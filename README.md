@@ -15,6 +15,34 @@ from GitHub thread state; the main downside is potential repeated work.
 npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
 ```
 
+## Update model (official `skills` behavior)
+
+`npx skills update` is driven by the lock file and remote folder hash, not by git tag directly.
+
+- Lock file name: `.skill-lock.json`
+- Typical path: `~/.agents/.skill-lock.json`
+- Optional path when `XDG_STATE_HOME` is set: `$XDG_STATE_HOME/skills/.skill-lock.json`
+- Update comparison key: `skills.<skill-name>.skillFolderHash` (GitHub tree SHA of the skill folder)
+
+### User-side update commands
+
+```bash
+# Check whether updates are available
+npx skills check
+
+# Update installed skills
+npx skills update
+```
+
+### Provider-side release policy
+
+- Keep skill identifier stable:
+  - `SKILL.md` frontmatter `name` should stay stable
+  - skill folder path should stay stable
+  - source repo (`owner/repo`) should stay stable
+- Publish all releasable changes to `main` so `skillFolderHash` can change and be detected by `check/update`.
+- Use semantic version tags + changelog for human-readable release management.
+
 ## What this skill provides
 
 - Strict per-thread CR handling workflow
@@ -39,4 +67,20 @@ scripts/run_once.sh --audit-id run-YYYYMMDD owner/repo 123
 scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> /tmp/reply.md
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
 scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
+```
+
+## CI semantic release (tag + changelog)
+
+This repo includes a `semantic-release` workflow:
+
+- Trigger: push to `main`
+- Input: Conventional Commits history
+- Output: semantic version tag (`vX.Y.Z`) + GitHub Release + `CHANGELOG.md`
+
+Commit format examples:
+
+```text
+feat: add strict unresolved-thread guard in final gate
+fix: avoid duplicate handled-state writes when thread already resolved
+docs: clarify npx skills update behavior
 ```

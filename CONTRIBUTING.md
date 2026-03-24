@@ -14,6 +14,19 @@ We welcome contributions! Please follow these guidelines:
 -   **Shell Scripts**: Use `set -euo pipefail` for robustness. Follow `shellcheck` recommendations.
 -   **Documentation**: Keep `SKILL.md` and `README.md` up to date with any changes to the core protocol or script usage.
 -   **Templates**: If you add new reply templates, ensure they follow the evidence-first principles.
+-   **Commits (required for automated release)**: Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
+
+## Release Process
+
+-   CI runs `semantic-release` on pushes to `main`.
+-   Releases are inferred from commit history:
+    -   `fix:` => patch
+    -   `feat:` => minor
+    -   `BREAKING CHANGE:` or `feat!:` / `fix!:` => major
+-   The workflow publishes:
+    -   Git tag (`vX.Y.Z`)
+    -   GitHub Release
+    -   `CHANGELOG.md` update committed back to `main`
 
 ## Security
 
