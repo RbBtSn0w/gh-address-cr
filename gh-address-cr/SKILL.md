@@ -30,7 +30,7 @@ Use this skill in strict incremental mode to minimize token usage while keeping 
 ## Hard Constraints (No Bypass)
 
 - Never declare "done" without `final_gate.sh` pass.
-- Never bypass `.state` tracking with ad-hoc batch scripts.
+- Never bypass state tracking with ad-hoc batch scripts.
 - If unresolved exists, keep iterating; do not send completion summary.
 - Each mid-run update must include either a pending list or explicit `Verified: 0 Unresolved Threads found`.
 
@@ -70,7 +70,7 @@ Any final completion message must include:
 - Mark handled without resolving: `scripts/mark_handled.sh [--repo <owner/repo> --pr <number>] <thread_id>`
 - Batch resolve from file: `scripts/batch_resolve.sh [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_ids_file>`
 - Generate fixed-reply draft: `scripts/reply_fixed.sh [--severity P1|P2|P3] <output_md> <commit_hash> <files_csv> <test_command> <test_result> [why]`
-- Clean local cache: `scripts/clean_state.sh [--clean-tmp]`
+- Clean local cache: `scripts/clean_state.sh [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]`
 - Audit report: `scripts/audit_report.sh <owner/repo> <pr_number>`
 - Templates: `assets/reply-templates/`
 - Reference checklist: `references/cr-triage-checklist.md`
@@ -88,4 +88,4 @@ Any final completion message must include:
 5. Hard gate before completion:
    - `scripts/final_gate.sh --auto-clean --audit-id run-20260324 github/spec-kit 1906`
 
-State cache lives in `.state/` to avoid repeated labor across rounds.
+State cache lives in a user cache directory by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.

@@ -5,6 +5,10 @@ An auditable GitHub PR review-comments workflow skill for AI coding agents.
 It is designed to process CR threads one by one, enforce evidence-first replies,
 and require a final freshness gate before declaring completion.
 
+By default, the skill stores its PR progress + audit artifacts in a user cache directory
+(override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
+from GitHub thread state; the main downside is potential repeated work.
+
 ## Install with npx skills
 
 ```bash

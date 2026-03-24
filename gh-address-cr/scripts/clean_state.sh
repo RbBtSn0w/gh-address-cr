@@ -6,31 +6,76 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/common.sh"
 
 clean_tmp=false
+all=false
+repo=""
+pr_number=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --all)
+      all=true
+      shift
+      ;;
+    --repo)
+      repo="${2:-}"
+      shift 2
+      ;;
+    --pr)
+      pr_number="${2:-}"
+      shift 2
+      ;;
     --clean-tmp)
       clean_tmp=true
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--clean-tmp]"
+      echo "Usage: $0 [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]"
+      echo "  --repo/--pr   Clean state for a single PR (recommended)"
+      echo "  --all         Remove all gh-address-cr state in state_dir"
       echo "  --clean-tmp   Also remove /tmp/gh-cr-reply*.md files"
       exit 0
       ;;
     *)
       echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--clean-tmp]" >&2
+      echo "Usage: $0 [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]" >&2
       exit 1
       ;;
   esac
 done
 
-if [[ -d "$state_dir" ]]; then
-  rm -rf "$state_dir"
-  echo "Removed state dir: $state_dir"
+if [[ "$all" == true ]] && [[ -n "$repo" || -n "$pr_number" ]]; then
+  echo "Unknown option combination: --all cannot be used with --repo/--pr" >&2
+  echo "Usage: $0 [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]" >&2
+  exit 1
+fi
+
+if [[ -n "$repo" || -n "$pr_number" ]] && [[ -z "$repo" || -z "$pr_number" ]]; then
+  echo "Usage: $0 [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]" >&2
+  exit 1
+fi
+
+if [[ "$all" == true ]]; then
+  if [[ -d "$state_dir" ]]; then
+    rm -rf "$state_dir"
+    echo "Removed all state dir: $state_dir"
+  else
+    echo "State dir not found: $state_dir"
+  fi
+elif [[ -n "$repo" && -n "$pr_number" ]]; then
+  ensure_state_dir
+  cleanup_pr_state_files "$repo" "$pr_number"
+  # Also remove PR-scoped audit outputs.
+  rm -f "$(audit_log_file "$repo" "$pr_number")" "$(audit_summary_file "$repo" "$pr_number")"
+  echo "Removed PR state for: $repo #$pr_number"
 else
-  echo "State dir not found: $state_dir"
+  # Backward-compat: previous versions removed the entire state directory.
+  # Keep that behavior for now, but make it explicit.
+  if [[ -d "$state_dir" ]]; then
+    rm -rf "$state_dir"
+    echo "Removed all state dir (no --repo/--pr provided): $state_dir"
+  else
+    echo "State dir not found: $state_dir"
+  fi
 fi
 
 if [[ "$clean_tmp" == true ]]; then

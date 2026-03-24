@@ -3,7 +3,38 @@ set -euo pipefail
 
 skill_scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_root_dir="$(cd "$skill_scripts_dir/.." && pwd)"
-state_dir="$skill_root_dir/.state"
+
+# State directory (progress + audit logs).
+#
+# This skill is commonly installed "globally" under $CODEX_HOME/skills. Writing state into the
+# skill installation directory is undesirable (can be read-only, and mixes state across repos).
+#
+# We default to a user cache directory as a pragmatic tradeoff:
+# - Cache is usually stable enough over a PR's lifetime.
+# - If it is purged, the workflow can be rebuilt from GitHub thread state; the main downside is
+#   potential repeated work (e.g., re-processing threads).
+#
+# Override with GH_ADDRESS_CR_STATE_DIR to pin state somewhere else (repo-local or user-state).
+if [[ -n "${GH_ADDRESS_CR_STATE_DIR:-}" ]]; then
+  state_dir="$GH_ADDRESS_CR_STATE_DIR"
+else
+  home_dir="${HOME:-}"
+  os_name="$(uname -s 2>/dev/null || echo unknown)"
+  case "$os_name" in
+    Darwin)
+      cache_base="${XDG_CACHE_HOME:-${home_dir:+$home_dir/Library/Caches}}"
+      ;;
+    *)
+      cache_base="${XDG_CACHE_HOME:-${home_dir:+$home_dir/.cache}}"
+      ;;
+  esac
+  if [[ -z "${cache_base:-}" ]]; then
+    echo "Unable to determine a user cache directory (XDG_CACHE_HOME/HOME missing)." >&2
+    echo "Set GH_ADDRESS_CR_STATE_DIR to a writable directory and retry." >&2
+    exit 2
+  fi
+  state_dir="$cache_base/gh-address-cr"
+fi
 
 require_tools() {
   local missing=()
