@@ -9,6 +9,66 @@ By default, the skill stores its PR progress + audit artifacts in a user cache d
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
 
+## Core Workflow
+
+```text
+       [ Start PR Review Resolution ]
+                   |
+                   v
++-------------------------------------+      (Fetch PR threads, exclude handled)
+|          1. run_once.sh             | <-----------------------------------------+
++------------------+------------------+                                           |
+                   |                                                              |
+                   v [Generates Snapshot & Unresolved List]                       |
+                   |                                                              |
++------------------+------------------+      (THE "BRAIN" STEP: Analyze & Decide) |
+|    2. Analysis & Decision Matrix    |                                           |
++------------------+------------------+                                           |
+                   |                                                              |
+         +---------+---------+-----------------------+                            |
+         |                   |                       |                            |
+    [ ACCEPT ]          [ CLARIFY ]             [ DEFER ]                         |
+   (Bug/Logic)        (Misunderstood)       (High-cost Nit)                       |
+         |                   |                       |                            |
+         v                   v                       v                            |
++--------+--------+ +--------+--------+     +--------+--------+                   |
+| 3a. Change Code | | 3b. Explain     |     | 3c. Explain     |                   |
+|     & Test      | |     Logic       |     |     Trade-offs  |                   |
++--------+--------+ +--------+--------+     +--------+--------+                   |
+         |                   |                       |                            |
+         v                   v                       v                            |
++--------+--------+ +--------+--------+     +--------+--------+                   |
+| 4a. generate_   | | 4b. generate_   |     | 4c. generate_   |                   |
+|    reply.sh     | |    reply.sh     |     |    reply.sh     |                   |
+|    --mode fix   | |  --mode clarify |     |   --mode defer  |                   |
++--------+--------+ +--------+--------+     +--------+--------+                   |
+         |                   |                       |                            |
+         +---------+---------+-----------------------+                            |
+                   |                                                              |
+                   v [Generates /tmp/reply.md]                                    |
+                   |                                                              |
++------------------+------------------+      (GitHub API: Reply)                  |
+|         5. post_reply.sh            |                                           |
++------------------+------------------+                                           |
+                   |                                                              |
++------------------+------------------+      (MANDATORY for all paths)            |
+|       6. resolve_thread.sh          |      (Local state marked 'Handled')       |
++------------------+------------------+                                           |
+                   |                                                              |
++------------------+------------------+      (HARD GATE: Re-fetch GitHub state)   |
+|         7. final_gate.sh            |-------------------------------------------+
++------------------+------------------+      [ Failed: Unresolved > 0 (Loop back) ]
+                   |
+                   | [ Passed: Unresolved == 0 ]
+                   v
++-------------------------------------+
+|         8. Audit Summary            |      (Output SHA256 & Final Confirmation)
++-------------------------------------+
+                   |
+                   v
+               [ Done ]
+```
+
 ## Install with npx skills
 
 ```bash
