@@ -28,7 +28,8 @@ query='query($owner:String!,$name:String!,$number:Int!,$after:String){
           isOutdated
           path
           line
-          comments(first:1){ nodes{ url body } }
+          firstComment: comments(first:1){ nodes{ url body } }
+          latestComment: comments(last:1){ nodes{ url body } }
         }
       }
     }
@@ -57,7 +58,18 @@ while true; do
   fi
 
   echo "$response" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[] |
-    {id, isResolved, isOutdated, path, line, url: .comments.nodes[0].url, body: .comments.nodes[0].body}'
+    {
+      id,
+      isResolved,
+      isOutdated,
+      path,
+      line,
+      url: (.latestComment.nodes[0].url // .firstComment.nodes[0].url // null),
+      body: (.latestComment.nodes[0].body // .firstComment.nodes[0].body // null),
+      comment_source: (if (.latestComment.nodes | length) > 0 then "latest" elif (.firstComment.nodes | length) > 0 then "first" else "none" end),
+      first_url: (.firstComment.nodes[0].url // null),
+      latest_url: (.latestComment.nodes[0].url // null)
+    }'
 
   has_next="$(echo "$response" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
   if [[ "$has_next" != "true" ]]; then

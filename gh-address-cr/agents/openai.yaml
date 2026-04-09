@@ -2,4 +2,9 @@ version: 1
 interface:
   display_name: GH Address CR
   short_description: Process PR review comments with evidence-first fixes and replies.
-  default_prompt: Resolve PR CR comments one by one, verify with code and tests, reply per thread with evidence, fix unresolved issues, and summarize merge readiness.
+  default_prompt: |
+    Resolve PR CR comments one by one with evidence-first replies.
+    1. For each handled thread, execute BOTH `post_reply` and `resolve_thread` (reply-only is incomplete).
+    2. Before any completion statement, run `final_gate.sh`.
+    3. Require the exact line: "Verified: 0 Unresolved Threads found".
+    4. Completion summary must include gate command, unresolved=0 confirmation, and audit summary sha256.

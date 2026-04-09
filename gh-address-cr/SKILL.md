@@ -1,6 +1,6 @@
 ---
 name: gh-address-cr
-description: Resolve GitHub PR review comments end-to-end with evidence. Use when asked to process CR comments one by one, verify fixes, reply per thread, fix unresolved issues, produce minimal repair plans, explain why new CRs appear later, and decide whether each CR must be fixed before merge.
+description: Use when resolving GitHub PR review threads that require evidence-first replies, explicit resolve actions, and a mandatory final unresolved-thread gate before completion.
 ---
 
 # gh-address-cr
@@ -22,6 +22,7 @@ Use this skill in strict incremental mode to minimize token usage while keeping 
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
 2. Process only unresolved + unhandled threads.
 3. For each thread: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence reply -> resolve`. (Note: You MUST resolve the thread on GitHub after replying to pass the final gate).
+   - `post_reply` and `resolve_thread` are separate atomic operations. Both MUST be executed for handled threads.
 4. Use minimal fixes and targeted tests first.
 5. Before completion message, run hard gate (MANDATORY):
    - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
@@ -37,7 +38,7 @@ Before modifying code, you MUST analyze the necessity of the CR suggestion:
 ## Hard Constraints (No Bypass)
 
 - Never declare "done" without `final_gate.sh` pass.
-- Never bypass state tracking with ad-hoc batch scripts.
+- Never bypass state tracking with ad-hoc batch scripts. Only use `scripts/batch_resolve.sh` with an approved list produced after per-thread analysis and evidence drafting.
 - If unresolved exists, keep iterating; do not send completion summary.
 - Each mid-run update must include either a pending list or explicit `Verified: 0 Unresolved Threads found`.
 
@@ -73,12 +74,22 @@ Any final completion message must include:
 - Post reply: `scripts/post_reply.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id> <reply_file>`
 - Resolve thread: `scripts/resolve_thread.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id>`
 - Mark handled without resolving: `scripts/mark_handled.sh [--repo <owner/repo> --pr <number>] <thread_id>`
-- Batch resolve from file: `scripts/batch_resolve.sh [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_ids_file>`
+- Batch resolve from approved file: `scripts/batch_resolve.sh [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <approved_threads_file>` (format: `APPROVED <thread_id>`)
 - Generate reply draft: `scripts/generate_reply.sh [--mode fix|clarify|defer] [--severity P1|P2|P3] <output_md> [args...]`
 - Clean local cache: `scripts/clean_state.sh [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]`
 - Audit report: `scripts/audit_report.sh <owner/repo> <pr_number>`
 - Templates: `assets/reply-templates/`
 - Reference checklist: `references/cr-triage-checklist.md`
+
+## Troubleshooting `final_gate` Failure
+
+If `scripts/final_gate.sh` fails:
+
+1. Read the pending table in terminal output and the audit summary file path printed by `final_gate.sh`.
+2. For each pending `thread_id`, verify if reply and resolve were both completed (reply-only is insufficient).
+3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved and handled state.
+4. Post missing evidence reply and resolve missing threads.
+5. Re-run `scripts/final_gate.sh ...` and only declare completion after `Verified: 0 Unresolved Threads found`.
 
 ## Fast Path
 
@@ -97,4 +108,3 @@ Any final completion message must include:
    - `scripts/final_gate.sh --auto-clean --audit-id run-20260324 github/spec-kit 1906`
 
 State cache lives in a user cache directory by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.
- by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.

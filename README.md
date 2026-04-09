@@ -4,6 +4,7 @@ An auditable GitHub PR review-comments workflow skill for AI coding agents.
 
 It is designed to process CR threads one by one, enforce evidence-first replies,
 and require a final freshness gate before declaring completion.
+For handled threads, replying and resolving are two separate required operations.
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
@@ -75,6 +76,17 @@ from GitHub thread state; the main downside is potential repeated work.
 npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
 ```
 
+## Breaking changes (2026-04-09)
+
+- `scripts/batch_resolve.sh` now requires an approved list format:
+  - one thread per line: `APPROVED <thread_id>`
+  - empty lines and `#` comments are allowed
+  - raw thread-id lines now fail fast
+- `scripts/list_threads.sh` now uses the latest thread comment as primary context and emits:
+  - `comment_source` (`latest|first|none`)
+  - `first_url`, `latest_url`
+  - `url`/`body` remain available, now latest-first with fallback
+
 ## Update model (official `skills` behavior)
 
 `npx skills update` is driven by the lock file and remote folder hash, not by git tag directly.
@@ -128,6 +140,15 @@ scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
 scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
+
+## Troubleshooting final gate failure
+
+If `scripts/final_gate.sh` fails:
+
+1. Read the pending table in terminal output and the printed audit summary path.
+2. For each pending thread, verify both operations were completed: `post_reply` and `resolve_thread`.
+3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved vs handled state.
+4. Resolve remaining threads, then re-run `scripts/final_gate.sh`.
 
 ## CI semantic release (tag + changelog)
 
