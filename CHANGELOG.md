@@ -1,3 +1,12 @@
+## [1.1.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.1.0...v1.1.1) (2026-04-09)
+
+### Bug Fixes
+
+* avoid stale line reuse in batch resolve ([86252ee](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/86252ee84e1d5f65c553ec1884b497be0304cb74))
+* harden batch resolve parsing ([6016acc](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/6016accca30e8b2e5d72ccd2c21882be7d6a2617))
+* tighten gh-address-cr agent guardrails ([8c85166](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/8c851666ebe6b60fe00f5a4afd2105aaa3d4459b))
+* tighten review comment follow-ups ([62e374d](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/62e374d10a99f870207d4a05f6d64c82f88f331e))
+
 ## [1.1.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.0.0...v1.1.0) (2026-04-03)
 
 ### Features
