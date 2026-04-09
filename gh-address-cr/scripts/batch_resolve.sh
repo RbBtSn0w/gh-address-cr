@@ -62,30 +62,27 @@ if [[ "$dry_run" == false && "$yes" == false ]]; then
   exit 1
 fi
 
-while IFS= read -r tid; do
-  [[ -z "$tid" ]] && continue
-  [[ "$tid" =~ ^# ]] && continue
-  if [[ ! "$tid" =~ ^APPROVED[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
+run_resolve() {
+  local tid="$1"
+  local cmd=(bash "$resolve_script")
+  if [[ "$dry_run" == true ]]; then
+    cmd+=(--dry-run)
+  fi
+  if [[ -n "$repo" && -n "$pr_number" ]]; then
+    cmd+=(--repo "$repo" --pr "$pr_number" --audit-id "$audit_id")
+  fi
+  cmd+=("$tid")
+  "${cmd[@]}"
+}
+
+while IFS= read -r tid || [[ -n "$tid" ]]; do
+  [[ "$tid" =~ ^[[:space:]]*$ ]] && continue
+  [[ "$tid" =~ ^[[:space:]]*# ]] && continue
+  if [[ ! "$tid" =~ ^[[:space:]]*APPROVED[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
     echo "Invalid line in approved list: '$tid'" >&2
     echo "Expected format: APPROVED <thread_id>" >&2
     exit 2
   fi
   tid="${BASH_REMATCH[1]}"
-  extra_args=()
-  if [[ -n "$repo" && -n "$pr_number" ]]; then
-    extra_args+=(--repo "$repo" --pr "$pr_number" --audit-id "$audit_id")
-  fi
-  if [[ "$dry_run" == true ]]; then
-    if [[ ${#extra_args[@]} -gt 0 ]]; then
-      bash "$resolve_script" --dry-run "${extra_args[@]}" "$tid"
-    else
-      bash "$resolve_script" --dry-run "$tid"
-    fi
-  else
-    if [[ ${#extra_args[@]} -gt 0 ]]; then
-      bash "$resolve_script" "${extra_args[@]}" "$tid"
-    else
-      bash "$resolve_script" "$tid"
-    fi
-  fi
+  run_resolve "$tid"
 done < "$approved_file"
