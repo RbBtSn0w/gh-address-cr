@@ -22,6 +22,8 @@ RESOLVE_THREAD_PY = SCRIPTS_DIR / "resolve_thread.py"
 GENERATE_REPLY_PY = SCRIPTS_DIR / "generate_reply.py"
 BATCH_RESOLVE_PY = SCRIPTS_DIR / "batch_resolve.py"
 CLEAN_STATE_PY = SCRIPTS_DIR / "clean_state.py"
+CONTROL_PLANE_PY = SCRIPTS_DIR / "control_plane.py"
+PREPARE_CODE_REVIEW_PY = SCRIPTS_DIR / "prepare_code_review.py"
 
 
 class SessionEngineTestCase(unittest.TestCase):

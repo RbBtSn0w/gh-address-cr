@@ -7,6 +7,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 COMMAND_TO_SCRIPT = {
+    "control-plane": "control_plane.py",
+    "prepare-code-review": "prepare_code_review.py",
     "run-once": "run_once.py",
     "final-gate": "final_gate.py",
     "list-threads": "list_threads.py",
@@ -35,6 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Subcommand to execute.\n"
             "Examples:\n"
+            "  cli.py control-plane mixed json owner/repo 123 --input findings.json\n"
+            "  cli.py prepare-code-review mixed owner/repo 123\n"
             "  cli.py run-once owner/repo 123\n"
             "  cli.py final-gate --no-auto-clean owner/repo 123\n"
             "  cli.py session-engine gate owner/repo 123"

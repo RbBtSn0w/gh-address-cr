@@ -1,12 +1,12 @@
 ---
 name: gh-address-cr
-description: Use when operating on an existing GitHub Pull Request that has remote review threads, local AI review findings, or repeated CR loops that must be tracked in one auditable PR session.
+description: Use when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
 argument-hint: "<mode> [producer] <owner/repo> <pr_number>"
 ---
 
 # gh-address-cr
 
-Use this skill in strict incremental mode to run a PR-scoped CR session with one source of truth.
+Use this skill as the PR review control plane. It owns session state, intake routing, and the final gate.
 
 ## Usage
 
@@ -17,29 +17,49 @@ Use this skill in strict incremental mode to run a PR-scoped CR session with one
 /gh-address-cr ingest <producer> <owner/repo> <pr_number>
 ```
 
-Interpret the arguments as:
+`mode`
+- `remote`: GitHub review threads only
+- `local`: local findings only
+- `mixed`: GitHub review threads plus local findings
+- `ingest`: import existing findings JSON
 
-- `mode`
-  - `remote`: only GitHub review threads
-  - `local`: only local review findings
-  - `mixed`: GitHub review threads plus local review findings
-  - `ingest`: import external findings JSON without running a local adapter command
-- `producer`
-  - `code-review`: a local code-review producer that must emit findings JSON
-  - `json`: findings already exist as JSON and should be imported directly
-  - `adapter`: a custom adapter command will be used
+`producer`
+- `code-review`: findings must be produced as structured JSON first
+- `json`: findings already exist as JSON
+- `adapter`: an adapter command prints findings JSON
 
-If `mode` is omitted, infer it from the task:
+## Entry Contract
 
-- existing PR review threads only -> `remote`
-- local CR requested with a producer -> `local`
-- both remote review and local CR requested -> `mixed`
+Treat `SKILL.md` as the source of truth for using this skill.
 
-If `producer` is omitted in a local or mixed request, default to:
+- Start from the high-level dispatcher:
+  - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
+- Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
+- Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
-- `json` when the user already provided findings JSON
-- `adapter` when the user provided a concrete command
-- `code-review` when the user explicitly asked for local AI review but did not specify a producer
+## Capability Status
+
+These paths are fully operational now:
+
+- `remote`
+- `local json`
+- `local adapter`
+- `mixed json`
+- `mixed adapter`
+- `ingest json`
+
+These paths are contract-supported but not yet auto-bridged:
+
+- `local code-review`
+- `mixed code-review`
+
+For `producer=code-review`, the current requirement is:
+
+- generate the bridge prompt with `prepare-code-review`
+- produce findings JSON first
+- then feed it through `control-plane` or `ingest-findings`
+
+Do not assume `gh-address-cr` directly runs another review skill by itself yet.
 
 ## Non-Negotiable Rule
 
@@ -51,114 +71,70 @@ If `producer` is omitted in a local or mixed request, default to:
   - session blocking item count is zero.
 - If gate fails, continue iteration; completion summary is forbidden.
 
-## Core Protocol (Token-Optimized)
+## Core Rules
 
-1. Run incremental triage first:
-   - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
-2. If local review is part of the selected mode, choose exactly one producer path:
-   - `producer=code-review`
-     - generate findings JSON using a local code-review workflow
-     - then ingest with `scripts/ingest_findings.sh`
-   - `producer=json`
-     - ingest provided findings JSON directly with `scripts/ingest_findings.sh`
-   - `producer=adapter`
-     - execute `scripts/run_local_review.sh`
-3. Optionally ingest local AI review findings:
-   - `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
-   - or `scripts/ingest_findings.sh [--scan-id <id>] [--source <name>] [--input <file>|-] <owner/repo> <pr_number>`
-4. Process only unresolved + unhandled GitHub threads and open local findings.
-5. For each item: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence -> close`. For GitHub threads, you MUST still reply and resolve on GitHub.
-   - `scripts/post_reply.sh` and `scripts/resolve_thread.sh` are separate atomic operations. Both MUST be executed for handled threads.
-6. Use minimal fixes and targeted tests first.
-7. Before completion message, run hard gate (MANDATORY):
-   - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
-8. Only if gate passes, send merge-readiness summary.
-
-## Mode Selection
-
-Choose the workflow based on `mode` and `producer`, not by habit.
-
-- `remote`:
-  - use `run_once.sh`
-  - handle each thread with reply plus resolve
-  - finish with `final_gate.sh`
-- `local code-review`:
-  - generate local findings JSON with a code-review workflow
-  - ingest with `ingest_findings.sh`
-  - move items through session status updates with notes
-  - do not reply/resolve on GitHub unless you explicitly publish the finding
-- `local json`:
-  - use `ingest_findings.sh`
-  - move items through session status updates with notes
-  - do not reply/resolve on GitHub unless you explicitly publish the finding
-- `local adapter`:
-  - use `run_local_review.sh`
-  - move items through session status updates with notes
-  - do not reply/resolve on GitHub unless you explicitly publish the finding
-- `mixed code-review`:
-  - run `run_once.sh`
-  - generate findings JSON with a code-review workflow
-  - ingest with `ingest_findings.sh`
-- `mixed json`:
-  - run `run_once.sh`
-  - ingest provided findings JSON with `ingest_findings.sh`
-- `mixed adapter`:
-  - run `run_once.sh` and `run_local_review.sh`
-  - process GitHub items and local items in the same session queue
-  - gate must clear both unresolved GitHub threads and session blocking items
-- `ingest`:
-  - import findings JSON without making assumptions about how they were produced
-  - use when the user already has machine-readable findings and only wants session handling
-- publish local finding:
-  - use `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
-  - after publication, resync and continue from the session state
+1. Pick exactly one `mode` and, when required, exactly one `producer`.
+2. Use the high-level dispatcher first:
+   - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
+3. Process only unresolved GitHub threads and open local findings.
+4. For GitHub review threads, reply and resolve are both mandatory.
+5. For local findings, terminal handling must include a note.
+6. `producer=code-review` must emit findings JSON before session handling starts.
+7. Never declare completion before `final_gate.sh` passes.
 
 ## Producer Contract
 
 `gh-address-cr` is the control plane. Producers are replaceable.
 
 - `code-review` is a producer, not the session owner.
-- `gh-address-cr` must not depend on one producer-specific finding schema beyond the normalized contract.
-- Any producer is acceptable if it can supply findings that normalize into:
+- `gh-address-cr` only assumes the normalized finding contract:
   - `title`
   - `body`
   - `path`
   - `line`
+- Supported dispatch paths live in:
+  - `references/mode-producer-matrix.md`
 
-For `producer=code-review`, require structured findings output first. Do not stop at a Markdown review summary.
+## Discovery Rules
 
-The full dispatch table for supported `mode + producer` combinations lives in:
+Use this skill when the task involves one or more of these needs:
 
-- `references/mode-producer-matrix.md`
+- handle GitHub PR review threads with explicit reply and resolve steps
+- ingest local review findings into a PR-scoped session
+- run a final gate before declaring review completion
+- keep remote threads and local findings under one auditable PR session
 
-## Decision Matrix (Analysis Phase)
+Do not use this skill as the review engine itself.
 
-Before modifying code, you MUST analyze the necessity of the CR suggestion:
-- **Accept (Bug/Logic Error):** If the suggestion identifies a real issue or valid improvement with low architectural cost -> Proceed to fix code and generate evidence.
-- **Defer (Nit/Preference with high cost):** If it's a stylistic preference requiring massive refactoring or architectural decay -> Do not change code. Use `scripts/generate_reply.sh --mode defer` to generate the trade-off explanation.
-- **Clarify (Question/Misunderstanding):** If the reviewer misunderstood the logic or asks a question -> Do not change code. Use `scripts/generate_reply.sh --mode clarify` to generate the technical rationale.
+- It manages intake, state, processing discipline, and gating.
+- It does not own the reasoning logic of external review producers.
 
-## Hard Constraints (No Bypass)
+## Decision Matrix
 
-- Never declare "done" without `final_gate.sh` pass.
-- Never bypass state tracking with ad-hoc batch scripts. Only use `scripts/batch_resolve.sh` with an approved list produced after per-thread analysis and evidence drafting.
-- If unresolved or blocking session items exist, keep iterating; do not send completion summary.
-- Each mid-run update must include either a pending list or explicit `Verified: 0 Unresolved Threads found`.
+- **Accept**: real bug or low-cost valid improvement; fix and provide evidence.
+- **Clarify**: reviewer misunderstood the code; explain without changing code.
+- **Defer**: non-blocking or high-cost preference; explain the tradeoff.
 
-## Completion Output Contract
+## Required Evidence
 
-Any final completion message must include:
+- Accepted GitHub thread:
+  - commit
+  - touched files
+  - validation command and result
+- Clarified or deferred item:
+  - rationale
+- Local finding terminal state:
+  - note
+
+## Completion Contract
+
+Final output must include:
 
 1. `final_gate` command used
-2. gate result line: `Verified: 0 Unresolved Threads found`
-3. unresolved GitHub thread count = 0 confirmation
-4. session blocking count = 0 confirmation
+2. `Verified: 0 Unresolved Threads found`
+3. unresolved GitHub threads = 0
+4. session blocking items = 0
 5. audit summary path + sha256
-
-## Mandatory Evidence & Rationale
-
-- **If Accepted (Code Changed):** Provide Commit `<hash>`, Files `<file1,file2>`, and Validation `<test command>` + `<result>`. Never resolve an accepted thread without these 3 items.
-- **If Deferred/Clarified (No Code Changed):** Provide a detailed, professional Rationale explaining why the code remains as is (e.g., architectural constraints, pointing out misunderstood logic).
 
 ## Must-Fix Rule
 
@@ -171,74 +147,10 @@ Any final completion message must include:
 - New commits trigger re-analysis and can generate new comments.
 - Old threads can become outdated; new ones may appear on different lines.
 
-## Reusable Resources
+## References
 
-- Primary implementation is Python-first. Prefer the stable command names under `scripts/*.sh` for compatibility, but expect those wrappers to dispatch into `scripts/*.py`.
-- Unified Python automation entrypoint: `python3 scripts/cli.py <command> ...`
-- One-shot triage + state snapshot: `scripts/run_once.sh [--show-all] [--audit-id <id>] <owner/repo> <pr_number>`
-- Local review ingestion: `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
-- Direct findings JSON ingestion: `scripts/ingest_findings.sh [--scan-id <id>] [--source <name>] [--input <file>|-] <owner/repo> <pr_number>`
-- Publish a local finding to GitHub review comments: `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
-- Close a local or session item after evidence: `python3 scripts/session_engine.py close-item <owner/repo> <pr_number> <item_id> --note <text>`
-- Reclaim expired item claims during loops: `python3 scripts/session_engine.py reclaim-stale-claims <owner/repo> <pr_number>`
-- Final completion gate (mandatory): `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
-- Post reply: `scripts/post_reply.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id> <reply_file>`
-- Resolve thread: `scripts/resolve_thread.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id>`
-- Mark handled without resolving: `scripts/mark_handled.sh [--repo <owner/repo> --pr <number>] <thread_id>`
-- Batch resolve from approved file: `scripts/batch_resolve.sh [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <approved_threads_file>` (format: `APPROVED <thread_id>`)
-- Generate reply draft: `scripts/generate_reply.sh [--mode fix|clarify|defer] [--severity P1|P2|P3] <output_md> [args...]`
-- Clean local cache: `scripts/clean_state.sh [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]`
-- Audit report: `scripts/audit_report.sh <owner/repo> <pr_number>`
-- Templates: `assets/reply-templates/`
-- Reference checklist: `references/cr-triage-checklist.md`
-
-## Implementation Note
-
-- `scripts/cli.py` is the unified Python dispatcher for the main command set.
-- Session logic, GitHub sync, local finding ingestion, reply generation, batch resolve, and cleanup now live in Python implementations under `scripts/*.py`.
-- Shell files remain as compatibility wrappers to avoid breaking existing operator workflows and skill prompts.
-- Current automated checks are:
-  - `python3 -m unittest discover -s tests`
-  - `bash -n gh-address-cr/scripts/*.sh`
-
-## Troubleshooting `final_gate` Failure
-
-If `scripts/final_gate.sh` fails:
-
-1. Read the pending table in terminal output and the audit summary file path printed by `final_gate.sh`.
-2. For each pending `thread_id`, verify if reply and resolve were both completed (reply-only is insufficient).
-3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved and handled state.
-4. Post missing evidence reply and resolve missing threads.
-5. Re-run `scripts/final_gate.sh ...` and only declare completion after `Verified: 0 Unresolved Threads found`.
-
-## Fast Path
-
-1. `scripts/run_once.sh --audit-id run-20260324 github/spec-kit 1906` to get unresolved threads excluding already-handled IDs.
-2. Optional local scan:
-   - `scripts/run_local_review.sh --source local-agent:codex github/spec-kit 1906 ./adapter.sh`
-3. **Analyze**: Decide whether to Accept, Defer, or Clarify.
-4. Generate reply draft:
-   - If Accepted (Code changed): `scripts/generate_reply.sh --mode fix --severity P2 /tmp/reply.md <commit> "<file1,file2>" "<test_cmd>" "<result>" "<why>"`
-   - If Clarified (No code changed): `scripts/generate_reply.sh --mode clarify /tmp/reply.md "<detailed rationale why current logic is correct>"`
-   - If Deferred (No code changed): `scripts/generate_reply.sh --mode defer /tmp/reply.md "<detailed rationale why this is deferred>"`
-5. Preview:
-   - `scripts/post_reply.sh --dry-run <thread_id> /tmp/reply.md`
-6. Execute:
-   - `scripts/post_reply.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id> /tmp/reply.md`
-   - `scripts/resolve_thread.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id>`
-7. Hard gate before completion:
-   - `scripts/final_gate.sh --auto-clean --audit-id run-20260324 github/spec-kit 1906`
-
-## Guidance Check
-
-The intended guidance is:
-
-- use `.sh` command names as the stable operator surface
-- treat `cli.py` as the preferred Python automation entrypoint
-- distinguish GitHub-thread handling from local-finding handling
-- require reply plus resolve only for GitHub review threads
-- require final gate pass before any completion statement
-
-If a future change breaks one of those rules, the skill guidance is wrong and must be updated with the implementation.
-
-State cache lives in a user cache directory by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.
+- dispatch matrix: `references/mode-producer-matrix.md`
+- checklist: `references/cr-triage-checklist.md`
+- stable operator surface: `scripts/*.sh`
+- preferred automation surface: `python3 scripts/cli.py ...`
+- code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`

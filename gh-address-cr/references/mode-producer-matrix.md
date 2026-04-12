@@ -19,11 +19,12 @@
 - input:
   - `local code-review <owner/repo> <pr_number>`
 - actions:
-  1. run a local code-review workflow
-  2. require structured findings JSON, not only Markdown
-  3. `ingest_findings.sh`
-  4. process local findings through session status transitions
-  5. `final_gate.sh`
+  1. generate the standard producer prompt with `prepare-code-review`
+  2. run a local code-review workflow
+  3. require structured findings JSON, not only Markdown
+  4. `ingest_findings.sh`
+  5. process local findings through session status transitions
+  6. `final_gate.sh`
 
 ### `local json`
 
@@ -50,11 +51,12 @@
   - `mixed code-review <owner/repo> <pr_number>`
 - actions:
   1. `run_once.sh`
-  2. run a local code-review workflow
-  3. require structured findings JSON
-  4. `ingest_findings.sh`
-  5. process GitHub threads and local findings as one session queue
-  6. `final_gate.sh`
+  2. generate the standard producer prompt with `prepare-code-review`
+  3. run a local code-review workflow
+  4. require structured findings JSON
+  5. `ingest_findings.sh`
+  6. process GitHub threads and local findings as one session queue
+  7. `final_gate.sh`
 
 ### `mixed json`
 
@@ -92,6 +94,7 @@
 - `code-review`
   - must produce findings JSON before session handling starts
   - do not stop at a Markdown summary
+  - use `prepare-code-review` to generate the bridge prompt shape
 - `json`
   - assumes findings already exist in machine-readable form
 - `adapter`

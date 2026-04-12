@@ -4,11 +4,13 @@ from pathlib import Path
 
 from tests.helpers import (
     CLI_PY,
+    CONTROL_PLANE_PY,
     FINAL_GATE_PY,
     INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
     POST_REPLY_PY,
     PUBLISH_FINDING_PY,
+    PREPARE_CODE_REVIEW_PY,
     RESOLVE_THREAD_PY,
     RUN_LOCAL_REVIEW_PY,
     RUN_ONCE_PY,
@@ -21,6 +23,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("control-plane", result.stdout)
         self.assertIn("run-once", result.stdout)
         self.assertIn("session-engine", result.stdout)
 
@@ -209,6 +212,166 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
+
+    def test_control_plane_remote_runs_run_once(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_REMOTE',
+                            'isResolved': False,
+                            'isOutdated': False,
+                            'path': 'src/remote.py',
+                            'line': 3,
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/remote', 'body': 'remote'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/remote', 'body': 'remote'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("github-thread:THREAD_REMOTE", result.stdout)
+
+    def test_control_plane_mixed_json_runs_sync_and_ingest(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_MIXED',
+                            'isResolved': False,
+                            'isOutdated': False,
+                            'path': 'src/mixed.py',
+                            'line': 8,
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/mixed', 'body': 'mixed'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/mixed', 'body': 'mixed'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        payload_file = Path(self.temp_dir.name) / "mixed-findings.json"
+        payload_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Mixed finding",
+                        "body": "Imported into mixed flow.",
+                        "path": "src/mixed_local.py",
+                        "line": 11,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CONTROL_PLANE_PY),
+                "mixed",
+                "json",
+                "--input",
+                str(payload_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("github-thread:THREAD_MIXED", result.stdout)
+        self.assertIn("Created 1 local item", result.stdout)
+
+    def test_control_plane_local_adapter_runs_adapter(self):
+        adapter = Path(self.temp_dir.name) / "adapter.py"
+        adapter.write_text(
+            "import json\nprint(json.dumps([{'title':'adapter finding','body':'body','path':'src/a.py','line':4}]))\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CONTROL_PLANE_PY),
+                "local",
+                "adapter",
+                self.repo,
+                self.pr,
+                sys.executable,
+                str(adapter),
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
+
+    def test_control_plane_rejects_remote_with_producer(self):
+        result = self.run_cmd(
+            [sys.executable, str(CONTROL_PLANE_PY), "remote", "code-review", self.repo, self.pr]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("remote expects", result.stderr)
+
+    def test_control_plane_requires_json_input_for_code_review(self):
+        result = self.run_cmd(
+            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires findings JSON", result.stderr)
+
+    def test_prepare_code_review_emits_bridge_prompt(self):
+        result = self.run_cmd(
+            [sys.executable, str(PREPARE_CODE_REVIEW_PY), "mixed", self.repo, self.pr]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["producer"], "code-review")
+        self.assertEqual(payload["mode"], "mixed")
+        self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
+        self.assertIn("control-plane mixed code-review", payload["ingest_command"])
+
+    def test_cli_dispatches_prepare_code_review(self):
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "prepare-code-review", "local", self.repo, self.pr]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["mode"], "local")
 
     def test_ingest_findings_python_accepts_stdin_array(self):
         payload = json.dumps(

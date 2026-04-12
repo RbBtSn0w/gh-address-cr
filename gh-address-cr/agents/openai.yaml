@@ -3,18 +3,10 @@ interface:
   display_name: GH Address CR
   short_description: Operate a PR-scoped CR control plane with mode and producer selection.
   default_prompt: |
-    Operate the PR as a CR control plane with explicit mode and producer selection.
+    Use `SKILL.md` as the source of truth.
     1. Select one mode: `remote`, `local`, `mixed`, or `ingest`.
-    2. If local review is requested, select one producer: `code-review`, `json`, or `adapter`.
-    3. `remote`: sync GitHub review threads with `scripts/run_once.sh`.
-    4. `local code-review`: produce structured findings JSON first, then ingest with `scripts/ingest_findings.sh`.
-    5. `local json` or `ingest json`: import provided findings JSON with `scripts/ingest_findings.sh`.
-    6. `local adapter`: execute `scripts/run_local_review.sh`.
-    7. `mixed`: run `scripts/run_once.sh` first, then run exactly one local producer path.
-    8. Process GitHub threads and local findings as one queue of session items.
-    9. For GitHub review threads, execute BOTH `scripts/post_reply.sh` and `scripts/resolve_thread.sh` when handling the item.
-    10. For local findings, use session status transitions; do not assume GitHub reply/resolve is required unless the finding is published.
-    11. Before any completion statement, run `scripts/final_gate.sh`.
-    12. Require the exact line: Verified: 0 Unresolved Threads found.
-    13. Completion summary must include the gate command, unresolved GitHub threads = 0, session blocking items = 0, audit summary path, and audit summary sha256.
-    14. Prefer the stable `scripts/*.sh` command names for operator compatibility, but assume they dispatch into Python implementations under `scripts/*.py`.
+    2. If local intake is needed, select one producer: `code-review`, `json`, or `adapter`.
+    3. Start with `python3 scripts/cli.py control-plane ...`.
+    4. GitHub review threads require both reply and resolve.
+    5. Local findings require valid terminal notes.
+    6. Before any completion statement, run `scripts/final_gate.sh`.

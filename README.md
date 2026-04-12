@@ -49,6 +49,20 @@ The exact dispatch behavior for each supported `mode + producer` combination is 
 
 - `gh-address-cr/references/mode-producer-matrix.md`
 
+The preferred automation entrypoint is now:
+
+```bash
+python3 gh-address-cr/scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...
+```
+
+For `producer=code-review`, generate the standardized bridge prompt with:
+
+```bash
+python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>
+```
+
+This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
+
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
