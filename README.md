@@ -23,7 +23,7 @@ Recommended invocation model:
 /gh-address-cr remote <owner/repo> <pr_number>
 /gh-address-cr local <producer> <owner/repo> <pr_number>
 /gh-address-cr mixed <producer> <owner/repo> <pr_number>
-/gh-address-cr ingest <producer> <owner/repo> <pr_number>
+/gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
 ```
 
 Supported producers:

@@ -76,6 +76,40 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["status"], "CLOSED")
         self.assertTrue(item["handled"])
         self.assertIsNotNone(item["handled_at"])
+
+    def test_gate_treats_stale_github_thread_as_non_unresolved(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_STALE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/stale",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            "github-thread:THREAD_STALE",
+            "STALE",
+            "--note",
+            "Thread became stale after a follow-up change.",
+            check=True,
+        )
+
+        session = self.load_session()
+        self.assertEqual(session["metrics"]["unresolved_github_threads_count"], 0)
+
+        gate = self.run_engine("gate", self.repo, self.pr)
+        self.assertEqual(gate.returncode, 0, gate.stderr)
+        self.assertIn("REMOTE GATE PASS", gate.stdout)
     def test_run_local_review_deduplicates_findings(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         findings = json.dumps(
@@ -474,6 +508,67 @@ class SessionEngineCLITest(SessionEngineTestCase):
         item = session["items"]["github-thread:THREAD_6"]
         self.assertIsNone(item["claimed_by"])
         self.assertEqual(item["status"], "OPEN")
+
+    def test_claim_rejects_closed_item(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_CLOSED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/closed.py",
+                    "line": 14,
+                    "body": "Already handled.",
+                    "url": "https://example.test/thread/closed",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            "github-thread:THREAD_CLOSED",
+            "CLOSED",
+            "--note",
+            "Resolved on GitHub.",
+            check=True,
+        )
+
+        claimed = self.run_engine("claim", self.repo, self.pr, "github-thread:THREAD_CLOSED", "--agent", "fixer-1")
+        self.assertNotEqual(claimed.returncode, 0)
+        self.assertIn("Illegal status transition", claimed.stderr)
+
+    def test_resolve_local_item_defer_reports_deferred_note_requirement(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Deferred issue",
+                    "body": "Can be revisited.",
+                    "path": "src/defer.py",
+                    "line": 4,
+                    "severity": "P3",
+                    "category": "style",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+
+        deferred = self.run_engine(
+            "resolve-local-item",
+            self.repo,
+            self.pr,
+            local_id,
+            "defer",
+            "--note",
+            "",
+        )
+        self.assertNotEqual(deferred.returncode, 0)
+        self.assertIn("Status DEFERRED requires --note", deferred.stderr)
 
     def test_sync_github_closes_published_local_finding_when_thread_appears(self):
         self.run_engine("init", self.repo, self.pr, check=True)

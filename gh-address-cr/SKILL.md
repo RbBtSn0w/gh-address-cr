@@ -14,7 +14,7 @@ Use this skill as the PR review control plane. It owns session state, intake rou
 /gh-address-cr remote <owner/repo> <pr_number>
 /gh-address-cr local <producer> <owner/repo> <pr_number>
 /gh-address-cr mixed <producer> <owner/repo> <pr_number>
-/gh-address-cr ingest <producer> <owner/repo> <pr_number>
+/gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
 ```
 
 `mode`

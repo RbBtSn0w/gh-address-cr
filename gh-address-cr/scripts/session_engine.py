@@ -16,6 +16,7 @@ LOOP_WARNING_THRESHOLD = 3
 BLOCKING_STATUSES = {"OPEN", "CLAIMED", "ACCEPTED", "FIX_IN_PROGRESS", "FIXED", "PUBLISHED"}
 NON_BLOCKING_STATUSES = {"VERIFIED", "CLARIFIED", "DEFERRED", "CLOSED", "DROPPED", "STALE"}
 VALID_STATUSES = BLOCKING_STATUSES | NON_BLOCKING_STATUSES
+GITHUB_TERMINAL_STATUSES = {"CLOSED", "DROPPED", "STALE"}
 STATUSES_REQUIRING_NOTE = {"ACCEPTED", "FIXED", "VERIFIED", "CLARIFIED", "DEFERRED", "CLOSED", "PUBLISHED"}
 ALLOWED_TRANSITIONS = {
     "OPEN": {"CLAIMED", "ACCEPTED", "CLARIFIED", "DEFERRED", "PUBLISHED", "CLOSED", "DROPPED", "STALE"},
@@ -158,7 +159,7 @@ def recalc_metrics(session: dict):
         "unresolved_github_threads_count": sum(
             1
             for item in items
-            if item["item_kind"] == "github_thread" and item.get("status") not in {"CLOSED", "DROPPED", "STALE"}
+            if item["item_kind"] == "github_thread" and item.get("status") not in GITHUB_TERMINAL_STATUSES
         ),
     }
 
@@ -416,6 +417,7 @@ def cmd_claim(args):
     session = load_session(args.repo, args.pr_number)
     item = ensure_item(session, args.item_id)
     now = datetime.now(timezone.utc)
+    validate_transition(item["status"], "CLAIMED")
     lease_expires_at = item.get("lease_expires_at")
     if item.get("claimed_by") and lease_expires_at:
         expires = datetime.fromisoformat(lease_expires_at)
@@ -535,7 +537,8 @@ def cmd_resolve_local_item(args):
     item = ensure_item(session, args.item_id)
     if item["item_kind"] != "local_finding":
         raise SystemExit("resolve-local-item only supports local_finding items.")
-    require_note("CLOSED" if args.resolution == "fix" else "CLARIFIED", args.note)
+    target_status = {"fix": "CLOSED", "clarify": "CLARIFIED", "defer": "DEFERRED"}[args.resolution]
+    require_note(target_status, args.note)
 
     if args.resolution == "fix":
         validate_transition(item["status"], "CLOSED")
@@ -656,7 +659,9 @@ def cmd_gate(args):
         and item.get("blocking")
     ]
     unresolved_threads = [
-        item for item in session["items"].values() if item["item_kind"] == "github_thread" and item["status"] != "CLOSED"
+        item
+        for item in session["items"].values()
+        if item["item_kind"] == "github_thread" and item["status"] not in GITHUB_TERMINAL_STATUSES
     ]
     session_gate = "PASS" if not blocking and not invalid_local_items and not loop_warning_items else "FAIL"
     remote_gate = "PASS" if not unresolved_threads else "FAIL"
