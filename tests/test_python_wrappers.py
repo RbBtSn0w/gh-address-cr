@@ -901,11 +901,18 @@ if args[:2] == ['api', 'graphql']:
     print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'octocat'}}))
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews']:
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews/101/events'):
+    payload = json.loads(state_file.read_text())
+    payload['submitted'].append('101')
+    state_file.write_text(json.dumps(payload))
+    print(json.dumps({{'ok': True}}))
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
     payload = json.loads(state_file.read_text())
     payload['review_calls'] += 1
     state_file.write_text(json.dumps(payload))
-    if payload['review_calls'] == 1:
+    if 'page=2' in args[1]:
+        print(json.dumps([]))
+    elif payload['review_calls'] == 1:
         print(json.dumps([
             {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
             {{'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
@@ -916,11 +923,6 @@ elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews']:
             {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
             {{'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
         ]))
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews/101/events']:
-    payload = json.loads(state_file.read_text())
-    payload['submitted'].append('101')
-    state_file.write_text(json.dumps(payload))
-    print(json.dumps({{'ok': True}}))
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
 """,
@@ -964,19 +966,22 @@ if args[:2] == ['api', 'graphql']:
     print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-existing'}}}}}}}}))
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'octocat'}}))
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews']:
-    payload = json.loads(state_file.read_text())
-    payload['review_calls'] += 1
-    state_file.write_text(json.dumps(payload))
-    print(json.dumps([
-        {{'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
-        {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
-    ]))
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews/777/events']:
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews/777/events'):
     payload = json.loads(state_file.read_text())
     payload['submitted'].append('777')
     state_file.write_text(json.dumps(payload))
     print(json.dumps({{'ok': True}}))
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
+    payload = json.loads(state_file.read_text())
+    payload['review_calls'] += 1
+    state_file.write_text(json.dumps(payload))
+    if 'page=2' in args[1]:
+        print(json.dumps([]))
+    else:
+        print(json.dumps([
+            {{'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
+            {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
+        ]))
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
 """,

@@ -108,9 +108,12 @@ elif args[:2] == ['api', 'graphql']:
                 }}
             }}
         }}))
-elif args[:2] == ['api', f'repos/{self.repo}/pulls/{self.pr}/reviews']:
-    print('[]')
-elif args[:3] == ['api', f'repos/{self.repo}/pulls/{self.pr}/reviews/1']:
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith(f'repos/{self.repo}/pulls/{self.pr}/reviews'):
+    if 'page=1' in args[1]:
+        print('[]')
+    else:
+        print('[]')
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith(f'repos/{self.repo}/pulls/{self.pr}/reviews/1'):
     print('{{}}')
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
