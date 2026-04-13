@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 
-from python_common import state_dir, workspace_dir
+from python_common import state_dir, normalize_repo
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,7 +29,7 @@ def main() -> int:
         else:
             print(f"State dir not found: {base}")
     elif args.repo and args.pr_number:
-        workspace = workspace_dir(args.repo, args.pr_number)
+        workspace = state_dir() / normalize_repo(args.repo) / f"pr-{args.pr_number}"
         shutil.rmtree(workspace, ignore_errors=True)
         print(f"Removed PR workspace for: {args.repo} #{args.pr_number}")
     else:
