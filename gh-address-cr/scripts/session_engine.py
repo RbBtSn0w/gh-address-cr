@@ -246,9 +246,17 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     item_id = f"github-thread:{row['id']}"
     now = utc_now()
     resolved = bool(row.get("isResolved"))
-    status = "CLOSED" if resolved else "OPEN"
     existing = session["items"].get(item_id)
-    reopened = bool(existing) and existing.get("status") in GITHUB_TERMINAL_STATUSES and not resolved
+    existing_status = existing.get("status") if existing else None
+    if resolved:
+        status = "CLOSED"
+    elif bool(row.get("isOutdated")):
+        status = "STALE"
+    elif existing_status == "DROPPED":
+        status = "DROPPED"
+    else:
+        status = "OPEN"
+    reopened = bool(existing) and existing_status in GITHUB_TERMINAL_STATUSES and status == "OPEN"
     payload = {
         "item_id": item_id,
         "item_kind": "github_thread",
@@ -385,11 +393,14 @@ def reconcile_published_findings(session: dict):
             same_location = item.get("path") == github_item.get("path") and item.get("line") == github_item.get("line")
             same_body = normalize_text(item.get("body", "")) == normalize_text(github_item.get("body", ""))
             if same_url or (same_location and same_body):
+                now = utc_now()
                 item["linked_github_item_id"] = github_item["item_id"]
                 item["status"] = "CLOSED"
                 item["blocking"] = False
                 item["handled"] = True
-                item["handled_at"] = utc_now()
+                item["handled_at"] = now
+                item["updated_at"] = now
+                clear_claim(item)
                 item["history"].append(history_event("linked", f"Linked to {github_item['item_id']}"))
                 break
 

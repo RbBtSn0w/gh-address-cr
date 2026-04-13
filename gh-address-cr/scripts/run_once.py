@@ -6,6 +6,17 @@ from pathlib import Path
 from python_common import audit_event, list_threads, normalize_repo, session_engine, session_file, snapshot_file, state_dir
 
 
+def unresolved_ids_from_snapshot_text(snapshot_text: str) -> list[str]:
+    unresolved_ids = set()
+    for line in snapshot_text.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not row["isResolved"]:
+            unresolved_ids.add(row["id"])
+    return sorted(unresolved_ids)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fetch PR threads, sync the session, and print unresolved work.")
     parser.add_argument("--show-all", action="store_true")
@@ -51,7 +62,7 @@ def main() -> int:
     curr_ids.write_text("\n".join(unresolved_ids) + ("\n" if unresolved_ids else ""), encoding="utf-8")
 
     if prev_snapshot.exists():
-        previous = sorted({json.loads(line)["id"] for line in prev_snapshot.read_text(encoding="utf-8").splitlines() if line.strip() and not json.loads(line)["isResolved"]})
+        previous = unresolved_ids_from_snapshot_text(prev_snapshot.read_text(encoding="utf-8"))
         prev_ids.write_text("\n".join(previous) + ("\n" if previous else ""), encoding="utf-8")
         newly_appeared = [item_id for item_id in unresolved_ids if item_id not in set(previous)]
     else:

@@ -661,6 +661,65 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertTrue(local_item["handled"])
         self.assertEqual(local_item["linked_github_item_id"], "github-thread:THREAD_7")
 
+    def test_sync_github_closes_published_local_finding_clears_claim_and_updates_timestamp(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Published issue",
+                    "body": "This was posted to GitHub.",
+                    "path": "src/map.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
+        self.run_engine(
+            "mark-published",
+            self.repo,
+            self.pr,
+            local_id,
+            "--published-ref",
+            "comment-456",
+            "--url",
+            "https://example.test/comment/456",
+            "--note",
+            "Published upstream.",
+            check=True,
+        )
+        published_session = self.load_session()
+        published_item = published_session["items"][local_id]
+        self.assertEqual(published_item["status"], "PUBLISHED")
+        self.assertEqual(published_item["claimed_by"], "fixer-1")
+
+        gh_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_7B",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 11,
+                    "body": "This was posted to GitHub.",
+                    "url": "https://example.test/comment/456",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=gh_payload, check=True)
+
+        session = self.load_session()
+        local_item = session["items"][local_id]
+        self.assertEqual(local_item["status"], "CLOSED")
+        self.assertIsNone(local_item["claimed_by"])
+        self.assertIsNone(local_item["claimed_at"])
+        self.assertIsNone(local_item["lease_expires_at"])
+        self.assertEqual(local_item["updated_at"], local_item["handled_at"])
+
     def test_sync_github_closes_published_local_finding_when_reply_changes_latest_comment(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         local_payload = json.dumps(
@@ -714,6 +773,75 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(local_item["status"], "CLOSED")
         self.assertTrue(local_item["handled"])
         self.assertEqual(local_item["linked_github_item_id"], "github-thread:THREAD_8")
+
+    def test_sync_github_maps_outdated_thread_to_stale(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        gh_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_STALE",
+                    "isResolved": False,
+                    "isOutdated": True,
+                    "path": "src/map.py",
+                    "line": 12,
+                    "body": "Old context.",
+                    "url": "https://example.test/comment/stale",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=gh_payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_STALE"]
+        self.assertEqual(item["status"], "STALE")
+        self.assertFalse(item["blocking"])
+
+    def test_sync_github_preserves_dropped_thread_until_resolved(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        initial_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_DROPPED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 14,
+                    "body": "Will be dropped locally.",
+                    "url": "https://example.test/comment/dropped",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=initial_payload, check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            "github-thread:THREAD_DROPPED",
+            "DROPPED",
+            "--note",
+            "Superseded elsewhere.",
+            check=True,
+        )
+
+        reopened_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_DROPPED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 14,
+                    "body": "Still unresolved upstream.",
+                    "url": "https://example.test/comment/dropped",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=reopened_payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_DROPPED"]
+        self.assertEqual(item["status"], "DROPPED")
+        self.assertFalse(item["blocking"])
 
     def test_gate_fails_when_loop_threshold_is_exceeded(self):
         self.run_engine("init", self.repo, self.pr, check=True)

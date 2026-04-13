@@ -1,10 +1,30 @@
+import importlib.util
 import sys
 from pathlib import Path
 
-from tests.helpers import BATCH_RESOLVE_PY, CLEAN_STATE_PY, GENERATE_REPLY_PY, PythonScriptTestCase
+from tests.helpers import BATCH_RESOLVE_PY, CLEAN_STATE_PY, GENERATE_REPLY_PY, PYTHON_COMMON_PY, PythonScriptTestCase, RUN_ONCE_PY
 
 
 class AuxiliaryScriptsTest(PythonScriptTestCase):
+    def test_run_once_helper_parses_each_snapshot_line_once(self):
+        spec = importlib.util.spec_from_file_location("run_once_module", RUN_ONCE_PY)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.pop(0)
+        snapshot_text = '\n'.join(
+            [
+                '{"id":"THREAD_1","isResolved":false}',
+                '{"id":"THREAD_2","isResolved":true}',
+                '{"id":"THREAD_3","isResolved":false}',
+                "",
+            ]
+        )
+        self.assertEqual(module.unresolved_ids_from_snapshot_text(snapshot_text), ["THREAD_1", "THREAD_3"])
+
     def test_generate_reply_fix_mode_writes_markdown(self):
         output = Path(self.temp_dir.name) / "reply.md"
         result = self.run_cmd(
