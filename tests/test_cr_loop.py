@@ -6,6 +6,9 @@ from tests.helpers import CR_LOOP_PY, PythonScriptTestCase
 
 
 class CRLoopCLITest(PythonScriptTestCase):
+    def artifacts_dir(self) -> Path:
+        return self.state_dir / f"{self.repo.replace('/', '__')}__pr{self.pr}__artifacts"
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
@@ -287,3 +290,88 @@ print(json.dumps({
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)
+
+    def test_cr_loop_local_json_without_external_fixer_writes_internal_request_artifact(self):
+        findings_file = Path(self.temp_dir.name) / "findings.json"
+        findings_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Loop local finding",
+                        "body": "Needs a local fix.",
+                        "path": "src/internal.py",
+                        "line": 13,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "local",
+                "json",
+                "--input",
+                str(findings_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
+
+        artifacts = sorted(self.artifacts_dir().glob("internal-fixer-request-*.json"))
+        self.assertEqual(len(artifacts), 1)
+        payload = json.loads(artifacts[0].read_text(encoding="utf-8"))
+        self.assertEqual(payload["repo"], self.repo)
+        self.assertEqual(payload["pr_number"], self.pr)
+        self.assertEqual(payload["item"]["path"], "src/internal.py")
+
+    def test_cr_loop_remote_without_external_fixer_passes_when_gate_is_clean(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({{
+        'data': {{
+            'repository': {{
+                'pullRequest': {{
+                    'reviewThreads': {{
+                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                        'nodes': []
+                    }}
+                }}
+            }}
+        }}
+    }}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'tester'}}))
+elif args[:2] == ['api', f'repos/{self.repo}/pulls/{self.pr}/reviews']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "remote",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cr-loop PASSED", result.stdout)

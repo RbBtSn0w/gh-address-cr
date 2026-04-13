@@ -56,6 +56,12 @@ def handled_threads_file(repo: str, pr_number: str) -> Path:
     return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__handled_threads.txt"
 
 
+def artifacts_dir(repo: str, pr_number: str) -> Path:
+    path = state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__artifacts"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def sha256_of_file(path: Path) -> str:
     import hashlib
 

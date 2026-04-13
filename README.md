@@ -59,7 +59,7 @@ python3 gh-address-cr/scripts/cli.py control-plane <mode> [producer] <owner/repo
 For multi-iteration autonomous execution, use:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> --fixer-cmd "<command>"
+python3 gh-address-cr/scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> [--fixer-cmd "<command>"]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:
@@ -77,8 +77,10 @@ This does not run another skill by itself. It emits the exact findings contract 
 `cr-loop` is the autonomous runner built on top of the existing control plane.
 
 - It performs repeated intake, item selection, action execution, and gate evaluation.
-- It requires an external fixer command via `--fixer-cmd`.
-- The fixer command must read a JSON payload from stdin and return JSON:
+- By default it uses an internal fixer handoff for the current AI agent.
+- If you omit `--fixer-cmd`, the loop writes an internal fixer request artifact into the PR cache artifacts directory and exits `BLOCKED` for the agent to handle.
+- `--fixer-cmd` remains available as an advanced integration path.
+- External fixer commands must read a JSON payload from stdin and return JSON:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
   - `reply_markdown` for GitHub thread items
@@ -90,7 +92,7 @@ This does not run another skill by itself. It emits the exact findings contract 
   - `NEEDS_HUMAN`
   - `BLOCKED`
 
-Example:
+Advanced external-fixer example:
 
 ```bash
 python3 gh-address-cr/scripts/cli.py cr-loop mixed adapter owner/repo 123 --fixer-cmd "python3 tools/fixer.py" python3 tools/review_adapter.py
@@ -183,6 +185,7 @@ The session state is stored next to the existing audit artifacts in the user cac
 - session: `...__session.json`
 - audit log: `...__audit.jsonl`
 - audit summary: `...__audit_summary.md`
+- artifacts: `...__artifacts/`
 
 The session also tracks loop-safety metadata per item:
 
@@ -212,6 +215,13 @@ If the producer is a local `code-review` run, use the built-in adapter backend:
 python3 gh-address-cr/scripts/cli.py prepare-code-review mixed owner/repo 123
 cat findings.json | python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
 ```
+
+`prepare-code-review` now also returns:
+
+- `artifacts_dir`
+- `recommended_findings_path`
+
+Use that cache-backed findings path instead of creating review artifacts in the project workspace.
 
 If your review tool already produces findings JSON, you do not need a custom adapter command. Use `scripts/ingest_findings.sh` instead:
 
@@ -288,7 +298,7 @@ python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
 python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
 python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input findings.json owner/repo 123
-python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input findings.json --fixer-cmd "python3 tools/fixer.py"
+python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input findings.json
 python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 

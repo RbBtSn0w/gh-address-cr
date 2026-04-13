@@ -100,9 +100,12 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         session_file = self.state_dir / f"{repo_key}__pr{self.pr}__session.json"
         audit_file = self.state_dir / f"{repo_key}__pr{self.pr}__audit.jsonl"
         summary_file = self.state_dir / f"{repo_key}__pr{self.pr}__audit_summary.md"
+        artifacts_dir = self.state_dir / f"{repo_key}__pr{self.pr}__artifacts"
         session_file.write_text("{}", encoding="utf-8")
         audit_file.write_text("{}\n", encoding="utf-8")
         summary_file.write_text("summary", encoding="utf-8")
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (artifacts_dir / "request.json").write_text("{}", encoding="utf-8")
 
         result = self.run_cmd(
             [
@@ -118,3 +121,4 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertFalse(session_file.exists())
         self.assertFalse(audit_file.exists())
         self.assertFalse(summary_file.exists())
+        self.assertFalse(artifacts_dir.exists())

@@ -39,7 +39,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Subcommand to execute.\n"
             "Examples:\n"
-            "  cli.py cr-loop local json owner/repo 123 --input findings.json --fixer-cmd \"python3 tools/fixer.py\"\n"
+            "  cli.py cr-loop local json owner/repo 123 --input findings.json\n"
+            "  cli.py cr-loop mixed adapter owner/repo 123 --fixer-cmd \"python3 tools/fixer.py\" python3 tools/review_adapter.py\n"
             "  cli.py control-plane mixed json owner/repo 123 --input findings.json\n"
             "  cli.py prepare-code-review mixed owner/repo 123\n"
             "  cli.py run-once owner/repo 123\n"

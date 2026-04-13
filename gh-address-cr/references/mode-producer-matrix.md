@@ -12,8 +12,9 @@
   1. initialize/load the PR session
   2. run the mode-specific intake path
   3. select the next blocking item
-  4. call the external fixer command
-  5. apply `fix`, `clarify`, or `defer`
+  4. if `--fixer-cmd` is provided, call the external fixer command
+  5. otherwise write an internal fixer request artifact for the current AI agent
+  6. apply `fix`, `clarify`, or `defer`
   6. run gate
   7. repeat until `PASSED`, `NEEDS_HUMAN`, or `BLOCKED`
 

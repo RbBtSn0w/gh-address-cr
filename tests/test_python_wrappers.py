@@ -490,6 +490,8 @@ else:
         self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
         self.assertIn("code-review-adapter", payload["adapter_backend"])
         self.assertIn("control-plane mixed code-review", payload["ingest_command"])
+        self.assertIn("__artifacts", payload["artifacts_dir"])
+        self.assertIn("__artifacts", payload["recommended_findings_path"])
 
     def test_code_review_adapter_normalizes_findings(self):
         payload = json.dumps(

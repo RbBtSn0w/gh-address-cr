@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import session_engine as engine
+from python_common import artifacts_dir
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -38,7 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", default="")
     parser.add_argument("--input", default=None, help="Findings JSON file. Use '-' to read from stdin.")
     parser.add_argument("--max-iterations", type=int, default=10)
-    parser.add_argument("--fixer-cmd", required=True, help="Shell command that returns a JSON action payload.")
+    parser.add_argument("--fixer-cmd", help="Optional external fixer command that returns a JSON action payload.")
     parser.add_argument("--validation-cmd", action="append", default=[], help="Extra validation command(s).")
     return getattr(parser, "parse_intermixed_args", parser.parse_args)(argv)
 
@@ -260,6 +261,28 @@ def run_fixer(fixer_cmd: str, payload: dict) -> tuple[dict | None, str]:
     return action, ""
 
 
+def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iteration: int, payload: dict) -> Path:
+    safe_item_id = payload["item"]["item_id"].replace("/", "_").replace(":", "_")
+    request_path = artifacts_dir(repo, pr_number) / f"internal-fixer-request-{run_id}-iter{iteration}-{safe_item_id}.json"
+    request = {
+        "mode": "internal-fixer",
+        "repo": repo,
+        "pr_number": pr_number,
+        "run_id": run_id,
+        "iteration": iteration,
+        "instructions": [
+            "Review the selected item using the current PR context.",
+            "Decide one resolution: fix, clarify, or defer.",
+            "Produce note text for terminal handling.",
+            "If the item is a GitHub thread, also produce reply_markdown.",
+            "Write any generated reply markdown inside the PR artifacts directory, not the project workspace.",
+        ],
+        **payload,
+    }
+    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return request_path
+
+
 def run_validation(commands: list[str]) -> tuple[bool, str]:
     for command in commands:
         result = subprocess.run(command, shell=True, text=True, capture_output=True)
@@ -291,6 +314,19 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
         "loop_state": {"run_id": run_id, "max_iterations": args.max_iterations},
         "default_validation_commands": args.validation_cmd,
     }
+    if not args.fixer_cmd:
+        request_path = write_internal_fixer_request(repo, pr_number, run_id=run_id, iteration=iteration, payload=payload)
+        update_loop_state(
+            repo,
+            pr_number,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=iteration,
+            max_iterations=args.max_iterations,
+            current_item_id=item["item_id"],
+            last_error=f"Internal fixer action required: {request_path}",
+        )
+        return "internal_required", str(request_path)
     action, error = run_fixer(args.fixer_cmd, payload)
     if action is None:
         record_auto_attempt(repo, pr_number, item["item_id"], action=None, failure=error)
@@ -339,11 +375,10 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
             record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=error)
             mark_needs_human(repo, pr_number, item["item_id"], error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
             return "needs_human", error
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as handle:
-            handle.write(reply_markdown)
-            reply_path = Path(handle.name)
+        thread_id = item["origin_ref"]
+        reply_path = artifacts_dir(repo, pr_number) / f"reply-{run_id}-iter{iteration}-{thread_id}.md"
+        reply_path.write_text(reply_markdown, encoding="utf-8")
         try:
-            thread_id = item["origin_ref"]
             result = run_cmd([sys.executable, str(POST_REPLY), "--repo", repo, "--pr", pr_number, "--audit-id", run_id, thread_id, str(reply_path)])
             emit(result)
             if result.returncode != 0:
@@ -451,14 +486,15 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop FAILED", file=sys.stderr)
             return 1
 
-        claim = run_cmd(
-            [sys.executable, str(SCRIPT_DIR / "session_engine.py"), "claim", repo, pr_number, next_item["item_id"], "--agent", "cr-loop"]
-        )
-        emit(claim)
-        if claim.returncode != 0:
-            update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, current_item_id=next_item["item_id"], last_error=claim.stderr or "claim failed")
-            print("cr-loop BLOCKED", file=sys.stderr)
-            return BLOCKED_EXIT
+        if args.fixer_cmd:
+            claim = run_cmd(
+                [sys.executable, str(SCRIPT_DIR / "session_engine.py"), "claim", repo, pr_number, next_item["item_id"], "--agent", "cr-loop"]
+            )
+            emit(claim)
+            if claim.returncode != 0:
+                update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, current_item_id=next_item["item_id"], last_error=claim.stderr or "claim failed")
+                print("cr-loop BLOCKED", file=sys.stderr)
+                return BLOCKED_EXIT
 
         update_loop_state(repo, pr_number, run_id=run_id, status="ACTIVE", iteration=iteration, max_iterations=args.max_iterations, current_item_id=next_item["item_id"])
         status, error = handle_item(args, repo, pr_number, next_item, run_id=run_id, iteration=iteration)
@@ -467,6 +503,9 @@ def main(argv: list[str] | None = None) -> int:
             current = engine.ensure_item(session, next_item["item_id"])
             if status == "retry":
                 continue
+            if status == "internal_required":
+                print(f"cr-loop INTERNAL_FIXER_REQUIRED item={next_item['item_id']} artifact={error}")
+                return BLOCKED_EXIT
             if status == "needs_human" or current.get("needs_human"):
                 print(f"cr-loop NEEDS_HUMAN item={next_item['item_id']}")
                 return NEEDS_HUMAN_EXIT

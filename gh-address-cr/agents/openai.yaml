@@ -7,6 +7,7 @@ interface:
     1. Select one mode: `remote`, `local`, `mixed`, or `ingest`.
     2. If local intake is needed, select one producer: `code-review`, `json`, or `adapter`.
     3. Start with `python3 scripts/cli.py control-plane ...` for one pass, or `python3 scripts/cli.py cr-loop ...` for multi-iteration execution.
-    4. GitHub review threads require both reply and resolve.
-    5. Local findings require valid terminal notes.
-    6. Before any completion statement, run `scripts/final_gate.sh`.
+    4. Prefer the default internal fixer path for loop execution; use `--fixer-cmd` only for advanced external integrations.
+    5. GitHub review threads require both reply and resolve.
+    6. Local findings require valid terminal notes.
+    7. Before any completion statement, run `scripts/final_gate.sh`.

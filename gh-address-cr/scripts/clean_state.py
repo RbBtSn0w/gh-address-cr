@@ -4,7 +4,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from python_common import audit_log_file, audit_summary_file, state_dir
+from python_common import artifacts_dir, audit_log_file, audit_summary_file, state_dir
 
 
 def cleanup_pr_state_files(repo: str, pr_number: str) -> None:
@@ -66,6 +66,7 @@ def main() -> int:
         cleanup_pr_state_files(args.repo, args.pr_number)
         audit_log_file(args.repo, args.pr_number).unlink(missing_ok=True)
         audit_summary_file(args.repo, args.pr_number).unlink(missing_ok=True)
+        shutil.rmtree(artifacts_dir(args.repo, args.pr_number), ignore_errors=True)
         print(f"Removed PR state for: {args.repo} #{args.pr_number}")
     else:
         if base.exists():

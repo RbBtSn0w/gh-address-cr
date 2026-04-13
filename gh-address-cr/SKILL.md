@@ -91,9 +91,10 @@ Do not assume `gh-address-cr` directly runs another review skill by itself. The 
 Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatically.
 
 - `cr-loop` still treats `gh-address-cr` as the control plane.
-- The loop requires a fixer command:
-  - `--fixer-cmd "<command>"`
-- The fixer command must read a JSON payload from stdin and return a JSON object containing:
+- By default, the loop uses the current AI agent as the internal fixer handoff path.
+- If no `--fixer-cmd` is provided, `cr-loop` writes an internal fixer request JSON into the PR artifacts directory and exits `BLOCKED` until the agent handles that item.
+- `--fixer-cmd "<command>"` remains available as an advanced external fixer override.
+- External fixer commands must read a JSON payload from stdin and return a JSON object containing:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
   - `reply_markdown` for GitHub thread items
@@ -177,6 +178,6 @@ Final output must include:
 - checklist: `references/cr-triage-checklist.md`
 - stable operator surface: `scripts/*.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
-- loop runner: `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> --fixer-cmd "<command>"`
+- loop runner: `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> [--fixer-cmd "<command>"]`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

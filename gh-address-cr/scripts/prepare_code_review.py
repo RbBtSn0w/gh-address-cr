@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 
+from python_common import artifacts_dir
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -19,6 +21,8 @@ def main() -> int:
         "mode": args.mode,
         "repo": args.repo,
         "pr_number": args.pr_number,
+        "artifacts_dir": str(artifacts_dir(args.repo, args.pr_number)),
+        "recommended_findings_path": str(artifacts_dir(args.repo, args.pr_number) / "code-review-findings.json"),
         "instructions": [
             "Review the PR and emit findings JSON, not a Markdown-only summary.",
             "Each finding must include: title, body, path, line.",
