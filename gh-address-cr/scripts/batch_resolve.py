@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -16,8 +17,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Resolve a batch of approved GitHub review threads.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", action="store_true")
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr", dest="pr_number", required=True)
+    parser.add_argument("--repo", default="")
+    parser.add_argument("--pr", dest="pr_number", default="")
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("approved_threads_file")
     return parser.parse_args()
@@ -35,6 +36,18 @@ def iter_approved_thread_ids(path: Path):
 
 def main() -> int:
     args = parse_args()
+
+    if not args.repo:
+        res = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner"], capture_output=True, text=True)
+        if res.returncode == 0:
+            args.repo = json.loads(res.stdout).get("nameWithOwner", "")
+    if not args.pr_number:
+        res = subprocess.run(["gh", "pr", "view", "--json", "number"], capture_output=True, text=True)
+        if res.returncode == 0:
+            args.pr_number = str(json.loads(res.stdout).get("number", ""))
+    if not args.repo or not args.pr_number:
+        raise SystemExit("Error: --repo and --pr are required if gh context is unavailable.")
+
     approved_path = Path(args.approved_threads_file)
     if not approved_path.is_file():
         raise SystemExit(f"Approved thread file not found: {approved_path}")

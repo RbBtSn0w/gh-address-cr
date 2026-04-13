@@ -11,6 +11,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--repo", default="")
     parser.add_argument("--pr", dest="pr_number", default="")
+    parser.add_argument("--clean-tmp", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 

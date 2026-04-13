@@ -84,6 +84,31 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("[dry-run] Would resolve thread: THREAD_1", result.stdout)
         self.assertIn("[dry-run] Would resolve thread: THREAD_2", result.stdout)
 
+    def test_batch_resolve_infers_repo_and_pr_from_gh_context(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:3] == ['repo', 'view', '--json']:
+    print(json.dumps({'nameWithOwner': 'octo/example'}))
+elif args[:3] == ['pr', 'view', '--json']:
+    print(json.dumps({'number': 77}))
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        approved = Path(self.temp_dir.name) / "approved.txt"
+        approved.write_text("APPROVED THREAD_1\n", encoding="utf-8")
+        result = self.run_cmd([sys.executable, str(BATCH_RESOLVE_PY), "--dry-run", str(approved)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry-run] Would resolve thread: THREAD_1", result.stdout)
+
     def test_batch_resolve_rejects_invalid_lines(self):
         approved = Path(self.temp_dir.name) / "approved.txt"
         approved.write_text("NOPE THREAD_1\n", encoding="utf-8")
@@ -132,3 +157,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertFalse(audit_file.exists())
         self.assertFalse(summary_file.exists())
         self.assertFalse(artifacts_dir.exists())
+
+    def test_clean_state_accepts_legacy_clean_tmp_flag(self):
+        result = self.run_cmd([sys.executable, str(CLEAN_STATE_PY), "--clean-tmp"])
+        self.assertEqual(result.returncode, 0, result.stderr)

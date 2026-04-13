@@ -113,9 +113,9 @@ def main() -> int:
 
     if args.auto_clean:
         workspace = workspace_dir(args.repo, args.pr_number)
+        audit_event("final_gate", "ok", args.repo, args.pr_number, args.audit_id, "Auto-clean completed after gate pass")
         shutil.rmtree(workspace, ignore_errors=True)
         print(f"Auto-cleaned PR workspace: {workspace}")
-        audit_event("final_gate", "ok", args.repo, args.pr_number, args.audit_id, "Auto-clean completed after gate pass")
     return 0
 
 

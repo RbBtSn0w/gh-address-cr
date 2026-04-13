@@ -1005,7 +1005,7 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], ["777"])
+        self.assertEqual(state["submitted"], [])
 
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):
         gh = self.bin_dir / "gh"
@@ -1059,6 +1059,37 @@ else:
         last = json.loads(audit_lines[-1])
         self.assertEqual(last["status"], "failed")
         self.assertEqual(last["message"], "Gate failed; 1 blocking item(s) remain")
+
+    def test_final_gate_auto_clean_does_not_recreate_workspace(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--auto-clean", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.workspace_dir().exists())
 
     def test_resolve_thread_python_updates_session(self):
         gh = self.bin_dir / "gh"
