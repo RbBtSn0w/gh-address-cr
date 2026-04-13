@@ -24,6 +24,7 @@ Recommended invocation model:
 /gh-address-cr local <producer> <owner/repo> <pr_number>
 /gh-address-cr mixed <producer> <owner/repo> <pr_number>
 /gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
+/gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
 ```
 
 Supported producers:
@@ -55,6 +56,12 @@ The preferred automation entrypoint is now:
 python3 gh-address-cr/scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...
 ```
 
+For multi-iteration autonomous execution, use:
+
+```bash
+python3 gh-address-cr/scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> --fixer-cmd "<command>"
+```
+
 For `producer=code-review`, generate the standardized bridge prompt with:
 
 ```bash
@@ -64,6 +71,30 @@ python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/re
 This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
 
 `code-review` intake is now adapter-backed. Once you have structured findings JSON, `control-plane` routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
+
+## CR Loop
+
+`cr-loop` is the autonomous runner built on top of the existing control plane.
+
+- It performs repeated intake, item selection, action execution, and gate evaluation.
+- It requires an external fixer command via `--fixer-cmd`.
+- The fixer command must read a JSON payload from stdin and return JSON:
+  - `resolution`: `fix`, `clarify`, or `defer`
+  - `note`
+  - `reply_markdown` for GitHub thread items
+  - optional `validation_commands`
+- `adapter` producer is re-run on each iteration.
+- `json` and `code-review` producers are treated as one-shot inputs for the current loop run.
+- The loop exits with one of:
+  - `PASSED`
+  - `NEEDS_HUMAN`
+  - `BLOCKED`
+
+Example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py cr-loop mixed adapter owner/repo 123 --fixer-cmd "python3 tools/fixer.py" python3 tools/review_adapter.py
+```
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
@@ -228,6 +259,7 @@ python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 12
 The main logic now lives in Python under `gh-address-cr/scripts/`:
 
 - `cli.py`
+- `cr_loop.py`
 - `code_review_adapter.py`
 - `session_engine.py`
 - `python_common.py`
@@ -256,6 +288,7 @@ python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
 python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
 python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input findings.json owner/repo 123
+python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input findings.json --fixer-cmd "python3 tools/fixer.py"
 python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 

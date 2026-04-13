@@ -13,6 +13,7 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(session["repo"], self.repo)
         self.assertEqual(session["pr_number"], self.pr)
         self.assertEqual(session["items"], {})
+        self.assertEqual(session["loop_state"]["status"], "IDLE")
 
     def test_sync_github_upserts_threads(self):
         self.run_engine("init", self.repo, self.pr, check=True)

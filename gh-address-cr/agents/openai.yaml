@@ -6,7 +6,7 @@ interface:
     Use `SKILL.md` as the source of truth.
     1. Select one mode: `remote`, `local`, `mixed`, or `ingest`.
     2. If local intake is needed, select one producer: `code-review`, `json`, or `adapter`.
-    3. Start with `python3 scripts/cli.py control-plane ...`.
+    3. Start with `python3 scripts/cli.py control-plane ...` for one pass, or `python3 scripts/cli.py cr-loop ...` for multi-iteration execution.
     4. GitHub review threads require both reply and resolve.
     5. Local findings require valid terminal notes.
     6. Before any completion statement, run `scripts/final_gate.sh`.

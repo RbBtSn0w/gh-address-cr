@@ -24,6 +24,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cr-loop", result.stdout)
         self.assertIn("control-plane", result.stdout)
         self.assertIn("run-once", result.stdout)
         self.assertIn("session-engine", result.stdout)

@@ -23,6 +23,7 @@ GENERATE_REPLY_PY = SCRIPTS_DIR / "generate_reply.py"
 BATCH_RESOLVE_PY = SCRIPTS_DIR / "batch_resolve.py"
 CLEAN_STATE_PY = SCRIPTS_DIR / "clean_state.py"
 CONTROL_PLANE_PY = SCRIPTS_DIR / "control_plane.py"
+CR_LOOP_PY = SCRIPTS_DIR / "cr_loop.py"
 PREPARE_CODE_REVIEW_PY = SCRIPTS_DIR / "prepare_code_review.py"
 CODE_REVIEW_ADAPTER_PY = SCRIPTS_DIR / "code_review_adapter.py"
 

@@ -15,6 +15,7 @@ Use this skill as the PR review control plane. It owns session state, intake rou
 /gh-address-cr local <producer> <owner/repo> <pr_number>
 /gh-address-cr mixed <producer> <owner/repo> <pr_number>
 /gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
+/gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
 ```
 
 `mode`
@@ -34,6 +35,7 @@ Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
   - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
+  - `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> ...`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
@@ -49,6 +51,10 @@ These paths are fully operational now:
 - `mixed json`
 - `mixed adapter`
 - `ingest json`
+- `loop remote`
+- `loop local json`
+- `loop local code-review`
+- `loop mixed adapter`
 
 For `producer=code-review`, the execution model is:
 
@@ -72,12 +78,32 @@ Do not assume `gh-address-cr` directly runs another review skill by itself. The 
 
 1. Pick exactly one `mode` and, when required, exactly one `producer`.
 2. Use the high-level dispatcher first:
-   - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
+  - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
+   - or `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> ...` for multi-iteration execution
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
 5. For local findings, terminal handling must include a note.
 6. `producer=code-review` must emit findings JSON before session handling starts.
 7. Never declare completion before `final_gate.sh` passes.
+
+## Loop Contract
+
+Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatically.
+
+- `cr-loop` still treats `gh-address-cr` as the control plane.
+- The loop requires a fixer command:
+  - `--fixer-cmd "<command>"`
+- The fixer command must read a JSON payload from stdin and return a JSON object containing:
+  - `resolution`: `fix`, `clarify`, or `defer`
+  - `note`
+  - `reply_markdown` for GitHub thread items
+  - optional `validation_commands`
+- `code-review` and `json` producers are consumed once per loop run.
+- `adapter` producer is re-run on each iteration.
+- The loop exits as:
+  - `PASSED` when gate succeeds
+  - `NEEDS_HUMAN` when retry thresholds are exceeded
+  - `BLOCKED` when a non-recoverable orchestration step fails
 
 ## Producer Contract
 
@@ -151,5 +177,6 @@ Final output must include:
 - checklist: `references/cr-triage-checklist.md`
 - stable operator surface: `scripts/*.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
+- loop runner: `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> --fixer-cmd "<command>"`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

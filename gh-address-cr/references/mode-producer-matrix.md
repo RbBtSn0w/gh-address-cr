@@ -4,6 +4,19 @@
 
 ## Supported combinations
 
+### `loop`
+
+- input:
+  - `loop <mode> [producer] <owner/repo> <pr_number>`
+- actions:
+  1. initialize/load the PR session
+  2. run the mode-specific intake path
+  3. select the next blocking item
+  4. call the external fixer command
+  5. apply `fix`, `clarify`, or `defer`
+  6. run gate
+  7. repeat until `PASSED`, `NEEDS_HUMAN`, or `BLOCKED`
+
 ### `remote`
 
 - input:

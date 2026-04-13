@@ -126,10 +126,40 @@ def default_session(repo: str, pr_number: str) -> dict:
             "blocking_items_count": 0,
             "open_local_findings_count": 0,
             "unresolved_github_threads_count": 0,
+            "needs_human_items_count": 0,
+        },
+        "loop_state": {
+            "run_id": None,
+            "status": "IDLE",
+            "iteration": 0,
+            "max_iterations": 0,
+            "current_item_id": None,
+            "last_error": "",
+            "last_started_at": None,
+            "last_completed_at": None,
         },
         "items": {},
         "history": [],
     }
+
+
+def ensure_loop_state(session: dict):
+    loop_state = session.setdefault("loop_state", {})
+    loop_state.setdefault("run_id", None)
+    loop_state.setdefault("status", "IDLE")
+    loop_state.setdefault("iteration", 0)
+    loop_state.setdefault("max_iterations", 0)
+    loop_state.setdefault("current_item_id", None)
+    loop_state.setdefault("last_error", "")
+    loop_state.setdefault("last_started_at", None)
+    loop_state.setdefault("last_completed_at", None)
+
+
+def ensure_item_runtime_fields(item: dict):
+    item.setdefault("auto_attempt_count", 0)
+    item.setdefault("last_auto_action", None)
+    item.setdefault("last_auto_failure", None)
+    item.setdefault("needs_human", False)
 
 
 def load_session(repo: str, pr_number: str) -> dict:
@@ -140,6 +170,9 @@ def load_session(repo: str, pr_number: str) -> dict:
         payload = json.load(handle)
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise SystemExit(f"Unsupported session schema version: {payload.get('schema_version')}")
+    ensure_loop_state(payload)
+    for item in payload.get("items", {}).values():
+        ensure_item_runtime_fields(item)
     return payload
 
 
@@ -161,6 +194,7 @@ def recalc_metrics(session: dict):
             for item in items
             if item["item_kind"] == "github_thread" and item.get("status") not in GITHUB_TERMINAL_STATUSES
         ),
+        "needs_human_items_count": sum(1 for item in items if item.get("needs_human")),
     }
 
 
@@ -253,6 +287,10 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "reopen_count": existing.get("reopen_count", 0) if existing else 0,
         "evidence": existing.get("evidence", []) if existing else [],
         "history": existing.get("history", []) if existing else [],
+        "auto_attempt_count": existing.get("auto_attempt_count", 0) if existing else 0,
+        "last_auto_action": existing.get("last_auto_action") if existing else None,
+        "last_auto_failure": existing.get("last_auto_failure") if existing else None,
+        "needs_human": False if reopened else (existing.get("needs_human", False) if existing else False),
         "created_at": existing.get("created_at") if existing else now,
         "updated_at": now,
     }
@@ -318,6 +356,10 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         "reopen_count": 0,
         "linked_github_item_id": None,
         "evidence": [],
+        "auto_attempt_count": 0,
+        "last_auto_action": None,
+        "last_auto_failure": None,
+        "needs_human": False,
         "history": [history_event("created", "Imported from local review")],
         "created_at": now,
         "updated_at": now,

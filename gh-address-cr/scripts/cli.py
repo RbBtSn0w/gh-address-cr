@@ -7,6 +7,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 COMMAND_TO_SCRIPT = {
+    "cr-loop": "cr_loop.py",
     "control-plane": "control_plane.py",
     "code-review-adapter": "code_review_adapter.py",
     "prepare-code-review": "prepare_code_review.py",
@@ -38,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Subcommand to execute.\n"
             "Examples:\n"
+            "  cli.py cr-loop local json owner/repo 123 --input findings.json --fixer-cmd \"python3 tools/fixer.py\"\n"
             "  cli.py control-plane mixed json owner/repo 123 --input findings.json\n"
             "  cli.py prepare-code-review mixed owner/repo 123\n"
             "  cli.py run-once owner/repo 123\n"
