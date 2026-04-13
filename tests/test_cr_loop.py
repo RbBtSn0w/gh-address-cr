@@ -255,3 +255,35 @@ print(json.dumps({
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
         self.assertIn("cr-loop PASSED", result.stdout)
+
+    def test_cr_loop_mixed_code_review_requires_findings_json(self):
+        fixer = Path(self.temp_dir.name) / "fixer.py"
+        fixer.write_text(
+            """#!/usr/bin/env python3
+import json, sys
+payload = json.loads(sys.stdin.read() or "{}")
+print(json.dumps({
+    "resolution": "clarify",
+    "note": "No-op.",
+    "reply_markdown": "No-op.",
+    "validation_commands": []
+}))
+""",
+            encoding="utf-8",
+        )
+        fixer.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "mixed",
+                "code-review",
+                "--fixer-cmd",
+                f"{sys.executable} {fixer}",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires findings JSON", result.stderr)

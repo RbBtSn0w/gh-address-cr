@@ -409,8 +409,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if args.input == "-":
             stdin_payload = sys.stdin.read()
+            if not stdin_payload.strip():
+                print(f"producer={producer} requires findings JSON via --input or stdin.", file=sys.stderr)
+                return 2
         elif args.input is None:
             stdin_payload = sys.stdin.read()
+            if not stdin_payload.strip():
+                print(f"producer={producer} requires findings JSON via --input or stdin.", file=sys.stderr)
+                return 2
 
     run_id = args.audit_id or f"cr-loop-{engine.utc_now()}"
     run_cmd([sys.executable, str(SCRIPT_DIR / "session_engine.py"), "init", repo, pr_number])
