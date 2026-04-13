@@ -75,6 +75,14 @@ def emit(result: subprocess.CompletedProcess[str]) -> None:
         sys.stderr.write(result.stderr)
 
 
+def run_or_return(cmd: list[str], *, stdin: str | None = None) -> subprocess.CompletedProcess[str] | None:
+    result = run_command(cmd, stdin=stdin)
+    emit(result)
+    if result.returncode != 0:
+        return result
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -108,14 +116,14 @@ def main(argv: list[str] | None = None) -> int:
                     return die(f"producer={producer} requires findings JSON via --input or stdin.")
 
     try:
-        results: list[subprocess.CompletedProcess[str]] = []
-
         if args.mode in {"remote", "mixed"}:
             cmd = [sys.executable, str(RUN_ONCE)]
             if args.audit_id:
                 cmd.extend(["--audit-id", args.audit_id])
             cmd.extend([repo, pr_number])
-            results.append(run_command(cmd))
+            result = run_or_return(cmd)
+            if result is not None:
+                return result.returncode
 
         if args.mode in {"local", "mixed", "ingest"}:
             if producer == "adapter":
@@ -125,7 +133,9 @@ def main(argv: list[str] | None = None) -> int:
                 if source:
                     cmd.extend(["--source", source])
                 cmd.extend([repo, pr_number, *extra])
-                results.append(run_command(cmd))
+                result = run_or_return(cmd)
+                if result is not None:
+                    return result.returncode
             elif producer == "code-review":
                 input_arg = args.input
                 if stdin_payload is not None:
@@ -148,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
                         input_arg or "-",
                     ]
                 )
-                results.append(run_command(cmd))
+                result = run_or_return(cmd)
+                if result is not None:
+                    return result.returncode
             else:
                 cmd = [sys.executable, str(INGEST_FINDINGS)]
                 if args.scan_id:
@@ -158,21 +170,20 @@ def main(argv: list[str] | None = None) -> int:
                 if args.input is not None:
                     cmd.extend(["--input", args.input])
                 cmd.extend([repo, pr_number])
-                results.append(run_command(cmd, stdin=stdin_payload))
+                result = run_or_return(cmd, stdin=stdin_payload)
+                if result is not None:
+                    return result.returncode
 
         if args.gate:
             cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
             if args.audit_id:
                 cmd.extend(["--audit-id", args.audit_id])
             cmd.extend([repo, pr_number])
-            results.append(run_command(cmd))
+            result = run_or_return(cmd)
+            if result is not None:
+                return result.returncode
 
-        exit_code = 0
-        for result in results:
-            emit(result)
-            if result.returncode != 0 and exit_code == 0:
-                exit_code = result.returncode
-        return exit_code
+        return 0
     finally:
         if temp_input_path and temp_input_path.exists():
             temp_input_path.unlink()

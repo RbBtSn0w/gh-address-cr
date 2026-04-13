@@ -319,6 +319,51 @@ else:
         self.assertIn("github-thread:THREAD_MIXED", result.stdout)
         self.assertIn("Created 1 local item", result.stdout)
 
+    def test_control_plane_stops_after_run_once_failure(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import sys
+sys.stderr.write('graphql failed\\n')
+raise SystemExit(1)
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        payload_file = Path(self.temp_dir.name) / "mixed-findings.json"
+        payload_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Should not ingest after remote failure",
+                        "body": "Control plane must stop on the first failed stage.",
+                        "path": "src/ignored.py",
+                        "line": 11,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CONTROL_PLANE_PY),
+                "mixed",
+                "json",
+                "--input",
+                str(payload_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Created 1 local item", result.stdout)
+
+        session_file = self.state_dir / "octo__example__pr77__session.json"
+        self.assertFalse(session_file.exists())
+
     def test_control_plane_mixed_code_review_accepts_dash_input_from_stdin(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
