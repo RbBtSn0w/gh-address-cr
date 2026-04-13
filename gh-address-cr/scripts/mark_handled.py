@@ -43,9 +43,10 @@ def main() -> int:
     handled_file = handled_threads_file(args.repo, args.pr_number)
     handled_file.parent.mkdir(parents=True, exist_ok=True)
     handled_file.touch(exist_ok=True)
-    existing = set(handled_file.read_text(encoding="utf-8").splitlines()) if handled_file.exists() else set()
+    content = handled_file.read_text(encoding="utf-8")
+    existing = set(content.splitlines()) if content else set()
     if args.thread_id not in existing:
-        handled_file.write_text((handled_file.read_text(encoding="utf-8") if handled_file.exists() else "") + f"{args.thread_id}\n", encoding="utf-8")
+        handled_file.write_text(content + f"{args.thread_id}\n", encoding="utf-8")
     print(f"Marked handled: {args.thread_id} (scope: {args.repo}#{args.pr_number})")
     return 0
 

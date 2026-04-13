@@ -1192,3 +1192,38 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         handled_file = self.github_dir() / "handled_threads.txt"
         self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))
+
+    def test_mark_handled_appends_without_clobbering_existing_entries(self):
+        handled_file = self.github_dir() / "handled_threads.txt"
+        handled_file.parent.mkdir(parents=True, exist_ok=True)
+        handled_file.write_text("THREAD_EXISTING\n", encoding="utf-8")
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_NEW",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/thread.py",
+                    "line": 8,
+                    "body": "Mark handled test.",
+                    "url": "https://example.test/thread/new",
+                }
+            ]
+        )
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        self.run_cmd([sys.executable, str(SCRIPT), "sync-github", self.repo, self.pr], stdin=payload, check=True)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "mark-handled",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_NEW",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(handled_file.read_text(encoding="utf-8").splitlines(), ["THREAD_EXISTING", "THREAD_NEW"])
