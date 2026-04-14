@@ -1,12 +1,12 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
-argument-hint: "<review|threads|findings|adapter|loop> ..."
+argument-hint: "<review|threads|findings|adapter> ..."
 ---
 
 # gh-address-cr
 
-Use this skill as the PR review control plane. It owns session state, intake routing, and the final gate.
+Use this skill as the PR review orchestrator. It owns session state, intake routing, and the final gate.
 
 ## Usage
 
@@ -15,24 +15,19 @@ Use this skill as the PR review control plane. It owns session state, intake rou
 /gh-address-cr threads <owner/repo> <pr_number>
 /gh-address-cr findings <owner/repo> <pr_number>
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
-/gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
-/gh-address-cr control-plane <mode> [producer] <owner/repo> <pr_number>
 ```
 
 Recommended high-level entrypoints:
 
 - `review`
   - default entrypoint
-  - internally maps to `cr-loop mixed code-review`
+  - runs the full PR review workflow automatically
 - `threads`
   - GitHub review threads only
-  - internally maps to `cr-loop remote`
 - `findings`
   - existing findings JSON only
-  - internally maps to `cr-loop local json`
 - `adapter`
   - adapter command prints findings JSON
-  - internally maps to `cr-loop mixed adapter`
 
 Advanced dispatch model:
 
@@ -55,9 +50,6 @@ Treat `SKILL.md` as the source of truth for using this skill.
   - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
   - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
   - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
-- Use advanced commands only when the high-level entrypoints do not fit:
-  - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
-  - `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> ...`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
@@ -70,20 +62,7 @@ These high-level paths are fully operational now:
 - `findings`
 - `adapter`
 
-These advanced paths are fully operational now:
-
-- `remote`
-- `local code-review`
-- `local json`
-- `local adapter`
-- `mixed code-review`
-- `mixed json`
-- `mixed adapter`
-- `ingest json`
-- `loop remote`
-- `loop local json`
-- `loop local code-review`
-- `loop mixed adapter`
+The internal iteration and dispatch layers are implementation details and are not part of the public entrypoint surface.
 
 For `producer=code-review`, the execution model is:
 
@@ -91,7 +70,7 @@ For `producer=code-review`, the execution model is:
 - run the external review step and produce findings JSON first
 - if findings already exist as a real file, pass that file with `--input <path>`
 - if findings are being produced in the current step, prefer piping them through `stdin` with `--input -`
-- let `control-plane` pass that JSON through the built-in `code-review-adapter`
+- let the intake layer pass that JSON through the built-in `code-review-adapter`
 
 `producer=code-review` is a contract label, not a hardcoded dependency on one specific skill name.
 
@@ -119,36 +98,35 @@ The only requirement is that the upstream review step emits findings in the acce
   - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
   - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
   - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
-2. Use `control-plane` or `cr-loop <mode> [producer]` only when the high-level entrypoints do not fit.
+2. Use the internal low-level dispatch only when the high-level entrypoints do not fit.
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
 5. For local findings, terminal handling must include a note.
 6. `producer=code-review` must emit findings JSON before session handling starts.
 7. Never declare completion before `final_gate.sh` passes.
 
-## Loop Contract
+## Automatic Iteration
 
-Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatically.
+The default review entrypoint runs repeated intake, item selection, action execution, and gate evaluation internally until the PR session converges.
 
-- `cr-loop` still treats `gh-address-cr` as the control plane.
-- By default, the loop uses the current AI agent as the internal fixer handoff path.
-- If no `--fixer-cmd` is provided, `cr-loop` writes an internal fixer request JSON into the PR artifacts directory and exits `BLOCKED` until the agent handles that item.
-- `--fixer-cmd "<command>"` remains available as an advanced external fixer override.
+- The internal fixer handoff path uses the current AI agent by default.
+- If a finding cannot be resolved automatically, the workflow records an internal fixer request artifact for the agent to handle.
+- Advanced external fixer commands remain available for integrations that need an explicit command boundary.
 - External fixer commands must read a JSON payload from stdin and return a JSON object containing:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
   - `reply_markdown` for GitHub thread items
   - optional `validation_commands`
-- `code-review` and `json` producers are consumed once per loop run.
+- `code-review` and `json` producers are consumed once per review run.
 - `adapter` producer is re-run on each iteration.
-- The loop exits as:
+- The workflow exits as:
   - `PASSED` when gate succeeds
   - `NEEDS_HUMAN` when retry thresholds are exceeded
   - `BLOCKED` when a non-recoverable orchestration step fails
 
 ## Producer Contract
 
-`gh-address-cr` is the control plane. Producers are replaceable.
+`gh-address-cr` is the orchestrator. Producers are replaceable.
 
 - `code-review` is a producer, not the session owner.
 - `code-review` here means "review-style findings producer", not one mandatory skill name.
@@ -258,7 +236,7 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 - the same item keeps reopening after multiple technically sound attempts
 - the suggestion conflicts with an intentional compatibility or workflow rule and the tradeoff is not obvious
 
-`gh-address-cr` should stop loop iteration and escalate rather than forcing an implementation under uncertainty.
+`gh-address-cr` should stop iteration and escalate rather than forcing an implementation under uncertainty.
 
 ## Required Evidence
 
@@ -286,7 +264,7 @@ Final output must include:
 - Default must-fix: correctness bugs, data loss risks, platform/runtime breakage, packaging/install breakage, P1/P2 regressions.
 - Can defer with rationale: style-only, naming preference, non-blocking wording improvements.
 - For this repo, fix priority is:
-  - session / gate / loop semantic mismatches
+  - session / gate / iteration semantic mismatches
   - GitHub reply / resolve / pending-review visibility issues
   - CLI and shell-wrapper compatibility regressions
   - workspace/cache side effects
@@ -305,6 +283,5 @@ Final output must include:
 - checklist: `references/cr-triage-checklist.md`
 - stable operator surface: `scripts/*.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
-- loop runner: `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> [--fixer-cmd "<command>"]`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

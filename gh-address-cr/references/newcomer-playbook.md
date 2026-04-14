@@ -13,7 +13,7 @@ Use this playbook when you are new to `gh-address-cr` and need one repeatable wa
   - handles GitHub review threads
   - enforces the final gate
 
-Do not treat `gh-address-cr` as the review engine itself. Treat it as the control plane.
+Do not treat `gh-address-cr` as the review engine itself. Treat it as the orchestrator.
 
 ## Producer Meaning
 
@@ -39,8 +39,8 @@ Use this mapping:
 
 Do not put the upstream tool name itself in the producer slot.
 
-- correct advanced form: `$gh-address-cr loop mixed code-review <PR_URL>`
-- incorrect: `$gh-address-cr loop mixed code-review-aa <PR_URL>`
+- correct form: `$gh-address-cr review <PR_URL>`
+- incorrect: `$gh-address-cr review code-review-aa <PR_URL>`
 
 ## Pick The Right Mode
 
@@ -50,8 +50,6 @@ Do not put the upstream tool name itself in the producer slot.
   - use when you only need to process local findings
 - `mixed`
   - use when you want GitHub review threads and local findings in the same PR session
-- `loop`
-  - use when you want repeated intake + processing + gate evaluation until the run exits `PASSED`, `BLOCKED`, or `NEEDS_HUMAN`
 
 Default for most real work:
 
@@ -98,7 +96,7 @@ Use this when `gh-address-cr` is the main entrypoint:
 
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
-然后由 $gh-address-cr 接管 session、GitHub threads、loop 和 final-gate，直到通过。
+然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
 ```
 
 ## Recommended Prompt: Review Command First

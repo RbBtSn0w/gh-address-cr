@@ -51,29 +51,25 @@ def alias_help(command: str) -> str:
         return (
             "usage: cli.py review <owner/repo> <pr_number> [--input <path>|-]\n\n"
             "High-level PR review entrypoint.\n\n"
-            "Maps to: cr-loop mixed code-review\n"
-            "Use when an upstream review producer emits findings JSON first.\n"
+            "Use when you want the full PR review workflow to run automatically.\n"
             "Prefer --input - with stdin for findings produced in the current step.\n"
         )
     if command == "threads":
         return (
             "usage: cli.py threads <owner/repo> <pr_number>\n\n"
             "High-level GitHub review-thread entrypoint.\n\n"
-            "Maps to: cr-loop remote\n"
             "Use when only GitHub review threads need processing.\n"
         )
     if command == "findings":
         return (
             "usage: cli.py findings <owner/repo> <pr_number> --input <path>|-\n\n"
             "High-level local findings entrypoint.\n\n"
-            "Maps to: cr-loop local json\n"
             "Use when findings already exist as JSON or are piped in through stdin.\n"
         )
     if command == "adapter":
         return (
             "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>\n\n"
             "High-level adapter entrypoint.\n\n"
-            "Maps to: cr-loop mixed adapter\n"
             "Use when an adapter command prints findings JSON.\n"
         )
     return ""
@@ -86,25 +82,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        choices=sorted(COMMAND_TO_SCRIPT),
+        metavar="{review,threads,findings,adapter}",
         help=(
-            "Subcommand to execute.\n"
-            "Preferred high-level commands:\n"
+            "High-level commands:\n"
             "  cli.py review owner/repo 123 --input -\n"
             "  cli.py threads owner/repo 123\n"
             "  cli.py findings owner/repo 123 --input findings.json\n"
             "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py\n"
-            "\n"
-            "Advanced commands:\n"
-            "  cli.py cr-loop local json owner/repo 123 --input findings.json\n"
-            "  cli.py cr-loop mixed adapter owner/repo 123 python3 tools/review_adapter.py\n"
-            "  cli.py cr-loop mixed code-review owner/repo 123 --input -\n"
-            "  cli.py control-plane mixed json owner/repo 123 --input findings.json\n"
-            "  cli.py control-plane mixed code-review owner/repo 123 --input -\n"
-            "  cli.py prepare-code-review mixed owner/repo 123\n"
-            "  cli.py run-once owner/repo 123\n"
-            "  cli.py final-gate --no-auto-clean owner/repo 123\n"
-            "  cli.py session-engine gate owner/repo 123"
         ),
     )
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed through to the selected subcommand.")
@@ -113,6 +97,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command not in COMMAND_TO_SCRIPT:
+        print("Unknown command. Use one of: review, threads, findings, adapter.", file=sys.stderr)
+        return 2
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0

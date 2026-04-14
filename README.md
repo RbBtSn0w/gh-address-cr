@@ -10,9 +10,9 @@ It now treats a Pull Request as the session root and can ingest both:
 Both become session items that move through one evidence-first workflow with a final gate.
 For handled GitHub threads, replying and resolving are still two separate required operations.
 
-## Control Plane Interface
+## Public Interface
 
-`gh-address-cr` should now be understood as a PR-scoped control plane with:
+`gh-address-cr` should now be understood as a PR-scoped workflow orchestrator with:
 
 - a `mode`
 - an optional local-review `producer`
@@ -24,23 +24,19 @@ Recommended invocation model:
 /gh-address-cr threads <owner/repo> <pr_number>
 /gh-address-cr findings <owner/repo> <pr_number>
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
-/gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
 ```
 
 High-level entrypoints:
 
 - `review`
   - default entrypoint
-  - internally maps to `cr-loop mixed code-review`
+  - runs the full PR review workflow automatically
 - `threads`
   - GitHub review threads only
-  - internally maps to `cr-loop remote`
 - `findings`
   - existing findings JSON only
-  - internally maps to `cr-loop local json`
 - `adapter`
   - adapter command prints findings JSON
-  - internally maps to `cr-loop mixed adapter`
 
 Advanced producer categories:
 
@@ -77,8 +73,8 @@ Important:
 - `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
 - Do not put the upstream tool name itself into the producer slot.
 - Example:
-  - correct: `loop mixed code-review <owner/repo> <pr>`
-  - incorrect: `loop mixed code-review-aa <owner/repo> <pr>`
+  - correct: `review <owner/repo> <pr>`
+  - incorrect: `code-review-aa <owner/repo> <pr>`
 
 Meaning:
 
@@ -129,10 +125,10 @@ Use these defaults:
 
 Do not stretch the PR just to silence a thread. If the item is valid but not appropriate for the current scope, defer it with a concrete rationale.
 
-For advanced multi-iteration autonomous execution, use:
+For the automatic review workflow, use:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> [--fixer-cmd "<command>"]
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:
@@ -143,7 +139,7 @@ python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/re
 
 This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
 
-`code-review` intake is now adapter-backed. Once you have structured findings JSON, `control-plane` routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
+`code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
 
 ## Prompt Templates
 
@@ -154,7 +150,7 @@ When `gh-address-cr` is the main entrypoint, use:
 
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
-然后由 $gh-address-cr 接管 session、GitHub threads、loop 和 final-gate，直到通过。
+然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
 ```
 
 When the upstream review tool must run first and `gh-address-cr` can only come second, use:
@@ -172,13 +168,13 @@ If you omit the producer where it is required:
 - `ingest` will assume `json`
 - `remote` does not accept a producer at all
 
-## CR Loop
+## Automatic Review Workflow
 
-`cr-loop` is the autonomous runner built on top of the existing control plane.
+`review` is the autonomous runner built on top of the existing intake and gate layers.
 
-- It performs repeated intake, item selection, action execution, and gate evaluation.
+- It performs repeated intake, item selection, action execution, and gate evaluation internally.
 - By default it uses an internal fixer handoff for the current AI agent.
-- If you omit `--fixer-cmd`, the loop writes an internal fixer request artifact into the PR cache artifacts directory and exits `BLOCKED` for the agent to handle.
+- If a finding cannot be resolved automatically, the workflow writes an internal fixer request artifact into the PR cache artifacts directory and exits `BLOCKED` for the agent to handle.
 - `--fixer-cmd` remains available as an advanced integration path.
 - External fixer commands must read a JSON payload from stdin and return JSON:
   - `resolution`: `fix`, `clarify`, or `defer`
@@ -186,8 +182,8 @@ If you omit the producer where it is required:
   - `reply_markdown` for GitHub thread items
   - optional `validation_commands`
 - `adapter` producer is re-run on each iteration.
-- `json` and `code-review` producers are treated as one-shot inputs for the current loop run.
-- The loop exits with one of:
+- `json` and `code-review` producers are treated as one-shot inputs for the current review run.
+- The workflow exits with one of:
   - `PASSED`
   - `NEEDS_HUMAN`
   - `BLOCKED`
@@ -195,7 +191,7 @@ If you omit the producer where it is required:
 Advanced external-fixer example:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py cr-loop mixed adapter owner/repo 123 --fixer-cmd "python3 tools/fixer.py" python3 tools/review_adapter.py
+python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py
 ```
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
@@ -319,7 +315,7 @@ If the producer is a local `code-review` run, use the built-in adapter backend:
 
 ```bash
 python3 gh-address-cr/scripts/cli.py prepare-code-review mixed owner/repo 123
-cat findings.json | python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
+cat findings.json | python3 gh-address-cr/scripts/cli.py review owner/repo 123 --input -
 ```
 
 Input rule:
@@ -424,8 +420,8 @@ python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
 python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
 python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
-python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
-python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input -
+python3 gh-address-cr/scripts/cli.py review owner/repo 123 --input -
+python3 gh-address-cr/scripts/cli.py findings owner/repo 123 --input -
 python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 
