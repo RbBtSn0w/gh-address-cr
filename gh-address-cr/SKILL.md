@@ -154,6 +154,54 @@ Do not use this skill as the review engine itself.
 - **Accept**: real bug or low-cost valid improvement; fix and provide evidence.
 - **Clarify**: reviewer misunderstood the code; explain without changing code.
 - **Defer**: non-blocking or high-cost preference; explain the tradeoff.
+- **Reject**: suggestion is technically incorrect, conflicts with the current contract, or would break an intentional compatibility guarantee.
+
+## Fix Selection Rules
+
+Before changing code, classify each item in this order:
+
+1. **Validity**
+   - `confirmed`: reproducible in current HEAD or directly supported by code/tests
+   - `unclear`: not yet verified; do not implement blindly
+   - `rejected`: technically incorrect or based on missing context
+2. **Impact**
+   - Does it affect correctness, session/gate consistency, runtime safety, compatibility, packaging, or CI?
+3. **Scope Fit**
+   - Is the fix local to the current PR, or does it expand into a new design decision or larger refactor?
+4. **Decision**
+   - `fix`, `clarify`, `defer`, or `reject`
+
+Use these defaults:
+
+- Default to `fix` for correctness bugs, state mismatches, concurrency hazards, compatibility regressions, install/runtime breakage, and P1/P2 issues that can be verified.
+- Default to `clarify` when behavior is intentional and the reviewer lacks context.
+- Default to `defer` when the issue is real but out of scope for the current PR or would force broader redesign.
+- Default to `reject` when the suggestion is technically unsound or would violate an explicit workflow contract.
+
+Do not change code until the item has been validated and classified.
+
+## Scope Guardrails
+
+Do not "fix" items just to make the thread disappear.
+
+- Do not expand the PR with unrelated refactors.
+- Do not change public behavior for style-only comments.
+- Do not weaken compatibility defaults unless the review identifies a real regression.
+- Do not let a reviewer preference override an existing, tested contract without explicit product intent.
+
+If a review item is real but not appropriate for the current PR, reply with `defer` and a concrete rationale instead of stretching scope.
+
+## Needs-Human Escalation
+
+Prefer `NEEDS_HUMAN` over speculative fixes when:
+
+- the claim cannot be verified from the codebase or tests
+- two valid concerns conflict and require a product decision
+- the fix would create a new interface or contract
+- the same item keeps reopening after multiple technically sound attempts
+- the suggestion conflicts with an intentional compatibility or workflow rule and the tradeoff is not obvious
+
+`gh-address-cr` should stop loop iteration and escalate rather than forcing an implementation under uncertainty.
 
 ## Required Evidence
 
@@ -180,6 +228,13 @@ Final output must include:
 
 - Default must-fix: correctness bugs, data loss risks, platform/runtime breakage, packaging/install breakage, P1/P2 regressions.
 - Can defer with rationale: style-only, naming preference, non-blocking wording improvements.
+- For this repo, fix priority is:
+  - session / gate / loop semantic mismatches
+  - GitHub reply / resolve / pending-review visibility issues
+  - CLI and shell-wrapper compatibility regressions
+  - workspace/cache side effects
+  - test and CI breakage caused by real implementation changes
+  - documentation/runtime mismatches that mislead actual usage
 
 ## Why CR Appears Later (Use This Exact Logic)
 

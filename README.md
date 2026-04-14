@@ -56,6 +56,31 @@ The preferred automation entrypoint is now:
 python3 gh-address-cr/scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...
 ```
 
+## Choosing Fixes
+
+`gh-address-cr` is not "fix every comment immediately". The intended workflow is:
+
+1. verify the claim in current HEAD
+2. classify it as `fix`, `clarify`, `defer`, or `reject`
+3. only modify code after the item is confirmed and in scope
+
+Use these defaults:
+
+- `fix`
+  - correctness bugs
+  - session/gate/loop mismatches
+  - concurrency or state hazards
+  - CLI or wrapper compatibility regressions
+  - packaging/runtime/CI breakage
+- `clarify`
+  - reviewer misunderstood current behavior
+- `defer`
+  - issue is real but would expand the PR into a larger redesign
+- `reject`
+  - suggestion is technically incorrect or would violate an intentional contract
+
+Do not stretch the PR just to silence a thread. If the item is valid but not appropriate for the current scope, defer it with a concrete rationale.
+
 For multi-iteration autonomous execution, use:
 
 ```bash
