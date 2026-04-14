@@ -149,6 +149,8 @@ def ensure_item_runtime_fields(item: dict):
     item.setdefault("last_auto_action", None)
     item.setdefault("last_auto_failure", None)
     item.setdefault("needs_human", False)
+    item.setdefault("reply_posted", False)
+    item.setdefault("reply_url", None)
 
 
 def load_session(repo: str, pr_number: str) -> dict:
@@ -288,6 +290,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "last_auto_action": existing.get("last_auto_action") if existing else None,
         "last_auto_failure": existing.get("last_auto_failure") if existing else None,
         "needs_human": False if reopened else (existing.get("needs_human", False) if existing else False),
+        "reply_posted": False if reopened else (existing.get("reply_posted", False) if existing else False),
+        "reply_url": None if reopened else (existing.get("reply_url") if existing else None),
         "created_at": existing.get("created_at") if existing else now,
         "updated_at": now,
     }

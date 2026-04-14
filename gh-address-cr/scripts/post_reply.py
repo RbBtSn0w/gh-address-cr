@@ -105,8 +105,7 @@ def main() -> int:
         payload = json.loads(result.stdout)
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
         pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
-        new_pending_reviews = sorted(pending_after - pending_before)
-        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, new_pending_reviews)
+        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, sorted(pending_after))
         audit_event(
             "post_reply",
             "ok",

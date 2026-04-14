@@ -272,6 +272,21 @@ def run_fixer(fixer_cmd: str, payload: dict) -> tuple[dict | None, str]:
     return action, ""
 
 
+def _extract_reply_url(stdout: str) -> str | None:
+    if not stdout:
+        return None
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return (
+        payload.get("data", {})
+        .get("addPullRequestReviewThreadReply", {})
+        .get("comment", {})
+        .get("url")
+    )
+
+
 def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iteration: int, payload: dict) -> Path:
     safe_item_id = payload["item"]["item_id"].replace("/", "_").replace(":", "_")
     request_path = loop_artifact_file(repo, pr_number, f"loop-request-{run_id}-iter{iteration}-{safe_item_id}.json")
@@ -429,14 +444,23 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
             return "needs_human", error
         thread_id = item["origin_ref"]
         reply_path = reply_file(repo, pr_number, f"reply-{run_id}-iter{iteration}-{thread_id}.md")
-        reply_path.write_text(reply_markdown, encoding="utf-8")
+        reply_already_posted = bool(item.get("reply_posted"))
+        if not reply_already_posted:
+            reply_path.write_text(reply_markdown, encoding="utf-8")
         try:
-            result = run_cmd([sys.executable, str(POST_REPLY), "--repo", repo, "--pr", pr_number, "--audit-id", run_id, thread_id, str(reply_path)])
-            emit(result)
-            if result.returncode != 0:
-                record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=result.stderr or "post_reply failed")
-                mark_needs_human(repo, pr_number, item["item_id"], result.stderr or "post_reply failed", run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
-                return "needs_human", result.stderr or "post_reply failed"
+            if not reply_already_posted:
+                result = run_cmd([sys.executable, str(POST_REPLY), "--repo", repo, "--pr", pr_number, "--audit-id", run_id, thread_id, str(reply_path)])
+                emit(result)
+                if result.returncode != 0:
+                    record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=result.stderr or "post_reply failed")
+                    mark_needs_human(repo, pr_number, item["item_id"], result.stderr or "post_reply failed", run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+                    return "needs_human", result.stderr or "post_reply failed"
+                session = engine.load_session(repo, pr_number)
+                current = engine.ensure_item(session, item["item_id"])
+                current["reply_posted"] = True
+                current["reply_url"] = _extract_reply_url(result.stdout)
+                current["last_auto_action"] = f"reply:{resolution}"
+                engine.save_session(session)
             result = run_cmd([sys.executable, str(RESOLVE_THREAD), "--repo", repo, "--pr", pr_number, "--audit-id", run_id, thread_id])
             emit(result)
             if result.returncode != 0:

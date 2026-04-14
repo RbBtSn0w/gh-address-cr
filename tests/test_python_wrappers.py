@@ -1276,7 +1276,13 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], [])
+        self.assertEqual(state["submitted"], ["777"])
+
+    def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--machine is only supported for review, threads, findings, and adapter.", result.stderr)
+        self.assertFalse(self.workspace_dir().exists())
 
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):
         gh = self.bin_dir / "gh"

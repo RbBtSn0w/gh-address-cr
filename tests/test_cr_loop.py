@@ -153,6 +153,117 @@ print(json.dumps({
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
 
+    def test_cr_loop_does_not_repost_reply_after_resolve_failure(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "gh_state_reply_retry.json"
+        state_file.write_text(json.dumps({"reply_calls": 0, "resolve_attempts": 0, "resolved": False}), encoding="utf-8")
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file)!r})
+state = json.loads(state_file.read_text(encoding="utf-8"))
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'tester'}}))
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith(f'repos/{self.repo}/pulls/{self.pr}/reviews'):
+    if 'page=2' in args[1]:
+        print('[]')
+    else:
+        print('[]')
+elif args[:2] == ['api', 'graphql']:
+    query = next(arg.split('=', 1)[1] for arg in args if arg.startswith('query='))
+    if 'addPullRequestReviewThreadReply' in query:
+        state['reply_calls'] += 1
+        state_file.write_text(json.dumps(state), encoding='utf-8')
+        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
+    elif 'resolveReviewThread' in query:
+        state['resolve_attempts'] += 1
+        if state['resolve_attempts'] > 1:
+            state['resolved'] = True
+        state_file.write_text(json.dumps(state), encoding='utf-8')
+        if not state['resolved']:
+            print(json.dumps({{'errors': [{{'message': 'temporary resolve failure'}}]}}))
+            raise SystemExit(1)
+        print(json.dumps({{'data': {{'resolveReviewThread': {{'thread': {{'id': 'THREAD_REPLY_RETRY', 'isResolved': True}}}}}}}}))
+    else:
+        print(json.dumps({{
+            'data': {{
+                'repository': {{
+                    'pullRequest': {{
+                        'reviewThreads': {{
+                            'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                            'nodes': [{{
+                                'id': 'THREAD_REPLY_RETRY',
+                                'isResolved': state['resolved'],
+                                'isOutdated': False,
+                                'path': 'src/reply_retry.py',
+                                'line': 5,
+                                'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/reply-retry', 'body': 'needs reply'}}]}},
+                                'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/reply-retry', 'body': 'needs reply'}}]}},
+                            }}]
+                        }}
+                    }}
+                }}
+            }}
+        }}))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        fixer = Path(self.temp_dir.name) / "fixer.py"
+        fixer.write_text(
+            """#!/usr/bin/env python3
+import json, sys
+payload = json.loads(sys.stdin.read())
+item = payload["item"]
+print(json.dumps({
+    "resolution": "clarify",
+    "note": f"Clarified {item['item_id']}.",
+    "reply_markdown": "Reply once, then retry resolve only.",
+    "validation_commands": []
+}))
+""",
+            encoding="utf-8",
+        )
+        fixer.chmod(0o755)
+
+        first = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "remote",
+                "--fixer-cmd",
+                f"{sys.executable} {fixer}",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(first.returncode, 0, first.stderr)
+
+        second = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "remote",
+                "--fixer-cmd",
+                f"{sys.executable} {fixer}",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertEqual(state["reply_calls"], 1)
+        self.assertEqual(state["resolve_attempts"], 2)
+        self.assertIn("cr-loop PASSED", second.stdout)
+
     def test_cr_loop_needs_human_after_repeated_validation_failure(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(

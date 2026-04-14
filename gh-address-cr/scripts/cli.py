@@ -195,16 +195,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0
+    if args.machine and args.command not in HIGH_LEVEL_COMMANDS:
+        print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
+        return 2
+    if args.machine and len(args.args) < 2:
+        print("High-level commands require <owner/repo> <pr_number>.", file=sys.stderr)
+        return 2
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
     rewritten_args = rewrite_alias_args(args.command, args.args)
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)
     if args.machine:
-        if args.command not in HIGH_LEVEL_COMMANDS:
-            print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
-            return 2
-        if len(args.args) < 2:
-            print("High-level commands require <owner/repo> <pr_number>.", file=sys.stderr)
-            return 2
         summary = build_machine_summary(args.command, args.args[0], args.args[1], result)
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     else:
