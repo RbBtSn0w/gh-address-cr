@@ -6,16 +6,13 @@ import sys
 from pathlib import Path
 
 import uuid
-from python_common import findings_file
+from python_common import findings_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
 INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
 FINAL_GATE = SCRIPT_DIR / "final_gate.py"
 CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
-
-VALID_MODES = {"remote", "local", "mixed", "ingest"}
-VALID_PRODUCERS = {"code-review", "json", "adapter"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -48,22 +45,7 @@ def die(message: str) -> int:
     return 2
 
 
-def parse_dispatch(mode: str, parts: list[str]) -> tuple[str | None, str, str, list[str]]:
-    if mode == "remote":
-        if len(parts) != 2:
-            raise SystemExit("remote expects: <owner/repo> <pr_number>")
-        return None, parts[0], parts[1], []
-
-    if mode == "ingest":
-        if len(parts) == 2:
-            return "json", parts[0], parts[1], []
-        if len(parts) >= 3:
-            return parts[0], parts[1], parts[2], parts[3:]
-        raise SystemExit("ingest expects: [producer] <owner/repo> <pr_number>")
-
-    if len(parts) < 3:
-        raise SystemExit(f"{mode} expects: <producer> <owner/repo> <pr_number> [adapter_cmd...]")
-    return parts[0], parts[1], parts[2], parts[3:]
+# parse_dispatch is now imported from python_common
 
 
 def run_command(cmd: list[str], *, stdin: str | None = None) -> subprocess.CompletedProcess[str]:

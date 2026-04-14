@@ -53,10 +53,10 @@ def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]\n\n"
+            "usage: cli.py review <owner/repo> <pr_number> --input <path>|- [--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
-            "Prefer --input - with stdin for findings produced in the current step.\n"
+            "Provide findings JSON via --input <path> or --input - with stdin.\n"
             "Use --machine for a structured JSON summary.\n"
         )
     if command == "threads":

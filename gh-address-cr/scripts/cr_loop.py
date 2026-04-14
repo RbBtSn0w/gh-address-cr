@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 import session_engine as engine
-from python_common import findings_file, loop_artifact_file, reply_file, validation_file
+from python_common import findings_file, loop_artifact_file, reply_file, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -21,8 +21,7 @@ POST_REPLY = SCRIPT_DIR / "post_reply.py"
 RESOLVE_THREAD = SCRIPT_DIR / "resolve_thread.py"
 CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 
-VALID_MODES = {"remote", "local", "mixed", "ingest"}
-VALID_PRODUCERS = {"code-review", "json", "adapter"}
+
 NEEDS_HUMAN_EXIT = 4
 BLOCKED_EXIT = 5
 
@@ -46,20 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return getattr(parser, "parse_intermixed_args", parser.parse_args)(argv)
 
 
-def parse_dispatch(mode: str, parts: list[str]) -> tuple[str | None, str, str, list[str]]:
-    if mode == "remote":
-        if len(parts) != 2:
-            raise SystemExit("remote expects: <owner/repo> <pr_number>")
-        return None, parts[0], parts[1], []
-    if mode == "ingest":
-        if len(parts) == 2:
-            return "json", parts[0], parts[1], []
-        if len(parts) >= 3:
-            return parts[0], parts[1], parts[2], parts[3:]
-        raise SystemExit("ingest expects: [producer] <owner/repo> <pr_number>")
-    if len(parts) < 3:
-        raise SystemExit(f"{mode} expects: <producer> <owner/repo> <pr_number> [adapter_cmd...]")
-    return parts[0], parts[1], parts[2], parts[3:]
+# parse_dispatch is now imported from python_common
 
 
 def run_cmd(cmd: list[str], *, stdin: str | None = None) -> subprocess.CompletedProcess[str]:

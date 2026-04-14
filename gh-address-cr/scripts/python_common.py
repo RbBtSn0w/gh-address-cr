@@ -169,3 +169,26 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
             break
         cursor = review_threads["pageInfo"]["endCursor"]
     return threads
+
+
+VALID_MODES = {"remote", "local", "mixed", "ingest"}
+VALID_PRODUCERS = {"code-review", "json", "adapter"}
+
+
+def parse_dispatch(mode: str, parts: list[str]) -> tuple[str | None, str, str, list[str]]:
+    """Shared dispatch parser used by both cr_loop.py and control_plane.py."""
+    if mode == "remote":
+        if len(parts) != 2:
+            raise SystemExit("remote expects: <owner/repo> <pr_number>")
+        return None, parts[0], parts[1], []
+
+    if mode == "ingest":
+        if len(parts) == 2:
+            return "json", parts[0], parts[1], []
+        if len(parts) >= 3:
+            return parts[0], parts[1], parts[2], parts[3:]
+        raise SystemExit("ingest expects: [producer] <owner/repo> <pr_number>")
+
+    if len(parts) < 3:
+        raise SystemExit(f"{mode} expects: <producer> <owner/repo> <pr_number> [adapter_cmd...]")
+    return parts[0], parts[1], parts[2], parts[3:]
