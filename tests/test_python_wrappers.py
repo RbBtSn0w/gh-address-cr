@@ -179,6 +179,45 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
 
+    def test_cli_threads_machine_emits_pass_summary(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "threads", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["item_id"], None)
+        self.assertEqual(summary["item_kind"], None)
+        self.assertEqual(summary["next_action"], "No action required.")
+        self.assertEqual(summary["counts"]["blocking_items_count"], 0)
+
     def test_cli_findings_alias_dispatches_local_json_loop(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
         payload_file.write_text(
@@ -208,6 +247,58 @@ else:
         )
         self.assertEqual(result.returncode, 5, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
+
+    def test_cli_adapter_machine_emits_pass_summary(self):
+        adapter = Path(self.temp_dir.name) / "adapter.py"
+        adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
+
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "--machine",
+                "adapter",
+                self.repo,
+                self.pr,
+                sys.executable,
+                str(adapter),
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["item_id"], None)
+        self.assertEqual(summary["item_kind"], None)
+        self.assertEqual(summary["next_action"], "No action required.")
 
     def test_cli_dispatches_run_once(self):
         gh = self.bin_dir / "gh"
