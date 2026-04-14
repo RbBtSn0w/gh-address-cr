@@ -85,6 +85,10 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
+        self.assertEqual(
+            set(summary),
+            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "repo", "status"},
+        )
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)
@@ -130,6 +134,10 @@ else:
         )
         self.assertEqual(result.returncode, 5, result.stderr)
         summary = json.loads(result.stdout)
+        self.assertEqual(
+            set(summary),
+            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "repo", "status"},
+        )
         self.assertEqual(summary["status"], "BLOCKED")
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)

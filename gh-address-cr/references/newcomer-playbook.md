@@ -76,6 +76,18 @@ Use `--sync` when you want missing local findings from the same source to be aut
 
 Use `--machine` when an AI agent needs a stable JSON summary instead of human-oriented text.
 
+Machine summary contract:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `next_action`
+- `exit_code`
+
 Do not create ad-hoc temporary files like `dummy.json` or `empty.json` in the project workspace just to drive the workflow.
 
 Accepted findings shapes:

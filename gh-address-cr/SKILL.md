@@ -31,6 +31,18 @@ Recommended high-level entrypoints:
 - `--machine`
   - structured JSON summary for agent consumers
 
+Machine summary contract:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `next_action`
+- `exit_code`
+
 Advanced dispatch model:
 
 - `mode`
