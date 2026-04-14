@@ -97,6 +97,17 @@ $gh-address-cr findings <PR_URL> --input findings.json --machine
 $gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
 ```
 
+Quick read:
+
+- `review`
+  - default for full PR review
+- `threads`
+  - GitHub threads only
+- `findings`
+  - existing JSON findings
+- `adapter`
+  - adapter command prints findings JSON
+
 Do not create ad-hoc temporary files like `dummy.json` or `empty.json` in the project workspace just to drive the workflow.
 
 Accepted findings shapes:
