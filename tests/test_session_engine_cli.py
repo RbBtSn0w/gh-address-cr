@@ -617,6 +617,88 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["status"], "OPEN")
         self.assertEqual(item["reopen_count"], 1)
 
+    def test_update_item_reopening_clears_stale_handled_and_needs_human_flags(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Reopen me",
+                    "body": "This item was previously handled.",
+                    "path": "src/reopen_flags.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
+        session = self.load_session()
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        item = session["items"][item_id]
+        item["status"] = "CLOSED"
+        item["blocking"] = False
+        item["handled"] = True
+        item["handled_at"] = "2026-04-14T00:00:00+00:00"
+        item["needs_human"] = True
+        item["updated_at"] = "2026-04-14T00:00:00+00:00"
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            item_id,
+            "OPEN",
+            "--note",
+            "Reopened after follow-up review.",
+            check=True,
+        )
+
+        session = self.load_session()
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertEqual(item["reopen_count"], 1)
+        self.assertFalse(item["handled"])
+        self.assertIsNone(item["handled_at"])
+        self.assertFalse(item["needs_human"])
+
+    def test_update_item_closing_clears_stale_needs_human_flag(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Close me",
+                    "body": "This item was escalated earlier.",
+                    "path": "src/close_flags.py",
+                    "line": 13,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
+        session = self.load_session()
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        session["items"][item_id]["needs_human"] = True
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            item_id,
+            "CLOSED",
+            "--note",
+            "Resolved after escalation.",
+            check=True,
+        )
+
+        session = self.load_session()
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertFalse(item["needs_human"])
+
     def test_reclaim_stale_claims_releases_expired_lease(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

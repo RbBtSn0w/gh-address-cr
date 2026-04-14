@@ -99,6 +99,53 @@ else:
         self.assertIn("pr-77", summary["artifact_path"])
         self.assertEqual(summary["next_action"], "No action required.")
 
+    def test_cli_review_machine_trailing_flag_emits_structured_summary(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "review",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+                "--machine",
+            ],
+            stdin="[]",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 0)
+
     def test_cli_review_alias_requires_findings_input(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)

@@ -537,12 +537,20 @@ def cmd_update_item(args):
     item["updated_at"] = utc_now()
     if args.status == "OPEN" and previous_status in {"DEFERRED", "CLARIFIED", "CLOSED", "STALE", "DROPPED"}:
         item["reopen_count"] = item.get("reopen_count", 0) + 1
+    if item.get("needs_human"):
+        item["needs_human"] = False
     if item["item_kind"] == "local_finding" and args.status in {"CLARIFIED", "DEFERRED", "VERIFIED", "CLOSED"}:
         item["handled"] = True
         item["handled_at"] = utc_now()
-    if args.handled:
+    elif args.status == "OPEN":
+        item["handled"] = False
+        item["handled_at"] = None
+    elif args.handled:
         item["handled"] = True
         item["handled_at"] = utc_now()
+    else:
+        item["handled"] = not item["blocking"]
+        item["handled_at"] = utc_now() if item["handled"] else None
     if args.decision:
         item["decision"] = args.decision
     if args.note:

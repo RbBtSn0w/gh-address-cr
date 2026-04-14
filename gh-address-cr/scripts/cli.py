@@ -39,6 +39,17 @@ COMMAND_TO_SCRIPT = {
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
 
 
+def normalize_machine_args(args: argparse.Namespace) -> bool:
+    if "--machine" not in args.args:
+        return True
+    if args.command not in HIGH_LEVEL_COMMANDS:
+        print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
+        return False
+    args.machine = True
+    args.args = [arg for arg in args.args if arg != "--machine"]
+    return True
+
+
 def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
     if command == "review":
         return ["mixed", "code-review", *passthrough_args]
@@ -199,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0
+    if not normalize_machine_args(args):
+        return 2
     if args.machine and args.command not in HIGH_LEVEL_COMMANDS:
         print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
         return 2

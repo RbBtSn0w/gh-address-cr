@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import session_engine as engine
@@ -65,11 +66,23 @@ def severity_rank(item: dict) -> tuple[int, str]:
     return mapping.get(severity, 9), severity
 
 
+def has_active_claim(item: dict) -> bool:
+    claimed_by = item.get("claimed_by")
+    lease_expires_at = item.get("lease_expires_at")
+    if not claimed_by or not lease_expires_at:
+        return False
+    try:
+        expires = datetime.fromisoformat(lease_expires_at)
+    except ValueError:
+        return bool(claimed_by)
+    return expires > datetime.now(timezone.utc)
+
+
 def select_next_item(session: dict) -> dict | None:
     candidates = [
         item
         for item in session["items"].values()
-        if item.get("blocking") and not item.get("needs_human")
+        if item.get("blocking") and not item.get("needs_human") and not has_active_claim(item)
     ]
     if not candidates:
         return None
@@ -451,6 +464,7 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
             emit(result)
             if result.returncode != 0:
                 record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=result.stderr or "resolve_thread failed")
+                release_item_for_retry(repo, pr_number, item["item_id"], result.stderr or "resolve_thread failed")
                 update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, current_item_id=item["item_id"], last_error=result.stderr or "resolve_thread failed")
                 return "blocked", result.stderr or "resolve_thread failed"
         finally:

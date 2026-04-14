@@ -1,5 +1,7 @@
+import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT
@@ -8,6 +10,48 @@ from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT
 class CRLoopCLITest(PythonScriptTestCase):
     def artifacts_dir(self) -> Path:
         return super().artifacts_dir()
+
+    def test_select_next_item_skips_active_claims(self):
+        sys.path.insert(0, str(CR_LOOP_PY.parent))
+        spec = importlib.util.spec_from_file_location("cr_loop_under_test", CR_LOOP_PY)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.pop(0)
+
+        future = (datetime.now(timezone.utc) + timedelta(minutes=15)).replace(microsecond=0).isoformat()
+        session = {
+            "items": {
+                "local-finding:claimed": {
+                    "item_id": "local-finding:claimed",
+                    "item_kind": "local_finding",
+                    "blocking": True,
+                    "needs_human": False,
+                    "claimed_by": "agent-a",
+                    "lease_expires_at": future,
+                    "severity": "P1",
+                    "path": "src/claimed.py",
+                    "line": 1,
+                },
+                "local-finding:open": {
+                    "item_id": "local-finding:open",
+                    "item_kind": "local_finding",
+                    "blocking": True,
+                    "needs_human": False,
+                    "claimed_by": None,
+                    "lease_expires_at": None,
+                    "severity": "P2",
+                    "path": "src/open.py",
+                    "line": 2,
+                },
+            }
+        }
+
+        selected = module.select_next_item(session)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["item_id"], "local-finding:open")
 
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
