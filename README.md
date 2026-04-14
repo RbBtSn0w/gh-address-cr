@@ -151,6 +151,14 @@ python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/re
 
 This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
 
+If the upstream review output is Markdown review blocks, convert it first with:
+
+```bash
+python3 gh-address-cr/scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -
+```
+
+The converter writes the standardized findings JSON to the cache-backed PR workspace by default and also prints the JSON to stdout.
+
 `code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
 
 ## Prompt Templates

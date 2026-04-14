@@ -154,6 +154,7 @@ The default review entrypoint runs repeated intake, item selection, action execu
 - `code-review` is a producer, not the session owner.
 - `code-review` here means "review-style findings producer", not one mandatory skill name.
 - `code-review` now uses the built-in `code-review-adapter` backend for structured intake.
+- If the upstream review output is Markdown review blocks, normalize it with `review-to-findings` before ingestion.
 - `gh-address-cr` only assumes the normalized finding contract:
   - `title`
   - `body`
@@ -309,4 +310,5 @@ Final output must include:
 - stable operator surface: `scripts/*.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
+- Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

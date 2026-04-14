@@ -12,6 +12,7 @@ from tests.helpers import (
     POST_REPLY_PY,
     PUBLISH_FINDING_PY,
     PREPARE_CODE_REVIEW_PY,
+    REVIEW_TO_FINDINGS_PY,
     RESOLVE_THREAD_PY,
     RUN_LOCAL_REVIEW_PY,
     RUN_ONCE_PY,
@@ -29,6 +30,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("threads", result.stdout)
         self.assertIn("findings", result.stdout)
         self.assertIn("adapter", result.stdout)
+        self.assertIn("review-to-findings", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("control-plane", result.stdout)
         self.assertNotIn("run-once", result.stdout)
@@ -760,11 +762,80 @@ else:
         self.assertEqual(payload["mode"], "mixed")
         self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
         self.assertIn("code-review-adapter", payload["adapter_backend"])
+        self.assertIn("review-to-findings", payload["review_to_findings_command"])
         self.assertIn("control-plane mixed code-review", payload["ingest_command"])
         self.assertIn("/octo__example/pr-77", payload["workspace_dir"])
         self.assertTrue(payload["findings_output_path"].endswith("/octo__example/pr-77/code-review-findings.json"))
         self.assertTrue(payload["reply_output_path"].endswith("/octo__example/pr-77/reply.md"))
         self.assertTrue(payload["loop_request_path"].endswith("/octo__example/pr-77/loop-request.json"))
+        self.assertTrue(payload["review_to_findings_command"].endswith("/octo__example/pr-77"))
+
+    def test_review_to_findings_python_converts_markdown_blocks_to_workspace_json(self):
+        markdown = """Intro text that should be ignored.
+
+```finding
+title: Missing null guard
+path: src/example.py
+line: 12
+severity: P2
+category: correctness
+confidence: high
+body:
+Potential null dereference.
+```
+
+```finding
+title: Another finding
+path: src/other.py
+line: 18
+body: Inline body text.
+```
+"""
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(REVIEW_TO_FINDINGS_PY),
+                "--input",
+                "-",
+                self.repo,
+                self.pr,
+            ],
+            stdin=markdown,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        findings = json.loads(result.stdout)
+        self.assertEqual(len(findings), 2)
+        self.assertEqual(findings[0]["title"], "Missing null guard")
+        self.assertEqual(findings[0]["path"], "src/example.py")
+        self.assertEqual(findings[0]["line"], 12)
+        self.assertEqual(findings[0]["body"], "Potential null dereference.")
+        self.assertEqual(findings[1]["title"], "Another finding")
+        self.assertEqual(findings[1]["body"], "Inline body text.")
+        workspace_file = self.workspace_dir() / "code-review-findings.json"
+        self.assertTrue(workspace_file.exists())
+        persisted = json.loads(workspace_file.read_text(encoding="utf-8"))
+        self.assertEqual(persisted, findings)
+
+    def test_review_to_findings_python_rejects_missing_required_fields(self):
+        markdown = """```finding
+path: src/example.py
+line: 12
+body: Missing title should fail.
+```
+"""
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(REVIEW_TO_FINDINGS_PY),
+                "--input",
+                "-",
+                self.repo,
+                self.pr,
+            ],
+            stdin=markdown,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must include a title", result.stderr)
 
     def test_code_review_adapter_normalizes_findings(self):
         payload = json.dumps(
@@ -797,6 +868,23 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["mode"], "local")
+
+    def test_cli_dispatches_review_to_findings(self):
+        markdown = """```finding
+title: CLI finding
+path: src/cli.py
+line: 5
+body: CLI bridge output.
+```
+"""
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "review-to-findings", "--input", "-", self.repo, self.pr],
+            stdin=markdown,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        findings = json.loads(result.stdout)
+        self.assertEqual(findings[0]["title"], "CLI finding")
+        self.assertTrue((self.workspace_dir() / "code-review-findings.json").exists())
 
     def test_ingest_findings_python_accepts_stdin_array(self):
         payload = json.dumps(

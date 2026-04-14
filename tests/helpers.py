@@ -26,6 +26,7 @@ CONTROL_PLANE_PY = SCRIPTS_DIR / "control_plane.py"
 CR_LOOP_PY = SCRIPTS_DIR / "cr_loop.py"
 PREPARE_CODE_REVIEW_PY = SCRIPTS_DIR / "prepare_code_review.py"
 CODE_REVIEW_ADAPTER_PY = SCRIPTS_DIR / "code_review_adapter.py"
+REVIEW_TO_FINDINGS_PY = SCRIPTS_DIR / "review_to_findings.py"
 PYTHON_COMMON_PY = SCRIPTS_DIR / "python_common.py"
 
 

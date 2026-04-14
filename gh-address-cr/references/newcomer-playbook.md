@@ -76,6 +76,14 @@ Use `--sync` when you want missing local findings from the same source to be aut
 
 Use `--machine` when an AI agent needs a stable JSON summary instead of human-oriented text.
 
+If the upstream review output is Markdown review blocks, convert it first with:
+
+```text
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
+```
+
+The converter writes the normalized findings JSON into the cache-backed PR workspace by default, so you do not need to create ad-hoc files in the project workspace.
+
 Machine summary contract:
 
 - `status`

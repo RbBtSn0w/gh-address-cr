@@ -18,6 +18,7 @@ COMMAND_TO_SCRIPT = {
     "cr-loop": "cr_loop.py",
     "control-plane": "control_plane.py",
     "code-review-adapter": "code_review_adapter.py",
+    "review-to-findings": "review_to_findings.py",
     "prepare-code-review": "prepare_code_review.py",
     "run-once": "run_once.py",
     "final-gate": "final_gate.py",
@@ -174,13 +175,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{review,threads,findings,adapter}",
+        metavar="{review,threads,findings,adapter,review-to-findings}",
         help=(
             "High-level commands:\n"
             "  cli.py review owner/repo 123 --input -\n"
             "  cli.py threads owner/repo 123\n"
             "  cli.py findings owner/repo 123 --input findings.json\n"
             "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py\n"
+            "Utility commands:\n"
+            "  cli.py review-to-findings owner/repo 123 --input review.md\n"
         ),
     )
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed through to the selected subcommand.")
