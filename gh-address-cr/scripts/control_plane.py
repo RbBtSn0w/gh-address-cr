@@ -28,6 +28,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--audit-id", default="")
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default="")
+    parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument(
         "--input",
         default=None,
@@ -136,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
                     cmd.extend(["--source", source])
+                if args.sync:
+                    cmd.append("--sync")
                 cmd.extend([repo, pr_number, *extra])
                 result = run_or_return(cmd)
                 if result is not None:
@@ -151,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
                     cmd.extend(["--source", source])
+                if args.sync:
+                    cmd.append("--sync")
                 cmd.extend(
                     [
                         repo,
@@ -170,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
                     cmd.extend(["--source", source])
+                if args.sync:
+                    cmd.append("--sync")
                 if args.input is not None:
                     cmd.extend(["--input", args.input])
                 cmd.extend([repo, pr_number])

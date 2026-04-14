@@ -37,6 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--audit-id", default="")
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default="")
+    parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument("--input", default=None, help="Findings JSON file. Use '-' to read from stdin.")
     parser.add_argument("--max-iterations", type=int, default=10)
     parser.add_argument("--loop-threshold", type=int, default=engine.LOOP_WARNING_THRESHOLD)
@@ -218,6 +219,8 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
                 cmd.extend(["--scan-id", args.scan_id])
             if args.source or producer:
                 cmd.extend(["--source", args.source or f"local-agent:{producer}"])
+            if args.sync:
+                cmd.append("--sync")
             cmd.extend([repo, pr_number, *extra])
             return run_cmd(cmd)
         if producer == "json":
@@ -228,6 +231,8 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
                 cmd.extend(["--scan-id", args.scan_id])
             if args.source or producer:
                 cmd.extend(["--source", args.source or f"local-agent:{producer}"])
+            if args.sync:
+                cmd.append("--sync")
             if args.input is not None:
                 cmd.extend(["--input", args.input])
             cmd.extend([repo, pr_number])
@@ -246,6 +251,8 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
                 cmd.extend(["--source", args.source or "local-agent:code-review"])
+                if args.sync:
+                    cmd.append("--sync")
                 cmd.extend([repo, pr_number, sys.executable, str(CODE_REVIEW_ADAPTER), "--input", input_arg or "-"])
                 return run_cmd(cmd)
             finally:
@@ -553,6 +560,12 @@ def main(argv: list[str] | None = None) -> int:
             if status == "retry":
                 continue
             if status == "internal_required":
+                print("cr-loop PAUSED: Interaction Required")
+                print("------------------------------------")
+                print(f"Issue: {next_item['item_id']}")
+                print(f"Task Description: {next_item.get('title') or next_item.get('body') or '-'}")
+                print(f"Artifact to Address: {error}")
+                print("Next Step: Address the finding and run the command again.")
                 print(f"cr-loop INTERNAL_FIXER_REQUIRED item={next_item['item_id']} artifact={error}")
                 return BLOCKED_EXIT
             if status == "needs_human" or current.get("needs_human"):

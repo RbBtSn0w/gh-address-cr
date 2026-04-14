@@ -224,6 +224,62 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(len(local_items), 1)
         self.assertEqual(local_items[0]["repeat_count"], 1)
 
+    def test_ingest_local_sync_closes_missing_same_source_items(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        initial = json.dumps(
+            [
+                {
+                    "title": "Keep me",
+                    "body": "Still present.",
+                    "path": "src/keep.py",
+                    "line": 3,
+                    "severity": "P2",
+                    "category": "correctness",
+                },
+                {
+                    "title": "Close me",
+                    "body": "Will disappear from the next snapshot.",
+                    "path": "src/close.py",
+                    "line": 7,
+                    "severity": "P2",
+                    "category": "correctness",
+                },
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=initial, check=True)
+
+        refreshed = json.dumps(
+            [
+                {
+                    "title": "Keep me",
+                    "body": "Still present.",
+                    "path": "src/keep.py",
+                    "line": 3,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        result = self.run_engine(
+            "ingest-local",
+            self.repo,
+            self.pr,
+            "--source",
+            "local-agent:test",
+            "--sync",
+            stdin=refreshed,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Existing active local item(s): 1", result.stdout)
+        self.assertIn("Synced 1 missing local item(s) to CLOSED.", result.stdout)
+
+        session = self.load_session()
+        keep_item = next(item for item in session["items"].values() if item["path"] == "src/keep.py")
+        close_item = next(item for item in session["items"].values() if item["path"] == "src/close.py")
+        self.assertEqual(keep_item["status"], "OPEN")
+        self.assertEqual(close_item["status"], "CLOSED")
+        self.assertTrue(close_item["handled"])
+
     def test_claim_and_update_status(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

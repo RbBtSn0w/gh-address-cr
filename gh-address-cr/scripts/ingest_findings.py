@@ -83,6 +83,7 @@ def main() -> int:
     )
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default="local-agent:imported")
+    parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument(
         "--input",
         default="-",
@@ -115,6 +116,8 @@ def main() -> int:
     ]
     if args.scan_id:
         ingest_cmd.extend(["--scan-id", args.scan_id])
+    if args.sync:
+        ingest_cmd.append("--sync")
 
     ingest_result = subprocess.run(
         ingest_cmd,

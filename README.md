@@ -323,6 +323,7 @@ Input rule:
 - if you already have a real findings JSON file from another tool, use `--input <path>`
 - if findings are being produced in the current step, prefer `--input -` and pipe them over `stdin`
 - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
+- use `--sync` when you want missing local findings from the same source to auto-close on refresh
 
 `prepare-code-review` now also returns:
 

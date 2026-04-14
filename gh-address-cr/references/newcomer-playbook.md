@@ -72,6 +72,8 @@ Use `--input <path>` only when a real JSON file already exists.
 
 Use `--input -` with `stdin` when findings are being produced in the current step.
 
+Use `--sync` when you want missing local findings from the same source to be auto-closed on refresh.
+
 Do not create ad-hoc temporary files like `dummy.json` or `empty.json` in the project workspace just to drive the workflow.
 
 Accepted findings shapes:
@@ -97,6 +99,7 @@ Use this when `gh-address-cr` is the main entrypoint:
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
 然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
+如果你要刷新本地 findings 并自动关闭消失的旧项，再加 `--sync`。
 ```
 
 ## Recommended Prompt: Review Command First

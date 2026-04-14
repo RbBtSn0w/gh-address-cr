@@ -318,6 +318,7 @@ else:
 
         result = self.run_cmd([sys.executable, str(CR_LOOP_PY), "remote", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cr-loop PAUSED: Interaction Required", result.stdout + result.stderr)
         self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
 
         updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"]["github-thread:THREAD_LOOP_THRESHOLD"]
@@ -386,6 +387,7 @@ print(json.dumps({
             ]
         )
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cr-loop PAUSED: Interaction Required", result.stdout + result.stderr)
         self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
 
         artifacts = sorted(self.artifacts_dir().glob("loop-request-*.json"))

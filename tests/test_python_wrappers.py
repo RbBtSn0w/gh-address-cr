@@ -1305,3 +1305,49 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(handled_file.read_text(encoding="utf-8").splitlines(), ["THREAD_EXISTING", "THREAD_NEW"])
+
+    def test_mark_handled_routes_local_finding_prefix_to_resolve_local_item(self):
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        self.run_cmd(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "ingest-local",
+                self.repo,
+                self.pr,
+                "--source",
+                "local-agent:test",
+            ],
+            stdin=json.dumps(
+                [
+                    {
+                        "title": "Local finding",
+                        "body": "Resolve this locally.",
+                        "path": "src/local.py",
+                        "line": 11,
+                    }
+                ]
+            ),
+            check=True,
+        )
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "mark-handled",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                local_id,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = session["items"][local_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertEqual(item["decision"], "accept")

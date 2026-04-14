@@ -149,6 +149,8 @@ The default review entrypoint runs repeated intake, item selection, action execu
   - use `--input <path>` only when a producer already emitted a real JSON file
   - otherwise prefer `--input -` and pipe findings through `stdin`
   - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
+- Refresh rule:
+  - use `--sync` when re-ingesting the same source and you want missing local findings to auto-close
 - Supported dispatch paths live in:
   - `references/mode-producer-matrix.md`
 

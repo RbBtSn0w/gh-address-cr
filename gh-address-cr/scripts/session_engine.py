@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from ingest_findings import normalize_finding
+
 from python_common import audit_log_file, audit_summary_file, session_file, state_dir
 
 
@@ -441,22 +443,57 @@ def cmd_sync_github(args):
 
 def cmd_ingest_local(args):
     session = load_session(args.repo, args.pr_number)
-    findings = read_records_from_stdin()
+    findings = [normalize_finding(record) for record in read_records_from_stdin()]
     session["current_scan_id"] = args.scan_id or utc_now()
+    incoming_ids = {f"local-finding:{fingerprint_finding(finding)}" for finding in findings}
     created = 0
     for finding in findings:
         _, was_created = add_local_finding(session, finding, args.source)
         created += 1 if was_created else 0
+    synced = 0
+    if args.sync:
+        now = utc_now()
+        for item in session["items"].values():
+            if item["item_kind"] != "local_finding":
+                continue
+            if item.get("source") != args.source:
+                continue
+            if item["item_id"] in incoming_ids:
+                continue
+            if item["status"] == "CLOSED":
+                continue
+            validate_transition(item["status"], "CLOSED")
+            item["status"] = "CLOSED"
+            item["blocking"] = False
+            item["decision"] = "sync"
+            item["handled"] = True
+            item["handled_at"] = now
+            item["updated_at"] = now
+            item["resolution_note"] = "Auto-resolved because the finding disappeared from synchronized input."
+            clear_claim(item)
+            item["history"].append(history_event("auto-resolved", "Auto-resolved from synchronized findings", actor="ingest-local"))
+            synced += 1
     save_session(session)
+    active_local_items = sum(1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking"))
     append_audit_event(
         args.repo,
         args.pr_number,
         "ingest-local",
         "ok",
         "Imported local review findings",
-        {"received_count": len(findings), "created_count": created, "source": args.source, "scan_id": session["current_scan_id"]},
+        {
+            "received_count": len(findings),
+            "created_count": created,
+            "synced_count": synced,
+            "active_local_items_count": active_local_items,
+            "source": args.source,
+            "scan_id": session["current_scan_id"],
+            "sync_enabled": bool(args.sync),
+        },
     )
-    print(f"Created {created} local item(s) from {len(findings)} finding(s).")
+    print(f"Created {created} local item(s) from {len(findings)} finding(s). Existing active local item(s): {active_local_items}.")
+    if args.sync:
+        print(f"Synced {synced} missing local item(s) to CLOSED.")
     return 0
 
 
@@ -792,6 +829,7 @@ def build_parser():
     ingest_local.add_argument("pr_number")
     ingest_local.add_argument("--source", required=True)
     ingest_local.add_argument("--scan-id")
+    ingest_local.add_argument("--sync", action="store_true")
     ingest_local.set_defaults(func=cmd_ingest_local)
 
     claim = sub.add_parser("claim")
