@@ -90,7 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     producer, repo, pr_number, extra = parse_dispatch(args.mode, args.parts)
 
     if producer is not None and producer not in VALID_PRODUCERS:
-        return die(f"Unsupported producer: {producer}")
+        return die(
+            f"Unsupported producer: {producer}\n"
+            "producer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name."
+        )
     if args.mode == "remote" and producer is not None:
         return die("remote mode does not accept a producer.")
     if args.mode == "ingest" and producer != "json":

@@ -474,7 +474,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     producer, repo, pr_number, extra = parse_dispatch(args.mode, args.parts)
     if producer is not None and producer not in VALID_PRODUCERS:
-        print(f"Unsupported producer: {producer}", file=sys.stderr)
+        print(
+            f"Unsupported producer: {producer}\n"
+            "producer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name.",
+            file=sys.stderr,
+        )
         return 2
     if args.mode == "remote" and producer is not None:
         print("remote mode does not accept a producer.", file=sys.stderr)

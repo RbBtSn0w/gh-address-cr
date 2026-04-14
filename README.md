@@ -20,14 +20,29 @@ For handled GitHub threads, replying and resolving are still two separate requir
 Recommended invocation model:
 
 ```text
-/gh-address-cr remote <owner/repo> <pr_number>
-/gh-address-cr local <producer> <owner/repo> <pr_number>
-/gh-address-cr mixed <producer> <owner/repo> <pr_number>
-/gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
+/gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr threads <owner/repo> <pr_number>
+/gh-address-cr findings <owner/repo> <pr_number>
+/gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 /gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
 ```
 
-Supported producers:
+High-level entrypoints:
+
+- `review`
+  - default entrypoint
+  - internally maps to `cr-loop mixed code-review`
+- `threads`
+  - GitHub review threads only
+  - internally maps to `cr-loop remote`
+- `findings`
+  - existing findings JSON only
+  - internally maps to `cr-loop local json`
+- `adapter`
+  - adapter command prints findings JSON
+  - internally maps to `cr-loop mixed adapter`
+
+Advanced producer categories:
 
 - `code-review`
 - `json`
@@ -86,7 +101,7 @@ The exact dispatch behavior for each supported `mode + producer` combination is 
 The preferred automation entrypoint is now:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]
 ```
 
 ## Choosing Fixes
@@ -114,7 +129,7 @@ Use these defaults:
 
 Do not stretch the PR just to silence a thread. If the item is valid but not appropriate for the current scope, defer it with a concrete rationale.
 
-For multi-iteration autonomous execution, use:
+For advanced multi-iteration autonomous execution, use:
 
 ```bash
 python3 gh-address-cr/scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> [--fixer-cmd "<command>"]
@@ -136,8 +151,6 @@ When `gh-address-cr` is the main entrypoint, use:
 
 ```text
 使用 $gh-address-cr 处理这个 PR：<PR_URL>
-mode=`loop mixed`
-producer=`code-review`
 
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
@@ -148,7 +161,7 @@ When the upstream review tool must run first and `gh-address-cr` can only come s
 
 ```text
 先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
-然后把这些 findings 交给 $gh-address-cr，按 `loop mixed` + `producer=code-review` 接管。
+然后把这些 findings 交给 $gh-address-cr，使用 `review` 入口接管。
 如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
 最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
 ```

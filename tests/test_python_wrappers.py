@@ -24,10 +24,80 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review", result.stdout)
+        self.assertIn("threads", result.stdout)
+        self.assertIn("findings", result.stdout)
+        self.assertIn("adapter", result.stdout)
         self.assertIn("cr-loop", result.stdout)
         self.assertIn("control-plane", result.stdout)
         self.assertIn("run-once", result.stdout)
         self.assertIn("session-engine", result.stdout)
+
+    def test_cli_review_alias_requires_findings_input(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires findings JSON via --input or stdin", result.stderr)
+
+    def test_cli_threads_alias_dispatches_remote_loop(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "threads", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cr-loop PASSED", result.stdout)
+
+    def test_cli_findings_alias_dispatches_local_json_loop(self):
+        payload_file = Path(self.temp_dir.name) / "findings.json"
+        payload_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Alias finding",
+                        "body": "Loop through the high-level findings alias.",
+                        "path": "src/alias.py",
+                        "line": 7,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "findings",
+                self.repo,
+                self.pr,
+                "--input",
+                str(payload_file),
+            ]
+        )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
 
     def test_cli_dispatches_run_once(self):
         gh = self.bin_dir / "gh"

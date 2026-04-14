@@ -1,7 +1,7 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
-argument-hint: "<mode> [producer] <owner/repo> <pr_number>"
+argument-hint: "<review|threads|findings|adapter|loop> ..."
 ---
 
 # gh-address-cr
@@ -11,29 +11,51 @@ Use this skill as the PR review control plane. It owns session state, intake rou
 ## Usage
 
 ```text
-/gh-address-cr remote <owner/repo> <pr_number>
-/gh-address-cr local <producer> <owner/repo> <pr_number>
-/gh-address-cr mixed <producer> <owner/repo> <pr_number>
-/gh-address-cr ingest [producer=json] <owner/repo> <pr_number>
+/gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr threads <owner/repo> <pr_number>
+/gh-address-cr findings <owner/repo> <pr_number>
+/gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 /gh-address-cr loop <mode> [producer] <owner/repo> <pr_number>
+/gh-address-cr control-plane <mode> [producer] <owner/repo> <pr_number>
 ```
 
-`mode`
-- `remote`: GitHub review threads only
-- `local`: local findings only
-- `mixed`: GitHub review threads plus local findings
-- `ingest`: import existing findings JSON
+Recommended high-level entrypoints:
 
-`producer`
-- `code-review`: any review-style producer that emits structured findings JSON first
-- `json`: findings already exist as JSON
-- `adapter`: an adapter command prints findings JSON
+- `review`
+  - default entrypoint
+  - internally maps to `cr-loop mixed code-review`
+- `threads`
+  - GitHub review threads only
+  - internally maps to `cr-loop remote`
+- `findings`
+  - existing findings JSON only
+  - internally maps to `cr-loop local json`
+- `adapter`
+  - adapter command prints findings JSON
+  - internally maps to `cr-loop mixed adapter`
+
+Advanced dispatch model:
+
+- `mode`
+  - `remote`: GitHub review threads only
+  - `local`: local findings only
+  - `mixed`: GitHub review threads plus local findings
+  - `ingest`: import existing findings JSON
+- `producer`
+  - `code-review`: any review-style producer that emits structured findings JSON first
+  - `json`: findings already exist as JSON
+  - `adapter`: an adapter command prints findings JSON
 
 ## Entry Contract
 
 Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
+  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
+  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
+  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
+  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
+- Use advanced commands only when the high-level entrypoints do not fit:
   - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
   - `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> ...`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
@@ -41,7 +63,14 @@ Treat `SKILL.md` as the source of truth for using this skill.
 
 ## Capability Status
 
-These paths are fully operational now:
+These high-level paths are fully operational now:
+
+- `review`
+- `threads`
+- `findings`
+- `adapter`
+
+These advanced paths are fully operational now:
 
 - `remote`
 - `local code-review`
@@ -148,7 +177,7 @@ Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatic
 When `gh-address-cr` is the main entrypoint, prefer:
 
 ```text
-$gh-address-cr loop mixed code-review <PR_URL>
+$gh-address-cr review <PR_URL>
 
 Use the upstream review producer to emit findings JSON first, then let $gh-address-cr ingest, process, and gate the PR session.
 ```
@@ -157,7 +186,7 @@ When an external review command must run first and `gh-address-cr` can only come
 
 ```text
 First run <review-command> on <PR_URL> and emit findings JSON, not Markdown only.
-Then hand the findings to $gh-address-cr using loop mixed code-review.
+Then hand the findings to $gh-address-cr using review.
 Use --input <path> only for an already-existing JSON file; otherwise prefer --input - with stdin.
 ```
 

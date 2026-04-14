@@ -39,7 +39,7 @@ Use this mapping:
 
 Do not put the upstream tool name itself in the producer slot.
 
-- correct: `$gh-address-cr loop mixed code-review <PR_URL>`
+- correct advanced form: `$gh-address-cr loop mixed code-review <PR_URL>`
 - incorrect: `$gh-address-cr loop mixed code-review-aa <PR_URL>`
 
 ## Pick The Right Mode
@@ -56,7 +56,7 @@ Do not put the upstream tool name itself in the producer slot.
 Default for most real work:
 
 ```text
-$gh-address-cr loop mixed code-review <PR_URL>
+$gh-address-cr review <PR_URL>
 ```
 
 If you omit the producer:
@@ -95,8 +95,6 @@ Use this when `gh-address-cr` is the main entrypoint:
 
 ```text
 使用 $gh-address-cr 处理这个 PR：<PR_URL>
-mode=`loop mixed`
-producer=`code-review`
 
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
@@ -109,7 +107,7 @@ Use this when the upstream review command must run first and `gh-address-cr` can
 
 ```text
 先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
-然后把这些 findings 交给 $gh-address-cr，按 `loop mixed` + `producer=code-review` 接管。
+然后把这些 findings 交给 $gh-address-cr，使用 `review` 入口接管。
 如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
 最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
 ```

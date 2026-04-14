@@ -7,6 +7,10 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 COMMAND_TO_SCRIPT = {
+    "review": "cr_loop.py",
+    "threads": "cr_loop.py",
+    "findings": "cr_loop.py",
+    "adapter": "cr_loop.py",
     "cr-loop": "cr_loop.py",
     "control-plane": "control_plane.py",
     "code-review-adapter": "code_review_adapter.py",
@@ -27,6 +31,20 @@ COMMAND_TO_SCRIPT = {
     "session-engine": "session_engine.py",
 }
 
+HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
+
+
+def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
+    if command == "review":
+        return ["mixed", "code-review", *passthrough_args]
+    if command == "threads":
+        return ["remote", *passthrough_args]
+    if command == "findings":
+        return ["local", "json", *passthrough_args]
+    if command == "adapter":
+        return ["mixed", "adapter", *passthrough_args]
+    return passthrough_args
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -38,7 +56,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=sorted(COMMAND_TO_SCRIPT),
         help=(
             "Subcommand to execute.\n"
-            "Examples:\n"
+            "Preferred high-level commands:\n"
+            "  cli.py review owner/repo 123 --input -\n"
+            "  cli.py threads owner/repo 123\n"
+            "  cli.py findings owner/repo 123 --input findings.json\n"
+            "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py\n"
+            "\n"
+            "Advanced commands:\n"
             "  cli.py cr-loop local json owner/repo 123 --input findings.json\n"
             "  cli.py cr-loop mixed adapter owner/repo 123 python3 tools/review_adapter.py\n"
             "  cli.py cr-loop mixed code-review owner/repo 123 --input -\n"
@@ -57,11 +81,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
-    result = subprocess.run([sys.executable, str(target), *args.args], text=True, capture_output=True)
+    rewritten_args = rewrite_alias_args(args.command, args.args)
+    result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)
     if result.stdout:
         sys.stdout.write(result.stdout)
     if result.stderr:
-        sys.stderr.write(result.stderr)
+        error_text = result.stderr
+        if args.command in HIGH_LEVEL_COMMANDS and "Unsupported producer:" in error_text:
+            error_text += "\nproducer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name.\n"
+        sys.stderr.write(error_text)
     return result.returncode
 
 
