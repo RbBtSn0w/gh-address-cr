@@ -17,11 +17,29 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
 
+## Agent Execution Ladder
+
+Read this skill in this order when you are an AI agent:
+
+1. Decide whether you already have findings JSON.
+2. If you already have a real JSON file, pass it with `--input <path>`.
+3. If findings are produced in the current step, pipe them through `stdin` with `--input -`.
+4. If the upstream tool only prints Markdown review blocks, convert them first with `review-to-findings`.
+5. Then invoke the `gh-address-cr` entrypoint that consumes those findings.
+
+Important:
+
+- `review` is the default end-to-end orchestrator, not a hidden review producer.
+- `threads` handles GitHub threads only.
+- `findings` handles existing findings JSON only.
+- `adapter` handles a command that prints findings JSON.
+- `--machine` is optional and only changes the output shape for agent consumers.
+
 Recommended high-level entrypoints:
 
 - `review`
   - default entrypoint
-  - runs the full PR review workflow automatically
+  - runs the full PR review workflow automatically once findings are supplied
 - `threads`
   - GitHub review threads only
 - `findings`

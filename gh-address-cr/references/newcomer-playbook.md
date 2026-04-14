@@ -2,6 +2,18 @@
 
 Use this playbook when you are new to `gh-address-cr` and need one repeatable way to run PR review work.
 
+## Agent-First Reading Order
+
+When an AI agent reads this playbook, follow this order:
+
+1. Determine whether findings JSON already exists.
+2. If it exists, use `--input <path>`.
+3. If findings are produced in the current step, use `--input -` and stdin.
+4. If the upstream tool only prints Markdown review blocks, convert them first with `review-to-findings`.
+5. Then hand the JSON to `gh-address-cr` through the appropriate entrypoint.
+
+`review` is the default orchestrator, but it still needs findings input from one of those paths.
+
 ## What Each Tool Owns
 
 - Review producer:

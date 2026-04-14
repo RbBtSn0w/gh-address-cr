@@ -17,6 +17,16 @@ For handled GitHub threads, replying and resolving are still two separate requir
 - a `mode`
 - an optional local-review `producer`
 
+Agent-first reading order:
+
+1. Check whether you already have findings JSON.
+2. Use `--input <path>` only for a real JSON file.
+3. Use `--input -` when findings are produced in the current step.
+4. If the upstream tool only prints Markdown review blocks, convert them with `review-to-findings` first.
+5. Then hand the JSON to `gh-address-cr` through the correct entrypoint.
+
+`review` is the default orchestrator, but it still needs findings input from one of the paths above.
+
 Recommended invocation model:
 
 ```text
@@ -45,7 +55,7 @@ High-level entrypoints:
 
 - `review`
   - default entrypoint
-  - runs the full PR review workflow automatically
+  - runs the full PR review workflow automatically once findings are supplied
 - `threads`
   - GitHub review threads only
 - `findings`
