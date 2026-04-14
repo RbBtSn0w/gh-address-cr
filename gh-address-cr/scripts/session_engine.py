@@ -190,7 +190,7 @@ def blocking_for_status(status: str) -> bool:
 
 
 def normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+    return (value or "").strip().lower()
 
 
 def fingerprint_finding(finding: dict) -> str:
@@ -239,10 +239,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         status = "CLOSED"
     elif bool(row.get("isOutdated")):
         status = "STALE"
-    elif existing_status in {"DROPPED", "STALE"}:
-        status = "DROPPED"
-        if existing_status == "STALE":
-            status = "STALE"
+    elif existing_status in {"DROPPED", "STALE", "DEFERRED"}:
+        status = existing_status
     else:
         status = "OPEN"
     reopened = bool(existing) and existing_status in GITHUB_TERMINAL_STATUSES and status == "OPEN"

@@ -39,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", default="")
     parser.add_argument("--input", default=None, help="Findings JSON file. Use '-' to read from stdin.")
     parser.add_argument("--max-iterations", type=int, default=10)
+    parser.add_argument("--loop-threshold", type=int, default=engine.LOOP_WARNING_THRESHOLD)
     parser.add_argument("--fixer-cmd", help="Optional external fixer command that returns a JSON action payload.")
     parser.add_argument("--validation-cmd", action="append", default=[], help="Extra validation command(s).")
     return getattr(parser, "parse_intermixed_args", parser.parse_args)(argv)
@@ -156,7 +157,7 @@ def mark_needs_human(repo: str, pr_number: str, item_id: str, reason: str, *, ru
     )
 
 
-def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int, max_iterations: int) -> tuple[bool, str]:
+def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int, max_iterations: int, loop_threshold: int) -> tuple[bool, str]:
     session = engine.load_session(repo, pr_number)
     for item in session["items"].values():
         if item.get("needs_human"):
@@ -174,7 +175,7 @@ def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int
         if (
             item.get("item_kind") == "local_finding"
             and item.get("blocking")
-            and max(item.get("repeat_count", 0), item.get("reopen_count", 0)) >= engine.LOOP_WARNING_THRESHOLD
+            and max(item.get("repeat_count", 0), item.get("reopen_count", 0)) >= loop_threshold
         ):
             mark_needs_human(
                 repo,
@@ -512,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop BLOCKED", file=sys.stderr)
             return BLOCKED_EXIT
 
-        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations, loop_threshold=args.loop_threshold)
         if needs_human:
             print(f"cr-loop NEEDS_HUMAN item={item_id}")
             return NEEDS_HUMAN_EXIT
@@ -564,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop PASSED")
             return 0
 
-        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations, loop_threshold=args.loop_threshold)
         if needs_human:
             print(f"cr-loop NEEDS_HUMAN item={item_id}")
             return NEEDS_HUMAN_EXIT
