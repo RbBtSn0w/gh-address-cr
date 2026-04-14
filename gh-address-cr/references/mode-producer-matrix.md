@@ -40,6 +40,17 @@
   5. process local findings through session status transitions
   6. `final_gate.sh`
 
+Typical invocation:
+
+```text
+<review-command> <PR_URL> --output findings.json
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+
+# If the upstream tool only emits Markdown review blocks:
+<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+```
+
 ### `local json`
 
 - input:
@@ -72,6 +83,17 @@
   6. process GitHub threads and local findings as one session queue
   7. `final_gate.sh`
 
+Typical invocation:
+
+```text
+<review-command> <PR_URL> --output findings.json
+$gh-address-cr review <PR_URL>
+
+# If the upstream tool only emits Markdown review blocks:
+<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
+$gh-address-cr review <PR_URL>
+```
+
 ### `mixed json`
 
 - input:
@@ -82,6 +104,12 @@
   3. `ingest_findings.sh`
   4. process GitHub threads and local findings as one session queue
   5. `final_gate.sh`
+
+Typical invocation:
+
+```text
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+```
 
 ### `mixed adapter`
 

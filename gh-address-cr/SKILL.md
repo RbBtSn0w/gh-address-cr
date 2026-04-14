@@ -46,9 +46,12 @@ Machine summary contract:
 Examples:
 
 ```text
+$gh-address-cr review <PR_URL>
 $gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL>
 $gh-address-cr threads <PR_URL> --machine
 $gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr findings <PR_URL> --input - --sync --machine
 $gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
 ```
 
@@ -63,6 +66,24 @@ Advanced dispatch model:
   - `code-review`: any review-style producer that emits structured findings JSON first
   - `json`: findings already exist as JSON
   - `adapter`: an adapter command prints findings JSON
+
+Examples:
+
+```text
+// A review skill runs first, then gh-address-cr ingests the JSON
+<review-command> <PR_URL> --output findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// The same pattern with stdin instead of a file
+<review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
+
+// Markdown-only review output becomes findings JSON first
+<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// The upstream producer is still category=code-review even if the tool name differs
+$gh-address-cr review <PR_URL>
+```
 
 ## Entry Contract
 

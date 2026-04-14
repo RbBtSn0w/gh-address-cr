@@ -99,9 +99,12 @@ Machine summary contract:
 Examples:
 
 ```text
+$gh-address-cr review <PR_URL>
 $gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL>
 $gh-address-cr threads <PR_URL> --machine
 $gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr findings <PR_URL> --input - --sync --machine
 $gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
 ```
 
@@ -115,6 +118,24 @@ Quick read:
   - existing JSON findings
 - `adapter`
   - adapter command prints findings JSON
+
+Practical examples:
+
+```text
+// A review skill runs first, then gh-address-cr ingests the JSON
+<review-command> <PR_URL> --output findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// Use stdin instead of a file when the producer runs in the same step
+<review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
+
+// Convert Markdown review blocks before ingesting them
+<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// If you only want GitHub threads, use the dedicated entrypoint
+$gh-address-cr threads <PR_URL>
+```
 
 Do not create ad-hoc temporary files like `dummy.json` or `empty.json` in the project workspace just to drive the workflow.
 

@@ -32,9 +32,12 @@ The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.
 Examples:
 
 ```text
+$gh-address-cr review <PR_URL>
 $gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL>
 $gh-address-cr threads <PR_URL> --machine
 $gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr findings <PR_URL> --input - --sync --machine
 $gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
 ```
 
@@ -49,6 +52,24 @@ High-level entrypoints:
   - existing findings JSON only
 - `adapter`
   - adapter command prints findings JSON
+
+Typical flows:
+
+```text
+// Run a review producer first, then ingest the JSON
+<review-command> <PR_URL> --output findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// Pipe findings directly from the producer
+<review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
+
+// Convert Markdown review blocks first when the producer is not JSON-native
+<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
+$gh-address-cr findings <PR_URL> --input findings.json --sync
+
+// Full PR workflow with the default review entrypoint
+$gh-address-cr review <PR_URL>
+```
 
 Advanced producer categories:
 
