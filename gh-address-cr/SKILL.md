@@ -1,6 +1,6 @@
 ---
 name: gh-address-cr
-description: Use when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
+description: This skill is used when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
 argument-hint: "<review|threads|findings|adapter> ..."
 ---
 

@@ -27,6 +27,7 @@ Recommended invocation model:
 ```
 
 Use `--machine` when the caller is an AI agent and needs a stable JSON summary instead of human-oriented text.
+The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.
 
 Examples:
 
@@ -36,18 +37,6 @@ $gh-address-cr threads <PR_URL> --machine
 $gh-address-cr findings <PR_URL> --input findings.json --machine
 $gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
 ```
-
-Machine summary contract:
-
-- `status`
-- `repo`
-- `pr_number`
-- `item_id`
-- `item_kind`
-- `counts`
-- `artifact_path`
-- `next_action`
-- `exit_code`
 
 High-level entrypoints:
 
