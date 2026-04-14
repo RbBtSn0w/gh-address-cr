@@ -219,6 +219,39 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertIn("Created 1 local item", first.stdout)
         self.assertIn("Created 0 local item", second.stdout)
 
+    def test_sync_local_finding_reopens_closed_item_when_it_reappears(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Recurring issue",
+                    "body": "This keeps showing up.",
+                    "path": "src/recurring.py",
+                    "line": 17,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+
+        first = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        session = self.load_session()
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine("update-item", self.repo, self.pr, item_id, "CLOSED", "--note", "Resolved after review.", check=True)
+
+        second = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("Synced 0 missing local item(s) to CLOSED.", second.stdout)
+
+        session = self.load_session()
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertTrue(item["blocking"])
+        self.assertEqual(item["reopen_count"], 1)
+        self.assertFalse(item["handled"])
+        self.assertIsNone(item["handled_at"])
+
         session = self.load_session()
         local_items = [item for item in session["items"].values() if item["item_kind"] == "local_finding"]
         self.assertEqual(len(local_items), 1)

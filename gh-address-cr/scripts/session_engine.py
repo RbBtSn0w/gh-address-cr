@@ -317,6 +317,17 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         existing["scan_id"] = session.get("current_scan_id")
         existing["updated_at"] = now
         existing["repeat_count"] = existing.get("repeat_count", 0) + 1
+        if existing.get("status") != "OPEN":
+            existing["status"] = "OPEN"
+            existing["blocking"] = True
+            existing["handled"] = False
+            existing["handled_at"] = None
+            existing["needs_human"] = False
+            existing["decision"] = None
+            existing["resolution_note"] = None
+            clear_claim(existing)
+            existing["reopen_count"] = existing.get("reopen_count", 0) + 1
+            existing["history"].append(history_event("reopened", "Finding reappeared after being closed"))
         existing["history"].append(history_event("seen-again", "Finding reappeared"))
         return item_id, False
 
