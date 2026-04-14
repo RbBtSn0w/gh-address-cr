@@ -190,7 +190,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.command not in COMMAND_TO_SCRIPT:
-        print("Unknown command. Use one of: review, threads, findings, adapter.", file=sys.stderr)
+        supported_commands = ", ".join(sorted(COMMAND_TO_SCRIPT))
+        print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
