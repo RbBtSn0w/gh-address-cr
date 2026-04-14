@@ -26,6 +26,8 @@ Recommended invocation model:
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
 
+Use `--machine` when the caller is an AI agent and needs a stable JSON summary instead of human-oriented text.
+
 High-level entrypoints:
 
 - `review`
@@ -97,7 +99,7 @@ The exact dispatch behavior for each supported `mode + producer` combination is 
 The preferred automation entrypoint is now:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]
 ```
 
 ## Choosing Fixes
@@ -128,7 +130,7 @@ Do not stretch the PR just to silence a thread. If the item is valid but not app
 For the automatic review workflow, use:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:

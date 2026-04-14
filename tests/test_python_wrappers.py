@@ -24,6 +24,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--machine", result.stdout)
         self.assertIn("review", result.stdout)
         self.assertIn("threads", result.stdout)
         self.assertIn("findings", result.stdout)
@@ -38,13 +39,106 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: cli.py review", result.stdout)
         self.assertIn("High-level PR review entrypoint.", result.stdout)
+        self.assertIn("--machine", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("{ingest,local,mixed,remote}", result.stdout)
+
+    def test_cli_review_machine_emits_structured_summary(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "--machine",
+                "review",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+            ],
+            stdin="[]",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["counts"]["blocking_items_count"], 0)
+        self.assertIn("pr-77", summary["artifact_path"])
+        self.assertEqual(summary["next_action"], "No action required.")
 
     def test_cli_review_alias_requires_findings_input(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON via --input or stdin", result.stderr)
+
+    def test_cli_findings_machine_reports_pause_summary(self):
+        payload_file = Path(self.temp_dir.name) / "findings.json"
+        payload_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Machine finding",
+                        "body": "Needs a local fix.",
+                        "path": "src/machine.py",
+                        "line": 12,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "--machine",
+                "findings",
+                self.repo,
+                self.pr,
+                "--input",
+                str(payload_file),
+            ]
+        )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 5)
+        self.assertGreaterEqual(summary["counts"]["blocking_items_count"], 1)
+        self.assertEqual(summary["item_kind"], "local_finding")
+        self.assertTrue(summary["item_id"].startswith("local-finding:"))
+        self.assertIn("loop-request-", summary["artifact_path"])
+        self.assertIn("Address the finding", summary["next_action"])
 
     def test_cli_threads_alias_dispatches_remote_loop(self):
         gh = self.bin_dir / "gh"

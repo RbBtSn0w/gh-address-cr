@@ -28,6 +28,8 @@ Recommended high-level entrypoints:
   - existing findings JSON only
 - `adapter`
   - adapter command prints findings JSON
+- `--machine`
+  - structured JSON summary for agent consumers
 
 Advanced dispatch model:
 
@@ -46,10 +48,10 @@ Advanced dispatch model:
 Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
-  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
-  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
+  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]`
+  - `python3 scripts/cli.py threads <owner/repo> <pr_number> [--machine]`
+  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync] [--machine]`
+  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--machine]`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
