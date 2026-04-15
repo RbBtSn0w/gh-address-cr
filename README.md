@@ -37,6 +37,7 @@ Fail-fast contract:
 - If `--input` is missing, the CLI fails immediately with a structured error instead of waiting on `stdin`.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
+- For `adapter`, wrapper `--human` and `--machine` belong before `adapter`. Arguments after `<adapter_cmd...>` are passed through to the adapter command unchanged.
 - The high-level CLI commands are the agent-safe public surface. Treat low-level scripts as implementation details.
 
 `review` is the default orchestrator, but it still needs findings input from one of the paths above.
@@ -50,8 +51,6 @@ Recommended invocation model:
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
-
-The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.
 
 Stable machine summary fields:
 
@@ -79,8 +78,18 @@ $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
+$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
 $gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
+
+For `adapter`, the last two examples mean different things:
+
+- `$gh-address-cr --human adapter ...`
+  - switches the wrapper output to human-oriented text
+- `$gh-address-cr adapter ... --human --machine`
+  - passes `--human --machine` to the adapter command itself
+  - it does not change the wrapper output mode
 
 High-level entrypoints:
 
@@ -119,6 +128,12 @@ $gh-address-cr review <PR_URL> --input findings.json
 
 // Switch to human-oriented text when a person is reading the output
 $gh-address-cr review <PR_URL> --input findings.json --human
+
+// Adapter wrapper output flag comes before `adapter`
+python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py
+
+// Flags after the adapter command belong to the adapter itself
+python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
 ```
 
 Minimal valid `review-to-findings` input:
@@ -208,26 +223,7 @@ The converter writes the standardized findings JSON to the cache-backed PR works
 
 `code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
 
-## Prompt Templates
-
-When `gh-address-cr` is the main entrypoint, use:
-
-```text
-使用 $gh-address-cr 处理这个 PR：<PR_URL>
-
-先让上游 review producer 输出 findings JSON，不要只给 Markdown。
-如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
-然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
-```
-
-When the upstream review tool must run first and `gh-address-cr` can only come second, use:
-
-```text
-先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
-然后把这些 findings 交给 $gh-address-cr，使用 `review` 入口接管。
-如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
-最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
-```
+Use the prompt patterns above as the canonical templates. Do not keep a second, shorter variant with weaker rules.
 
 If you omit the producer where it is required:
 

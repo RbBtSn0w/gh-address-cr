@@ -55,6 +55,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = README_MD.read_text(encoding="utf-8")
         self.assertIn("adapter-produced findings plus PR orchestration", text)
         self.assertNotIn("adapter command prints findings JSON", text)
+        self.assertIn("wrapper `--human` and `--machine` belong before `adapter`", text)
+        self.assertIn("passed through to the adapter command unchanged", text)
 
     def test_readme_documents_converter_input_contract(self):
         text = README_MD.read_text(encoding="utf-8")
@@ -63,6 +65,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_documents_machine_summary_fields(self):
         text = README_MD.read_text(encoding="utf-8")
+        self.assertNotIn("The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.", text)
         for field in (
             "status",
             "repo",
@@ -82,3 +85,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = README_MD.read_text(encoding="utf-8")
         self.assertLess(text.index("## Public Interface"), text.index("## Automatic Review Workflow"))
         self.assertLess(text.index("## Automatic Review Workflow"), text.index("Advanced producer categories:"))
+
+    def test_readme_keeps_one_canonical_prompt_template_section(self):
+        text = README_MD.read_text(encoding="utf-8")
+        self.assertEqual(text.count("When `gh-address-cr` is the main entrypoint:"), 1)
+        self.assertEqual(text.count("When the upstream review command must run first and `gh-address-cr` can only come second:"), 1)
+        self.assertNotIn("## Prompt Templates", text)
+
+    def test_readme_documents_executable_adapter_flag_examples(self):
+        text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
+        self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
+        self.assertIn("python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text)
+        self.assertIn("python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human", text)
