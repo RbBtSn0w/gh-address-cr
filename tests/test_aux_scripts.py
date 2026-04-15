@@ -84,7 +84,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("[dry-run] Would resolve thread: THREAD_1", result.stdout)
         self.assertIn("[dry-run] Would resolve thread: THREAD_2", result.stdout)
 
-    def test_batch_resolve_infers_repo_and_pr_from_gh_context(self):
+    def test_batch_resolve_requires_explicit_repo_and_pr(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -106,8 +106,8 @@ else:
         approved = Path(self.temp_dir.name) / "approved.txt"
         approved.write_text("APPROVED THREAD_1\n", encoding="utf-8")
         result = self.run_cmd([sys.executable, str(BATCH_RESOLVE_PY), "--dry-run", str(approved)])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry-run] Would resolve thread: THREAD_1", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--repo and --pr are required", result.stderr)
 
     def test_batch_resolve_rejects_invalid_lines(self):
         approved = Path(self.temp_dir.name) / "approved.txt"

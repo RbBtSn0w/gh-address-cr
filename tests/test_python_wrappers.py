@@ -1723,6 +1723,29 @@ else:
         handled_file = self.github_dir() / "handled_threads.txt"
         self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))
 
+    def test_resolve_thread_python_requires_explicit_repo_and_pr(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:3] == ['repo', 'view', '--json']:
+    print(json.dumps({'nameWithOwner': 'octo/example'}))
+elif args[:3] == ['pr', 'view', '--json']:
+    print(json.dumps({'number': 77}))
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(RESOLVE_THREAD_PY), "THREAD_NEEDS_CONTEXT"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--repo and --pr are required", result.stderr)
+
     def test_mark_handled_appends_without_clobbering_existing_entries(self):
         handled_file = self.github_dir() / "handled_threads.txt"
         handled_file.parent.mkdir(parents=True, exist_ok=True)
