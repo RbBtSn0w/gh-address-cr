@@ -95,6 +95,17 @@ def select_ready_batch(session: dict) -> list[dict]:
     )
 
 
+def _resolve_session(repo: str, pr_number: str, session: dict | None) -> tuple[dict, bool]:
+    if session is not None:
+        return session, False
+    return engine.load_session(repo, pr_number), True
+
+
+def _save_if_needed(session: dict, *, loaded_here: bool, persist: bool) -> None:
+    if loaded_here or persist:
+        engine.save_session(session)
+
+
 def update_loop_state(
     repo: str,
     pr_number: str,
@@ -105,8 +116,10 @@ def update_loop_state(
     max_iterations: int,
     current_item_id: str | None = None,
     last_error: str = "",
+    session: dict | None = None,
+    persist: bool = True,
 ):
-    session = engine.load_session(repo, pr_number)
+    session, loaded_here = _resolve_session(repo, pr_number, session)
     engine.ensure_loop_state(session)
     loop = session["loop_state"]
     loop["run_id"] = run_id
@@ -119,22 +132,42 @@ def update_loop_state(
         loop["last_started_at"] = engine.utc_now()
     if status in {"PASSED", "FAILED", "NEEDS_HUMAN", "BLOCKED"}:
         loop["last_completed_at"] = engine.utc_now()
-    engine.save_session(session)
+    _save_if_needed(session, loaded_here=loaded_here, persist=persist)
 
 
-def record_auto_attempt(repo: str, pr_number: str, item_id: str, *, action: str | None, failure: str | None):
-    session = engine.load_session(repo, pr_number)
+def record_auto_attempt(
+    repo: str,
+    pr_number: str,
+    item_id: str,
+    *,
+    action: str | None,
+    failure: str | None,
+    session: dict | None = None,
+    persist: bool = True,
+):
+    session, loaded_here = _resolve_session(repo, pr_number, session)
     item = engine.ensure_item(session, item_id)
     item["auto_attempt_count"] = item.get("auto_attempt_count", 0) + 1
     item["last_auto_action"] = action
     item["last_auto_failure"] = failure
     item["updated_at"] = engine.utc_now()
     item["history"].append(engine.history_event("auto-attempt", failure or action or "auto-attempt", actor="cr-loop"))
-    engine.save_session(session)
+    _save_if_needed(session, loaded_here=loaded_here, persist=persist)
 
 
-def mark_needs_human(repo: str, pr_number: str, item_id: str, reason: str, *, run_id: str, iteration: int, max_iterations: int):
-    session = engine.load_session(repo, pr_number)
+def mark_needs_human(
+    repo: str,
+    pr_number: str,
+    item_id: str,
+    reason: str,
+    *,
+    run_id: str,
+    iteration: int,
+    max_iterations: int,
+    session: dict | None = None,
+    persist: bool = True,
+):
+    session, loaded_here = _resolve_session(repo, pr_number, session)
     item = engine.ensure_item(session, item_id)
     item["needs_human"] = True
     item["last_auto_failure"] = reason
@@ -142,7 +175,6 @@ def mark_needs_human(repo: str, pr_number: str, item_id: str, reason: str, *, ru
     item["blocking"] = True
     item["updated_at"] = engine.utc_now()
     item["history"].append(engine.history_event("needs-human", reason, actor="cr-loop"))
-    engine.save_session(session)
     update_loop_state(
         repo,
         pr_number,
@@ -152,11 +184,24 @@ def mark_needs_human(repo: str, pr_number: str, item_id: str, reason: str, *, ru
         max_iterations=max_iterations,
         current_item_id=item_id,
         last_error=reason,
+        session=session,
+        persist=False,
     )
+    _save_if_needed(session, loaded_here=loaded_here, persist=persist)
 
 
-def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int, max_iterations: int, loop_threshold: int) -> tuple[bool, str]:
-    session = engine.load_session(repo, pr_number)
+def detect_needs_human(
+    repo: str,
+    pr_number: str,
+    *,
+    run_id: str,
+    iteration: int,
+    max_iterations: int,
+    loop_threshold: int,
+    session: dict | None = None,
+    persist: bool = True,
+) -> tuple[bool, str]:
+    session, loaded_here = _resolve_session(repo, pr_number, session)
     for item in session["items"].values():
         if item.get("needs_human"):
             update_loop_state(
@@ -168,7 +213,10 @@ def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int
                 max_iterations=max_iterations,
                 current_item_id=item["item_id"],
                 last_error=item.get("last_auto_failure") or "Item requires human review.",
+                session=session,
+                persist=False,
             )
+            _save_if_needed(session, loaded_here=loaded_here, persist=persist)
             return True, item["item_id"]
         if (
             item.get("item_kind") == "local_finding"
@@ -183,7 +231,10 @@ def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int
                 run_id=run_id,
                 iteration=iteration,
                 max_iterations=max_iterations,
+                session=session,
+                persist=False,
             )
+            _save_if_needed(session, loaded_here=loaded_here, persist=persist)
             return True, item["item_id"]
     return False, ""
 
@@ -363,8 +414,16 @@ def write_validation_record(
     )
 
 
-def release_item_for_retry(repo: str, pr_number: str, item_id: str, reason: str):
-    session = engine.load_session(repo, pr_number)
+def release_item_for_retry(
+    repo: str,
+    pr_number: str,
+    item_id: str,
+    reason: str,
+    *,
+    session: dict | None = None,
+    persist: bool = True,
+):
+    session, loaded_here = _resolve_session(repo, pr_number, session)
     item = engine.ensure_item(session, item_id)
     if item["status"] == "CLAIMED":
         item["status"] = "OPEN"
@@ -373,7 +432,7 @@ def release_item_for_retry(repo: str, pr_number: str, item_id: str, reason: str)
     item["last_auto_failure"] = reason
     item["updated_at"] = engine.utc_now()
     item["history"].append(engine.history_event("auto-retry", reason, actor="cr-loop"))
-    engine.save_session(session)
+    _save_if_needed(session, loaded_here=loaded_here, persist=persist)
 
 
 def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_items: list[dict], *, run_id: str, iteration: int) -> tuple[str, str]:
@@ -408,8 +467,19 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
 
         action, error = run_fixer(args.fixer_cmd, payload)
         if action is None:
-            record_auto_attempt(repo, pr_number, item["item_id"], action=None, failure=error)
-            mark_needs_human(repo, pr_number, item["item_id"], error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+            item_session = engine.load_session(repo, pr_number)
+            record_auto_attempt(repo, pr_number, item["item_id"], action=None, failure=error, session=item_session, persist=False)
+            mark_needs_human(
+                repo,
+                pr_number,
+                item["item_id"],
+                error,
+                run_id=run_id,
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                session=item_session,
+                persist=True,
+            )
             mark_batch_error(error)
             continue
 
@@ -417,33 +487,95 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
         note = (action.get("note") or "").strip()
         if resolution not in {"fix", "clarify", "defer"} or not note:
             error = error or f"Unsupported resolution or missing note: {resolution}"
-            record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=error)
-            mark_needs_human(repo, pr_number, item["item_id"], error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+            item_session = engine.load_session(repo, pr_number)
+            record_auto_attempt(
+                repo,
+                pr_number,
+                item["item_id"],
+                action=resolution,
+                failure=error,
+                session=item_session,
+                persist=False,
+            )
+            mark_needs_human(
+                repo,
+                pr_number,
+                item["item_id"],
+                error,
+                run_id=run_id,
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                session=item_session,
+                persist=True,
+            )
             mark_batch_error(error)
             continue
 
-        record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=None)
+        item_session = engine.load_session(repo, pr_number)
+        record_auto_attempt(
+            repo,
+            pr_number,
+            item["item_id"],
+            action=resolution,
+            failure=None,
+            session=item_session,
+            persist=True,
+        )
 
         validation_commands = list(action.get("validation_commands") or []) + list(args.validation_cmd or [])
         if resolution == "fix" and validation_commands:
             ok, validation_error = run_validation(validation_commands)
             write_validation_record(repo, pr_number, run_id=run_id, iteration=iteration, item_id=item["item_id"], commands=validation_commands, ok=ok, error=validation_error)
             if not ok:
-                session = engine.load_session(repo, pr_number)
-                current = engine.ensure_item(session, item["item_id"])
+                current = engine.ensure_item(item_session, item["item_id"])
                 if current.get("auto_attempt_count", 0) >= 2:
-                    mark_needs_human(repo, pr_number, item["item_id"], validation_error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+                    mark_needs_human(
+                        repo,
+                        pr_number,
+                        item["item_id"],
+                        validation_error,
+                        run_id=run_id,
+                        iteration=iteration,
+                        max_iterations=args.max_iterations,
+                        session=item_session,
+                        persist=True,
+                    )
                     mark_batch_error(validation_error)
                     continue
-                release_item_for_retry(repo, pr_number, item["item_id"], validation_error)
+                release_item_for_retry(
+                    repo,
+                    pr_number,
+                    item["item_id"],
+                    validation_error,
+                    session=item_session,
+                    persist=True,
+                )
                 continue  # Skip this item for now, retry next wave
 
         if item["item_kind"] == "github_thread":
             reply_markdown = action.get("reply_markdown")
             if not reply_markdown:
                 error = "GitHub thread actions require reply_markdown."
-                record_auto_attempt(repo, pr_number, item["item_id"], action=resolution, failure=error)
-                mark_needs_human(repo, pr_number, item["item_id"], error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+                record_auto_attempt(
+                    repo,
+                    pr_number,
+                    item["item_id"],
+                    action=resolution,
+                    failure=error,
+                    session=item_session,
+                    persist=False,
+                )
+                mark_needs_human(
+                    repo,
+                    pr_number,
+                    item["item_id"],
+                    error,
+                    run_id=run_id,
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                    session=item_session,
+                    persist=True,
+                )
                 mark_batch_error(error)
                 continue
 
@@ -488,8 +620,24 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
             result_status = res.get("status")
             if result_status != "succeeded":
                 failure = res.get("error") or f"GitHub action ended with status={result_status or 'unknown'}"
-                record_auto_attempt(repo, pr_number, item_id, action=action["resolution"], failure=failure)
-                release_item_for_retry(repo, pr_number, item_id, failure)
+                item_session = engine.load_session(repo, pr_number)
+                record_auto_attempt(
+                    repo,
+                    pr_number,
+                    item_id,
+                    action=action["resolution"],
+                    failure=failure,
+                    session=item_session,
+                    persist=False,
+                )
+                release_item_for_retry(
+                    repo,
+                    pr_number,
+                    item_id,
+                    failure,
+                    session=item_session,
+                    persist=True,
+                )
                 if action["reply_body"] and res.get("reply_url"):
                     session_updates.append({
                         "item_id": item_id,
@@ -537,8 +685,28 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
         )
         emit(result)
         if result.returncode != 0:
-            record_auto_attempt(repo, pr_number, update["item_id"], action=update["resolution"], failure=result.stderr or "resolve-local-item failed")
-            mark_needs_human(repo, pr_number, update["item_id"], result.stderr or "resolve-local-item failed", run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
+            item_session = engine.load_session(repo, pr_number)
+            failure = result.stderr or "resolve-local-item failed"
+            record_auto_attempt(
+                repo,
+                pr_number,
+                update["item_id"],
+                action=update["resolution"],
+                failure=failure,
+                session=item_session,
+                persist=False,
+            )
+            mark_needs_human(
+                repo,
+                pr_number,
+                update["item_id"],
+                failure,
+                run_id=run_id,
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                session=item_session,
+                persist=True,
+            )
             return "needs_human", result.stderr or "resolve-local-item failed"
 
         run_cmd(
@@ -605,12 +773,20 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop BLOCKED", file=sys.stderr)
             return BLOCKED_EXIT
 
-        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations, loop_threshold=args.loop_threshold)
+        session = engine.load_session(repo, pr_number)
+        needs_human, item_id = detect_needs_human(
+            repo,
+            pr_number,
+            run_id=run_id,
+            iteration=iteration,
+            max_iterations=args.max_iterations,
+            loop_threshold=args.loop_threshold,
+            session=session,
+        )
         if needs_human:
             print(f"cr-loop NEEDS_HUMAN item={item_id}")
             return NEEDS_HUMAN_EXIT
 
-        session = engine.load_session(repo, pr_number)
         batch_items = select_ready_batch(session)
         if not batch_items:
             gate = run_gate(args.mode, repo, pr_number, run_id, snapshot=current_snapshot_path(args.mode, repo, pr_number))
@@ -661,7 +837,16 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop PASSED")
             return 0
 
-        needs_human, item_id = detect_needs_human(repo, pr_number, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations, loop_threshold=args.loop_threshold)
+        session = engine.load_session(repo, pr_number)
+        needs_human, item_id = detect_needs_human(
+            repo,
+            pr_number,
+            run_id=run_id,
+            iteration=iteration,
+            max_iterations=args.max_iterations,
+            loop_threshold=args.loop_threshold,
+            session=session,
+        )
         if needs_human:
             print(f"cr-loop NEEDS_HUMAN item={item_id}")
             return NEEDS_HUMAN_EXIT

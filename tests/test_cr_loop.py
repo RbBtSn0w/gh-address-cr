@@ -61,6 +61,140 @@ class CRLoopCLITest(PythonScriptTestCase):
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["item_id"], "local-finding:open")
 
+    def test_detect_needs_human_uses_supplied_session_without_reload(self):
+        module = self.load_module()
+        item_id = "local-finding:loop-threshold"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "local_finding",
+                    "blocking": True,
+                    "needs_human": False,
+                    "repeat_count": 2,
+                    "reopen_count": 0,
+                    "history": [],
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+
+        with patch.object(module.engine, "load_session", side_effect=AssertionError("load_session should not be called")):
+            needs_human, found_item_id = module.detect_needs_human(
+                self.repo,
+                self.pr,
+                run_id="run-1",
+                iteration=1,
+                max_iterations=3,
+                loop_threshold=2,
+                session=session,
+            )
+
+        self.assertTrue(needs_human)
+        self.assertEqual(found_item_id, item_id)
+        updated = session["items"][item_id]
+        self.assertTrue(updated["needs_human"])
+        self.assertEqual(session["loop_state"]["status"], "NEEDS_HUMAN")
+
+    def test_handle_batch_invalid_resolution_loads_session_once(self):
+        module = self.load_module()
+        item_id = "local-finding:bad-resolution"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "local_finding",
+                    "origin_ref": item_id,
+                    "title": "Bad resolution",
+                    "body": "Invalid fixer output should escalate once.",
+                    "path": "src/bad_resolution.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": False,
+                    "published_ref": None,
+                    "url": None,
+                    "first_url": None,
+                    "latest_url": None,
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "bogus",
+                    "note": "This resolution is invalid.",
+                    "validation_commands": [],
+                },
+                "",
+            )
+
+        module.run_fixer = fake_run_fixer
+        module.emit = lambda _result: None
+        args = types.SimpleNamespace(fixer_cmd="fixer", validation_cmd=[], max_iterations=3)
+
+        real_load_session = module.engine.load_session
+        real_save_session = module.engine.save_session
+        counts = {"load": 0, "save": 0}
+
+        def counted_load_session(repo: str, pr_number: str):
+            counts["load"] += 1
+            return real_load_session(repo, pr_number)
+
+        def counted_save_session(updated_session: dict):
+            counts["save"] += 1
+            return real_save_session(updated_session)
+
+        with patch.object(module.engine, "load_session", side_effect=counted_load_session), patch.object(
+            module.engine, "save_session", side_effect=counted_save_session
+        ), patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-bad-resolution",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "needs_human")
+        self.assertIn("Unsupported resolution", error)
+        self.assertEqual(counts["load"], 1)
+        self.assertEqual(counts["save"], 1)
+
     def test_handle_batch_keeps_item_open_when_batch_result_is_retryable(self):
         module = self.load_module()
         item_id = "github-thread:THREAD_RETRYABLE"
