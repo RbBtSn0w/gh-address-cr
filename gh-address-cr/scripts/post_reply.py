@@ -5,12 +5,11 @@ import json
 import sys
 from pathlib import Path
 
-from python_common import audit_event, run_cmd
+from python_common import audit_event, gh_read_json, gh_write_cmd, gh_write_json
 
 
 def current_login() -> str:
-    response = run_cmd(["gh", "api", "user"], check=True)
-    payload = json.loads(response.stdout)
+    payload = gh_read_json(["api", "user"])
     return payload["login"]
 
 
@@ -18,8 +17,7 @@ def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[str]:
     page = 1
     pending: set[str] = set()
     while True:
-        response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"], check=True)
-        reviews = json.loads(response.stdout)
+        reviews = gh_read_json(["api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"])
         if not reviews:
             break
         for review in reviews:
@@ -52,9 +50,7 @@ def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> 
     var_str = ", ".join(f"${k}: {v}" for k, v in variables.items())
     query = f"mutation({var_str}) {{ {' '.join(query_parts)} }}"
 
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"] + flags
-    result = run_cmd(cmd, check=True)
-    payload = json.loads(result.stdout)
+    payload = gh_write_json(["api", "graphql", "-f", f"query={query}", *flags])
     data = payload.get("data") or {}
 
     for i, node_id in enumerate(review_ids):
@@ -107,7 +103,7 @@ def main() -> int:
     if args.repo and args.pr_number:
         login = current_login()
         pending_before = list_pending_review_ids(args.repo, args.pr_number, login)
-    result = run_cmd(
+    result = gh_write_cmd(
         ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
         check=True,
     )

@@ -5,6 +5,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -107,25 +108,70 @@ def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: s
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
-def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 3) -> subprocess.CompletedProcess:
-    import subprocess
-    import time
-    for attempt in range(retries):
+TRANSIENT_GH_FAILURE_MARKERS = (
+    "502",
+    "503",
+    "temporary failure",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "graphql error",
+    "graphql failed",
+)
+
+
+def is_transient_gh_failure(stderr: str | None = None, stdout: str | None = None, returncode: int | None = None) -> bool:
+    _ = returncode
+    text = f"{stderr or ''}\n{stdout or ''}".lower()
+    return any(marker in text for marker in TRANSIENT_GH_FAILURE_MARKERS)
+
+
+def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 1) -> subprocess.CompletedProcess:
+    _ = retries
+    return subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
+
+
+def gh_read_cmd(
+    cmd: list[str],
+    *,
+    input_text: str | None = None,
+    check: bool = False,
+    retries: int = 3,
+) -> subprocess.CompletedProcess:
+    attempts = max(1, retries)
+    for attempt in range(attempts):
         try:
             result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
-            if not check and result.returncode != 0 and cmd[0] == "gh":
-                # If check=False, we still might want to retry gh commands if they look like transient network errors
-                if "502" in result.stderr or "503" in result.stderr or "Temporary failure" in result.stderr or "graphql error" in result.stderr.lower():
-                    if attempt < retries - 1:
-                        time.sleep(2 ** attempt)
-                        continue
+            if result.returncode != 0 and cmd and cmd[0] == "gh" and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
+                if attempt < attempts - 1:
+                    time.sleep(2**attempt)
+                    continue
             return result
-        except subprocess.CalledProcessError as e:
-            if attempt < retries - 1 and cmd[0] == "gh":
-                time.sleep(2 ** attempt)
+        except subprocess.CalledProcessError as exc:
+            if cmd and cmd[0] == "gh" and attempt < attempts - 1 and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode):
+                time.sleep(2**attempt)
                 continue
-            raise e
-    return result # Should never reach here
+            raise
+    raise AssertionError("gh_read_cmd exhausted without returning a result")
+
+
+def gh_write_cmd(
+    cmd: list[str],
+    *,
+    input_text: str | None = None,
+    check: bool = False,
+) -> subprocess.CompletedProcess:
+    return run_cmd(cmd, input_text=input_text, check=check)
+
+
+def gh_read_json(args: list[str], *, retries: int = 3):
+    result = gh_read_cmd(["gh", *args], check=True, retries=retries)
+    return json.loads(result.stdout)
+
+
+def gh_write_json(args: list[str], *, input_text: str | None = None):
+    result = gh_write_cmd(["gh", *args], input_text=input_text, check=True)
+    return json.loads(result.stdout)
 
 
 def session_engine(args: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
@@ -156,10 +202,10 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
     threads: list[dict] = []
     cursor = None
     while True:
-        cmd = ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={pr_number}"]
+        cmd = ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={pr_number}"]
         if cursor:
             cmd.extend(["-F", f"after={cursor}"])
-        response = json.loads(run_cmd(cmd, check=True).stdout)
+        response = gh_read_json(cmd)
         review_threads = response["data"]["repository"]["pullRequest"]["reviewThreads"]
         for node in review_threads["nodes"]:
             latest = (node.get("latestComment", {}) or {}).get("nodes", [])

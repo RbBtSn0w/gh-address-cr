@@ -2,17 +2,14 @@
 from __future__ import annotations
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+from python_common import gh_read_cmd, gh_read_json, gh_write_json, run_cmd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
-
-
-def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
 
 
 def load_item(repo: str, pr_number: str, item_id: str) -> dict:
@@ -27,8 +24,7 @@ def load_item(repo: str, pr_number: str, item_id: str) -> dict:
 
 
 def gh_json(args: list[str]) -> object:
-    result = run_cmd(["gh", *args], check=True)
-    return json.loads(result.stdout)
+    return gh_read_json(args)
 
 
 def load_pr_files(repo: str, pr_number: str) -> list[dict]:
@@ -108,7 +104,7 @@ def main() -> int:
         f"{item.get('body', '')}"
     )
 
-    head_sha_result = run_cmd(
+    head_sha_result = gh_read_cmd(
         ["gh", "pr", "view", args.pr, "--repo", args.repo, "--json", "headRefOid", "-q", ".headRefOid"],
         check=True,
     )
@@ -133,13 +129,11 @@ def main() -> int:
         "path": path_value,
         "position": diff_position,
     }
-    response = run_cmd(
-        ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}/comments", "--method", "POST", "--input", "-"],
+    comment = gh_write_json(
+        ["api", f"repos/{args.repo}/pulls/{args.pr}/comments", "--method", "POST", "--input", "-"],
         input_text=json.dumps(payload),
-        check=True,
     )
-    sys.stdout.write(response.stdout)
-    comment = json.loads(response.stdout)
+    sys.stdout.write(json.dumps(comment))
 
     run_cmd(
         [

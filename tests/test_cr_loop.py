@@ -15,7 +15,7 @@ class CRLoopCLITest(PythonScriptTestCase):
     def artifacts_dir(self) -> Path:
         return super().artifacts_dir()
 
-    def test_select_next_item_skips_active_claims(self):
+    def load_module(self):
         sys.path.insert(0, str(CR_LOOP_PY.parent))
         spec = importlib.util.spec_from_file_location("cr_loop_under_test", CR_LOOP_PY)
         module = importlib.util.module_from_spec(spec)
@@ -24,6 +24,10 @@ class CRLoopCLITest(PythonScriptTestCase):
             spec.loader.exec_module(module)
         finally:
             sys.path.pop(0)
+        return module
+
+    def test_select_next_item_skips_active_claims(self):
+        module = self.load_module()
 
         future = (datetime.now(timezone.utc) + timedelta(minutes=15)).replace(microsecond=0).isoformat()
         session = {
@@ -56,6 +60,133 @@ class CRLoopCLITest(PythonScriptTestCase):
         selected = module.select_ready_batch(session)
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["item_id"], "local-finding:open")
+
+    def test_handle_batch_keeps_item_open_when_batch_result_is_retryable(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_RETRYABLE"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_RETRYABLE",
+                    "title": "Retry later",
+                    "body": "Transient write failure should not close item.",
+                    "path": "src/retry.py",
+                    "line": 9,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/retry",
+                    "url": "https://example.test/thread/retry",
+                    "first_url": "https://example.test/thread/retry",
+                    "latest_url": "https://example.test/thread/retry",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "clarify",
+                    "note": "Retry later.",
+                    "reply_markdown": "Transient remote failure.",
+                    "validation_commands": [],
+                },
+                "",
+            )
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    json.dumps(
+                        {
+                            item_id: {
+                                "status": "retryable",
+                                "error": "graphql failed",
+                                "reply_url": "https://example.test/reply/retryable",
+                            }
+                        }
+                    ),
+                    "",
+                )
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                updates = json.loads(stdin or "[]")
+                session = json.loads(self.session_file().read_text(encoding="utf-8"))
+                for update in updates:
+                    current = session["items"][update["item_id"]]
+                    current.update(update)
+                self.session_file().write_text(json.dumps(session), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "record-auto-attempt":
+                session = json.loads(self.session_file().read_text(encoding="utf-8"))
+                item = session["items"][cmd[5]]
+                item["last_auto_failure"] = cmd[9]
+                self.session_file().write_text(json.dumps(session), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "release-claim":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        module.run_fixer = fake_run_fixer
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
+
+        args = types.SimpleNamespace(
+            fixer_cmd="fixer",
+            validation_cmd=[],
+            max_iterations=10,
+        )
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-retryable",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "done")
+        self.assertEqual(error, "")
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
+        self.assertEqual(updated["status"], "OPEN")
+        self.assertFalse(updated["handled"])
+        self.assertTrue(updated["reply_posted"])
+        self.assertEqual(updated["reply_url"], "https://example.test/reply/retryable")
+        self.assertEqual(updated["last_auto_failure"], "graphql failed")
 
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
@@ -129,7 +260,16 @@ if args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'tester'}}))
 elif args[:2] == ['api', 'graphql']:
     query = next(arg.split('=', 1)[1] for arg in args if arg.startswith('query='))
-    if 'resolveReviewThread' in query:
+    if 'resolveReviewThread' in query and 'addPullRequestReviewThreadReply' in query:
+        state['resolved'] = True
+        state_file.write_text(json.dumps(state), encoding='utf-8')
+        print(json.dumps({{
+            'data': {{
+                'reply0': {{'comment': {{'url': 'https://example.test/reply'}}}},
+                'resolve0': {{'thread': {{'id': 'THREAD_REMOTE_LOOP', 'isResolved': True}}}},
+            }}
+        }}))
+    elif 'resolveReviewThread' in query:
         state['resolved'] = True
         state_file.write_text(json.dumps(state), encoding='utf-8')
         print(json.dumps({{'data': {{'resolveReviewThread': {{'thread': {{'id': 'THREAD_REMOTE_LOOP', 'isResolved': True}}}}}}}}))

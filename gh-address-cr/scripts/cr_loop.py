@@ -474,9 +474,11 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
         for action in github_actions:
             item_id = action["item_id"]
             res = github_results.get(item_id, {})
-            if res.get("error"):
-                record_auto_attempt(repo, pr_number, item_id, action=action["resolution"], failure=res["error"])
-                release_item_for_retry(repo, pr_number, item_id, res["error"])
+            result_status = res.get("status")
+            if result_status != "succeeded":
+                failure = res.get("error") or f"GitHub action ended with status={result_status or 'unknown'}"
+                record_auto_attempt(repo, pr_number, item_id, action=action["resolution"], failure=failure)
+                release_item_for_retry(repo, pr_number, item_id, failure)
                 if action["reply_body"] and res.get("reply_url"):
                     session_updates.append({
                         "item_id": item_id,
@@ -494,7 +496,7 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
                     "needs_human": False,
                     "clear_claim": True
                 }
-                if action["reply_body"] and not res.get("error"):
+                if action["reply_body"]:
                     update["reply_posted"] = True
                     update["reply_url"] = res.get("reply_url")
                 session_updates.append(update)

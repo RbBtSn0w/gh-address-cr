@@ -58,7 +58,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             submitted.extend(review_ids)
             return list(review_ids)
 
-        def fake_run_cmd(cmd, *, check=False):
+        def fake_write_cmd(cmd, *, input_text=None, check=False):
             self.assertIn("gh", cmd[0])
             self.assertIn("graphql", cmd)
             return subprocess.CompletedProcess(
@@ -78,7 +78,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         module.list_pending_review_ids = fake_list_pending_review_ids
         module.submit_pending_reviews = fake_submit_pending_reviews
         module.current_login = lambda: "tester"
-        module.run_cmd = fake_run_cmd
+        module.gh_write_cmd = fake_write_cmd
         module.audit_event = lambda *args, **kwargs: None
 
         with patched_argv(
@@ -90,10 +90,14 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
                 self.pr,
             ]
         ), patched_stdin(action_payload):
-            rc = module.main()
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
 
         self.assertEqual(rc, 0)
         self.assertEqual(submitted, [11, 22])
+        self.assertEqual(payload["github-thread:THREAD_1"]["status"], "succeeded")
+        self.assertEqual(payload["github-thread:THREAD_1"]["reply_url"], "https://example.test/reply")
 
     def test_batch_github_execute_returns_nonzero_when_graphql_fails(self):
         module = self.load_module()
@@ -116,13 +120,14 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             submitted.extend(review_ids)
             return list(review_ids)
 
-        def fake_run_cmd(cmd, *, check=False):
+        def fake_write_cmd(cmd, *, input_text=None, check=False):
             return subprocess.CompletedProcess(cmd, 1, "", "graphql failed")
 
         module.list_pending_review_ids = fake_list_pending_review_ids
         module.submit_pending_reviews = fake_submit_pending_reviews
         module.current_login = lambda: "tester"
-        module.run_cmd = fake_run_cmd
+        module.gh_write_cmd = fake_write_cmd
+        module.is_transient_gh_failure = lambda *_args, **_kwargs: True
         module.audit_event = lambda *args, **kwargs: None
 
         with patched_argv(
@@ -134,7 +139,11 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
                 self.pr,
             ]
         ), patched_stdin(action_payload):
-            rc = module.main()
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
 
         self.assertNotEqual(rc, 0)
         self.assertEqual(submitted, [])
+        self.assertEqual(payload["github-thread:THREAD_2"]["status"], "retryable")
+        self.assertEqual(payload["github-thread:THREAD_2"]["error"], "graphql failed")

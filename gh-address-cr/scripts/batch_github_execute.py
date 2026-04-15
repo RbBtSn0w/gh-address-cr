@@ -5,10 +5,25 @@ import json
 import sys
 
 from post_reply import list_pending_review_ids, submit_pending_reviews, current_login
-from python_common import run_cmd, audit_event
+from python_common import gh_write_cmd, audit_event, is_transient_gh_failure
 
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
     return [actions[i:i + max_size] for i in range(0, len(actions), max_size)]
+
+
+def item_result(
+    *,
+    status: str,
+    error: str | None = None,
+    reply_url: str | None = None,
+    resolved: bool | None = None,
+) -> dict:
+    return {
+        "status": status,
+        "error": error,
+        "reply_url": reply_url,
+        "resolved": resolved,
+    }
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch execute GitHub review thread actions.")
@@ -66,45 +81,58 @@ def main() -> int:
         query = f"mutation({var_str}) {{ {' '.join(query_parts)} }}"
         
         cmd = ["gh", "api", "graphql", "-f", f"query={query}"] + flags
-        result = run_cmd(cmd, check=False)
-        
+        result = gh_write_cmd(cmd, check=False)
+
         payload = {}
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             if result.returncode != 0:
                 had_error = True
-                print(f"GraphQL request failed: {result.stderr}", file=sys.stderr)
+                status = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "unknown"
                 for action in chunk:
-                    results[action["item_id"]] = {"error": result.stderr or "GraphQL request failed"}
+                    results[action["item_id"]] = item_result(
+                        status=status,
+                        error=result.stderr or "GraphQL request failed",
+                    )
                 continue
         errors = payload.get("errors")
         data = payload.get("data") or {}
         if errors or result.returncode != 0:
             had_error = True
-        
+
         for i, action in enumerate(chunk):
             item_id = action["item_id"]
-            res = {}
-            if action.get("reply_body"):
-                res["reply_url"] = data.get(f"reply{i}", {}).get("comment", {}).get("url") if data.get(f"reply{i}") else None
-            if action.get("resolve"):
-                res["resolved"] = data.get(f"resolve{i}", {}).get("thread", {}).get("isResolved") if data.get(f"resolve{i}") else None
-            
+            reply_data = data.get(f"reply{i}")
+            if reply_data is None and len(chunk) == 1:
+                reply_data = data.get("addPullRequestReviewThreadReply")
+            resolve_data = data.get(f"resolve{i}")
+            if resolve_data is None and len(chunk) == 1:
+                resolve_data = data.get("resolveReviewThread")
+
+            reply_url = reply_data.get("comment", {}).get("url") if action.get("reply_body") and reply_data else None
+            resolved = resolve_data.get("thread", {}).get("isResolved") if action.get("resolve") and resolve_data else None
+
             # Check for specific field errors if GraphQL returned partial success
             if errors:
                 item_errors = [e["message"] for e in errors if any(p.startswith(f"reply{i}") or p.startswith(f"resolve{i}") for p in e.get("path", []))]
                 if item_errors:
-                    res["error"] = "; ".join(item_errors)
-                elif "error" not in res:
-                    res["error"] = "; ".join(e["message"] for e in errors)
+                    results[item_id] = item_result(status="failed", error="; ".join(item_errors), reply_url=reply_url, resolved=resolved)
+                    continue
+                results[item_id] = item_result(status="failed", error="; ".join(e["message"] for e in errors), reply_url=reply_url, resolved=resolved)
+                continue
 
-            if "error" not in res and not errors and result.returncode == 0:
-                 res["error"] = None
-            elif not errors and result.returncode != 0:
-                 res["error"] = "Unknown error"
-                 
-            results[item_id] = res
+            reply_requested = bool(action.get("reply_body"))
+            resolve_requested = bool(action.get("resolve"))
+            reply_succeeded = (not reply_requested) or bool(reply_url)
+            resolve_succeeded = (not resolve_requested) or resolved is True
+
+            if result.returncode == 0 and reply_succeeded and resolve_succeeded:
+                results[item_id] = item_result(status="succeeded", reply_url=reply_url, resolved=resolved)
+            elif result.returncode != 0 and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
+                results[item_id] = item_result(status="retryable", error=result.stderr or "GraphQL request failed", reply_url=reply_url, resolved=resolved)
+            else:
+                results[item_id] = item_result(status="unknown", error=result.stderr or "GraphQL response was incomplete", reply_url=reply_url, resolved=resolved)
 
     pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
     submitted = []
