@@ -49,6 +49,22 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("{ingest,local,mixed,remote}", result.stdout)
 
+    def test_cli_adapter_help_matches_orchestration_behavior(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "adapter", "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: cli.py adapter", result.stdout)
+        self.assertIn("High-level adapter entrypoint.", result.stdout)
+        self.assertIn("prints findings JSON and then runs PR orchestration", result.stdout)
+        self.assertIn("including GitHub thread handling", result.stdout)
+        self.assertNotIn("cr-loop", result.stdout)
+
+    def test_cli_root_help_documents_converter_as_fixed_finding_blocks_only(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review-to-findings owner/repo 123 --input findings.md", result.stdout)
+        self.assertIn("fixed finding blocks only", result.stdout)
+        self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
+
     def test_cli_review_defaults_to_structured_summary(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

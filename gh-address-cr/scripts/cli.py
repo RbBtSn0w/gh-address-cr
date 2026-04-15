@@ -107,7 +107,8 @@ def alias_help(command: str) -> str:
         return (
             "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--human|--machine]\n\n"
             "High-level adapter entrypoint.\n\n"
-            "Use when an adapter command prints findings JSON.\n"
+            "Use when an adapter command prints findings JSON and then runs PR orchestration,\n"
+            "including GitHub thread handling.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -343,7 +344,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review consumes findings JSON; it does not generate findings.\n"
             "  High-level commands are the agent-safe public surface.\n"
             "Utility commands:\n"
-            "  cli.py review-to-findings owner/repo 123 --input review.md\n"
+            "  cli.py review-to-findings owner/repo 123 --input findings.md\n"
+            "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
         ),
     )
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed through to the selected subcommand.")

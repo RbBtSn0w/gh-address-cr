@@ -12,24 +12,30 @@ For handled GitHub threads, replying and resolving are still two separate requir
 
 ## Public Interface
 
-`gh-address-cr` should now be understood as a PR-scoped workflow orchestrator with:
+`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with these agent-safe public entrypoints:
 
-- a `mode`
-- an optional local-review `producer`
+- `review`
+- `threads`
+- `findings`
+- `adapter`
+- `review-to-findings`
 
 Agent-first reading order:
 
-1. Check whether you already have findings JSON.
+1. If you already have findings JSON, use `findings --input <path>|-`.
 2. Use `--input <path>` only for a real JSON file.
 3. Use `--input -` when findings are produced in the current step.
-4. If the upstream tool only prints Markdown review blocks, convert them with `review-to-findings` first.
-5. Then hand the JSON to `gh-address-cr` through the correct entrypoint.
+4. If the upstream tool only prints fixed `finding` blocks, convert them with `review-to-findings` first.
+5. If you only need GitHub review threads, use `threads`.
+6. If you want full PR orchestration and already have findings JSON, use `review --input <path>|-`.
+7. If your producer is an adapter command, use `adapter <owner/repo> <pr_number> <adapter_cmd...>`.
 
 Fail-fast contract:
 
 - `review` and `findings` require findings input explicitly.
 - `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
 - If `--input` is missing, the CLI fails immediately with a structured error instead of waiting on `stdin`.
+- `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
 - The high-level CLI commands are the agent-safe public surface. Treat low-level scripts as implementation details.
 
@@ -39,23 +45,41 @@ High-level entrypoints emit machine-readable JSON summaries by default. Use `--h
 Recommended invocation model:
 
 ```text
-/gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr review <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr threads <owner/repo> <pr_number>
-/gh-address-cr findings <owner/repo> <pr_number>
+/gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
 
 The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.
 
+Stable machine summary fields:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `exit_code`
+
+`reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
+
 Examples:
 
 ```text
-$gh-address-cr review <PR_URL>
-$gh-address-cr review <PR_URL> --human
+$gh-address-cr review <PR_URL> --input findings.json
+$gh-address-cr review <PR_URL> --input -
+$gh-address-cr review <PR_URL> --input findings.json --human
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
 
 High-level entrypoints:
@@ -71,8 +95,10 @@ High-level entrypoints:
   - existing findings JSON only
   - emits a machine-readable JSON summary by default
 - `adapter`
-  - adapter command prints findings JSON
+  - adapter-produced findings plus PR orchestration, including GitHub thread handling
   - emits a machine-readable JSON summary by default
+- `review-to-findings`
+  - fixed-format finding blocks to findings JSON
 
 Typical flows:
 
@@ -84,16 +110,29 @@ $gh-address-cr findings <PR_URL> --input findings.json --sync
 // Pipe findings directly from the producer
 <review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
 
-// Convert Markdown review blocks first when the producer is not JSON-native
+// Convert fixed finding blocks first when the producer is not JSON-native
 <review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
 $gh-address-cr findings <PR_URL> --input findings.json --sync
 
 // Full PR workflow with the default review entrypoint
-$gh-address-cr review <PR_URL>
+$gh-address-cr review <PR_URL> --input findings.json
 
 // Switch to human-oriented text when a person is reading the output
-$gh-address-cr review <PR_URL> --human
+$gh-address-cr review <PR_URL> --input findings.json --human
 ```
+
+Minimal valid `review-to-findings` input:
+
+````text
+```finding
+title: Missing null guard
+path: src/example.py
+line: 12
+body: Potential null dereference.
+```
+````
+
+This converter rejects plain narrative Markdown review output.
 
 Prompt patterns:
 
@@ -103,7 +142,7 @@ When `gh-address-cr` is the main entrypoint:
 使用 $gh-address-cr 处理这个 PR：<PR_URL>
 
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
-如果上游只会输出 Markdown review blocks，先用 `review-to-findings` 转成 findings JSON。
+如果上游只会输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
 然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
 如果你要刷新本地 findings 并自动关闭消失的旧项，再加 `--sync`。
@@ -113,7 +152,7 @@ When the upstream review command must run first and `gh-address-cr` can only com
 
 ```text
 先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
-如果该命令只输出 Markdown review blocks，先用 `review-to-findings` 转成 findings JSON。
+如果该命令只输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
 然后把这些 findings 交给 $gh-address-cr，使用 `findings` 入口接管 JSON 文件，或使用 `review` 入口接管当前步骤的 stdin。
 如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
 如果你想刷新同一来源的 findings 并自动关闭消失项，再加 `--sync`。
