@@ -194,6 +194,46 @@ raise SystemExit(1)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 1)
 
+    def test_python_common_run_cmd_retries_transient_gh_failure_when_requested(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "gh_run_cmd_retry_state.json"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file.as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"calls": 0}}))
+
+payload = json.loads(state_file.read_text())
+payload["calls"] += 1
+state_file.write_text(json.dumps(payload))
+if payload["calls"] == 1:
+    sys.stderr.write("graphql failed\\n")
+    raise SystemExit(1)
+print("ok")
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        spec = importlib.util.spec_from_file_location("python_common_module", PYTHON_COMMON_PY)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin_dir}:{original_path}"
+        try:
+            spec.loader.exec_module(module)
+            result = module.run_cmd(["gh", "api", "graphql"], retries=2)
+        finally:
+            os.environ["PATH"] = original_path
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "ok")
+        self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 2)
+
     def test_python_common_pull_request_read_cache_reuses_files_for_same_head(self):
         original_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)

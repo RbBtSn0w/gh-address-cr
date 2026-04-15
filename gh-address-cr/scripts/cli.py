@@ -45,6 +45,9 @@ OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
+PR_URL_RE = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$"
+)
 
 
 def inline_output_flags(command: str, passthrough_args: list[str]) -> set[str]:
@@ -346,6 +349,23 @@ def has_option(args: list[str], flag: str) -> bool:
     return flag in args
 
 
+def parse_pr_url(value: str) -> tuple[str, str] | None:
+    match = PR_URL_RE.match(value)
+    if not match:
+        return None
+    return f"{match.group('owner')}/{match.group('repo')}", match.group("pr_number")
+
+
+def normalize_high_level_target_args(args: argparse.Namespace) -> None:
+    if args.command not in HIGH_LEVEL_COMMANDS or not args.args:
+        return
+    parsed = parse_pr_url(args.args[0])
+    if parsed is None:
+        return
+    repo, pr_number = parsed
+    args.args = [repo, pr_number, *args.args[1:]]
+
+
 def output_preflight_error(
     args: argparse.Namespace,
     repo: str,
@@ -498,11 +518,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not normalize_output_args(args):
         return 2
+    normalize_high_level_target_args(args)
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0
     if args.command in HIGH_LEVEL_COMMANDS and len(args.args) < 2:
-        print("High-level commands require <owner/repo> <pr_number>.", file=sys.stderr)
+        print("High-level commands require <owner/repo> <pr_number> or <PR_URL>.", file=sys.stderr)
         return 2
     if args.command in HIGH_LEVEL_COMMANDS:
         preflight_rc = preflight_high_level(args)

@@ -569,7 +569,8 @@ Run the current automated checks with:
 
 ```bash
 python3 -m unittest discover -s tests
-bash -n gh-address-cr/python3 gh-address-cr/scripts/cli.py
+python3 gh-address-cr/scripts/cli.py --help
+python3 gh-address-cr/scripts/cli.py cr-loop --help
 ```
 
 Current test layout:

@@ -294,3 +294,69 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(payload["github-thread:THREAD_4"]["status"], "succeeded")
         self.assertEqual(calls["count"], 1)
+
+    def test_batch_github_execute_reindexes_executable_actions_after_skips(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:MISSING_THREAD_ID",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                },
+                {
+                    "item_id": "github-thread:THREAD_5",
+                    "thread_id": "THREAD_5",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                },
+            ]
+        )
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
+        module.current_login = lambda: "tester"
+        module.audit_event = lambda *args, **kwargs: None
+
+        def fake_write_cmd(cmd, *, input_text=None, check=False):
+            query_arg = next(part for part in cmd if part.startswith("query="))
+            self.assertIn("reply0", query_arg)
+            self.assertIn("resolve0", query_arg)
+            self.assertNotIn("reply1", query_arg)
+            self.assertNotIn("resolve1", query_arg)
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                json.dumps(
+                    {
+                        "data": {
+                            "reply0": {"comment": {"url": "https://example.test/reply"}},
+                            "resolve0": {"thread": {"id": "THREAD_5", "isResolved": True}},
+                        }
+                    }
+                ),
+                "",
+            )
+
+        module.gh_write_cmd = fake_write_cmd
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["github-thread:MISSING_THREAD_ID"]["status"], "failed")
+        self.assertEqual(payload["github-thread:THREAD_5"]["status"], "succeeded")

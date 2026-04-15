@@ -235,6 +235,72 @@ else:
         self.assertTrue((self.workspace_dir() / "incoming-findings.md").exists())
         self.assertIn("external review producer", result.stderr)
 
+    def test_cli_review_accepts_pr_url_target(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "review",
+                f"https://github.com/{self.repo}/pull/{self.pr}",
+            ]
+        )
+        self.assertEqual(result.returncode, 6)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "WAITING_FOR_EXTERNAL_REVIEW")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+
+    def test_cli_adapter_accepts_pr_url_target(self):
+        adapter = Path(self.temp_dir.name) / "adapter.py"
+        adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
+
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "adapter",
+                f"https://github.com/{self.repo}/pull/{self.pr}",
+                sys.executable,
+                str(adapter),
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+
     def test_cli_review_auto_ingests_handoff_json_without_explicit_input(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

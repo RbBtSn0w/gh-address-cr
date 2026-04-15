@@ -25,6 +25,7 @@ def item_result(
         "resolved": resolved,
     }
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch execute GitHub review thread actions.")
     parser.add_argument("--repo", required=True)
@@ -57,8 +58,9 @@ def main() -> int:
         query_parts = []
         variables = {}
         flags = []
-        
-        for i, action in enumerate(chunk):
+        executable_actions = []
+
+        for action in chunk:
             thread_id = action.get("thread_id")
             if not thread_id:
                 had_error = True
@@ -67,6 +69,7 @@ def main() -> int:
                     error="GitHub thread actions require thread_id.",
                 )
                 continue
+            i = len(executable_actions)
             if action.get("reply_body"):
                 query_parts.append(f"reply{i}: addPullRequestReviewThreadReply(input:{{pullRequestReviewThreadId: $reply{i}_threadId, body: $reply{i}_body}}) {{ comment {{ url }} }}")
                 variables[f"reply{i}_threadId"] = "ID!"
@@ -77,6 +80,7 @@ def main() -> int:
                 query_parts.append(f"resolve{i}: resolveReviewThread(input:{{threadId: $resolve{i}_threadId}}) {{ thread {{ id isResolved }} }}")
                 variables[f"resolve{i}_threadId"] = "ID!"
                 flags.extend(["-F", f"resolve{i}_threadId={thread_id}"])
+            executable_actions.append(action)
 
         if not query_parts:
             continue
@@ -94,7 +98,7 @@ def main() -> int:
             if result.returncode != 0:
                 had_error = True
                 status = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "unknown"
-                for action in chunk:
+                for action in executable_actions:
                     results[action["item_id"]] = item_result(
                         status=status,
                         error=result.stderr or "GraphQL request failed",
@@ -105,13 +109,13 @@ def main() -> int:
         if errors or result.returncode != 0:
             had_error = True
 
-        for i, action in enumerate(chunk):
+        for i, action in enumerate(executable_actions):
             item_id = action["item_id"]
             reply_data = data.get(f"reply{i}")
-            if reply_data is None and len(chunk) == 1:
+            if reply_data is None and len(executable_actions) == 1:
                 reply_data = data.get("addPullRequestReviewThreadReply")
             resolve_data = data.get(f"resolve{i}")
-            if resolve_data is None and len(chunk) == 1:
+            if resolve_data is None and len(executable_actions) == 1:
                 resolve_data = data.get("resolveReviewThread")
 
             reply_url = reply_data.get("comment", {}).get("url") if action.get("reply_body") and reply_data else None
