@@ -138,8 +138,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_documents_external_review_handoff_contract(self):
         readme_text = README_MD.read_text(encoding="utf-8")
-        self.assertIn("任意外部 review producer", readme_text)
+        self.assertIn("any external review producer may satisfy the handoff", readme_text)
         self.assertIn("producer-request.md", readme_text)
         self.assertIn("incoming-findings.json", readme_text)
         self.assertIn("incoming-findings.md", readme_text)
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)
+        self.assertIn("如果你自己就是外部 review producer", readme_text)
+        self.assertIn("不要只输出普通 Markdown 审查报告", readme_text)

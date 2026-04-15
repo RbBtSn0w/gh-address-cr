@@ -137,7 +137,7 @@ Producer contract:
 Minimal user prompt:
 
 ```text
-让 $gh-address-cr 完整处理这个 PR：<PR_URL>
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>
 ```
 
 Typical flows:
@@ -151,6 +151,10 @@ $gh-address-cr review <PR_URL>
 // - producer-request.md
 // - incoming-findings.json
 // - incoming-findings.md
+
+// If you are also the review producer, write findings JSON to incoming-findings.json
+// or fixed `finding` blocks to incoming-findings.md now.
+// Do not write a plain Markdown-only review report.
 
 // After any external review producer fills a handoff file, rerun the same command
 $gh-address-cr review <PR_URL>
@@ -178,12 +182,16 @@ This converter rejects plain narrative Markdown review output.
 Prompt patterns:
 
 ```text
-使用 $gh-address-cr 完整处理这个 PR：<PR_URL>
+先运行 `$gh-address-cr review <PR_URL>`。
 
-如果当前 PR 还没有 findings，$gh-address-cr 应该进入 `WAITING_FOR_EXTERNAL_REVIEW`，
-写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`，
-并等待任意外部 review producer 提供 findings JSON 或固定格式的 `finding` blocks。
-收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate。
+如果当前 PR 还没有 findings，`review` 应进入 `WAITING_FOR_EXTERNAL_REVIEW`，
+写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`。
+
+如果你自己就是外部 review producer，就在当前任务里直接生成 findings JSON，
+写入 `incoming-findings.json`；或者生成固定格式的 `finding` blocks`，
+写入 `incoming-findings.md`。不要只输出普通 Markdown 审查报告。
+
+收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
 ```
 
 ## Choosing Fixes
