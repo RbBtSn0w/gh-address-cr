@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd
+from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd, workspace_dir
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,6 +39,25 @@ def load_pr_files(repo: str, pr_number: str) -> list[dict]:
             raise SystemExit("Expected a JSON array when listing PR files.")
         files.extend(response)
         page += 1
+    return files
+
+
+def pr_files_cache_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "publish_finding_files_cache.json"
+
+
+def load_cached_pr_files(repo: str, pr_number: str, head_sha: str) -> list[dict]:
+    cache_path = pr_files_cache_file(repo, pr_number)
+    if cache_path.exists():
+        try:
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        if payload.get("head_sha") == head_sha and isinstance(payload.get("files"), list):
+            return payload["files"]
+
+    files = load_pr_files(repo, pr_number)
+    cache_path.write_text(json.dumps({"head_sha": head_sha, "files": files}, sort_keys=True), encoding="utf-8")
     return files
 
 
@@ -129,7 +148,7 @@ def main() -> int:
             check=True,
         )
         head_sha = head_sha_result.stdout.strip()
-        files = load_pr_files(args.repo, args.pr)
+        files = load_cached_pr_files(args.repo, args.pr, head_sha)
         diff_position = compute_diff_position(files, path_value, int(line_value))
     except subprocess.CalledProcessError as exc:
         payload["status"] = "retryable" if is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode) else "failed"

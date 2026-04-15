@@ -1403,6 +1403,80 @@ else:
         self.assertTrue(item["published"])
         self.assertEqual(item["published_ref"], "321")
 
+    def test_publish_finding_python_reuses_pr_files_cache_for_same_head(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "publish_cache_state.json"
+        state_file.write_text(json.dumps({"files_calls": 0, "head_calls": 0}), encoding="utf-8")
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file)!r})
+state = json.loads(state_file.read_text(encoding='utf-8'))
+args = sys.argv[1:]
+if args[:3] == ['pr', 'view', '77']:
+    state['head_calls'] += 1
+    state_file.write_text(json.dumps(state), encoding='utf-8')
+    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
+    state['files_calls'] += 1
+    state_file.write_text(json.dumps(state), encoding='utf-8')
+    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
+    if page == '1':
+        print(json.dumps([{{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}}]))
+    else:
+        print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Publish me",
+                    "body": "Dry-run publication.",
+                    "path": "src/a.py",
+                    "line": 4,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
+            stdin=payload,
+            check=True,
+        )
+
+        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        item_id = json.loads(list_result.stdout.strip())["item_id"]
+
+        for _ in range(2):
+            result = self.run_cmd(
+                [
+                    sys.executable,
+                    str(PUBLISH_FINDING_PY),
+                    "--dry-run",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    item_id,
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("position=4", result.stdout)
+
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertEqual(state["head_calls"], 2)
+        self.assertEqual(state["files_calls"], 2)
+
     def test_run_once_python_syncs_session_with_mocked_gh(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -1659,6 +1733,7 @@ else:
         self.assertEqual(payload["reply_url"], "https://example.test/reply")
         state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["submitted"], ["REV_NODE_101"])
+        self.assertEqual(state["review_calls"], 2)
 
     def test_post_reply_submits_preexisting_pending_review(self):
         gh = self.bin_dir / "gh"
@@ -1724,6 +1799,7 @@ else:
         self.assertEqual(payload["reply_url"], "https://example.test/reply-existing")
         state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
         self.assertEqual(state["submitted"], ["777"])
+        self.assertEqual(state["review_calls"], 2)
 
     def test_post_reply_reports_unknown_when_submit_fails_after_reply(self):
         gh = self.bin_dir / "gh"

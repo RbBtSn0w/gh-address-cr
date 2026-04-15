@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import session_engine as engine
-from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -188,14 +188,25 @@ def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int
     return False, ""
 
 
-def run_gate(mode: str, repo: str, pr_number: str, audit_id: str) -> subprocess.CompletedProcess[str]:
+def run_gate(mode: str, repo: str, pr_number: str, audit_id: str, *, snapshot: str = "") -> subprocess.CompletedProcess[str]:
     if mode == "local":
         return run_cmd([sys.executable, str(SCRIPT_DIR / "session_engine.py"), "gate", repo, pr_number])
     cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
     if audit_id:
         cmd.extend(["--audit-id", audit_id])
+    if snapshot:
+        cmd.extend(["--snapshot", snapshot])
     cmd.extend([repo, pr_number])
     return run_cmd(cmd)
+
+
+def current_snapshot_path(mode: str, repo: str, pr_number: str) -> str:
+    if mode not in {"remote", "mixed"}:
+        return ""
+    path = snapshot_file(repo, pr_number)
+    if not path.exists():
+        return ""
+    return str(path)
 
 
 def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_number: str, extra: list[str], iteration: int, stdin_payload: str | None) -> subprocess.CompletedProcess[str]:
@@ -602,7 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         session = engine.load_session(repo, pr_number)
         batch_items = select_ready_batch(session)
         if not batch_items:
-            gate = run_gate(args.mode, repo, pr_number, run_id)
+            gate = run_gate(args.mode, repo, pr_number, run_id, snapshot=current_snapshot_path(args.mode, repo, pr_number))
             emit(gate)
             if gate.returncode == 0:
                 update_loop_state(repo, pr_number, run_id=run_id, status="PASSED", iteration=iteration, max_iterations=args.max_iterations)
@@ -640,7 +651,10 @@ def main(argv: list[str] | None = None) -> int:
             print("cr-loop BLOCKED", file=sys.stderr)
             return BLOCKED_EXIT
 
-        gate = run_gate(args.mode, repo, pr_number, run_id)
+        gate_snapshot = ""
+        if all(item["item_kind"] != "github_thread" for item in batch_items):
+            gate_snapshot = current_snapshot_path(args.mode, repo, pr_number)
+        gate = run_gate(args.mode, repo, pr_number, run_id, snapshot=gate_snapshot)
         emit(gate)
         if gate.returncode == 0:
             update_loop_state(repo, pr_number, run_id=run_id, status="PASSED", iteration=iteration, max_iterations=args.max_iterations)

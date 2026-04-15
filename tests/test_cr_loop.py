@@ -341,6 +341,47 @@ print(json.dumps({
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
 
+    def test_cr_loop_remote_reuses_run_once_snapshot_when_gate_runs_without_actions(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "gh_remote_snapshot_state.json"
+        state_file.write_text(json.dumps({"graphql_calls": 0}), encoding="utf-8")
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file)!r})
+state = json.loads(state_file.read_text(encoding="utf-8"))
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'graphql']:
+    state['graphql_calls'] += 1
+    state_file.write_text(json.dumps(state), encoding='utf-8')
+    print(json.dumps({{
+        'data': {{
+            'repository': {{
+                'pullRequest': {{
+                    'reviewThreads': {{
+                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                        'nodes': []
+                    }}
+                }}
+            }}
+        }}
+    }}))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CR_LOOP_PY), "remote", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertEqual(state["graphql_calls"], 1)
+
     def test_cr_loop_does_not_repost_reply_after_resolve_failure(self):
         gh = self.bin_dir / "gh"
         state_file = Path(self.temp_dir.name) / "gh_state_reply_retry.json"

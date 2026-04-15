@@ -48,7 +48,6 @@ def main() -> int:
         return 0
 
     login = current_login()
-    pending_before = list_pending_review_ids(args.repo, args.pr_number, login)
 
     results = {}
     had_error = False
@@ -160,7 +159,6 @@ def main() -> int:
         "Executed batch GitHub operations",
         {
             "actions_count": len(actions),
-            "pending_before": sorted(pending_before),
             "pending_after": current_pending,
             "submitted": submit_result["submitted"],
             "submit_status": submit_result["status"],

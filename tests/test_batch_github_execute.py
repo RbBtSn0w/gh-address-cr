@@ -48,11 +48,10 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
                 }
             ]
         )
-        pending_sets = [{11}, {11, 22}]
         submitted = []
 
         def fake_list_pending_review_ids(repo, pr_number, login):
-            return pending_sets.pop(0)
+            return {11, 22}
 
         def fake_submit_pending_reviews_result(repo, pr_number, review_ids):
             submitted.extend(review_ids)
@@ -238,3 +237,60 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(payload["github-thread:THREAD_3"]["status"], "unknown")
         self.assertEqual(payload["github-thread:THREAD_3"]["reply_url"], "https://example.test/reply")
         self.assertIn("submit pending reviews failed", payload["github-thread:THREAD_3"]["error"])
+
+    def test_batch_github_execute_scans_pending_reviews_once(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_4",
+                    "thread_id": "THREAD_4",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+        calls = {"count": 0}
+
+        def fake_list_pending_review_ids(*_args, **_kwargs):
+            calls["count"] += 1
+            return {11}
+
+        module.list_pending_review_ids = fake_list_pending_review_ids
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "succeeded",
+            "submitted": [11],
+            "error": None,
+        }
+        module.current_login = lambda: "tester"
+        module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
+            cmd,
+            0,
+            json.dumps(
+                {
+                    "data": {
+                        "reply0": {"comment": {"url": "https://example.test/reply"}},
+                        "resolve0": {"thread": {"id": "THREAD_4", "isResolved": True}},
+                    }
+                }
+            ),
+            "",
+        )
+        module.audit_event = lambda *args, **kwargs: None
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["github-thread:THREAD_4"]["status"], "succeeded")
+        self.assertEqual(calls["count"], 1)
