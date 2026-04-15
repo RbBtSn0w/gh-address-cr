@@ -5,6 +5,9 @@ from tests.helpers import ROOT
 
 SKILL_MD = ROOT / "gh-address-cr" / "SKILL.md"
 README_MD = ROOT / "README.md"
+MODE_PRODUCER_MATRIX_MD = ROOT / "gh-address-cr" / "references" / "mode-producer-matrix.md"
+LOCAL_REVIEW_ADAPTER_MD = ROOT / "gh-address-cr" / "references" / "local-review-adapter.md"
+OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
@@ -54,6 +57,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/cli.py review <owner/repo> <pr_number>", text)
         self.assertIn("python3 scripts/cli.py final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
+
+    def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
+        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("gh-address-cr/scripts/", text, msg=str(path))
+            self.assertNotIn("gh-address-cr/references/", text, msg=str(path))
+            self.assertIn("scripts/cli.py", text, msg=str(path))
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")

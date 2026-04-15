@@ -23,22 +23,22 @@
 - input:
   - `remote <owner/repo> <pr_number>`
 - actions:
-  1. `python3 gh-address-cr/scripts/cli.py run-once <owner/repo> <pr_number>`
+  1. `python3 scripts/cli.py run-once <owner/repo> <pr_number>`
   2. process GitHub review threads
-  3. `python3 gh-address-cr/scripts/cli.py post-reply ...` + `python3 gh-address-cr/scripts/cli.py resolve-thread ...` for handled GitHub items
-  4. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  3. `python3 scripts/cli.py post-reply ...` + `python3 scripts/cli.py resolve-thread ...` for handled GitHub items
+  4. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 ### `local code-review`
 
 - input:
   - `local code-review <owner/repo> <pr_number>`
 - actions:
-  1. generate the standard producer prompt with `python3 gh-address-cr/scripts/cli.py prepare-code-review local <owner/repo> <pr_number>`
+  1. generate the standard producer prompt with `python3 scripts/cli.py prepare-code-review local <owner/repo> <pr_number>`
   2. run a local code-review workflow
   3. require structured findings JSON, not only Markdown
-  4. `python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:code-review <owner/repo> <pr_number> python3 gh-address-cr/scripts/cli.py code-review-adapter --input findings.json`
+  4. `python3 scripts/cli.py run-local-review --source local-agent:code-review <owner/repo> <pr_number> python3 scripts/cli.py code-review-adapter --input findings.json`
   5. process local findings through session status transitions
-  6. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  6. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -57,31 +57,31 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
   - `local json <owner/repo> <pr_number>`
 - actions:
   1. read provided findings JSON
-  2. `python3 gh-address-cr/scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
+  2. `python3 scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
   3. process local findings through session status transitions
-  4. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  4. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 ### `local adapter`
 
 - input:
   - `local adapter <owner/repo> <pr_number>`
 - actions:
-  1. `python3 gh-address-cr/scripts/cli.py run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
+  1. `python3 scripts/cli.py run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
   2. process local findings through session status transitions
-  3. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  3. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 ### `mixed code-review`
 
 - input:
   - `mixed code-review <owner/repo> <pr_number>`
 - actions:
-  1. `python3 gh-address-cr/scripts/cli.py run-once <owner/repo> <pr_number>`
-  2. generate the standard producer prompt with `python3 gh-address-cr/scripts/cli.py prepare-code-review mixed <owner/repo> <pr_number>`
+  1. `python3 scripts/cli.py run-once <owner/repo> <pr_number>`
+  2. generate the standard producer prompt with `python3 scripts/cli.py prepare-code-review mixed <owner/repo> <pr_number>`
   3. run a local code-review workflow
   4. require structured findings JSON
-  5. `python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:code-review <owner/repo> <pr_number> python3 gh-address-cr/scripts/cli.py code-review-adapter --input findings.json`
+  5. `python3 scripts/cli.py run-local-review --source local-agent:code-review <owner/repo> <pr_number> python3 scripts/cli.py code-review-adapter --input findings.json`
   6. process GitHub threads and local findings as one session queue
-  7. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  7. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -103,11 +103,11 @@ $gh-address-cr review <PR_URL>
 - input:
   - `mixed json <owner/repo> <pr_number>`
 - actions:
-  1. `python3 gh-address-cr/scripts/cli.py run-once <owner/repo> <pr_number>`
+  1. `python3 scripts/cli.py run-once <owner/repo> <pr_number>`
   2. read provided findings JSON
-  3. `python3 gh-address-cr/scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
+  3. `python3 scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
   4. process GitHub threads and local findings as one session queue
-  5. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  5. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -120,10 +120,10 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
 - input:
   - `mixed adapter <owner/repo> <pr_number>`
 - actions:
-  1. `python3 gh-address-cr/scripts/cli.py run-once <owner/repo> <pr_number>`
-  2. `python3 gh-address-cr/scripts/cli.py run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
+  1. `python3 scripts/cli.py run-once <owner/repo> <pr_number>`
+  2. `python3 scripts/cli.py run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
   3. process GitHub threads and local findings as one session queue
-  4. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  4. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 ### `ingest json`
 
@@ -131,9 +131,9 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
   - `ingest json <owner/repo> <pr_number>`
 - actions:
   1. read provided findings JSON
-  2. `python3 gh-address-cr/scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
+  2. `python3 scripts/cli.py ingest-findings --input findings.json <owner/repo> <pr_number>`
   3. process local findings through session status transitions
-  4. `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>`
+  4. `python3 scripts/cli.py final-gate <owner/repo> <pr_number>`
 
 ## Producer rules
 
@@ -151,4 +151,4 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
 
 - GitHub review threads require both reply and resolve.
 - Local findings require valid status transitions and notes for terminal handling.
-- `python3 gh-address-cr/scripts/cli.py final-gate` must pass before any completion statement.
+- `python3 scripts/cli.py final-gate` must pass before any completion statement.

@@ -10,4 +10,4 @@ interface:
     4. Prefer the default internal fixer path for loop execution; use `--fixer-cmd` only for advanced external integrations.
     5. GitHub review threads require both reply and resolve.
     6. Local findings require valid terminal notes.
-    7. Before any completion statement, run `python3 gh-address-cr/scripts/cli.py final-gate ...`.
+    7. Before any completion statement, run `python3 scripts/cli.py final-gate ...`.

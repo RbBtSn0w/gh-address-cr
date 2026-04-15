@@ -33,16 +33,14 @@ def main() -> int:
             "Do not post to GitHub or mutate repository state.",
             "Write review artifacts into the provided workspace paths, not the project workspace.",
         ],
-        "adapter_backend": (
-            "python3 gh-address-cr/scripts/cli.py code-review-adapter --input -"
-        ),
+        "adapter_backend": ("python3 scripts/cli.py code-review-adapter --input -"),
         "review_to_findings_command": (
-            f"python3 gh-address-cr/scripts/cli.py review-to-findings --input - --output "
+            f"python3 scripts/cli.py review-to-findings --input - --output "
             f"{findings_file(args.repo, args.pr_number)} {args.repo} {args.pr_number} --workspace "
             f"{workspace_dir(args.repo, args.pr_number)}"
         ),
         "ingest_command": (
-            f"python3 gh-address-cr/scripts/cli.py control-plane {args.mode} code-review "
+            f"python3 scripts/cli.py control-plane {args.mode} code-review "
             f"--input - {args.repo} {args.pr_number}"
         ),
         "json_contract": [

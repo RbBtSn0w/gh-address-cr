@@ -138,7 +138,7 @@ def workspace_root(repo: str, pr_number: str) -> Path:
 
 
 def external_review_command(repo: str, pr_number: str) -> str:
-    return f"python3 gh-address-cr/scripts/cli.py review {repo} {pr_number}"
+    return f"python3 scripts/cli.py review {repo} {pr_number}"
 
 
 def _write_if_missing(path: Path, content: str = "") -> None:
@@ -270,7 +270,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         waiting_on = "findings_input"
         next_action = (
             f"`{command}` does not generate findings. "
-            f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
+            f"Provide findings JSON with `python3 scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
         )
     elif "Missing GitHub CLI" in combined_error or "gh executable" in combined_error:
         reason_code = "MISSING_GH_CLI"
@@ -408,7 +408,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>.",
             reason_code="MISSING_ADAPTER_COMMAND",
             waiting_on="adapter_command",
-            next_action=f"Provide an adapter command after `python3 gh-address-cr/scripts/cli.py adapter {repo} {pr_number}`.",
+            next_action=f"Provide an adapter command after `python3 scripts/cli.py adapter {repo} {pr_number}`.",
         )
 
     if args.command in HIGH_LEVEL_GH_COMMANDS and shutil.which("gh") is None:
@@ -468,7 +468,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             f"{args.command} requires findings JSON. This command does not generate findings. Pass --input <path> or --input - and provide findings through stdin.",
             reason_code="MISSING_FINDINGS_INPUT",
             waiting_on="findings_input",
-            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
+            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
         )
     return None
 
