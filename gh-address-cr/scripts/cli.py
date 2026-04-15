@@ -43,8 +43,14 @@ HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"review", "findings"}
 
 
+def inline_output_flags(command: str, passthrough_args: list[str]) -> set[str]:
+    if command == "adapter":
+        return set()
+    return {arg for arg in passthrough_args if arg in OUTPUT_FLAGS}
+
+
 def normalize_output_args(args: argparse.Namespace) -> bool:
-    inline_flags = {arg for arg in args.args if arg in OUTPUT_FLAGS}
+    inline_flags = inline_output_flags(args.command, args.args)
     requested_flags = set(inline_flags)
     if args.machine:
         requested_flags.add("--machine")
@@ -58,7 +64,8 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
         return False
     args.machine = "--machine" in requested_flags
     args.human = "--human" in requested_flags
-    args.args = [arg for arg in args.args if arg not in OUTPUT_FLAGS]
+    if args.command != "adapter":
+        args.args = [arg for arg in args.args if arg not in OUTPUT_FLAGS]
     return True
 
 
@@ -70,6 +77,8 @@ def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
     if command == "findings":
         return ["local", "json", *passthrough_args]
     if command == "adapter":
+        if len(passthrough_args) >= 3:
+            return ["mixed", "adapter", *passthrough_args[:2], "--", *passthrough_args[2:]]
         return ["mixed", "adapter", *passthrough_args]
     return passthrough_args
 
@@ -105,10 +114,12 @@ def alias_help(command: str) -> str:
         )
     if command == "adapter":
         return (
-            "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--human|--machine]\n\n"
+            "usage: cli.py [--human|--machine] adapter <owner/repo> <pr_number> <adapter_cmd...>\n\n"
             "High-level adapter entrypoint.\n\n"
             "Use when an adapter command prints findings JSON and then runs PR orchestration,\n"
             "including GitHub thread handling.\n"
+            "Arguments after <adapter_cmd...> are passed through to the adapter command unchanged.\n"
+            "Use global --human/--machine before `adapter` to change wrapper output mode.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -339,10 +350,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  cli.py review owner/repo 123 --input - [--human]\n"
             "  cli.py threads owner/repo 123 [--human]\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
-            "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py [--human]\n"
+            "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
             "Notes:\n"
             "  review consumes findings JSON; it does not generate findings.\n"
             "  High-level commands are the agent-safe public surface.\n"
+            "  For `adapter`, flags after <adapter_cmd...> are passed through to the adapter command.\n"
             "Utility commands:\n"
             "  cli.py review-to-findings owner/repo 123 --input finding-blocks.md\n"
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"

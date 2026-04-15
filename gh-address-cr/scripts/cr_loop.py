@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import session_engine as engine
-from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, validation_file, parse_dispatch, shield_adapter_passthrough, VALID_MODES, VALID_PRODUCERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -28,6 +28,7 @@ BLOCKED_EXIT = 5
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = shield_adapter_passthrough(argv)
     parser = argparse.ArgumentParser(
         description="Run a multi-iteration CR loop for gh-address-cr.",
         formatter_class=argparse.RawTextHelpFormatter,

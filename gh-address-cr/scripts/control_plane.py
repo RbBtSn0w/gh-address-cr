@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import uuid
-from python_common import findings_file, parse_dispatch, snapshot_file, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, parse_dispatch, shield_adapter_passthrough, snapshot_file, VALID_MODES, VALID_PRODUCERS
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
@@ -16,6 +16,7 @@ CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = shield_adapter_passthrough(argv)
     parser = argparse.ArgumentParser(
         description="High-level control-plane dispatcher for gh-address-cr.",
         formatter_class=argparse.RawTextHelpFormatter,

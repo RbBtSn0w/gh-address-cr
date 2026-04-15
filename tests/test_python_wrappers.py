@@ -52,10 +52,11 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_adapter_help_matches_orchestration_behavior(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "adapter", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py adapter", result.stdout)
+        self.assertIn("usage: cli.py [--human|--machine] adapter", result.stdout)
         self.assertIn("High-level adapter entrypoint.", result.stdout)
         self.assertIn("prints findings JSON and then runs PR orchestration", result.stdout)
         self.assertIn("including GitHub thread handling", result.stdout)
+        self.assertIn("passed through to the adapter command unchanged", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
 
     def test_cli_root_help_documents_converter_as_fixed_finding_blocks_only(self):
@@ -457,6 +458,64 @@ else:
         self.assertEqual(summary["next_action"], "No action required.")
         self.assertEqual(summary["reason_code"], "PASSED")
         self.assertIsNone(summary["waiting_on"])
+
+    def test_cli_adapter_preserves_child_machine_and_human_flags(self):
+        seen_args = Path(self.temp_dir.name) / "adapter-args.json"
+        adapter = Path(self.temp_dir.name) / "adapter.py"
+        adapter.write_text(
+            (
+                "import json\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                f"Path({str(seen_args)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+                "print(json.dumps([]))\n"
+            ),
+            encoding="utf-8",
+        )
+
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "adapter",
+                self.repo,
+                self.pr,
+                sys.executable,
+                str(adapter),
+                "--human",
+                "--machine",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(json.loads(seen_args.read_text(encoding="utf-8")), ["--human", "--machine"])
 
     def test_cli_review_fails_fast_when_gh_is_missing(self):
         self.env["PATH"] = str(self.bin_dir)

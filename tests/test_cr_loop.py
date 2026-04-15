@@ -61,6 +61,63 @@ class CRLoopCLITest(PythonScriptTestCase):
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["item_id"], "local-finding:open")
 
+    def test_cr_loop_mixed_adapter_accepts_adapter_command_flags(self):
+        adapter = Path(self.temp_dir.name) / "adapter_with_flags.py"
+        adapter.write_text(
+            (
+                "import argparse\n"
+                "import json\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--base', required=True)\n"
+                "args = parser.parse_args()\n"
+                "print(json.dumps([]))\n"
+            ),
+            encoding="utf-8",
+        )
+
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "mixed",
+                "adapter",
+                self.repo,
+                self.pr,
+                sys.executable,
+                str(adapter),
+                "--base",
+                "main",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cr-loop PASSED", result.stdout)
+
     def test_detect_needs_human_uses_supplied_session_without_reload(self):
         module = self.load_module()
         item_id = "local-finding:loop-threshold"

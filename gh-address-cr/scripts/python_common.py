@@ -371,6 +371,19 @@ VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
 
 
+def shield_adapter_passthrough(argv: list[str] | None) -> list[str]:
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if "--" in tokens:
+        return tokens
+    if len(tokens) < 5:
+        return tokens
+    if tokens[0] not in {"local", "mixed", "ingest"}:
+        return tokens
+    if tokens[1] != "adapter":
+        return tokens
+    return [*tokens[:4], "--", *tokens[4:]]
+
+
 def parse_dispatch(mode: str, parts: list[str]) -> tuple[str | None, str, str, list[str]]:
     """Shared dispatch parser used by both cr_loop.py and control_plane.py."""
     if mode == "remote":
