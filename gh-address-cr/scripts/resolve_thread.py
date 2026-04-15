@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from python_common import audit_event, handled_threads_file, run_cmd, session_engine
+from python_common import audit_event, handled_threads_file, gh_write_cmd, run_cmd, session_engine
 
 
 def append_handled(thread_id: str, repo: str, pr_number: str):
@@ -47,7 +47,7 @@ def main() -> int:
         return 0
 
     query = "mutation($threadId:ID!){ resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } } }"
-    result = run_cmd(
+    result = gh_write_cmd(
         ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}"],
         check=True,
     )
