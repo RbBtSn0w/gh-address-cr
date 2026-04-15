@@ -147,3 +147,41 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(submitted, [])
         self.assertEqual(payload["github-thread:THREAD_2"]["status"], "retryable")
         self.assertEqual(payload["github-thread:THREAD_2"]["error"], "graphql failed")
+
+    def test_batch_github_execute_marks_action_failed_when_thread_id_is_missing(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:MISSING_THREAD_ID",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+        submitted = []
+        audit_calls = []
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews = lambda *_args, **_kwargs: submitted
+        module.current_login = lambda: "tester"
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+        module.audit_event = lambda *args, **kwargs: audit_calls.append((args, kwargs))
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["github-thread:MISSING_THREAD_ID"]["status"], "failed")
+        self.assertIn("thread_id", payload["github-thread:MISSING_THREAD_ID"]["error"])
+        self.assertTrue(audit_calls)

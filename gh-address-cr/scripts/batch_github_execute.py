@@ -62,6 +62,11 @@ def main() -> int:
         for i, action in enumerate(chunk):
             thread_id = action.get("thread_id")
             if not thread_id:
+                had_error = True
+                results[action["item_id"]] = item_result(
+                    status="failed",
+                    error="GitHub thread actions require thread_id.",
+                )
                 continue
             if action.get("reply_body"):
                 query_parts.append(f"reply{i}: addPullRequestReviewThreadReply(input:{{pullRequestReviewThreadId: $reply{i}_threadId, body: $reply{i}_body}}) {{ comment {{ url }} }}")
@@ -142,7 +147,7 @@ def main() -> int:
 
     audit_event(
         "batch_github_execute",
-        "ok",
+        "partial" if had_error else "ok",
         args.repo,
         args.pr_number,
         args.audit_id,
@@ -152,6 +157,12 @@ def main() -> int:
             "pending_before": sorted(pending_before),
             "pending_after": current_pending,
             "submitted": submitted,
+            "result_status_counts": {
+                "succeeded": sum(1 for value in results.values() if value.get("status") == "succeeded"),
+                "failed": sum(1 for value in results.values() if value.get("status") == "failed"),
+                "unknown": sum(1 for value in results.values() if value.get("status") == "unknown"),
+                "retryable": sum(1 for value in results.values() if value.get("status") == "retryable"),
+            },
         },
     )
 

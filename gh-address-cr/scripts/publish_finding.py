@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from python_common import gh_read_cmd, gh_read_json, gh_write_json, run_cmd
+from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_json, run_cmd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -121,6 +121,21 @@ def main() -> int:
         print("-----")
         print(comment_body)
         print("-----")
+        audit_event(
+            "publish_finding",
+            "dry-run",
+            args.repo,
+            args.pr,
+            args.audit_id,
+            "Previewed local finding publication",
+            {
+                "item_id": args.local_item_id,
+                "path": path_value,
+                "line": int(line_value),
+                "position": diff_position,
+                "commit_id": head_sha,
+            },
+        )
         return 0
 
     payload = {
@@ -153,6 +168,23 @@ def main() -> int:
             "publish_finding",
         ],
         check=True,
+    )
+    audit_event(
+        "publish_finding",
+        "ok",
+        args.repo,
+        args.pr,
+        args.audit_id,
+        "Published local finding to GitHub review comments",
+        {
+            "item_id": args.local_item_id,
+            "path": path_value,
+            "line": int(line_value),
+            "position": diff_position,
+            "commit_id": head_sha,
+            "comment_id": comment.get("id"),
+            "comment_url": comment.get("html_url", ""),
+        },
     )
     return 0
 
