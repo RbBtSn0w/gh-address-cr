@@ -1425,9 +1425,9 @@ if args[:2] == ['api', 'graphql']:
     query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
     if 'submitPullRequestReview' in query:
         payload = json.loads(state_file.read_text())
-        payload['submitted'].append('101')
+        payload['submitted'].append('REV_NODE_101')
         state_file.write_text(json.dumps(payload))
-        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': '101'}}}}}}}}))
+        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': 'REV_NODE_101'}}}}}}}}))
     else:
         print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
 elif args[:2] == ['api', 'user']:
@@ -1473,7 +1473,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("https://example.test/reply", result.stdout)
         state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], ["node_101"])
+        self.assertEqual(state["submitted"], ["REV_NODE_101"])
 
     def test_post_reply_submits_preexisting_pending_review(self):
         gh = self.bin_dir / "gh"
