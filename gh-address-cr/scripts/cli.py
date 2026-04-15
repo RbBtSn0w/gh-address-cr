@@ -80,7 +80,9 @@ def alias_help(command: str) -> str:
             "usage: cli.py review <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
+            "This command does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.\n"
             "Provide findings JSON via --input <path> or --input - with stdin.\n"
+            "Missing --input fails immediately instead of waiting on stdin.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -97,6 +99,7 @@ def alias_help(command: str) -> str:
             "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
             "High-level local findings entrypoint.\n\n"
             "Use when findings already exist as JSON or are piped in through stdin.\n"
+            "Missing --input fails immediately instead of waiting on stdin.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -178,7 +181,10 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     elif "requires findings JSON" in combined_error or "requires findings input" in combined_error:
         reason_code = "MISSING_FINDINGS_INPUT"
         waiting_on = "findings_input"
-        next_action = f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
+        next_action = (
+            f"`{command}` does not generate findings. "
+            f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
+        )
     elif "Missing GitHub CLI" in combined_error or "gh executable" in combined_error:
         reason_code = "MISSING_GH_CLI"
         waiting_on = "github_cli"
@@ -279,10 +285,10 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             args,
             repo,
             pr_number,
-            f"{args.command} requires findings JSON. Pass --input <path> or --input - and provide findings through stdin.",
+            f"{args.command} requires findings JSON. This command does not generate findings. Pass --input <path> or --input - and provide findings through stdin.",
             reason_code="MISSING_FINDINGS_INPUT",
             waiting_on="findings_input",
-            next_action=f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
+            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
         )
 
     if args.command == "adapter" and len(args.args) < 3:
@@ -333,6 +339,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  cli.py threads owner/repo 123 [--human]\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
             "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py [--human]\n"
+            "Notes:\n"
+            "  review consumes findings JSON; it does not generate findings.\n"
+            "  High-level commands are the agent-safe public surface.\n"
             "Utility commands:\n"
             "  cli.py review-to-findings owner/repo 123 --input review.md\n"
         ),

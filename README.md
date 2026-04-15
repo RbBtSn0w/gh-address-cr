@@ -28,8 +28,10 @@ Agent-first reading order:
 Fail-fast contract:
 
 - `review` and `findings` require findings input explicitly.
+- `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
 - If `--input` is missing, the CLI fails immediately with a structured error instead of waiting on `stdin`.
 - `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
+- The high-level CLI commands are the agent-safe public surface. Treat low-level scripts as implementation details.
 
 `review` is the default orchestrator, but it still needs findings input from one of the paths above.
 High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.

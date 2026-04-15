@@ -30,8 +30,10 @@ Read this skill in this order when you are an AI agent:
 Fail-fast rules:
 
 - `review` and `findings` require explicit findings input.
+- `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
 - If `--input` is missing, the CLI fails immediately instead of waiting on `stdin`.
 - `review`, `threads`, and `adapter` require `gh` on `PATH` and fail immediately when it is missing.
+- The high-level CLI commands are the only agent-safe public surface. Treat low-level scripts as internal implementation details.
 
 Important:
 

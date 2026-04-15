@@ -42,6 +42,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: cli.py review", result.stdout)
         self.assertIn("High-level PR review entrypoint.", result.stdout)
+        self.assertIn("does not generate findings", result.stdout)
         self.assertIn("Default output is a structured JSON summary.", result.stdout)
         self.assertIn("--human", result.stdout)
         self.assertIn("--machine", result.stdout)
@@ -204,8 +205,10 @@ else:
         self.assertEqual(summary["reason_code"], "MISSING_FINDINGS_INPUT")
         self.assertEqual(summary["waiting_on"], "findings_input")
         self.assertIn("--input", summary["next_action"])
+        self.assertIn("does not generate findings", summary["next_action"])
         self.assertEqual(summary["repo"], self.repo)
         self.assertIn("findings JSON", result.stderr)
+        self.assertIn("does not generate findings", result.stderr)
 
     def test_cli_findings_machine_reports_pause_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
@@ -384,6 +387,7 @@ else:
         self.assertEqual(summary["reason_code"], "MISSING_FINDINGS_INPUT")
         self.assertEqual(summary["waiting_on"], "findings_input")
         self.assertIn("--input", summary["next_action"])
+        self.assertIn("does not generate findings", summary["next_action"])
 
     def test_cli_adapter_defaults_to_structured_summary(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
