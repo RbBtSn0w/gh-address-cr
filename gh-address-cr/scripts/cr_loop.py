@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import session_engine as engine
-from python_common import findings_file, loop_artifact_file, reply_file, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, validation_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -49,8 +49,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # parse_dispatch is now imported from python_common
 
 
-def run_cmd(cmd: list[str], *, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, input=stdin, text=True, capture_output=True)
+def run_cmd(cmd: list[str], *, stdin: str | None = None, retries: int = 3) -> subprocess.CompletedProcess[str]:
+    return common_run_cmd(cmd, input_text=stdin, retries=retries)
 
 
 def emit(result: subprocess.CompletedProcess[str]) -> None:

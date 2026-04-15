@@ -107,8 +107,25 @@ def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: s
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
-def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
+def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 3) -> subprocess.CompletedProcess:
+    import subprocess
+    import time
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
+            if not check and result.returncode != 0 and cmd[0] == "gh":
+                # If check=False, we still might want to retry gh commands if they look like transient network errors
+                if "502" in result.stderr or "503" in result.stderr or "Temporary failure" in result.stderr or "graphql error" in result.stderr.lower():
+                    if attempt < retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+            return result
+        except subprocess.CalledProcessError as e:
+            if attempt < retries - 1 and cmd[0] == "gh":
+                time.sleep(2 ** attempt)
+                continue
+            raise e
+    return result # Should never reach here
 
 
 def session_engine(args: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:

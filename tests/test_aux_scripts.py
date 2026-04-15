@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -108,6 +110,45 @@ else:
         result = self.run_cmd([sys.executable, str(BATCH_RESOLVE_PY), "--dry-run", str(approved)])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--repo and --pr are required", result.stderr)
+
+    def test_python_common_run_cmd_retries_transient_gh_failure(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "gh_retry_state.json"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file.as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"calls": 0}}))
+
+payload = json.loads(state_file.read_text())
+payload["calls"] += 1
+state_file.write_text(json.dumps(payload))
+if payload["calls"] == 1:
+    sys.stderr.write("graphql error\\n")
+    raise SystemExit(1)
+print(json.dumps({{"data": {{"ok": True}}}}))
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        spec = importlib.util.spec_from_file_location("python_common_module", PYTHON_COMMON_PY)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin_dir}:{original_path}"
+        try:
+            spec.loader.exec_module(module)
+            result = module.run_cmd(["gh", "api", "graphql"])
+        finally:
+            os.environ["PATH"] = original_path
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 2)
 
     def test_batch_resolve_rejects_invalid_lines(self):
         approved = Path(self.temp_dir.name) / "approved.txt"
