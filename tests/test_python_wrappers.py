@@ -1422,14 +1422,16 @@ if not state_file.exists():
 
 args = sys.argv[1:]
 if args[:2] == ['api', 'graphql']:
-    print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
+    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
+    if 'submitPullRequestReview' in query:
+        payload = json.loads(state_file.read_text())
+        payload['submitted'].append('101')
+        state_file.write_text(json.dumps(payload))
+        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': '101'}}}}}}}}))
+    else:
+        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'octocat'}}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews/101/events'):
-    payload = json.loads(state_file.read_text())
-    payload['submitted'].append('101')
-    state_file.write_text(json.dumps(payload))
-    print(json.dumps({{'ok': True}}))
 elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
     payload = json.loads(state_file.read_text())
     payload['review_calls'] += 1
@@ -1438,14 +1440,14 @@ elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/exam
         print(json.dumps([]))
     elif payload['review_calls'] == 1:
         print(json.dumps([
-            {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
-            {{'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
+            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
+            {{'node_id': 'REV_NODE_303', 'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
         ]))
     else:
         print(json.dumps([
-            {{'id': 101, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
-            {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
-            {{'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
+            {{'node_id': 'REV_NODE_101', 'id': 101, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
+            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
+            {{'node_id': 'REV_NODE_303', 'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
         ]))
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
@@ -1471,9 +1473,9 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("https://example.test/reply", result.stdout)
         state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], ["101"])
+        self.assertEqual(state["submitted"], ["node_101"])
 
-    def test_post_reply_does_not_submit_preexisting_pending_review(self):
+    def test_post_reply_submits_preexisting_pending_review(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             f"""#!/usr/bin/env python3
@@ -1487,14 +1489,16 @@ if not state_file.exists():
 
 args = sys.argv[1:]
 if args[:2] == ['api', 'graphql']:
-    print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-existing'}}}}}}}}))
+    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
+    if 'submitPullRequestReview' in query:
+        payload = json.loads(state_file.read_text())
+        payload['submitted'].append('777')
+        state_file.write_text(json.dumps(payload))
+        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': '777'}}}}}}}}))
+    else:
+        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-existing'}}}}}}}}))
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'octocat'}}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews/777/events'):
-    payload = json.loads(state_file.read_text())
-    payload['submitted'].append('777')
-    state_file.write_text(json.dumps(payload))
-    print(json.dumps({{'ok': True}}))
 elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
     payload = json.loads(state_file.read_text())
     payload['review_calls'] += 1
@@ -1503,8 +1507,8 @@ elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/exam
         print(json.dumps([]))
     else:
         print(json.dumps([
-            {{'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
-            {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
+            {{'node_id': 'REV_NODE_777', 'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
+            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
         ]))
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
@@ -1826,3 +1830,26 @@ else:
         self.assertEqual(item["status"], "CLOSED")
         self.assertTrue(item["handled"])
         self.assertEqual(item["decision"], "accept")
+
+    def test_mark_handled_requires_explicit_repo_and_pr(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:3] == ['repo', 'view', '--json']:
+    print(json.dumps({'nameWithOwner': 'octo/example'}))
+elif args[:3] == ['pr', 'view', '--json']:
+    print(json.dumps({'number': 77}))
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "mark-handled", "THREAD_NEEDS_CONTEXT"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--repo and --pr are required", result.stderr)

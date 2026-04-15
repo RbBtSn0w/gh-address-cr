@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
-import subprocess
-import json
 
 from python_common import handled_threads_file, session_engine
 
@@ -33,15 +31,6 @@ def main() -> int:
     parser.add_argument("--note", default="")
     parser.add_argument("item_id")
     args = parser.parse_args()
-
-    if not args.repo:
-        res = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner"], capture_output=True, text=True)
-        if res.returncode == 0:
-            args.repo = json.loads(res.stdout).get("nameWithOwner", "")
-    if not args.pr_number:
-        res = subprocess.run(["gh", "pr", "view", "--json", "number"], capture_output=True, text=True)
-        if res.returncode == 0:
-            args.pr_number = str(json.loads(res.stdout).get("number", ""))
 
     if not args.repo or not args.pr_number:
         raise SystemExit("Error: --repo and --pr are required if gh context is unavailable.")

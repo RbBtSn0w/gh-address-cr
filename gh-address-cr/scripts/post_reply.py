@@ -14,9 +14,9 @@ def current_login() -> str:
     return payload["login"]
 
 
-def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[int]:
+def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[str]:
     page = 1
-    pending: set[int] = set()
+    pending: set[str] = set()
     while True:
         response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"], check=True)
         reviews = json.loads(response.stdout)
@@ -27,29 +27,40 @@ def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[int]:
                 continue
             if (review.get("user") or {}).get("login") != login:
                 continue
-            pending.add(review["id"])
+            pending.add(review["node_id"])
         page += 1
     return pending
 
 
-def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[int]) -> list[int]:
-    submitted: list[int] = []
-    for review_id in review_ids:
-        run_cmd(
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/pulls/{pr_number}/reviews/{review_id}/events",
-                "-X",
-                "POST",
-                "-f",
-                "event=COMMENT",
-                "-f",
-                "body=Submitting pending automated review replies.",
-            ],
-            check=True,
-        )
-        submitted.append(review_id)
+def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> list[str]:
+    if not review_ids:
+        return []
+
+    submitted: list[str] = []
+
+    # We can batch GraphQL mutations if there are multiple
+    query_parts = []
+    variables = {}
+    flags = []
+
+    for i, node_id in enumerate(review_ids):
+        query_parts.append(f"submit{i}: submitPullRequestReview(input:{{pullRequestReviewId:$id{i}, event:COMMENT, body:$body{i}}}) {{ pullRequestReview {{ id }} }}")
+        variables[f"id{i}"] = "ID!"
+        variables[f"body{i}"] = "String!"
+        flags.extend(["-F", f"id{i}={node_id}", "-F", f"body{i}=Submitting pending automated review replies."])
+
+    var_str = ", ".join(f"${k}: {v}" for k, v in variables.items())
+    query = f"mutation({var_str}) {{ {' '.join(query_parts)} }}"
+
+    cmd = ["gh", "api", "graphql", "-f", f"query={query}"] + flags
+    result = run_cmd(cmd, check=True)
+    payload = json.loads(result.stdout)
+    data = payload.get("data") or {}
+
+    for i, node_id in enumerate(review_ids):
+        if f"submit{i}" in data and data[f"submit{i}"]:
+            submitted.append(node_id)
+
     return submitted
 
 
@@ -91,7 +102,7 @@ def main() -> int:
         "mutation($threadId:ID!,$body:String!){ "
         "addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){ comment{ url } } }"
     )
-    pending_before: set[int] = set()
+    pending_before: set[str] = set()
     login = ""
     if args.repo and args.pr_number:
         login = current_login()
