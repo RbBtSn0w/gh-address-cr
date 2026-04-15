@@ -12,19 +12,11 @@ For handled GitHub threads, replying and resolving are still two separate requir
 
 ## Public Interface
 
-`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with these agent-safe public entrypoints:
-
-- `review`
-- `threads`
-- `findings`
-- `adapter`
-- `review-to-findings`
-
-Public main entrypoint:
+`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint:
 
 - `review`
 
-Advanced/internal entrypoints:
+Advanced/internal integration entrypoints:
 
 - `threads`
 - `findings`
@@ -50,14 +42,13 @@ Fail-fast contract:
 
 High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
 
-Recommended invocation model:
+Minimal invocation model:
 
 ```text
 /gh-address-cr review <owner/repo> <pr_number>
-/gh-address-cr threads <owner/repo> <pr_number>
-/gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
-/gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
+
+Advanced/internal integrations are documented later in this README.
 
 Stable machine summary fields:
 
@@ -75,26 +66,11 @@ Stable machine summary fields:
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 
-Examples:
+Main entrypoint examples:
 
 ```text
 $gh-address-cr review <PR_URL>
-$gh-address-cr threads <PR_URL>
-$gh-address-cr findings <PR_URL> --input findings.json
-$gh-address-cr findings <PR_URL> --input - --sync
-$gh-address-cr adapter <PR_URL> <adapter_cmd...>
-$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
-$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
-$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
-
-For `adapter`, the last two examples mean different things:
-
-- `$gh-address-cr --human adapter ...`
-  - switches the wrapper output to human-oriented text
-- `$gh-address-cr adapter ... --human --machine`
-  - passes `--human --machine` to the adapter command itself
-  - it does not change the wrapper output mode
 
 High-level entrypoints:
 
@@ -219,7 +195,12 @@ Use these defaults:
 
 Do not stretch the PR just to silence a thread. If the item is valid but not appropriate for the current scope, defer it with a concrete rationale.
 
-For the automatic review workflow, use:
+## Advanced / Developer Integration
+
+The public user flow above does not require manual `--input`, producer selection, or mode routing.
+The following commands remain available for explicit integrations, repository-root automation, and debugging.
+
+For explicit automation or repository-root invocation, the main command is:
 
 ```bash
 python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
@@ -240,6 +221,26 @@ python3 gh-address-cr/scripts/cli.py review-to-findings <owner/repo> <pr_number>
 ```
 
 The converter writes the standardized findings JSON to the cache-backed PR workspace by default and also prints the JSON to stdout.
+
+Advanced CLI examples:
+
+```text
+$gh-address-cr threads <PR_URL>
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
+$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
+$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
+```
+
+For `adapter`, the last two examples mean different things:
+
+- `$gh-address-cr --human adapter ...`
+  - switches the wrapper output to human-oriented text
+- `$gh-address-cr adapter ... --human --machine`
+  - passes `--human --machine` to the adapter command itself
+  - it does not change the wrapper output mode
 
 `code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
 

@@ -77,6 +77,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("one public main entrypoint", text)
+        self.assertIn("Advanced/internal integration entrypoints:", text)
+        self.assertNotIn("with these agent-safe public entrypoints:", text)
         self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
@@ -145,3 +148,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)
         self.assertIn("如果你自己就是外部 review producer", readme_text)
         self.assertIn("不要只输出普通 Markdown 审查报告", readme_text)
+
+    def test_readme_moves_input_and_producer_routing_to_advanced_section(self):
+        readme_text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("## Advanced / Developer Integration", readme_text)
+        self.assertIn(
+            "The public user flow above does not require manual `--input`, producer selection, or mode routing.",
+            readme_text,
+        )
+        self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
