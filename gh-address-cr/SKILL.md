@@ -8,14 +8,6 @@ argument-hint: "<review|threads|findings|adapter> ..."
 
 Use this skill as the PR review orchestrator. It owns session state, intake routing, and the final gate.
 
-## Path Resolution
-
-Treat this `SKILL.md` as rooted at the `gh-address-cr/` directory.
-
-- Use `python3 scripts/cli.py ...` for commands shown inside this skill.
-- Do not prepend `gh-address-cr/` to paths that already live inside this skill directory.
-- Use `references/*.md` when you need supplemental guidance beyond this contract.
-
 ## Usage
 
 ```text
