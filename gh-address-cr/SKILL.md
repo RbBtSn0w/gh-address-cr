@@ -1,6 +1,6 @@
 ---
 name: gh-address-cr
-description: This skill is used when a GitHub Pull Request needs review-thread reply/resolve handling, local findings ingestion, and a mandatory final gate in one PR-scoped session.
+description: Use when a GitHub Pull Request needs review-thread reply and resolve handling, findings ingestion, and a mandatory final gate in one PR-scoped session.
 argument-hint: "<review|threads|findings|adapter> ..."
 ---
 
@@ -21,17 +21,18 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 
 Read this skill in this order when you are an AI agent:
 
-1. Decide whether you already have findings JSON.
-2. If you already have a real JSON file, pass it with `--input <path>`.
-3. If findings are produced in the current step, pipe them through `stdin` with `--input -`.
-4. If the upstream tool only prints Markdown review blocks, convert them first with `review-to-findings`.
-5. Then invoke the `gh-address-cr` entrypoint that consumes those findings.
+1. If you already have findings JSON, use `findings --input <path>|-`.
+2. If you have fixed-format review blocks, convert them with `review-to-findings`, then use `findings`.
+3. If you only need GitHub review threads, use `threads`.
+4. If you want the full PR orchestration flow and already have findings JSON, use `review --input <path>|-`.
+5. If your upstream producer is an adapter command, use `adapter <owner/repo> <pr_number> <adapter_cmd...>`.
 
 Fail-fast rules:
 
 - `review` and `findings` require explicit findings input.
 - `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
 - If `--input` is missing, the CLI fails immediately instead of waiting on `stdin`.
+- `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` require `gh` on `PATH` and fail immediately when it is missing.
 - The high-level CLI commands are the only agent-safe public surface. Treat low-level scripts as internal implementation details.
 
@@ -40,7 +41,8 @@ Important:
 - `review` is the default end-to-end orchestrator, not a hidden review producer.
 - `threads` handles GitHub threads only.
 - `findings` handles existing findings JSON only.
-- `adapter` handles a command that prints findings JSON.
+- `adapter` runs an adapter command that prints findings JSON and then orchestrates the PR session, including GitHub thread handling.
+- `review-to-findings` is only a converter. It is not a review engine and it is not a general Markdown parser.
 
 Recommended high-level entrypoints:
 
@@ -52,47 +54,60 @@ Recommended high-level entrypoints:
 - `findings`
   - existing findings JSON only
 - `adapter`
-  - adapter command prints findings JSON
+  - adapter-produced findings plus PR orchestration
+- `review-to-findings`
+  - fixed-format finding blocks to findings JSON
 
 Examples:
 
 ```text
-$gh-address-cr review <PR_URL>
+$gh-address-cr review <PR_URL> --input findings.json
+$gh-address-cr review <PR_URL> --input -
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
 
-Advanced dispatch model:
+Minimal valid `review-to-findings` input:
 
-- `mode`
-  - `remote`: GitHub review threads only
-  - `local`: local findings only
-  - `mixed`: GitHub review threads plus local findings
-  - `ingest`: import existing findings JSON
-- `producer`
-  - `code-review`: any review-style producer that emits structured findings JSON first
-  - `json`: findings already exist as JSON
-  - `adapter`: an adapter command prints findings JSON
-
-Examples:
-
-```text
-// A review skill runs first, then gh-address-cr ingests the JSON
-<review-command> <PR_URL> --output findings.json
-$gh-address-cr findings <PR_URL> --input findings.json --sync
-
-// The same pattern with stdin instead of a file
-<review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
-
-// Markdown-only review output becomes findings JSON first
-<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
-$gh-address-cr findings <PR_URL> --input findings.json --sync
-
-// The upstream producer is still category=code-review even if the tool name differs
-$gh-address-cr review <PR_URL>
+````text
+```finding
+title: Missing null guard
+path: src/example.py
+line: 12
+body: Potential null dereference.
 ```
+````
+
+This converter rejects plain narrative Markdown review output.
+
+## Machine Summary Contract
+
+High-level commands emit structured JSON by default. Agents should consume these fields, not parse human prose:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `exit_code`
+
+`reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
+
+## Advanced References
+
+- Dispatch details: `references/mode-producer-matrix.md`
+- Review triage checklist: `references/cr-triage-checklist.md`
+- Low-level scripts are implementation details, not the public agent surface.
+
+Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.
 
 ## Entry Contract
 
@@ -117,22 +132,10 @@ These high-level paths are fully operational now:
 
 The internal iteration and dispatch layers are implementation details and are not part of the public entrypoint surface.
 
-For `producer=code-review`, the execution model is:
+Advanced producer and dispatch details live in:
 
-- generate the bridge prompt with `prepare-code-review`
-- run the external review step and produce findings JSON first
-- if findings already exist as a real file, pass that file with `--input <path>`
-- if findings are being produced in the current step, prefer piping them through `stdin` with `--input -`
-- let the intake layer pass that JSON through the built-in `code-review-adapter`
-
-`producer=code-review` is a contract label, not a hardcoded dependency on one specific skill name.
-
-- It can be `/code-review`
-- It can be `/code-review-aa`
-- It can be `/code-review-bb`
-- It can be an agent-native review command that only runs before `gh-address-cr`
-
-The only requirement is that the upstream review step emits findings in the accepted JSON shapes. Do not assume `gh-address-cr` directly runs another review skill by itself. The review step is still external; the intake path is now adapter-backed and stable.
+- `references/mode-producer-matrix.md`
+- `references/cr-triage-checklist.md`
 
 ## Non-Negotiable Rule
 
@@ -184,7 +187,8 @@ The default review entrypoint runs repeated intake, item selection, action execu
 - `code-review` is a producer, not the session owner.
 - `code-review` here means "review-style findings producer", not one mandatory skill name.
 - `code-review` now uses the built-in `code-review-adapter` backend for structured intake.
-- If the upstream review output is Markdown review blocks, normalize it with `review-to-findings` before ingestion.
+- If the upstream review output is fixed-format `finding` blocks, normalize it with `review-to-findings` before ingestion.
+- `review-to-findings` does not accept arbitrary Markdown prose.
 - `gh-address-cr` only assumes the normalized finding contract:
   - `title`
   - `body`
@@ -213,10 +217,10 @@ The default review entrypoint runs repeated intake, item selection, action execu
 When `gh-address-cr` is the main entrypoint, prefer:
 
 ```text
-$gh-address-cr review <PR_URL>
+$gh-address-cr review <PR_URL> --input -
 
 Use the upstream review producer to emit findings JSON first, then let $gh-address-cr ingest, process, and gate the PR session.
-If the upstream tool emits Markdown review blocks, convert them first with `review-to-findings`, then feed the resulting JSON to `gh-address-cr`.
+If the upstream tool emits fixed-format `finding` blocks, convert them first with `review-to-findings`, then feed the resulting JSON to `gh-address-cr`.
 If the findings are produced in the current step, prefer `--input -` and stdin.
 ```
 
@@ -224,7 +228,7 @@ When an external review command must run first and `gh-address-cr` can only come
 
 ```text
 First run <review-command> on <PR_URL> and emit findings JSON, not Markdown only.
-If the command only emits Markdown review blocks, convert them first with `review-to-findings`.
+If the command only emits fixed-format `finding` blocks, convert them first with `review-to-findings`.
 Then hand the findings to $gh-address-cr using `findings` or `review`, depending on whether the input is already a JSON file.
 Use --input <path> only for an already-existing JSON file; otherwise prefer --input - with stdin.
 Add `--sync` when you want missing findings from the same source to auto-close on refresh.
