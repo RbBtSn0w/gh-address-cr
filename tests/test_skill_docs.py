@@ -90,6 +90,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("run `python3 scripts/submit_feedback.py`", text)
         self.assertIn("contradictory instructions", text)
         self.assertIn("missing automation", text)
+        self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", text)
+        self.assertIn("expected wait states", text)
         self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
 
     def test_repo_issue_template_documents_ai_agent_feedback_fields(self):
