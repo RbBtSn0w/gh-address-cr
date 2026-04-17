@@ -405,7 +405,24 @@ def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iter
     return request_path
 
 
-def build_github_fix_reply(action: dict, item: dict, validation_commands: list[str]) -> tuple[str | None, str]:
+def normalize_validation_commands(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        command = value.strip()
+        return [command] if command else []
+    if isinstance(value, (list, tuple)):
+        commands = []
+        for entry in value:
+            command = str(entry or "").strip()
+            if command:
+                commands.append(command)
+        return commands
+    command = str(value).strip()
+    return [command] if command else []
+
+
+def build_github_fix_reply(action: dict, item: dict, validation_commands: object) -> tuple[str | None, str]:
     fix_reply = action.get("fix_reply")
     if not isinstance(fix_reply, dict):
         return None, "GitHub fix actions require fix_reply. Raw reply_markdown is not allowed for fix."
@@ -424,9 +441,10 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: list[s
     if not files:
         return None, "GitHub fix actions require fix_reply.files."
 
+    normalized_validation_commands = normalize_validation_commands(validation_commands)
     severity = str(fix_reply.get("severity") or item.get("severity") or "P2").strip().upper()
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
-    test_command = str(fix_reply.get("test_command") or " && ".join(validation_commands)).strip()
+    test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
     test_result = str(fix_reply.get("test_result") or ("passed" if test_command else "")).strip()
     if not test_command:
         return None, "GitHub fix actions require fix_reply.test_command or validation_commands."
@@ -597,7 +615,7 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
             persist=True,
         )
 
-        validation_commands = list(action.get("validation_commands") or []) + list(args.validation_cmd or [])
+        validation_commands = normalize_validation_commands(action.get("validation_commands")) + normalize_validation_commands(args.validation_cmd)
         if resolution == "fix" and validation_commands:
             ok, validation_error = run_validation(validation_commands)
             write_validation_record(repo, pr_number, run_id=run_id, iteration=iteration, item_id=item["item_id"], commands=validation_commands, ok=ok, error=validation_error)

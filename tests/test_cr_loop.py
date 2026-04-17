@@ -605,6 +605,234 @@ else:
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
 
+    def test_handle_batch_github_fix_normalizes_string_validation_command(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_FIX_STRING_VALIDATION"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_FIX_STRING_VALIDATION",
+                    "title": "Normalize string validation command",
+                    "body": "String validation commands should not be split into characters.",
+                    "path": "src/string_validation.py",
+                    "line": 17,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/string-validation",
+                    "url": "https://example.test/thread/string-validation",
+                    "first_url": "https://example.test/thread/string-validation",
+                    "latest_url": "https://example.test/thread/string-validation",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        captured = {}
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "fix",
+                    "note": "Normalized string validation commands.",
+                    "fix_reply": {
+                        "commit_hash": "abc123",
+                        "files": ["src/string_validation.py"],
+                    },
+                    "validation_commands": "python3 -m unittest tests.test_cr_loop",
+                },
+                "",
+            )
+
+        def fake_run_validation(commands: list[str]):
+            captured["commands"] = commands
+            return True, ""
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                payload = json.loads(stdin or "[]")
+                captured["reply_body"] = payload[0]["reply_body"]
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/string-validation"}}),
+                    "",
+                )
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                updates = json.loads(stdin or "[]")
+                session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
+                for update in updates:
+                    session_data["items"][update["item_id"]].update(update)
+                self.session_file().write_text(json.dumps(session_data), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        module.run_fixer = fake_run_fixer
+        module.run_validation = fake_run_validation
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
+
+        args = types.SimpleNamespace(fixer_cmd="fixer", validation_cmd=[], max_iterations=10)
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-string-validation",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "done")
+        self.assertEqual(error, "")
+        self.assertEqual(captured["commands"], ["python3 -m unittest tests.test_cr_loop"])
+        self.assertIn("`python3 -m unittest tests.test_cr_loop`", captured["reply_body"])
+
+    def test_handle_batch_github_fix_normalizes_mixed_validation_command_list(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_FIX_MIXED_VALIDATION"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_FIX_MIXED_VALIDATION",
+                    "title": "Normalize mixed validation command list",
+                    "body": "Validation commands should coerce list elements to strings and drop empties.",
+                    "path": "src/mixed_validation.py",
+                    "line": 23,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/mixed-validation",
+                    "url": "https://example.test/thread/mixed-validation",
+                    "first_url": "https://example.test/thread/mixed-validation",
+                    "latest_url": "https://example.test/thread/mixed-validation",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        captured = {}
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "fix",
+                    "note": "Normalized mixed validation commands.",
+                    "fix_reply": {
+                        "commit_hash": "def456",
+                        "files": ["src/mixed_validation.py"],
+                    },
+                    "validation_commands": ["python3 -m unittest tests.test_cr_loop", 123, "  ", None],
+                },
+                "",
+            )
+
+        def fake_run_validation(commands: list[str]):
+            captured["commands"] = commands
+            return True, ""
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                payload = json.loads(stdin or "[]")
+                captured["reply_body"] = payload[0]["reply_body"]
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/mixed-validation"}}),
+                    "",
+                )
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                updates = json.loads(stdin or "[]")
+                session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
+                for update in updates:
+                    session_data["items"][update["item_id"]].update(update)
+                self.session_file().write_text(json.dumps(session_data), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        module.run_fixer = fake_run_fixer
+        module.run_validation = fake_run_validation
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
+
+        args = types.SimpleNamespace(fixer_cmd="fixer", validation_cmd=[], max_iterations=10)
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-mixed-validation",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "done")
+        self.assertEqual(error, "")
+        self.assertEqual(captured["commands"], ["python3 -m unittest tests.test_cr_loop", "123"])
+        self.assertIn("`python3 -m unittest tests.test_cr_loop && 123`", captured["reply_body"])
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
