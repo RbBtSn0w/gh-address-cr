@@ -383,6 +383,228 @@ else:
         self.assertEqual(updated["reply_url"], "https://example.test/reply/retryable")
         self.assertEqual(updated["last_auto_failure"], "graphql failed")
 
+    def test_handle_batch_github_fix_generates_reply_from_structured_fix_payload(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_FIX_TEMPLATE"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_FIX_TEMPLATE",
+                    "title": "Use template",
+                    "body": "Fix replies must use the canonical template.",
+                    "path": "src/template_fix.py",
+                    "line": 21,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/template-fix",
+                    "url": "https://example.test/thread/template-fix",
+                    "first_url": "https://example.test/thread/template-fix",
+                    "latest_url": "https://example.test/thread/template-fix",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        captured = {}
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "fix",
+                    "note": "Applied the focused fix.",
+                    "fix_reply": {
+                        "commit_hash": "abc123",
+                        "files": ["src/template_fix.py", "tests/test_template_fix.py"],
+                        "why": "Aligned the reply flow with the canonical fix template.",
+                    },
+                    "validation_commands": ["python3 -m unittest tests.test_cr_loop"],
+                },
+                "",
+            )
+
+        def fake_run_validation(commands: list[str]):
+            self.assertEqual(commands, ["python3 -m unittest tests.test_cr_loop"])
+            return True, ""
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                payload = json.loads(stdin or "[]")
+                self.assertEqual(len(payload), 1)
+                captured["reply_body"] = payload[0]["reply_body"]
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            item_id: {
+                                "status": "succeeded",
+                                "reply_url": "https://example.test/reply/template-fix",
+                            }
+                        }
+                    ),
+                    "",
+                )
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                updates = json.loads(stdin or "[]")
+                session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
+                for update in updates:
+                    session_data["items"][update["item_id"]].update(update)
+                self.session_file().write_text(json.dumps(session_data), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        module.run_fixer = fake_run_fixer
+        module.run_validation = fake_run_validation
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
+
+        args = types.SimpleNamespace(
+            fixer_cmd="fixer",
+            validation_cmd=[],
+            max_iterations=10,
+        )
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-fix-template",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "done")
+        self.assertEqual(error, "")
+        self.assertIn("Fixed in `abc123`.", captured["reply_body"])
+        self.assertIn("Severity: `P2`", captured["reply_body"])
+        self.assertIn("What I changed:", captured["reply_body"])
+        self.assertIn("- `src/template_fix.py`: updated per CR scope", captured["reply_body"])
+        self.assertIn("Why this addresses the CR:", captured["reply_body"])
+        self.assertIn("Validation:", captured["reply_body"])
+        self.assertIn("`python3 -m unittest tests.test_cr_loop`", captured["reply_body"])
+        self.assertIn("Result: passed", captured["reply_body"])
+
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
+        self.assertEqual(updated["status"], "CLOSED")
+        self.assertTrue(updated["handled"])
+        self.assertTrue(updated["reply_posted"])
+
+    def test_handle_batch_github_fix_rejects_raw_reply_markdown_without_fix_template_payload(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_RAW_FIX_REPLY"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_RAW_FIX_REPLY",
+                    "title": "Reject raw fix reply",
+                    "body": "Raw fix replies should not bypass the template.",
+                    "path": "src/raw_fix_reply.py",
+                    "line": 8,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/raw-fix",
+                    "url": "https://example.test/thread/raw-fix",
+                    "first_url": "https://example.test/thread/raw-fix",
+                    "latest_url": "https://example.test/thread/raw-fix",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "fix",
+                    "note": "Fixed it.",
+                    "reply_markdown": "Custom reply that bypasses the template.",
+                    "validation_commands": [],
+                },
+                "",
+            )
+
+        module.run_fixer = fake_run_fixer
+        module.emit = lambda _result: None
+        args = types.SimpleNamespace(fixer_cmd="fixer", validation_cmd=[], max_iterations=3)
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-raw-fix-reply",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "needs_human")
+        self.assertIn("fix_reply", error)
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
+        self.assertTrue(updated["needs_human"])
+        self.assertFalse(updated["reply_posted"])
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(

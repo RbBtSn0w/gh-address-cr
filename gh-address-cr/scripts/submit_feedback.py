@@ -166,7 +166,7 @@ def sanitize_command(value: str | None) -> str | None:
             expects_sensitive_value = True
             continue
         if "=" in token:
-            key, raw_value = token.split("=", 1)
+            key, _ = token.split("=", 1)
             if key.lower() in SENSITIVE_VALUE_FLAGS:
                 sanitized_tokens.append(f"{key}=[redacted]")
                 continue

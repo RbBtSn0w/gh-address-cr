@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from generate_reply import fix_reply as render_fix_reply
 import session_engine as engine
 from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, trace_event, validation_file, parse_dispatch, shield_adapter_passthrough, VALID_MODES, VALID_PRODUCERS
 
@@ -393,13 +394,53 @@ def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iter
             "Review the selected item using the current PR context.",
             "Decide one resolution: fix, clarify, or defer.",
             "Produce note text for terminal handling.",
-            "If the item is a GitHub thread, also produce reply_markdown.",
+            "If the item is a GitHub thread and resolution=fix, return fix_reply instead of handwritten reply_markdown.",
+            "fix_reply must include commit_hash and files, and should include why; test_command/test_result may be omitted when validation_commands are provided.",
+            "If the item is a GitHub thread and resolution=clarify or defer, produce reply_markdown.",
             "Write any generated reply markdown inside the PR artifacts directory, not the project workspace.",
         ],
         **payload,
     }
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return request_path
+
+
+def build_github_fix_reply(action: dict, item: dict, validation_commands: list[str]) -> tuple[str | None, str]:
+    fix_reply = action.get("fix_reply")
+    if not isinstance(fix_reply, dict):
+        return None, "GitHub fix actions require fix_reply. Raw reply_markdown is not allowed for fix."
+
+    commit_hash = str(fix_reply.get("commit_hash") or "").strip()
+    if not commit_hash:
+        return None, "GitHub fix actions require fix_reply.commit_hash."
+
+    files_value = fix_reply.get("files")
+    if isinstance(files_value, str):
+        files = [part.strip() for part in files_value.split(",") if part.strip()]
+    elif isinstance(files_value, list):
+        files = [str(part).strip() for part in files_value if str(part).strip()]
+    else:
+        files = []
+    if not files:
+        return None, "GitHub fix actions require fix_reply.files."
+
+    severity = str(fix_reply.get("severity") or item.get("severity") or "P2").strip().upper()
+    why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
+    test_command = str(fix_reply.get("test_command") or " && ".join(validation_commands)).strip()
+    test_result = str(fix_reply.get("test_result") or ("passed" if test_command else "")).strip()
+    if not test_command:
+        return None, "GitHub fix actions require fix_reply.test_command or validation_commands."
+    if not test_result:
+        return None, "GitHub fix actions require fix_reply.test_result or a derivable validation result."
+
+    try:
+        reply_markdown = render_fix_reply(
+            severity,
+            [commit_hash, ",".join(files), test_command, test_result, why],
+        )
+    except SystemExit as exc:
+        return None, str(exc) or "Invalid fix_reply payload."
+    return reply_markdown, ""
 
 
 def run_validation(commands: list[str]) -> tuple[bool, str]:
@@ -587,9 +628,13 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
                 continue  # Skip this item for now, retry next wave
 
         if item["item_kind"] == "github_thread":
-            reply_markdown = action.get("reply_markdown")
+            if resolution == "fix":
+                reply_markdown, error = build_github_fix_reply(action, item, validation_commands)
+            else:
+                reply_markdown = action.get("reply_markdown")
+                error = ""
             if not reply_markdown:
-                error = "GitHub thread actions require reply_markdown."
+                error = error or "GitHub thread actions require reply_markdown."
                 record_auto_attempt(
                     repo,
                     pr_number,
