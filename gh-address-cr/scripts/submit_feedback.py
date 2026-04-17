@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shlex
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,8 +34,8 @@ VALID_CATEGORIES = (
     "integration-gap",
     "other",
 )
-POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?P<path>(?<!:)(?<!/)/(?:[^\s`]+))")
-WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?P<path>[A-Za-z]:\\[^\s`]+)")
+POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>/[^\s`\"')\]}>;,]+)")
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>[A-Za-z]:\\[^\s`\"')\]}>;,]+)")
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 TOKEN_PATTERNS = (
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
@@ -95,6 +96,10 @@ def compact_absolute_path(value: str) -> str:
     parts = [part for part in normalized.split("/") if part]
     if parts and re.match(r"^[A-Za-z]:$", parts[0]):
         parts = parts[1:]
+    if len(parts) >= 2 and parts[0] in {"Users", "home"}:
+        parts = parts[2:]
+    elif len(parts) >= 3 and parts[:2] == ["var", "home"]:
+        parts = parts[3:]
     if not parts:
         return "..."
     return f".../{'/'.join(parts[-3:])}"
@@ -112,8 +117,14 @@ def redact_secret_token(value: str) -> str:
 
 def sanitize_text(value: str) -> str:
     sanitized = redact_secret_token(value)
-    sanitized = POSIX_ABSOLUTE_PATH_RE.sub(lambda match: compact_absolute_path(match.group("path")), sanitized)
-    sanitized = WINDOWS_ABSOLUTE_PATH_RE.sub(lambda match: compact_absolute_path(match.group("path")), sanitized)
+    sanitized = POSIX_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    sanitized = WINDOWS_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
     return sanitized
 
 
@@ -442,6 +453,16 @@ def emit_result(payload: dict, exit_code: int, *, error_message: str | None = No
     return exit_code
 
 
+def format_lookup_error(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+    else:
+        detail = str(exc).strip()
+    if not detail:
+        detail = exc.__class__.__name__
+    return sanitize_text(f"feedback issue dedupe lookup failed: {detail}")
+
+
 def audit_scope(args: argparse.Namespace) -> tuple[str, str]:
     return args.using_repo or args.target_repo, args.using_pr or DEFAULT_FEEDBACK_PR
 
@@ -518,7 +539,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return emit_result(payload, 0)
 
-    dedupe_status, existing_issue = find_existing_feedback_issue(args.target_repo, fingerprint, args.cooldown_hours)
+    try:
+        dedupe_status, existing_issue = find_existing_feedback_issue(args.target_repo, fingerprint, args.cooldown_hours)
+    except (json.JSONDecodeError, subprocess.CalledProcessError, SystemExit) as exc:
+        payload["error"] = format_lookup_error(exc)
+        write_feedback_audit(
+            args,
+            "failed",
+            "Feedback issue dedupe lookup failed",
+            {"target_repo": args.target_repo, "fingerprint": fingerprint, "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
+
     if existing_issue is not None and dedupe_status is not None:
         payload["status"] = dedupe_status
         payload["issue_number"] = existing_issue.get("number")

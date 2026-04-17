@@ -256,3 +256,59 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertEqual(payload["error"], "feedback issue response was not valid JSON")
         self.assertTrue(audits)
         self.assertIn("feedback issue response was not valid JSON", stderr.getvalue())
+
+    def test_submit_feedback_audits_lookup_failure_with_structured_output(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_lookup_failure_under_test")
+
+        audits = []
+        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
+
+        def failing_gh_read_json(*args, **kwargs):
+            raise subprocess.CalledProcessError(1, args[0], "", "gh auth failed")
+
+        module.gh_read_json = failing_gh_read_json
+        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "{}", "")
+
+        with patched_argv(
+            [
+                "submit_feedback.py",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "dedupe lookup failure",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIsNone(payload["issue_number"])
+        self.assertIsNone(payload["issue_url"])
+        self.assertIn("dedupe lookup failed", payload["error"])
+        self.assertIn("gh auth failed", payload["error"])
+        self.assertTrue(audits)
+        self.assertIn("dedupe lookup failed", stderr.getvalue())
+
+    def test_submit_feedback_sanitize_text_only_redacts_absolute_paths(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_under_test")
+
+        sanitized = module.sanitize_text(
+            "Repo octo/example uses tmp/file.json and https://example.com/docs/a "
+            "plus /Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "and C:\\Users\\snow\\workspace\\notes.txt."
+        )
+
+        self.assertIn("octo/example", sanitized)
+        self.assertIn("tmp/file.json", sanitized)
+        self.assertIn("https://example.com/docs/a", sanitized)
+        self.assertIn(".../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn(".../workspace/notes.txt", sanitized)
+        self.assertNotIn("/Users/snow/workspace", sanitized)
+        self.assertNotIn("C:\\Users\\snow\\workspace\\notes.txt", sanitized)
