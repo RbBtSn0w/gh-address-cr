@@ -11,3 +11,6 @@ interface:
     5. GitHub review threads require both reply and resolve.
     6. Local findings require valid terminal notes.
     7. Before any completion statement, run `python3 scripts/cli.py final-gate ...` and summarize the current-run queue counts in natural language. Include total, new in this run, unresolved, and handled in this run for both GitHub threads and local findings; prefer the human-readable `Current Run Snapshot` block and use raw machine count lines only as fallback evidence.
+    8. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `python3 scripts/submit_feedback.py` before giving up. Do not file feedback issues for normal PR findings or codebase bugs.
+    9. Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues. Prefer safe technical diagnostics such as failing command, exit code, status, reason_code, waiting_on, run_id, and skill version.
+    10. When possible, provide `--using-repo` and `--using-pr` so feedback can auto-collect the latest local machine summary, session metrics, audit summary hash, and cached PR head SHA. Repeated feedback is deduplicated by fingerprint.

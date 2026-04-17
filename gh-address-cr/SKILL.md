@@ -305,6 +305,26 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 
 `gh-address-cr` should stop iteration and escalate rather than forcing an implementation under uncertainty.
 
+## Agent Feedback
+
+- when the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
+- use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
+- do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
+- do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
+- prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- when `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
+- repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
+- Use `python3 scripts/submit_feedback.py` with explicit fields so the body matches the repository issue format:
+  - `--category`
+  - `--title`
+  - `--summary`
+  - `--expected`
+  - `--actual`
+  - optional `--source-command`, `--failing-command`, `--exit-code`, `--status`, `--reason-code`, `--waiting-on`, `--run-id`, `--skill-version`, `--using-repo`, `--using-pr`, `--artifact`, and `--notes`
+- Example:
+  - `python3 scripts/submit_feedback.py --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous." --source-command "python3 scripts/cli.py review owner/repo 123" --failing-command "python3 scripts/cli.py final-gate owner/repo 123" --exit-code 5 --status BLOCKED --reason-code WAITING_FOR_FIX --waiting-on human_fix --run-id cr-loop-20260417T120000Z --skill-version 1.2.0 --using-repo owner/repo --using-pr 123 --artifact /tmp/loop-request.json`
+  - `python3 scripts/cli.py submit-feedback --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous."`
+
 ## Required Evidence
 
 - Accepted GitHub thread:
@@ -360,6 +380,7 @@ For run-scoped diagnostics, use:
 - checklist: `references/cr-triage-checklist.md`
 - stable operator surface: `python3 scripts/cli.py`
 - preferred automation surface: `python3 scripts/cli.py ...`
+- AI agent feedback helper: `python3 scripts/submit_feedback.py`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

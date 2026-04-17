@@ -100,6 +100,10 @@ def normalized_handoff_findings_file(repo: str, pr_number: str) -> Path:
     return findings_file(repo, pr_number, "incoming-findings.normalized.json")
 
 
+def last_machine_summary_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "last-machine-summary.json"
+
+
 def reply_file(repo: str, pr_number: str, name: str) -> Path:
     return workspace_dir(repo, pr_number) / name
 

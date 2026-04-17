@@ -29,6 +29,7 @@ PREPARE_CODE_REVIEW_PY = SCRIPTS_DIR / "prepare_code_review.py"
 CODE_REVIEW_ADAPTER_PY = SCRIPTS_DIR / "code_review_adapter.py"
 REVIEW_TO_FINDINGS_PY = SCRIPTS_DIR / "review_to_findings.py"
 PYTHON_COMMON_PY = SCRIPTS_DIR / "python_common.py"
+SUBMIT_FEEDBACK_PY = SCRIPTS_DIR / "submit_feedback.py"
 
 
 class SessionEngineTestCase(unittest.TestCase):

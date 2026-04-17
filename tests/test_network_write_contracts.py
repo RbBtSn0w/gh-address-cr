@@ -224,3 +224,35 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertEqual(payload["error"], "publish response was not valid JSON")
         self.assertTrue(audits)
         self.assertIn("publish response was not valid JSON", stderr.getvalue())
+
+    def test_submit_feedback_audits_invalid_json_response(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_under_test")
+
+        audits = []
+        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
+        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
+
+        with patched_argv(
+            [
+                "submit_feedback.py",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "bad response",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["error"], "feedback issue response was not valid JSON")
+        self.assertTrue(audits)
+        self.assertIn("feedback issue response was not valid JSON", stderr.getvalue())

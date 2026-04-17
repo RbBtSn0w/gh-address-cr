@@ -214,6 +214,49 @@ Ready-to-use prompt variants:
 继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
 ```
 
+## AI Agent Feedback
+
+When the skill itself blocks progress, file a feedback issue in this repository instead of silently dropping the problem.
+
+- Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
+- Do not file feedback issues for normal PR findings, target-repository bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
+- Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
+- Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- When `--using-repo` and `--using-pr` are provided, the helper auto-collects the latest local evidence from the PR workspace when available:
+  - `last-machine-summary.json`
+  - `session.json`
+  - `audit_summary.md`
+  - cached PR head SHA from `github_pr_cache.json`
+- The helper deduplicates repeated reports by fingerprint and skips creating a new issue when the same feedback issue is already open or was closed recently within the cooldown window.
+- The repository issue format lives in `.github/ISSUE_TEMPLATE/ai-agent-feedback.md`.
+- Repository-root helper command:
+
+```bash
+python3 gh-address-cr/scripts/submit_feedback.py \
+  --category workflow-gap \
+  --title "blocked without a recovery step" \
+  --summary "review stopped in a blocked state without enough operator guidance." \
+  --expected "the skill should identify the next command or artifact to inspect." \
+  --actual "the workflow stopped and the next action was ambiguous." \
+  --source-command "python3 gh-address-cr/scripts/cli.py review owner/repo 123" \
+  --failing-command "python3 gh-address-cr/scripts/cli.py final-gate owner/repo 123" \
+  --exit-code 5 \
+  --status BLOCKED \
+  --reason-code WAITING_FOR_FIX \
+  --waiting-on human_fix \
+  --run-id cr-loop-20260417T120000Z \
+  --skill-version 1.2.0 \
+  --using-repo owner/repo \
+  --using-pr 123 \
+  --artifact /tmp/loop-request.json
+```
+
+- Unified CLI passthrough:
+
+```bash
+python3 gh-address-cr/scripts/cli.py submit-feedback --category workflow-gap --title "..." --summary "..." --expected "..." --actual "..."
+```
+
 ## Choosing Fixes
 
 `gh-address-cr` is not "fix every comment immediately". The intended workflow is:

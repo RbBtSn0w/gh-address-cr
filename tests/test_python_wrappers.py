@@ -66,7 +66,32 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("review-to-findings owner/repo 123 --input finding-blocks.md", result.stdout)
         self.assertIn("fixed finding blocks only", result.stdout)
+        self.assertIn("submit-feedback --category", result.stdout)
         self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
+
+    def test_cli_submit_feedback_passthrough_dry_run(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "submit-feedback",
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "cli passthrough",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "dry-run")
+        self.assertTrue(payload["title"].startswith("[AI Feedback] "))
 
     def test_cli_review_defaults_to_structured_summary(self):
         gh = self.bin_dir / "gh"
@@ -249,6 +274,11 @@ else:
         self.assertTrue((self.workspace_dir() / "incoming-findings.json").exists())
         self.assertTrue((self.workspace_dir() / "incoming-findings.md").exists())
         self.assertIn("external review producer", result.stderr)
+        summary_path = self.workspace_dir() / "last-machine-summary.json"
+        self.assertTrue(summary_path.exists())
+        persisted = json.loads(summary_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "WAITING_FOR_EXTERNAL_REVIEW")
+        self.assertEqual(persisted["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
 
     def test_cli_findings_help_mentions_source_required_for_sync(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "findings", "--help"])

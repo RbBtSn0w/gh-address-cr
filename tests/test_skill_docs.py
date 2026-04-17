@@ -8,6 +8,7 @@ README_MD = ROOT / "README.md"
 MODE_PRODUCER_MATRIX_MD = ROOT / "gh-address-cr" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "gh-address-cr" / "references" / "local-review-adapter.md"
 OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
+AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
@@ -81,6 +82,31 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("summarize the current-run queue counts in natural language", text)
         self.assertIn("prefer the human-readable `Current Run Snapshot` block", text)
 
+    def test_skill_documents_agent_feedback_command_and_trigger(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/submit_feedback.py", text)
+        self.assertIn("when the skill itself blocks progress", text)
+        self.assertIn("do not file feedback issues for normal PR findings", text)
+
+    def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
+        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertIn("run `python3 scripts/submit_feedback.py`", text)
+        self.assertIn("contradictory instructions", text)
+        self.assertIn("missing automation", text)
+        self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
+
+    def test_repo_issue_template_documents_ai_agent_feedback_fields(self):
+        text = AGENT_FEEDBACK_ISSUE_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("name: AI Agent Feedback", text)
+        self.assertIn("## Summary", text)
+        self.assertIn("## Category", text)
+        self.assertIn("## Expected Workflow", text)
+        self.assertIn("## Actual Behavior", text)
+        self.assertIn("## Reproduction Context", text)
+        self.assertIn("## Technical Diagnostics", text)
+        self.assertIn("## Additional Notes", text)
+        self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
+
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
             text = path.read_text(encoding="utf-8")
@@ -91,6 +117,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_referenced_skill_owned_docs_exist(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
             self.assertTrue(path.exists(), msg=str(path))
+        self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
