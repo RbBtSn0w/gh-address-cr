@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import atexit
 import gzip
 import json
 import os
 import platform
+import queue as queue_module
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +26,27 @@ DEFAULT_OTLP_TIMEOUT_SECONDS = 3.0
 DEFAULT_OTLP_COMPRESSION = "gzip"
 DEFAULT_OTLP_SERVICE_NAME = "gh-address-cr-cli"
 DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT = "https://gh-address-cr.hamiltonsnow.workers.dev"
+OTLP_EXPORT_QUEUE_SIZE = 128
+OTLP_EXPORT_FLUSH_GRACE_SECONDS = 0.2
+POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>/[^\s`\"')\]}>;,]+)")
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>[A-Za-z]:\\[^\s`\"')\]}>;,]+)")
+FILE_URI_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<scheme>file://)(?P<path>/[^\s`\"')\]}>;,]+)")
+EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+TOKEN_PATTERNS = (
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
+)
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:[A-Za-z0-9]+[_-])*token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)"
+)
+
+_OTLP_EXPORT_QUEUE: queue_module.Queue[dict] | None = None
+_OTLP_EXPORT_THREAD: threading.Thread | None = None
+_OTLP_EXPORT_LOCK = threading.Lock()
+_OTLP_EXPORT_ATEXIT_REGISTERED = False
 
 
 def state_dir() -> Path:
@@ -229,6 +253,71 @@ def append_jsonl_event(path: Path, payload: dict) -> None:
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
+def _is_windows_absolute_path(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:[\\/]", value))
+
+
+def _compact_absolute_path(value: str) -> str:
+    if not value:
+        return value
+    if not (value.startswith("/") or _is_windows_absolute_path(value)):
+        return value
+    normalized = value.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part]
+    if parts and re.match(r"^[A-Za-z]:$", parts[0]):
+        parts = parts[1:]
+    if len(parts) >= 2 and parts[0] in {"Users", "home"}:
+        parts = parts[2:]
+    elif len(parts) >= 3 and parts[:2] == ["var", "home"]:
+        parts = parts[3:]
+    elif len(parts) >= 4 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2] in {"Users", "home"}:
+        parts = parts[4:]
+    elif len(parts) >= 5 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2:4] == ["var", "home"]:
+        parts = parts[5:]
+    if not parts:
+        return "..."
+    return f".../{'/'.join(parts[-3:])}"
+
+
+def _redact_telemetry_sensitive_text(value: str) -> str:
+    redacted = EMAIL_RE.sub("[redacted-email]", value)
+    for pattern in TOKEN_PATTERNS:
+        redacted = pattern.sub("[redacted-token]", redacted)
+    return SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[redacted-token]",
+        redacted,
+    )
+
+
+def _sanitize_telemetry_string(value: str) -> str:
+    sanitized = _redact_telemetry_sensitive_text(value)
+    sanitized = FILE_URI_RE.sub(
+        lambda match: f"{match.group('prefix')}{match.group('scheme')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    sanitized = POSIX_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    sanitized = WINDOWS_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    return sanitized
+
+
+def _sanitize_telemetry_value(value):
+    if isinstance(value, str):
+        return _sanitize_telemetry_string(value)
+    if isinstance(value, dict):
+        return {key: _sanitize_telemetry_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_telemetry_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_telemetry_value(item) for item in value]
+    return value
+
+
 def _parse_otlp_key_value_pairs(value: str) -> dict[str, str]:
     if not value.strip():
         return {}
@@ -400,7 +489,23 @@ def _safe_otlp_endpoint(endpoint: str) -> str:
     return urllib_parse.urlunparse(parsed._replace(query="", fragment=""))
 
 
-def _append_telemetry_export_failure(repo: str, pr_number: str, log_kind: str, entry: dict, endpoint: str | None, error: str) -> None:
+def _sanitized_otlp_entry(entry: dict) -> dict:
+    sanitized = dict(entry)
+    sanitized["message"] = _sanitize_telemetry_string(str(entry.get("message") or ""))
+    sanitized["details"] = _sanitize_telemetry_value(entry.get("details") or {})
+    return sanitized
+
+
+def _append_telemetry_export_failure(
+    repo: str,
+    pr_number: str,
+    log_kind: str,
+    entry: dict,
+    endpoint: str | None,
+    error: str,
+    *,
+    trace_path: Path | None = None,
+) -> None:
     diagnostic = {
         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "action": "telemetry_export",
@@ -417,29 +522,121 @@ def _append_telemetry_export_failure(repo: str, pr_number: str, log_kind: str, e
             "endpoint": _safe_otlp_endpoint(endpoint) if endpoint else "",
         },
     }
-    append_jsonl_event(trace_log_file(repo, pr_number), diagnostic)
+    append_jsonl_event(trace_path or trace_log_file(repo, pr_number), diagnostic)
+
+
+def _build_otlp_export_request(log_kind: str, entry: dict) -> dict | None:
+    endpoint = _otlp_logs_endpoint()
+    if not endpoint:
+        return None
+    _otlp_logs_protocol()
+    payload = json.dumps(
+        _build_otlp_logs_payload(log_kind, _sanitized_otlp_entry(entry)),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "gh-address-cr/otel-http-json",
+    }
+    compression = _otlp_logs_compression()
+    if compression == "gzip":
+        payload = gzip.compress(payload)
+        headers["Content-Encoding"] = "gzip"
+    headers.update(_otlp_logs_headers())
+    return {
+        "log_kind": log_kind,
+        "entry": entry,
+        "endpoint": endpoint,
+        "timeout": _otlp_logs_timeout_seconds(),
+        "headers": headers,
+        "payload": payload,
+        "trace_path": trace_log_file(str(entry.get("repo") or ""), str(entry.get("pr") or "")),
+    }
+
+
+def _deliver_otlp_export(request_spec: dict) -> None:
+    request = urllib_request.Request(
+        request_spec["endpoint"],
+        data=request_spec["payload"],
+        headers=request_spec["headers"],
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=request_spec["timeout"]) as response:
+        response.read()
+
+
+def _drain_otlp_export_queue_briefly() -> None:
+    queue = _OTLP_EXPORT_QUEUE
+    if queue is None:
+        return
+    deadline = time.monotonic() + OTLP_EXPORT_FLUSH_GRACE_SECONDS
+    while queue.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
+def _otlp_export_worker() -> None:
+    queue = _OTLP_EXPORT_QUEUE
+    if queue is None:
+        return
+    while True:
+        request_spec = queue.get()
+        try:
+            _deliver_otlp_export(request_spec)
+        except Exception as exc:
+            entry = request_spec["entry"]
+            _append_telemetry_export_failure(
+                str(entry.get("repo") or ""),
+                str(entry.get("pr") or ""),
+                str(request_spec["log_kind"] or ""),
+                entry,
+                request_spec.get("endpoint"),
+                str(exc) or exc.__class__.__name__,
+                trace_path=request_spec.get("trace_path"),
+            )
+        finally:
+            queue.task_done()
+
+
+def _ensure_otlp_export_worker() -> queue_module.Queue[dict]:
+    global _OTLP_EXPORT_QUEUE
+    global _OTLP_EXPORT_THREAD
+    global _OTLP_EXPORT_ATEXIT_REGISTERED
+
+    with _OTLP_EXPORT_LOCK:
+        if _OTLP_EXPORT_QUEUE is None:
+            _OTLP_EXPORT_QUEUE = queue_module.Queue(maxsize=OTLP_EXPORT_QUEUE_SIZE)
+        if _OTLP_EXPORT_THREAD is None or not _OTLP_EXPORT_THREAD.is_alive():
+            _OTLP_EXPORT_THREAD = threading.Thread(
+                target=_otlp_export_worker,
+                name="gh-address-cr-otlp-export",
+                daemon=True,
+            )
+            _OTLP_EXPORT_THREAD.start()
+        if not _OTLP_EXPORT_ATEXIT_REGISTERED:
+            atexit.register(_drain_otlp_export_queue_briefly)
+            _OTLP_EXPORT_ATEXIT_REGISTERED = True
+        return _OTLP_EXPORT_QUEUE
 
 
 def _export_otlp_log(log_kind: str, entry: dict) -> None:
     endpoint: str | None = None
     try:
-        endpoint = _otlp_logs_endpoint()
-        if not endpoint:
+        request_spec = _build_otlp_export_request(log_kind, entry)
+        if request_spec is None:
             return
-        _otlp_logs_protocol()
-        payload = json.dumps(_build_otlp_logs_payload(log_kind, entry), sort_keys=True, separators=(",", ":")).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "gh-address-cr/otel-http-json",
-        }
-        compression = _otlp_logs_compression()
-        if compression == "gzip":
-            payload = gzip.compress(payload)
-            headers["Content-Encoding"] = "gzip"
-        headers.update(_otlp_logs_headers())
-        request = urllib_request.Request(endpoint, data=payload, headers=headers, method="POST")
-        with urllib_request.urlopen(request, timeout=_otlp_logs_timeout_seconds()) as response:
-            response.read()
+        endpoint = request_spec["endpoint"]
+        export_queue = _ensure_otlp_export_worker()
+        export_queue.put_nowait(request_spec)
+    except queue_module.Full:
+        _append_telemetry_export_failure(
+            str(entry.get("repo") or ""),
+            str(entry.get("pr") or ""),
+            log_kind,
+            entry,
+            endpoint,
+            "telemetry export queue full",
+        )
     except Exception as exc:
         _append_telemetry_export_failure(
             str(entry.get("repo") or ""),
