@@ -529,11 +529,11 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertIn("local_findings_unresolved_count=0", gated.stdout)
 
         summary = (self.workspace_dir() / "audit_summary.md").read_text(encoding="utf-8")
-        self.assertIn("## Current Run Snapshot", summary)
-        self.assertIn("- GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0", summary)
-        self.assertIn("- Local findings: total 0; new in this run 0; unresolved 0; handled in this run 0", summary)
+        self.assertNotIn("## Current Run Snapshot", summary)
+        self.assertNotIn("- GitHub threads: total 2;", summary)
+        self.assertNotIn("- Local findings: total 0;", summary)
 
-    def test_gate_summary_reports_new_and_handled_counts_for_current_run(self):
+    def test_gate_summary_omits_current_run_progress_block(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         gh_seed_payload = json.dumps(
             [
@@ -614,8 +614,8 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertIn("local_findings_unresolved_count=0", gated.stdout)
 
         summary = (self.workspace_dir() / "audit_summary.md").read_text(encoding="utf-8")
-        self.assertIn("- GitHub threads: total 2; new in this run 1; unresolved 0; handled in this run 2", summary)
-        self.assertIn("- Local findings: total 1; new in this run 0; unresolved 0; handled in this run 1", summary)
+        self.assertNotIn("- GitHub threads: total 2;", summary)
+        self.assertNotIn("- Local findings: total 1;", summary)
 
     def test_close_item_marks_local_finding_closed_and_handled(self):
         self.run_engine("init", self.repo, self.pr, check=True)

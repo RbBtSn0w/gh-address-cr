@@ -162,12 +162,7 @@ Advanced producer and dispatch details live in:
   - output includes `Verified: 0 Unresolved Threads found`, and
   - output includes `Verified: 0 Pending Reviews found`, and
   - session blocking item count is zero.
-- Completion summaries must lead with a readable current-run handling summary from the same gate run, not just the final zero counts:
-  - GitHub threads: total, new in this run, unresolved, handled in this run
-  - local findings: total, new in this run, unresolved, handled in this run
-  - prefer labeled phrasing such as `GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0`
-  - prefer the human-readable `Current Run Snapshot` block printed by `python3 scripts/cli.py final-gate ...`; use raw machine count lines only as fallback evidence
-  - use `audit_summary.md` or the machine-readable count lines printed by `final-gate`
+- Use `audit_summary.md` or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed.
 - If gate fails, continue iteration; completion summary is forbidden.
 
 ## Core Rules
@@ -195,7 +190,12 @@ The default review entrypoint runs repeated intake, item selection, action execu
 - External fixer commands must read a JSON payload from stdin and return a JSON object containing:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
-  - `reply_markdown` for GitHub thread items
+  - for GitHub thread `fix`: `fix_reply`
+    - `commit_hash`
+    - `files`
+    - optional `severity`, `why`, `test_command`, `test_result`
+    - `validation_commands` may be used as the default validation evidence when `test_command` / `test_result` are omitted
+  - for GitHub thread `clarify` or `defer`: `reply_markdown`
   - optional `validation_commands`
 - `code-review` and `json` producers are consumed once per review run.
 - `adapter` producer is re-run on each iteration.
@@ -305,6 +305,26 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 
 `gh-address-cr` should stop iteration and escalate rather than forcing an implementation under uncertainty.
 
+## Agent Feedback
+
+- When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
+- Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
+- Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
+- Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
+- Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- When `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
+- Repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
+- Use `python3 scripts/submit_feedback.py` with explicit fields so the body matches the repository issue format:
+  - `--category`
+  - `--title`
+  - `--summary`
+  - `--expected`
+  - `--actual`
+  - optional `--source-command`, `--failing-command`, `--exit-code`, `--status`, `--reason-code`, `--waiting-on`, `--run-id`, `--skill-version`, `--using-repo`, `--using-pr`, `--artifact`, and `--notes`
+- Example:
+  - `python3 scripts/submit_feedback.py --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous." --source-command "python3 scripts/cli.py review owner/repo 123" --failing-command "python3 scripts/cli.py final-gate owner/repo 123" --exit-code 5 --status BLOCKED --reason-code WAITING_FOR_FIX --waiting-on human_fix --run-id cr-loop-20260417T120000Z --skill-version 1.2.0 --using-repo owner/repo --using-pr 123 --artifact /tmp/loop-request.json`
+  - `python3 scripts/cli.py submit-feedback --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous."`
+
 ## Required Evidence
 
 - Accepted GitHub thread:
@@ -321,15 +341,11 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 Final output must include:
 
 1. `final_gate` command used
-2. readable current-run handling summary from the same gate run:
-   - GitHub threads total, new in this run, unresolved, handled in this run
-   - local findings total, new in this run, unresolved, handled in this run
-   - prefer labeled phrasing such as `GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0`
-3. `Verified: 0 Unresolved Threads found`
-4. `Verified: 0 Pending Reviews found`
-5. unresolved GitHub threads = 0
-6. session blocking items = 0
-7. audit summary path + sha256
+2. `Verified: 0 Unresolved Threads found`
+3. `Verified: 0 Pending Reviews found`
+4. unresolved GitHub threads = 0
+5. session blocking items = 0
+6. audit summary path + sha256
 
 For run-scoped diagnostics, use:
 
@@ -360,6 +376,7 @@ For run-scoped diagnostics, use:
 - checklist: `references/cr-triage-checklist.md`
 - stable operator surface: `python3 scripts/cli.py`
 - preferred automation surface: `python3 scripts/cli.py ...`
+- AI agent feedback helper: `python3 scripts/submit_feedback.py`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`
 - code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

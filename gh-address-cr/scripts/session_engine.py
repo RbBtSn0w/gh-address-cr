@@ -1023,20 +1023,6 @@ def cmd_gate(args):
         f"- unresolved_github_threads_count: {len(unresolved_threads)}",
         f"- invalid_local_items_count: {len(invalid_local_items)}",
         f"- loop_warning_items_count: {len(loop_warning_items)}",
-        "",
-        "## Current Run Snapshot",
-        (
-            f"- GitHub threads: total {progress['github_threads_total_count']}; "
-            f"new in this run {progress['github_threads_new_count']}; "
-            f"unresolved {progress['github_threads_unresolved_count']}; "
-            f"handled in this run {progress['github_threads_handled_this_run_count']}"
-        ),
-        (
-            f"- Local findings: total {progress['local_findings_total_count']}; "
-            f"new in this run {progress['local_findings_new_count']}; "
-            f"unresolved {progress['local_findings_unresolved_count']}; "
-            f"handled in this run {progress['local_findings_handled_this_run_count']}"
-        ),
     ]
     if blocking:
         lines.extend(["", "## Blocking Items"])

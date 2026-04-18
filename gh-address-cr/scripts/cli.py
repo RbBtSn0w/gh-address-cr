@@ -11,7 +11,7 @@ from pathlib import Path
 from ingest_findings import normalize_finding, parse_records
 from review_to_findings import parse_findings
 from python_common import incoming_findings_json_file, incoming_findings_markdown_file, normalized_handoff_findings_file
-from python_common import producer_request_file, workspace_dir
+from python_common import last_machine_summary_file, producer_request_file, workspace_dir
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,6 +39,7 @@ COMMAND_TO_SCRIPT = {
     "batch-resolve": "batch_resolve.py",
     "clean-state": "clean_state.py",
     "session-engine": "session_engine.py",
+    "submit-feedback": "submit_feedback.py",
 }
 
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
@@ -144,6 +145,11 @@ def alias_help(command: str) -> str:
 
 def workspace_root(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number)
+
+
+def persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
+    path = last_machine_summary_file(repo, pr_number)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def external_review_command(repo: str, pr_number: str) -> str:
@@ -417,6 +423,7 @@ def output_preflight_error(
             next_action=next_action,
             artifact_path=artifact_path,
         )
+        persist_machine_summary(repo, pr_number, summary)
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     print(message, file=sys.stderr)
     return exit_code
@@ -521,7 +528,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{review,threads,findings,adapter,review-to-findings}",
+        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback}",
         help=(
             "High-level commands:\n"
             "  cli.py review owner/repo 123 [--human]\n"
@@ -534,6 +541,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  For `adapter`, flags after <adapter_cmd...> are passed through to the adapter command.\n"
             "Utility commands:\n"
             "  cli.py review-to-findings owner/repo 123 --input finding-blocks.md\n"
+            "  cli.py submit-feedback --category workflow-gap --title ... --summary ... --expected ... --actual ...\n"
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
         ),
     )
@@ -569,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)
     if args.command in HIGH_LEVEL_COMMANDS and not args.human:
         summary = build_machine_summary(args.command, args.args[0], args.args[1], result)
+        persist_machine_summary(args.args[0], args.args[1], summary)
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     else:
         if result.stdout:

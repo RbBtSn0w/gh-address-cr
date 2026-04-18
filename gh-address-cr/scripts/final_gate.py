@@ -25,25 +25,6 @@ def metric_count(data: dict[str, str], key: str) -> int:
     return int(data.get(key, "0"))
 
 
-def print_current_run_snapshot(data: dict[str, str]) -> None:
-    print()
-    print("== Current Run Snapshot ==")
-    print(
-        "GitHub threads: "
-        f"total {metric_count(data, 'github_threads_total_count')}; "
-        f"new in this run {metric_count(data, 'github_threads_new_count')}; "
-        f"unresolved {metric_count(data, 'github_threads_unresolved_count')}; "
-        f"handled in this run {metric_count(data, 'github_threads_handled_this_run_count')}"
-    )
-    print(
-        "Local findings: "
-        f"total {metric_count(data, 'local_findings_total_count')}; "
-        f"new in this run {metric_count(data, 'local_findings_new_count')}; "
-        f"unresolved {metric_count(data, 'local_findings_unresolved_count')}; "
-        f"handled in this run {metric_count(data, 'local_findings_handled_this_run_count')}"
-    )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the final PR/session gate.")
     auto_group = parser.add_mutually_exclusive_group()
@@ -116,7 +97,6 @@ def main() -> int:
             summary.write_text(Path(summary_from_engine).read_text(encoding="utf-8"), encoding="utf-8")
         if not summary_hash and summary.exists():
             summary_hash = sha256_of_file(summary)
-        print_current_run_snapshot(data)
         print()
         print("== Machine Gate Diagnostics ==")
         print(gate_output.rstrip())
@@ -143,7 +123,6 @@ def main() -> int:
         print(f"\nGate FAILED: {failure_message}. Do not send completion summary.", file=sys.stderr)
         return 3
 
-    print_current_run_snapshot(data)
     print()
     print("== Gate Result ==")
     print("Verified: 0 Unresolved Threads found")
