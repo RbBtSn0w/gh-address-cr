@@ -1,3 +1,9 @@
+## [1.3.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.2.0...v1.3.0) (2026-04-18)
+
+### Features
+
+* add agent feedback issue reporting ([#3](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/3)) ([9b373c8](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/9b373c861d9d1bea0d8954ac9be7e530d23b4f65))
+
 ## [1.2.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.1.1...v1.2.0) (2026-04-16)
 
 ### Features
