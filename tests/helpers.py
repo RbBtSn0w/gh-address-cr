@@ -43,6 +43,7 @@ class SessionEngineTestCase(unittest.TestCase):
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        self.env["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
 
     def tearDown(self):
         if self.original_process_state_dir is None:
@@ -86,6 +87,7 @@ class PythonScriptTestCase(unittest.TestCase):
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        self.env["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
         self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
 
     def tearDown(self):

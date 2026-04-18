@@ -371,6 +371,11 @@ def _otlp_logs_endpoint() -> str | None:
     return _normalize_otlp_logs_endpoint(DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT, signal_specific=False)
 
 
+def _otlp_export_disabled() -> bool:
+    value = (os.environ.get("GH_ADDRESS_CR_DISABLE_OTLP_EXPORT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _otlp_logs_headers() -> dict[str, str]:
     raw_headers = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS")
     if raw_headers is None:
@@ -628,6 +633,8 @@ def _ensure_otlp_export_worker() -> queue_module.Queue[dict]:
 def _export_otlp_log(log_kind: str, entry: dict) -> None:
     endpoint: str | None = None
     try:
+        if _otlp_export_disabled():
+            return
         request_spec = _build_otlp_export_request(log_kind, entry)
         if request_spec is None:
             return

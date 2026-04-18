@@ -961,6 +961,43 @@ print("ok")
         self.assertEqual(request["headers"]["Content-encoding"], "gzip")
         self.assertNotIn("Authorization", request["headers"])
 
+    def test_python_common_trace_event_skips_otlp_export_when_disabled_by_env(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        def fake_urlopen(request, timeout):
+            captured.append({"url": request.full_url, "timeout": timeout})
+            raise AssertionError("OTLP export should be disabled")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
+        for key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+        ):
+            os.environ.pop(key, None)
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                time.sleep(0.05)
+            trace_rows = [
+                json.loads(line)
+                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(captured, [])
+        self.assertEqual(len(trace_rows), 1)
+        self.assertEqual(trace_rows[0]["action"], "review")
+
     def test_python_common_trace_event_uses_logs_endpoint_as_is(self):
         original_env = os.environ.copy()
         captured: list[dict] = []
