@@ -1,20 +1,52 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import atexit
+import gzip
 import json
 import os
 import platform
+import queue as queue_module
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
 _GITHUB_VIEWER_LOGIN: str | None = None
+OTLP_HTTP_JSON_PROTOCOL = "http/json"
+DEFAULT_OTLP_TIMEOUT_SECONDS = 3.0
+DEFAULT_OTLP_COMPRESSION = "gzip"
+DEFAULT_OTLP_SERVICE_NAME = "gh-address-cr-cli"
+DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT = "https://gh-address-cr.hamiltonsnow.workers.dev"
+OTLP_EXPORT_QUEUE_SIZE = 128
+OTLP_EXPORT_FLUSH_GRACE_SECONDS = 0.2
+POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>/[^\s`\"')\]}>;,]+)")
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>[A-Za-z]:\\[^\s`\"')\]}>;,]+)")
+FILE_URI_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<scheme>file://)(?P<path>/[^\s`\"')\]}>;,]+)")
+EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+TOKEN_PATTERNS = (
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
+)
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:[A-Za-z0-9]+[_-])*token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)"
+)
+
+_OTLP_EXPORT_QUEUE: queue_module.Queue[dict] | None = None
+_OTLP_EXPORT_THREAD: threading.Thread | None = None
+_OTLP_EXPORT_LOCK = threading.Lock()
+_OTLP_EXPORT_ATEXIT_REGISTERED = False
 
 
 def state_dir() -> Path:
@@ -221,6 +253,407 @@ def append_jsonl_event(path: Path, payload: dict) -> None:
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
+def _is_windows_absolute_path(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:[\\/]", value))
+
+
+def _compact_absolute_path(value: str) -> str:
+    if not value:
+        return value
+    if not (value.startswith("/") or _is_windows_absolute_path(value)):
+        return value
+    normalized = value.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part]
+    if parts and re.match(r"^[A-Za-z]:$", parts[0]):
+        parts = parts[1:]
+    if len(parts) >= 2 and parts[0] in {"Users", "home"}:
+        parts = parts[2:]
+    elif len(parts) >= 3 and parts[:2] == ["var", "home"]:
+        parts = parts[3:]
+    elif len(parts) >= 4 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2] in {"Users", "home"}:
+        parts = parts[4:]
+    elif len(parts) >= 5 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2:4] == ["var", "home"]:
+        parts = parts[5:]
+    if not parts:
+        return "..."
+    return f".../{'/'.join(parts[-3:])}"
+
+
+def _redact_telemetry_sensitive_text(value: str) -> str:
+    redacted = EMAIL_RE.sub("[redacted-email]", value)
+    for pattern in TOKEN_PATTERNS:
+        redacted = pattern.sub("[redacted-token]", redacted)
+    return SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[redacted-token]",
+        redacted,
+    )
+
+
+def _sanitize_telemetry_string(value: str) -> str:
+    sanitized = _redact_telemetry_sensitive_text(value)
+    sanitized = FILE_URI_RE.sub(
+        lambda match: f"{match.group('prefix')}{match.group('scheme')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    sanitized = POSIX_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    sanitized = WINDOWS_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}{_compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
+    return sanitized
+
+
+def _sanitize_telemetry_value(value):
+    if isinstance(value, str):
+        return _sanitize_telemetry_string(value)
+    if isinstance(value, dict):
+        return {key: _sanitize_telemetry_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_telemetry_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_telemetry_value(item) for item in value]
+    return value
+
+
+def _parse_otlp_key_value_pairs(value: str) -> dict[str, str]:
+    if not value.strip():
+        return {}
+    pairs: dict[str, str] = {}
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"Invalid OTLP key/value pair: {item}")
+        key, raw_pair_value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("Invalid OTLP key/value pair: empty key")
+        pairs[key] = urllib_parse.unquote(raw_pair_value.strip())
+    return pairs
+
+
+def _otlp_logs_protocol() -> str:
+    protocol = (
+        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
+        or os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL")
+        or OTLP_HTTP_JSON_PROTOCOL
+    )
+    if protocol != OTLP_HTTP_JSON_PROTOCOL:
+        raise ValueError(f"Unsupported OTLP logs protocol: {protocol}. Only {OTLP_HTTP_JSON_PROTOCOL} is supported.")
+    return protocol
+
+
+def _normalize_otlp_logs_endpoint(value: str, *, signal_specific: bool) -> str:
+    parsed = urllib_parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"Invalid OTLP logs endpoint: {value}")
+    path = parsed.path or "/"
+    if signal_specific:
+        normalized_path = path or "/"
+    elif path in {"", "/"}:
+        normalized_path = "/v1/logs"
+    else:
+        normalized_path = f"{path.rstrip('/')}/v1/logs"
+    return urllib_parse.urlunparse(parsed._replace(path=normalized_path, fragment=""))
+
+
+def _otlp_logs_endpoint() -> str | None:
+    logs_endpoint = (os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or "").strip()
+    base_endpoint = (os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
+    if logs_endpoint:
+        return _normalize_otlp_logs_endpoint(logs_endpoint, signal_specific=True)
+    if base_endpoint:
+        return _normalize_otlp_logs_endpoint(base_endpoint, signal_specific=False)
+    return _normalize_otlp_logs_endpoint(DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT, signal_specific=False)
+
+
+def _otlp_logs_headers() -> dict[str, str]:
+    raw_headers = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS")
+    if raw_headers is None:
+        raw_headers = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")
+    return _parse_otlp_key_value_pairs(raw_headers)
+
+
+def _otlp_logs_timeout_seconds() -> float:
+    raw_timeout = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT")
+    if raw_timeout is None:
+        raw_timeout = os.environ.get("OTEL_EXPORTER_OTLP_TIMEOUT", "")
+    if not raw_timeout.strip():
+        return DEFAULT_OTLP_TIMEOUT_SECONDS
+    try:
+        timeout_ms = int(raw_timeout)
+    except ValueError as exc:
+        raise ValueError(f"Invalid OTLP timeout: {raw_timeout}") from exc
+    if timeout_ms <= 0:
+        raise ValueError(f"Invalid OTLP timeout: {raw_timeout}")
+    return timeout_ms / 1000.0
+
+
+def _otlp_logs_compression() -> str:
+    compression = (
+        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_COMPRESSION")
+        or os.environ.get("OTEL_EXPORTER_OTLP_COMPRESSION")
+        or DEFAULT_OTLP_COMPRESSION
+    )
+    if compression not in {"gzip", "none"}:
+        raise ValueError(f"Unsupported OTLP logs compression: {compression}")
+    return compression
+
+
+def _otlp_resource_attributes() -> list[dict]:
+    raw_attributes = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    resource_attributes = _parse_otlp_key_value_pairs(raw_attributes)
+    service_name = (os.environ.get("OTEL_SERVICE_NAME") or "").strip()
+    if service_name:
+        resource_attributes["service.name"] = service_name
+    else:
+        resource_attributes.setdefault("service.name", DEFAULT_OTLP_SERVICE_NAME)
+    return [{"key": key, "value": {"stringValue": value}} for key, value in sorted(resource_attributes.items())]
+
+
+def _otlp_string_attribute(key: str, value: str | None) -> dict | None:
+    if value is None or value == "":
+        return None
+    return {"key": key, "value": {"stringValue": value}}
+
+
+def _otlp_severity_text(status: str) -> str:
+    lowered = status.lower()
+    if lowered in {"failed", "error", "rejected", "unknown"}:
+        return "ERROR"
+    if lowered in {"blocked", "waiting", "warn"}:
+        return "WARN"
+    return "INFO"
+
+
+def _otlp_time_unix_nano(timestamp: str) -> str:
+    return str(int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000))
+
+
+def _otlp_log_record(log_kind: str, entry: dict) -> dict:
+    attributes = [
+        _otlp_string_attribute("gh.address_cr.log_kind", log_kind),
+        _otlp_string_attribute("gh.address_cr.action", str(entry.get("action") or "")),
+        _otlp_string_attribute("gh.address_cr.status", str(entry.get("status") or "")),
+        _otlp_string_attribute("gh.address_cr.repo", str(entry.get("repo") or "")),
+        _otlp_string_attribute("gh.address_cr.pr", str(entry.get("pr") or "")),
+        _otlp_string_attribute("gh.address_cr.run_id", str(entry.get("run_id") or "")),
+        _otlp_string_attribute("gh.address_cr.audit_id", str(entry.get("audit_id") or "")),
+    ]
+    details = entry.get("details")
+    if details:
+        attributes.append(
+            {
+                "key": "gh.address_cr.details_json",
+                "value": {"stringValue": json.dumps(details, sort_keys=True, separators=(",", ":"))},
+            }
+        )
+    message = str(entry.get("message") or f"{entry.get('action', '')}:{entry.get('status', '')}")
+    return {
+        "timeUnixNano": _otlp_time_unix_nano(str(entry["timestamp"])),
+        "observedTimeUnixNano": _otlp_time_unix_nano(str(entry["timestamp"])),
+        "severityText": _otlp_severity_text(str(entry.get("status") or "")),
+        "body": {"stringValue": message},
+        "attributes": [attribute for attribute in attributes if attribute is not None],
+    }
+
+
+def _build_otlp_logs_payload(log_kind: str, entry: dict) -> dict:
+    return {
+        "resourceLogs": [
+            {
+                "resource": {
+                    "attributes": _otlp_resource_attributes(),
+                },
+                "scopeLogs": [
+                    {
+                        "scope": {
+                            "name": "gh-address-cr",
+                        },
+                        "logRecords": [
+                            _otlp_log_record(log_kind, entry),
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _safe_otlp_endpoint(endpoint: str) -> str:
+    parsed = urllib_parse.urlparse(endpoint)
+    return urllib_parse.urlunparse(parsed._replace(query="", fragment=""))
+
+
+def _sanitized_otlp_entry(entry: dict) -> dict:
+    sanitized = dict(entry)
+    sanitized["message"] = _sanitize_telemetry_string(str(entry.get("message") or ""))
+    sanitized["details"] = _sanitize_telemetry_value(entry.get("details") or {})
+    return sanitized
+
+
+def _append_telemetry_export_failure(
+    repo: str,
+    pr_number: str,
+    log_kind: str,
+    entry: dict,
+    endpoint: str | None,
+    error: str,
+    *,
+    trace_path: Path | None = None,
+) -> None:
+    diagnostic = {
+        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "action": "telemetry_export",
+        "status": "error",
+        "repo": repo,
+        "pr": pr_number,
+        "run_id": entry.get("run_id"),
+        "audit_id": entry.get("audit_id"),
+        "message": f"OTLP log export failed for {log_kind}: {error}",
+        "details": {
+            "log_kind": log_kind,
+            "source_action": entry.get("action"),
+            "source_status": entry.get("status"),
+            "endpoint": _safe_otlp_endpoint(endpoint) if endpoint else "",
+        },
+    }
+    target_path = trace_path or trace_log_file(repo, pr_number)
+    if trace_path is not None and not target_path.parent.exists():
+        return
+    try:
+        append_jsonl_event(target_path, diagnostic)
+    except OSError:
+        return
+
+
+def _build_otlp_export_request(log_kind: str, entry: dict) -> dict | None:
+    endpoint = _otlp_logs_endpoint()
+    if not endpoint:
+        return None
+    _otlp_logs_protocol()
+    payload = json.dumps(
+        _build_otlp_logs_payload(log_kind, _sanitized_otlp_entry(entry)),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "gh-address-cr/otel-http-json",
+    }
+    compression = _otlp_logs_compression()
+    if compression == "gzip":
+        payload = gzip.compress(payload)
+        headers["Content-Encoding"] = "gzip"
+    headers.update(_otlp_logs_headers())
+    return {
+        "log_kind": log_kind,
+        "entry": entry,
+        "endpoint": endpoint,
+        "timeout": _otlp_logs_timeout_seconds(),
+        "headers": headers,
+        "payload": payload,
+        "trace_path": trace_log_file(str(entry.get("repo") or ""), str(entry.get("pr") or "")),
+    }
+
+
+def _deliver_otlp_export(request_spec: dict) -> None:
+    request = urllib_request.Request(
+        request_spec["endpoint"],
+        data=request_spec["payload"],
+        headers=request_spec["headers"],
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=request_spec["timeout"]) as response:
+        response.read()
+
+
+def _drain_otlp_export_queue_briefly() -> None:
+    queue = _OTLP_EXPORT_QUEUE
+    if queue is None:
+        return
+    deadline = time.monotonic() + OTLP_EXPORT_FLUSH_GRACE_SECONDS
+    while queue.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
+def _otlp_export_worker() -> None:
+    queue = _OTLP_EXPORT_QUEUE
+    if queue is None:
+        return
+    while True:
+        request_spec = queue.get()
+        try:
+            _deliver_otlp_export(request_spec)
+        except Exception as exc:
+            entry = request_spec["entry"]
+            _append_telemetry_export_failure(
+                str(entry.get("repo") or ""),
+                str(entry.get("pr") or ""),
+                str(request_spec["log_kind"] or ""),
+                entry,
+                request_spec.get("endpoint"),
+                str(exc) or exc.__class__.__name__,
+                trace_path=request_spec.get("trace_path"),
+            )
+        finally:
+            queue.task_done()
+
+
+def _ensure_otlp_export_worker() -> queue_module.Queue[dict]:
+    global _OTLP_EXPORT_QUEUE
+    global _OTLP_EXPORT_THREAD
+    global _OTLP_EXPORT_ATEXIT_REGISTERED
+
+    with _OTLP_EXPORT_LOCK:
+        if _OTLP_EXPORT_QUEUE is None:
+            _OTLP_EXPORT_QUEUE = queue_module.Queue(maxsize=OTLP_EXPORT_QUEUE_SIZE)
+        if _OTLP_EXPORT_THREAD is None or not _OTLP_EXPORT_THREAD.is_alive():
+            _OTLP_EXPORT_THREAD = threading.Thread(
+                target=_otlp_export_worker,
+                name="gh-address-cr-otlp-export",
+                daemon=True,
+            )
+            _OTLP_EXPORT_THREAD.start()
+        if not _OTLP_EXPORT_ATEXIT_REGISTERED:
+            atexit.register(_drain_otlp_export_queue_briefly)
+            _OTLP_EXPORT_ATEXIT_REGISTERED = True
+        return _OTLP_EXPORT_QUEUE
+
+
+def _export_otlp_log(log_kind: str, entry: dict) -> None:
+    endpoint: str | None = None
+    try:
+        request_spec = _build_otlp_export_request(log_kind, entry)
+        if request_spec is None:
+            return
+        endpoint = request_spec["endpoint"]
+        export_queue = _ensure_otlp_export_worker()
+        export_queue.put_nowait(request_spec)
+    except queue_module.Full:
+        _append_telemetry_export_failure(
+            str(entry.get("repo") or ""),
+            str(entry.get("pr") or ""),
+            log_kind,
+            entry,
+            endpoint,
+            "telemetry export queue full",
+        )
+    except Exception as exc:
+        _append_telemetry_export_failure(
+            str(entry.get("repo") or ""),
+            str(entry.get("pr") or ""),
+            log_kind,
+            entry,
+            endpoint,
+            str(exc) or exc.__class__.__name__,
+        )
+
+
 def trace_event(
     action: str,
     status: str,
@@ -244,6 +677,7 @@ def trace_event(
         "details": details or {},
     }
     append_jsonl_event(trace_log_file(repo, pr_number), entry)
+    _export_otlp_log("trace", entry)
 
 
 def audit_event(
@@ -267,6 +701,7 @@ def audit_event(
         "details": details or {},
     }
     append_jsonl_event(audit_log_file(repo, pr_number), entry)
+    _export_otlp_log("audit", entry)
     trace_event(
         action,
         status,

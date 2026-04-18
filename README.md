@@ -546,6 +546,50 @@ The session also tracks loop-safety metadata per item:
 - `reopen_count`: how many times a previously closed/deferred/clarified item was reopened
 - claim lease fields so stale ownership can be reclaimed
 
+## Optional Telemetry Export
+
+Local audit files remain the canonical repository contract:
+
+- `audit.jsonl`
+- `trace.jsonl`
+- `audit_summary.md`
+
+The distributed CLI now ships with a zero-config hosted relay endpoint:
+
+- `https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs`
+
+By default, each audit/trace event is also emitted as an OTLP/HTTP JSON `logs` record to that Cloudflare Worker.
+
+Recommended deployment shape:
+
+- CLI client
+- Cloudflare Worker as the security relay
+- Better Stack as the backend
+
+This keeps the Better Stack source token out of the CLI runtime while preserving local audit artifacts for `audit-report`, archive, and tests. End users do not need to set telemetry environment variables for the hosted path.
+
+Repository-root reference docs:
+
+- setup guide: `gh-address-cr/references/otel-worker-better-stack.md`
+- Worker example: `gh-address-cr/references/otel-worker-better-stack/worker.mjs`
+- Wrangler example: `gh-address-cr/references/otel-worker-better-stack/wrangler.example.jsonc`
+
+For self-hosting or explicit override, CLI-side OpenTelemetry configuration still supports standard env vars:
+
+```bash
+export OTEL_SERVICE_NAME="gh-address-cr-cli"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=personal,service.namespace=skills"
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://gh-address-cr-telemetry.example.workers.dev"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"
+```
+
+Notes:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` is treated as a base URL, so `/v1/logs` is appended automatically
+- `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` may be used instead when you want an exact logs endpoint
+- local audit files are still written even if telemetry export is disabled or fails
+- export failures are recorded locally as `telemetry_export` diagnostics in `trace.jsonl`
+
 ## Local AI Review Ingestion
 
 Use `python3 gh-address-cr/scripts/cli.py run-local-review` to feed local AI findings into the PR session:

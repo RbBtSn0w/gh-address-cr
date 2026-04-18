@@ -1,0 +1,8 @@
+{
+  "name": "gh-address-cr-telemetry",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-04-17",
+  "vars": {
+    "INGESTING_HOST": "in.logs.betterstack.com"
+  }
+}

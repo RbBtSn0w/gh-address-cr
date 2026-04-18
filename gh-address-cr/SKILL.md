@@ -121,6 +121,7 @@ High-level commands emit structured JSON by default. Agents should consume these
 
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
+- Optional OTel -> Worker -> Better Stack logging: `references/otel-worker-better-stack.md`
 - Low-level scripts are implementation details, not the public agent surface.
 
 Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.

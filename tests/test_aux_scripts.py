@@ -1,8 +1,13 @@
 import importlib.util
+import gzip
 import json
 import os
+import shutil
 import sys
+import threading
+import time
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.helpers import (
     BATCH_RESOLVE_PY,
@@ -22,6 +27,14 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def _wait_until(self, predicate, *, timeout=1.0, interval=0.01):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval)
+        return predicate()
 
     def test_run_once_helper_parses_each_snapshot_line_once(self):
         spec = importlib.util.spec_from_file_location("run_once_module", RUN_ONCE_PY)
@@ -768,6 +781,449 @@ print("ok")
                 os.environ["GH_ADDRESS_CR_STATE_DIR"] = original_state_dir
 
         self.assertEqual(loaded, [{"id": "THREAD_1", "isResolved": False, "path": "src/a.py", "line": 1}])
+
+    def test_python_common_trace_event_exports_otlp_http_json_via_base_endpoint(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout):
+            captured.append(
+                {
+                    "url": request.full_url,
+                    "headers": dict(request.header_items()),
+                    "data": request.data,
+                    "timeout": timeout,
+                }
+            )
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/collector"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = "authorization=Bearer%20worker-secret,x-gh-address-cr-key=abc123"
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "deployment.environment=test"
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event(
+                    "run_once",
+                    "start",
+                    self.repo,
+                    self.pr,
+                    run_id="run-123",
+                    audit_id="audit-123",
+                    message="Starting triage snapshot",
+                    details={"attempt": 1},
+                )
+                self.assertTrue(self._wait_until(lambda: len(captured) == 1))
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(len(captured), 1)
+        request = captured[0]
+        self.assertEqual(request["url"], "https://worker.example/collector/v1/logs")
+        self.assertEqual(request["headers"]["Content-type"], "application/json")
+        self.assertEqual(request["headers"]["Content-encoding"], "gzip")
+        self.assertEqual(request["headers"]["Authorization"], "Bearer worker-secret")
+        self.assertEqual(request["headers"]["X-gh-address-cr-key"], "abc123")
+        payload = json.loads(gzip.decompress(request["data"]).decode("utf-8"))
+        resource_logs = payload["resourceLogs"]
+        self.assertEqual(len(resource_logs), 1)
+        resource_attributes = {
+            item["key"]: next(iter(item["value"].values()))
+            for item in resource_logs[0]["resource"]["attributes"]
+        }
+        self.assertEqual(resource_attributes["service.name"], "gh-address-cr-cli")
+        self.assertEqual(resource_attributes["deployment.environment"], "test")
+        log_record = resource_logs[0]["scopeLogs"][0]["logRecords"][0]
+        self.assertEqual(log_record["body"]["stringValue"], "Starting triage snapshot")
+        record_attributes = {
+            item["key"]: next(iter(item["value"].values()))
+            for item in log_record["attributes"]
+        }
+        self.assertEqual(record_attributes["gh.address_cr.log_kind"], "trace")
+        self.assertEqual(record_attributes["gh.address_cr.action"], "run_once")
+        self.assertEqual(record_attributes["gh.address_cr.status"], "start")
+        self.assertEqual(record_attributes["gh.address_cr.repo"], self.repo)
+        self.assertEqual(record_attributes["gh.address_cr.pr"], self.pr)
+        self.assertEqual(record_attributes["gh.address_cr.run_id"], "run-123")
+        self.assertEqual(record_attributes["gh.address_cr.audit_id"], "audit-123")
+
+    def test_python_common_trace_event_exports_to_public_relay_by_default(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout):
+            captured.append(
+                {
+                    "url": request.full_url,
+                    "headers": dict(request.header_items()),
+                    "timeout": timeout,
+                }
+            )
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        for key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+        ):
+            os.environ.pop(key, None)
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                self.assertTrue(self._wait_until(lambda: len(captured) == 1))
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(len(captured), 1)
+        request = captured[0]
+        self.assertEqual(request["url"], "https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs")
+        self.assertEqual(request["headers"]["Content-type"], "application/json")
+        self.assertEqual(request["headers"]["Content-encoding"], "gzip")
+        self.assertNotIn("Authorization", request["headers"])
+
+    def test_python_common_trace_event_uses_logs_endpoint_as_is(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout):
+            captured.append(
+                {
+                    "url": request.full_url,
+                    "headers": dict(request.header_items()),
+                    "timeout": timeout,
+                }
+            )
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "https://worker.example/custom/logs"
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] = "http/json"
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_HEADERS"] = "x-otlp-route=logs-only"
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event("final_gate", "ok", self.repo, self.pr, message="Gate passed")
+                self.assertTrue(self._wait_until(lambda: len(captured) == 1))
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["url"], "https://worker.example/custom/logs")
+        self.assertEqual(captured[0]["headers"]["X-otlp-route"], "logs-only")
+
+    def test_python_common_trace_event_records_local_diagnostic_when_telemetry_export_fails(self):
+        original_env = os.environ.copy()
+
+        def failing_urlopen(_request, timeout=None):
+            _ = timeout
+            raise OSError("worker unavailable")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=failing_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                self.assertTrue(
+                    self._wait_until(
+                        lambda: module.trace_log_file(self.repo, self.pr).exists()
+                        and len(
+                            [
+                                line
+                                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                                if line.strip()
+                            ]
+                        )
+                        >= 2
+                    )
+                )
+            trace_rows = [
+                json.loads(line)
+                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(trace_rows[0]["action"], "review")
+        self.assertEqual(trace_rows[0]["message"], "Handled threads")
+        self.assertEqual(trace_rows[1]["action"], "telemetry_export")
+        self.assertEqual(trace_rows[1]["status"], "error")
+        self.assertIn("worker unavailable", trace_rows[1]["message"])
+
+    def test_python_common_trace_event_failure_diagnostic_uses_original_state_dir_after_env_changes(self):
+        original_env = os.environ.copy()
+        release_export = threading.Event()
+
+        def delayed_failing_urlopen(_request, timeout=None):
+            _ = timeout
+            self.assertTrue(release_export.wait(1.0))
+            raise OSError("worker unavailable")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            expected_trace_file = module.trace_log_file(self.repo, self.pr)
+            with patch("urllib.request.urlopen", side_effect=delayed_failing_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+                release_export.set()
+                self.assertTrue(
+                    self._wait_until(
+                        lambda: expected_trace_file.exists()
+                        and len(
+                            [
+                                line
+                                for line in expected_trace_file.read_text(encoding="utf-8").splitlines()
+                                if line.strip()
+                            ]
+                        )
+                        >= 2
+                    )
+                )
+            trace_rows = [
+                json.loads(line)
+                for line in expected_trace_file.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(trace_rows[0]["action"], "review")
+        self.assertEqual(trace_rows[1]["action"], "telemetry_export")
+        self.assertIn("worker unavailable", trace_rows[1]["message"])
+
+    def test_python_common_trace_event_failure_does_not_recreate_removed_workspace(self):
+        original_env = os.environ.copy()
+        release_export = threading.Event()
+
+        def delayed_failing_urlopen(_request, timeout=None):
+            _ = timeout
+            self.assertTrue(release_export.wait(1.0))
+            raise OSError("worker unavailable")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            expected_trace_file = module.trace_log_file(self.repo, self.pr)
+            workspace = expected_trace_file.parent
+            with patch("urllib.request.urlopen", side_effect=delayed_failing_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                shutil.rmtree(workspace)
+                release_export.set()
+                self.assertTrue(self._wait_until(lambda: not workspace.exists()))
+                time.sleep(0.05)
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertFalse(workspace.exists())
+
+    def test_python_common_audit_event_keeps_local_contract_and_exports_audit_and_trace(self):
+        original_env = os.environ.copy()
+        exported_kinds: list[str] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout=None):
+            _ = timeout
+            payload = json.loads(gzip.decompress(request.data).decode("utf-8"))
+            exported_kinds.append(
+                payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"][0]["value"]["stringValue"]
+            )
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.audit_event("final_gate", "ok", self.repo, self.pr, "run-456", "Gate passed", {"count": 0})
+                self.assertTrue(self._wait_until(lambda: len(exported_kinds) == 2))
+            audit_rows = [
+                json.loads(line)
+                for line in module.audit_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            trace_rows = [
+                json.loads(line)
+                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(len(audit_rows), 1)
+        self.assertEqual(audit_rows[0]["action"], "final_gate")
+        self.assertEqual(len(trace_rows), 1)
+        self.assertEqual(trace_rows[0]["action"], "final_gate")
+        self.assertEqual(exported_kinds, ["audit", "trace"])
+
+    def test_python_common_trace_event_sanitizes_exported_payload_for_hosted_relay(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout=None):
+            _ = timeout
+            captured.append(json.loads(gzip.decompress(request.data).decode("utf-8")))
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        for key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+        ):
+            os.environ.pop(key, None)
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event(
+                    "post_reply",
+                    "failed",
+                    self.repo,
+                    self.pr,
+                    message="reply_file=/Users/snow/private/reply.md token=ghp_secretvalue alice@example.com",
+                    details={
+                        "reply_file": "/Users/snow/private/reply.md",
+                        "error": "token=ghp_secretvalue email=alice@example.com",
+                    },
+                )
+                self.assertTrue(self._wait_until(lambda: len(captured) == 1))
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        log_record = captured[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
+        self.assertIn("[redacted-token]", log_record["body"]["stringValue"])
+        self.assertIn("[redacted-email]", log_record["body"]["stringValue"])
+        self.assertIn(".../private/reply.md", log_record["body"]["stringValue"])
+        self.assertNotIn("/Users/snow/private", log_record["body"]["stringValue"])
+        details_json = next(
+            item["value"]["stringValue"]
+            for item in log_record["attributes"]
+            if item["key"] == "gh.address_cr.details_json"
+        )
+        self.assertIn("[redacted-token]", details_json)
+        self.assertIn("[redacted-email]", details_json)
+        self.assertIn(".../private/reply.md", details_json)
+        self.assertNotIn("/Users/snow/private", details_json)
+        self.assertNotIn("ghp_secretvalue", details_json)
+        self.assertNotIn("alice@example.com", details_json)
+
+    def test_python_common_trace_event_does_not_block_on_slow_telemetry_delivery(self):
+        original_env = os.environ.copy()
+        started = threading.Event()
+        finished = threading.Event()
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def slow_urlopen(_request, timeout=None):
+            _ = timeout
+            started.set()
+            time.sleep(0.4)
+            finished.set()
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=slow_urlopen):
+                started_at = time.monotonic()
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                elapsed = time.monotonic() - started_at
+                self.assertLess(elapsed, 0.2)
+                self.assertTrue(started.wait(1.0))
+                self.assertTrue(finished.wait(1.0))
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
 
     def test_python_common_github_viewer_login_caches_value_within_process(self):
         gh = self.bin_dir / "gh"

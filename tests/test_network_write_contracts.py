@@ -24,7 +24,8 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         try:
-            spec.loader.exec_module(module)
+            with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
+                spec.loader.exec_module(module)
         finally:
             sys.path.pop(0)
         return module
@@ -297,7 +298,6 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertNotIn("snow@example.com", payload["error"])
         self.assertTrue(audits)
         self.assertIn("gh missing", stderr.getvalue())
-
     def test_submit_feedback_rejects_success_response_missing_required_fields(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_missing_fields_under_test")
 
@@ -434,7 +434,6 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertNotIn("auth-token=hunter2", sanitized)
         self.assertNotIn("refresh_token=abc123", sanitized)
         self.assertNotIn("token=value", sanitized)
-
     def test_submit_feedback_sanitize_command_redacts_key_value_tokens_and_file_uri_args(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_command_under_test")
 

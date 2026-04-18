@@ -614,7 +614,6 @@ def main(argv: list[str] | None = None) -> int:
             {"target_repo": args.target_repo, "fingerprint": fingerprint, "error": payload["error"]},
         )
         return emit_result(payload, 1, error_message=payload["error"])
-
     if result.returncode != 0:
         payload["error"] = sanitize_error_message(result.stderr or result.stdout, "submit feedback failed")
         write_feedback_audit(

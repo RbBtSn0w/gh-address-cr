@@ -21,7 +21,8 @@ class CRLoopCLITest(PythonScriptTestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         try:
-            spec.loader.exec_module(module)
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
+                spec.loader.exec_module(module)
         finally:
             sys.path.pop(0)
         return module
@@ -605,6 +606,28 @@ else:
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
 
+    def test_build_github_fix_reply_normalizes_unknown_severity_to_p2(self):
+        module = self.load_module()
+
+        reply_markdown, error = module.build_github_fix_reply(
+            {
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                }
+            },
+            {
+                "item_id": "github-thread:THREAD_UNKNOWN_SEVERITY",
+                "severity": "P4",
+            },
+            ["python3 -m unittest tests.test_cr_loop"],
+        )
+
+        self.assertEqual(error, "")
+        self.assertIsNotNone(reply_markdown)
+        self.assertIn("Severity: `P2`", reply_markdown)
+        self.assertIn("`python3 -m unittest tests.test_cr_loop`", reply_markdown)
+
     def test_handle_batch_github_fix_normalizes_string_validation_command(self):
         module = self.load_module()
         item_id = "github-thread:THREAD_FIX_STRING_VALIDATION"
@@ -920,7 +943,6 @@ else:
         updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
-
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(

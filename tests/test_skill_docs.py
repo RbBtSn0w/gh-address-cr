@@ -7,6 +7,9 @@ SKILL_MD = ROOT / "gh-address-cr" / "SKILL.md"
 README_MD = ROOT / "README.md"
 MODE_PRODUCER_MATRIX_MD = ROOT / "gh-address-cr" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "gh-address-cr" / "references" / "local-review-adapter.md"
+OTEL_WORKER_BETTER_STACK_MD = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack.md"
+OTEL_WORKER_MJS = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack" / "worker.mjs"
+OTEL_WORKER_WRANGLER = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
 OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
 
@@ -55,6 +58,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
+        self.assertIn("references/otel-worker-better-stack.md", text)
         self.assertIn("public main entrypoint", text)
         self.assertIn("advanced/internal", text)
         self.assertNotIn("## Prompt Patterns", text)
@@ -127,6 +131,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_referenced_skill_owned_docs_exist(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
             self.assertTrue(path.exists(), msg=str(path))
+        for path in (OTEL_WORKER_BETTER_STACK_MD, OTEL_WORKER_MJS, OTEL_WORKER_WRANGLER):
+            self.assertTrue(path.exists(), msg=str(path))
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
@@ -143,6 +149,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Published skill payload: the entire `gh-address-cr/` directory", text)
         self.assertIn("Repo-level verification harness: `tests/`", text)
         self.assertIn("If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`", text)
+
+    def test_readme_and_skill_document_optional_otlp_worker_logging(self):
+        readme_text = README_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("Cloudflare Worker as the security relay", readme_text)
+        self.assertIn("gh-address-cr.hamiltonsnow.workers.dev", readme_text)
+        self.assertIn("telemetry_export", readme_text)
+        self.assertNotIn("replace-with-worker-shared-secret", readme_text)
+        self.assertIn("references/otel-worker-better-stack.md", skill_text)
 
     def test_readme_matches_adapter_public_semantics(self):
         text = README_MD.read_text(encoding="utf-8")

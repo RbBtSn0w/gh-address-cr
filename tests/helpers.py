@@ -39,10 +39,16 @@ class SessionEngineTestCase(unittest.TestCase):
         self.cwd = ROOT
         self.repo = "octo/example"
         self.pr = "42"
+        self.original_process_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
 
     def tearDown(self):
+        if self.original_process_state_dir is None:
+            os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+        else:
+            os.environ["GH_ADDRESS_CR_STATE_DIR"] = self.original_process_state_dir
         self.temp_dir.cleanup()
 
     def run_engine(self, *args, stdin=None, check=False):
@@ -76,11 +82,17 @@ class PythonScriptTestCase(unittest.TestCase):
         self.cwd = ROOT
         self.repo = "octo/example"
         self.pr = "77"
+        self.original_process_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
 
     def tearDown(self):
+        if self.original_process_state_dir is None:
+            os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+        else:
+            os.environ["GH_ADDRESS_CR_STATE_DIR"] = self.original_process_state_dir
         self.temp_dir.cleanup()
 
     def run_cmd(self, cmd, check=False, stdin=None):

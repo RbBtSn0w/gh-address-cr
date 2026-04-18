@@ -422,6 +422,11 @@ def normalize_validation_commands(value: object) -> list[str]:
     return [command] if command else []
 
 
+def normalize_fix_reply_severity(value: object) -> str:
+    severity = str(value or "").strip().upper()
+    return severity if severity in {"P1", "P2", "P3"} else "P2"
+
+
 def build_github_fix_reply(action: dict, item: dict, validation_commands: object) -> tuple[str | None, str]:
     fix_reply = action.get("fix_reply")
     if not isinstance(fix_reply, dict):
@@ -442,7 +447,7 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         return None, "GitHub fix actions require fix_reply.files."
 
     normalized_validation_commands = normalize_validation_commands(validation_commands)
-    severity = str(fix_reply.get("severity") or item.get("severity") or "P2").strip().upper()
+    severity = normalize_fix_reply_severity(fix_reply.get("severity") or item.get("severity") or "P2")
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
     test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
     derived_test_result = "passed" if normalized_validation_commands else ""
