@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.4.0...v1.4.1) (2026-04-19)
+
+### Bug Fixes
+
+* clarify feedback reporting target and source context ([#5](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/5)) ([4340b20](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/4340b2057a5096748e1e452120c1130e02091082))
+
 ## [1.4.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.3.0...v1.4.0) (2026-04-18)
 
 ### Features
