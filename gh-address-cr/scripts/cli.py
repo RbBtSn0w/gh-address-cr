@@ -43,7 +43,7 @@ COMMAND_TO_SCRIPT = {
     "submit-action": "submit_action.py",
 }
 
-HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
+HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter", "submit-action"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
@@ -70,7 +70,7 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
         print("--machine and --human are mutually exclusive.", file=sys.stderr)
         return False
     if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
-        print("--machine and --human are only supported for review, threads, findings, and adapter.", file=sys.stderr)
+        print(f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr)
         return False
     args.machine = "--machine" in requested_flags
     args.human = "--human" in requested_flags
@@ -325,7 +325,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     elif status == "BLOCKED" and ("Internal fixer action required:" in combined_error or "Interaction Required" in combined_error):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
-        next_action = f"Address the finding by running: `python3 scripts/cli.py submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 scripts/cli.py {command} {repo} {pr_number}`"
+        next_action = f"Address the finding by running: `python3 {sys.argv[0]} submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 {sys.argv[0]} {command} {repo} {pr_number}`"
     elif status == "BLOCKED":
         reason_code = "BLOCKED"
         waiting_on = "manual_intervention"
@@ -538,7 +538,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback}",
+        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action}",
         help=(
             "High-level commands:\n"
             "  cli.py review owner/repo 123 [--human]\n"
@@ -555,12 +555,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
         ),
     )
+    parser.add_argument("repo", nargs="?", help="Owner/repo name.")
+    parser.add_argument("pr_number", nargs="?", help="Pull request number.")
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed through to the selected subcommand.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command == "submit-action":
+        if args.args and args.args[0] in {"-h", "--help"}:
+            print(alias_help(args.command), end="")
+            return 0
+        script_path = SCRIPT_DIR / "submit_action.py"
+        cmd = [sys.executable, str(script_path)]
+        if args.machine:
+            cmd.append("--machine")
+        if args.human:
+            cmd.append("--human")
+        passthrough = []
+        if args.repo:
+            passthrough.append(args.repo)
+        if args.pr_number:
+            passthrough.append(args.pr_number)
+        passthrough.extend(args.args)
+        return subprocess.run(cmd + passthrough).returncode
+
     if args.command not in COMMAND_TO_SCRIPT:
         supported_commands = ", ".join(sorted(COMMAND_TO_SCRIPT))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)

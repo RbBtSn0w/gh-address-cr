@@ -10,6 +10,7 @@ import subprocess
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Submit an action to a blocked loop and resume.")
     parser.add_argument("loop_request", help="Path to the loop-request JSON artifact.")
@@ -27,6 +28,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--machine", action="store_true", help="Compatibility alias.")
     parser.add_argument("resume_cmd", nargs=argparse.REMAINDER, help="Original command to resume (e.g. python3 scripts/cli.py review owner/repo 1)")
     return parser.parse_args(argv)
+
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
@@ -48,6 +50,19 @@ def main(argv: list[str] | None = None) -> int:
     if not repo or not pr_number or not item:
         print("Error: loop-request missing repo, pr_number, or item", file=sys.stderr)
         return 2
+
+    item_kind = item.get("item_kind")
+
+    # Validation: fix for GitHub thread requires fix_reply details
+    if args.resolution == "fix" and item_kind == "github_thread":
+        if not args.commit_hash or not args.files:
+            print("Error: --resolution fix for github_thread requires --commit-hash and --files", file=sys.stderr)
+            return 2
+    # Validation: clarify/defer for GitHub thread requires reply_markdown
+    if args.resolution in {"clarify", "defer"} and item_kind == "github_thread":
+        if not args.reply_markdown:
+            print(f"Error: --resolution {args.resolution} for github_thread requires --reply-markdown", file=sys.stderr)
+            return 2
 
     action = {
         "resolution": args.resolution,
@@ -78,10 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     script_path.write_text(f"#!/bin/sh\ncat {shlex.quote(str(output_path))}\n", encoding="utf-8")
     os.chmod(script_path, 0o755)
 
-    if args.resume_cmd:
-        cmd = args.resume_cmd
-        if cmd[0] == "--":
-            cmd = cmd[1:]
+    cmd = list(args.resume_cmd)
+    if cmd and cmd[0] == "--":
+        cmd = cmd[1:]
+
+    if cmd:
         cmd.extend(["--fixer-cmd", str(script_path)])
         print(f"Resuming loop with submitted action '{args.resolution}'...")
         result = subprocess.run(cmd)
@@ -91,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     print("To resume the PR session, run your original loop command and append:")
     print(f"  --fixer-cmd \"{script_path}\"")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
