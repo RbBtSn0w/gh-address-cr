@@ -1,0 +1,12 @@
+{
+	"servers": {
+		"betterstack": {
+			"type": "http",
+			"url": "https://mcp.betterstack.com",
+			"headers": {
+				"Authorization": "Bearer ${BETTERSTACK_API_TOKEN}"
+				// "Authorization": "Bearer RNckBnMxC9vXqk9QdYYDPguS"
+			}
+		}
+	}
+}
