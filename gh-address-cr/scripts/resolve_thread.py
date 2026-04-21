@@ -36,10 +36,15 @@ def main() -> int:
     parser.add_argument("--pr", dest="pr_number", default="")
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("thread_id")
+    parser.add_argument("--reply-posted", action="store_true", help="Assert that a reply has been posted.")
+
     args = parser.parse_args()
 
     if not args.repo or not args.pr_number:
         raise SystemExit("Error: --repo and --pr are required if gh context is unavailable.")
+
+    if not args.reply_posted:
+        raise SystemExit("Error: Cannot silently resolve threads. You must post a reply and provide --reply-posted.")
 
     if args.dry_run:
         print(f"[dry-run] Would resolve thread: {args.thread_id}")
