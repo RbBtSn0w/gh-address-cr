@@ -67,6 +67,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
                 "--pr",
                 self.pr,
                 "THREAD_RESOLVE",
+                "--reply-posted",
             ]
         ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
             rc = module.main()
@@ -179,6 +180,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
                 "--pr",
                 self.pr,
                 "THREAD_RESOLVE",
+                "--reply-posted",
             ]
         ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
             rc = module.main()

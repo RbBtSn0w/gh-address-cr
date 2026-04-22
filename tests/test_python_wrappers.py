@@ -2619,6 +2619,7 @@ else:
                 "--pr",
                 self.pr,
                 "THREAD_RESOLVE",
+                "--reply-posted",
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2666,6 +2667,7 @@ else:
                 "--pr",
                 self.pr,
                 "THREAD_ONLY_REMOTE",
+                "--reply-posted",
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -51,6 +51,7 @@ def main() -> int:
             cmd.append("--dry-run")
         cmd.extend(["--repo", args.repo, "--pr", args.pr_number, "--audit-id", args.audit_id])
         cmd.append(thread_id)
+        cmd.append("--reply-posted")
         result = subprocess.run(cmd, text=True, capture_output=True)
         if result.stdout:
             print(result.stdout, end="")
