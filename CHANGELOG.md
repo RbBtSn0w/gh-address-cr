@@ -1,3 +1,9 @@
+## [1.5.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.5.0...v1.5.1) (2026-04-23)
+
+### Bug Fixes
+
+* Enforce reply evidence across sync and resolve paths ([#11](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/11)) ([378b65e](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/378b65e12cf023411b79014d3850134b4cc87d4d))
+
 ## [1.5.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.4.1...v1.5.0) (2026-04-21)
 
 ### Features
