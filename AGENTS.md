@@ -153,3 +153,8 @@ You may say a task is complete only when all of the following are true:
 - no unresolved high-severity issue introduced by your change is being ignored
 
 When in doubt, be precise, be explicit, and fail loudly rather than leaving the repository in an ambiguous state.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
