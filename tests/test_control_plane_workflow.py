@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from gh_address_cr.core.models import ActionRequest
+
 from tests.helpers import PythonScriptTestCase
 
 
@@ -100,6 +102,8 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][payload["lease_id"]]["status"], "active")
+        self.assertEqual(session["leases"][payload["lease_id"]]["request_id"], request["request_id"])
+        self.assertEqual(session["leases"][payload["lease_id"]]["request_hash"], ActionRequest.from_dict(request).stable_hash())
 
     def test_agent_submit_accepts_fix_response_with_active_lease(self):
         self.write_session(
@@ -143,9 +147,57 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "ACTION_ACCEPTED")
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "fixed")
+        self.assertEqual(session["items"]["local-finding:1"]["status"], "CLOSED")
         self.assertFalse(session["items"]["local-finding:1"]["blocking"])
+        self.assertTrue(session["items"]["local-finding:1"]["handled"])
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "accepted")
         self.assertIn("response_accepted", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_rejects_response_with_stale_request_id(self):
+        self.write_session(
+            items=[
+                open_item(
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    }
+                )
+            ]
+        )
+        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        issued_payload = json.loads(issued.stdout)
+        request = json.loads(Path(issued_payload["request_path"]).read_text(encoding="utf-8"))
+        response_path = self.workspace_dir() / "stale-action-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": "req_stale_or_fabricated",
+                    "lease_id": request["lease_id"],
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "note": "This response belongs to a different request.",
+                    "files": ["src/example.py"],
+                    "validation_commands": [
+                        {"command": "python3 -m unittest tests.test_example", "result": "passed"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "STALE_REQUEST_CONTEXT")
+        session = self.load_session()
+        self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
+        self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
+        self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
 
     def test_agent_submit_moves_github_thread_fix_to_publish_ready_without_side_effects(self):
         self.write_session(

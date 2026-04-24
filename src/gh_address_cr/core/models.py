@@ -241,6 +241,8 @@ class ClaimLease:
     expires_at: str | None = None
     resume_token: str | None = None
     request_hash: str | None = None
+    request_id: str | None = None
+    request_path: str | None = None
     conflict_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -264,6 +266,10 @@ class ClaimLease:
             payload["resume_token"] = self.resume_token
         if self.request_hash is not None:
             payload["request_hash"] = self.request_hash
+        if self.request_id is not None:
+            payload["request_id"] = self.request_id
+        if self.request_path is not None:
+            payload["request_path"] = self.request_path
         return payload
 
 

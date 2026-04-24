@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
 from gh_address_cr.core import session as session_store
@@ -16,6 +17,7 @@ from gh_address_cr.core.leases import (
     expire_leases,
     submit_lease,
 )
+from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
 
@@ -112,8 +114,28 @@ def issue_action_request(
             payload={"item_id": item_id},
         )
 
-    request_id = _stable_id("req", {"session_id": session["session_id"], "item": item, "role": role, "agent_id": agent_id})
-    request_hash = _hash_payload({"request_id": request_id, "item": item, "role": role})
+    lease_id = f"lease_{uuid4().hex}"
+    request_id = _stable_id(
+        "req",
+        {"session_id": session["session_id"], "item_id": item_id, "role": role, "agent_id": agent_id, "lease_id": lease_id},
+    )
+    request_item = dict(item)
+    request_item["state"] = "claimed"
+    request = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": request_id,
+        "session_id": session["session_id"],
+        "lease_id": lease_id,
+        "agent_role": role,
+        "item": request_item,
+        "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
+        "required_evidence": _required_evidence_for(item, role),
+        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
+        "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+    }
+    request_hash = ActionRequest.from_dict(request).stable_hash()
+    request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
     try:
         lease = claim_lease(
             session,
@@ -121,7 +143,10 @@ def issue_action_request(
             agent_id=agent_id,
             role=role,
             request_hash=request_hash,
+            lease_id=lease_id,
             now=current_time,
+            request_id=request_id,
+            request_path=str(request_path),
             resume_token=f"resume:{request_id}",
         )
     except LeaseConflictError as exc:
@@ -135,23 +160,8 @@ def issue_action_request(
             payload={"item_id": item_id},
         ) from exc
 
-    lease_id = _get(lease, "lease_id")
     item["state"] = "claimed"
     item["active_lease_id"] = lease_id
-    request = {
-        "schema_version": PROTOCOL_VERSION,
-        "request_id": request_id,
-        "session_id": session["session_id"],
-        "lease_id": lease_id,
-        "agent_role": role,
-        "item": dict(item),
-        "allowed_actions": list(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
-        "required_evidence": _required_evidence_for(item, role),
-        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
-        "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-    }
-    request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     ledger.append_event(
@@ -247,6 +257,19 @@ def submit_action_response(repo: str, pr_number: str, *, response_path: str | Pa
             payload={"item_id": item_id, "lease_id": lease_id},
         )
 
+    expected_request_hash, context_reason_code = _expected_request_hash_for_response(response, lease)
+    if context_reason_code:
+        _record_response_rejected(session, ledger, response, context_reason_code, item_id=item_id)
+        session_store.save_session(repo, pr_number, session)
+        raise WorkflowError(
+            status="ACTION_REJECTED",
+            reason_code=context_reason_code,
+            waiting_on="action_response",
+            exit_code=5,
+            message=f"ActionResponse rejected: {context_reason_code}",
+            payload={"item_id": item_id, "lease_id": lease_id},
+        )
+
     try:
         submit_lease(
             session,
@@ -254,7 +277,7 @@ def submit_action_response(repo: str, pr_number: str, *, response_path: str | Pa
             agent_id=str(response["agent_id"]),
             role=str(lease["role"]),
             item_id=item_id,
-            request_hash=str(lease["request_hash"]),
+            request_hash=str(expected_request_hash),
         )
         accept_lease(session, lease_id)
     except LeaseSubmissionError as exc:
@@ -421,14 +444,43 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     return None
 
 
+def _expected_request_hash_for_response(response: dict[str, Any], lease: dict[str, Any]) -> tuple[str | None, str | None]:
+    response_request_id = str(response["request_id"])
+    request_path = _get(lease, "request_path")
+    if request_path:
+        path = Path(str(request_path))
+        if not path.is_file():
+            return None, "REQUEST_CONTEXT_NOT_FOUND"
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+            expected_hash = ActionRequest.from_dict(request).stable_hash()
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return None, "INVALID_REQUEST_CONTEXT"
+        if response_request_id != str(request.get("request_id") or ""):
+            return None, "STALE_REQUEST_CONTEXT"
+        return expected_hash, None
+
+    lease_request_id = _get(lease, "request_id")
+    if lease_request_id:
+        if response_request_id != str(lease_request_id):
+            return None, "STALE_REQUEST_CONTEXT"
+        return str(_get(lease, "request_hash")), None
+
+    if response_request_id != str(_get(lease, "request_hash")):
+        return None, "STALE_REQUEST_CONTEXT"
+    return str(_get(lease, "request_hash")), None
+
+
 def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
     resolution = str(response["resolution"])
     if item.get("item_kind") == "github_thread":
         item["state"] = "publish_ready"
+        item["status"] = "OPEN"
         item["blocking"] = True
         item["publish_resolution"] = resolution
         item["accepted_response"] = {
             "note": response["note"],
+            "resolution": resolution,
             "files": response.get("files", []),
             "validation_commands": response.get("validation_commands", []),
             "reply_markdown": response.get("reply_markdown"),
@@ -436,15 +488,33 @@ def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> N
         }
         return
     item["state"] = "fixed" if resolution == "fix" else resolution
+    item["status"] = _legacy_local_status_for_resolution(resolution)
     item["blocking"] = False
+    item["handled"] = True
+    item["handled_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     item["resolution_note"] = response["note"]
     item["validation_evidence"] = response.get("validation_commands", [])
+    item["claimed_by"] = None
+    item["claimed_at"] = None
+    item["lease_expires_at"] = None
     if response.get("files"):
         item["files"] = response["files"]
     if response.get("reply_markdown"):
         item["reply_markdown"] = response["reply_markdown"]
     if response.get("fix_reply"):
         item["fix_reply"] = response["fix_reply"]
+
+
+def _legacy_local_status_for_resolution(resolution: str) -> str:
+    if resolution == "fix":
+        return "CLOSED"
+    if resolution == "clarify":
+        return "CLARIFIED"
+    if resolution == "defer":
+        return "DEFERRED"
+    if resolution == "reject":
+        return "DROPPED"
+    return resolution.upper()
 
 
 def _claims_direct_github_side_effect(response: dict[str, Any]) -> bool:

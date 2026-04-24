@@ -1,8 +1,12 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
+from pathlib import Path
+
+from gh_address_cr.agent.manifests import validate_capability_manifest
 
 from tests.helpers import RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
 
@@ -23,6 +27,34 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((RUNTIME_PACKAGE_DIR / "cli.py").exists())
         self.assertIn("0.1.0", result.stdout)
+
+    def test_installed_runtime_carries_legacy_command_scripts(self):
+        install_root = Path(self.temp_dir.name) / "installed"
+        shutil.copytree(RUNTIME_PACKAGE_DIR, install_root / "gh_address_cr")
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(install_root)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import gh_address_cr.cli as cli\n"
+                    "result = cli.run_script('session_engine.py', ['--help'])\n"
+                    "print(result.returncode)\n"
+                    "print(result.stdout)\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[0], "0")
+        self.assertIn("usage:", result.stdout)
 
     def test_runtime_module_help_lists_public_commands(self):
         result = self.run_runtime_module("--help")
@@ -62,7 +94,12 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "MANIFEST_READY")
+        validate_capability_manifest(payload)
+        self.assertIn("coordinator", payload["roles"])
+        self.assertIn("triage", payload["roles"])
         self.assertIn("fixer", payload["roles"])
+        self.assertIn("verify", payload["actions"])
+        self.assertEqual(payload["constraints"]["max_parallel_claims"], 2)
         self.assertIn("action_request.v1", payload["input_formats"])
 
     def test_missing_gh_preflight_fails_before_session_mutation(self):

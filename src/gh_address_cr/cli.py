@@ -13,12 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 
-from gh_address_cr import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
+from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
 from gh_address_cr.core import workflow
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_DIR = ROOT / "gh-address-cr" / "scripts"
+SCRIPT_DIR = Path(__file__).resolve().parent / "legacy_scripts"
 
 COMMAND_TO_SCRIPT = {
     "review": "cr_loop.py",
@@ -615,16 +614,33 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
 def build_agent_manifest() -> dict:
     return {
         "status": "MANIFEST_READY",
+        "schema_version": PROTOCOL_VERSION,
         "runtime_package": "gh-address-cr",
-        "protocol_version": PROTOCOL_VERSION,
+        "runtime_version": __version__,
+        "agent_id": "gh-address-cr-runtime",
+        "protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
         "supported_protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
         "supported_skill_contract_versions": list(SUPPORTED_SKILL_CONTRACT_VERSIONS),
         "roles": [
-            "orchestrator",
+            "coordinator",
+            "review_producer",
+            "triage",
             "fixer",
-            "reviewer",
-            "github-operator",
+            "verifier",
+            "publisher",
             "gatekeeper",
+        ],
+        "actions": [
+            "review",
+            "produce_findings",
+            "triage",
+            "fix",
+            "clarify",
+            "defer",
+            "reject",
+            "verify",
+            "publish",
+            "gate",
         ],
         "input_formats": [
             "action_request.v1",
@@ -636,6 +652,9 @@ def build_agent_manifest() -> dict:
             "evidence_record.v1",
             "gate_report.v1",
         ],
+        "constraints": {
+            "max_parallel_claims": 2,
+        },
         "public_commands": sorted(["review", "threads", "findings", "adapter", "submit-action", "final-gate"]),
     }
 

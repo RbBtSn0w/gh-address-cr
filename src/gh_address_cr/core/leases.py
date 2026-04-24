@@ -28,7 +28,9 @@ class _FallbackClaimLease:
     expires_at: datetime
     resume_token: str | None
     request_hash: str
-    conflict_keys: tuple[str, ...]
+    request_id: str | None = None
+    request_path: str | None = None
+    conflict_keys: tuple[str, ...] = ()
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
     reason: str | None = None
@@ -63,6 +65,8 @@ def claim_lease(
     now: datetime | None = None,
     ttl_seconds: int = 3600,
     resume_token: str | None = None,
+    request_id: str | None = None,
+    request_path: str | None = None,
     conflict_keys: tuple[str, ...] | list[str] | None = None,
 ) -> Any:
     now = _coerce_now(now)
@@ -91,6 +95,8 @@ def claim_lease(
         expires_at=now + timedelta(seconds=ttl_seconds),
         resume_token=resume_token,
         request_hash=request_hash,
+        request_id=request_id,
+        request_path=request_path,
         conflict_keys=keys,
     )
     leases[_get(lease, "lease_id")] = lease
@@ -204,6 +210,8 @@ def reclaim_lease(
     now: datetime | None = None,
     ttl_seconds: int = 3600,
     resume_token: str | None = None,
+    request_id: str | None = None,
+    request_path: str | None = None,
 ) -> Any:
     now = _coerce_now(now)
     expire_leases(session, now=now)
@@ -217,6 +225,8 @@ def reclaim_lease(
         now=now,
         ttl_seconds=ttl_seconds,
         resume_token=resume_token,
+        request_id=request_id,
+        request_path=request_path,
     )
 
 
