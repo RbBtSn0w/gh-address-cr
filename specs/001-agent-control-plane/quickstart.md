@@ -4,6 +4,16 @@ This quickstart describes the intended validation flow for the multi-agent
 control-plane design. Some protocol commands are planned advanced/internal
 commands and will become executable during implementation.
 
+## Agent Ownership Lanes
+
+- Runtime CLI Agent: `src/gh_address_cr/cli.py`, `src/gh_address_cr/core/session.py`, `src/gh_address_cr/core/workflow.py`, runtime command wiring
+- Protocol Agent: `src/gh_address_cr/agent/`, `src/gh_address_cr/core/models.py`, protocol fixtures
+- Lease Coordinator Agent: `src/gh_address_cr/core/leases.py`, lease lifecycle and conflict-key rules
+- GitHub Evidence Agent: `src/gh_address_cr/github/`, `src/gh_address_cr/evidence/`, `src/gh_address_cr/intake/`
+- Gate Agent: `src/gh_address_cr/core/gate.py`
+- Skill Adapter Agent: `gh-address-cr/SKILL.md`, `gh-address-cr/scripts/cli.py`, `gh-address-cr/agents/`, `gh-address-cr/references/`
+- Verification Agent: `tests/`, this quickstart, and final validation evidence
+
 ## 1. Run Existing Baseline Checks
 
 ```bash
@@ -57,6 +67,12 @@ Expected behavior:
 - the AI fixer receives only the item, allowed actions, required evidence, and
   forbidden actions
 
+Executable example with explicit agent id:
+
+```bash
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+```
+
 ## 5. Submit Agent Evidence
 
 Planned advanced/internal command:
@@ -72,6 +88,12 @@ Expected behavior:
 - missing evidence fails loudly
 - accepted evidence is appended to the ledger
 - GitHub side effects are still performed by the deterministic control plane
+
+Verifier rejection behavior:
+
+- `VERIFICATION_REJECTED` returns the item to open/blocked state
+- `verification_rejected` is appended to the ledger
+- no GitHub side-effect attempt is emitted
 
 ## 6. Verify Parallel Coordination
 
@@ -114,3 +136,46 @@ Expected requirements before implementation proceeds:
 - skill-owned docs describe the runtime as an external prerequisite
 - no skill Markdown is the only owner of a state transition, GitHub side
   effect, or final-gate rule
+
+## 9. Implementation Readiness Evidence
+
+Fresh verification commands to run before claiming this implementation ready:
+
+```bash
+ruff check gh-address-cr src tests
+python3 -m unittest discover -s tests
+python3 gh-address-cr/scripts/cli.py --help
+PYTHONPATH=src python3 -m gh_address_cr --help
+python3 gh-address-cr/scripts/cli.py cr-loop --help
+python3 gh-address-cr/scripts/cli.py final-gate --help
+git diff --check
+```
+
+Focused coverage commands:
+
+```bash
+python3 -m unittest tests.test_runtime_packaging tests.test_skill_runtime_shim
+python3 -m unittest tests.test_agent_protocol tests.test_findings_intake tests.test_control_plane_workflow
+python3 -m unittest tests.test_claim_leases tests.test_evidence_ledger tests.test_final_gate
+```
+
+Current blocker categories:
+
+- Runtime CLI Agent: no known blocker
+- Protocol Agent: no known blocker
+- Lease Coordinator Agent: no known blocker
+- GitHub Evidence Agent: no known blocker
+- Gate Agent: no known blocker
+- Skill Adapter Agent: no known blocker
+- Verification Agent: final evidence must be refreshed after any further edit
+
+Latest verification snapshot:
+
+- `ruff check gh-address-cr src tests` -> `All checks passed!`
+- `python3 -m unittest discover -s tests` -> `Ran 306 tests in 99.602s OK`
+- `python3 gh-address-cr/scripts/cli.py --help` -> exit `0`
+- `PYTHONPATH=src python3 -m gh_address_cr --help` -> exit `0`
+- `python3 gh-address-cr/scripts/cli.py adapter check-runtime` -> `status: compatible`
+- `python3 gh-address-cr/scripts/cli.py cr-loop --help` -> exit `0`
+- `python3 gh-address-cr/scripts/cli.py final-gate --help` -> exit `0`
+- `git diff --check` -> exit `0`

@@ -220,6 +220,7 @@ Fields:
 - `idempotency_key`
 - `status`: `pending`, `succeeded`, `retrying`, `blocked`, or `failed`
 - `retry_count`
+- `backoff_until`: optional timestamp for scheduled retry after rate limits
 - `last_error`
 - `external_url`: durable URL or identifier when the side effect succeeds
 
@@ -227,6 +228,8 @@ Validation rules:
 
 - Side effects must be serialized per work item
 - Retry exhaustion must block the item without duplicating successful effects
+- Rate-limit retries must record whether the next step is immediate retry,
+  scheduled backoff, or blocking after exhaustion
 - Successful GitHub replies must record durable reply evidence
 
 ## RuntimeCLI

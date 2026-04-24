@@ -1,18 +1,17 @@
 version: 1
 interface:
   display_name: GH Address CR
-  short_description: Operate a PR-scoped CR control plane with mode and producer selection.
+  short_description: Operate the gh-address-cr runtime through a thin skill adapter.
   default_prompt: |
     Use `SKILL.md` as the source of truth.
-    1. Select one mode: `remote`, `local`, `mixed`, or `ingest`.
-    2. If local intake is needed, select one producer: `code-review`, `json`, or `adapter`.
-    3. Start with `python3 scripts/cli.py control-plane ...` for one pass, or `python3 scripts/cli.py cr-loop ...` for multi-iteration execution.
-    4. Prefer the default internal fixer path for loop execution; use `--fixer-cmd` only for advanced external integrations.
-    5. GitHub review threads require both reply and resolve.
-    6. Terminal GitHub threads also require durable reply evidence; a zero unresolved-thread count alone is insufficient.
-    7. Local findings require valid terminal notes.
-    8. Before any completion statement, run `python3 scripts/cli.py final-gate ...` and report the gate evidence directly from that run. Include `Verified: 0 Unresolved Threads found`, `Verified: 0 Pending Reviews found`, session blocking item count, and the audit summary path + sha256. Use the machine-readable count lines only when extra run-scoped diagnostics are needed.
-    9. If low-level resolve helpers are used, do not attempt resolve-only handling unless reply evidence already exists or the same action posts a fresh reply.
-    10. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `python3 scripts/submit_feedback.py` before giving up. Feedback goes to `RbBtSn0w/gh-address-cr-skill` by default. Do not file feedback issues for normal PR findings, codebase bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
-    11. Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues. Prefer safe technical diagnostics such as failing command, exit code, status, reason_code, waiting_on, run_id, and skill version.
-    12. Always provide `--using-repo` and `--using-pr` for PR-scoped feedback so the issue body records where the problem came from. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred. When those fields are present, feedback can auto-collect the latest local machine summary, session metrics, audit summary hash, and cached PR head SHA. Repeated feedback is deduplicated by fingerprint.
+    1. Treat `python3 scripts/cli.py` as a compatibility shim. Stateful work belongs to the external `gh-address-cr` runtime.
+    2. Start with `python3 scripts/cli.py review <owner/repo> <pr_number>` or `gh-address-cr review <owner/repo> <pr_number>`.
+    3. For multi-agent work, inspect `gh-address-cr agent manifest`, claim with `agent next`, submit evidence with `agent submit`, inspect with `agent leases`, and recover stale claims with `agent reclaim`.
+    4. AI agents may classify, fix, clarify, defer, reject, or verify. They must not post GitHub replies or resolve threads directly.
+    5. GitHub review threads require both reply and resolve, with durable reply evidence from the current authenticated login.
+    6. Local findings require valid terminal notes and validation evidence.
+    7. Before any completion statement, run `python3 scripts/cli.py final-gate ...` or `gh-address-cr final-gate ...` and report the gate evidence directly from that run. Include `Verified: 0 Unresolved Threads found`, `Verified: 0 Pending Reviews found`, session blocking item count, and the audit summary path + sha256. Use the machine-readable count lines only when extra run-scoped diagnostics are needed.
+    8. If low-level resolve helpers are used, do not attempt resolve-only handling unless reply evidence already exists or the same action posts a fresh reply.
+    9. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `python3 scripts/submit_feedback.py` before giving up. Feedback goes to `RbBtSn0w/gh-address-cr-skill` by default. Do not file feedback issues for normal PR findings, codebase bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
+    10. Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues. Prefer safe technical diagnostics such as failing command, exit code, status, reason_code, waiting_on, run_id, and skill version.
+    11. Always provide `--using-repo` and `--using-pr` for PR-scoped feedback so the issue body records where the problem came from. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred. When those fields are present, feedback can auto-collect the latest local machine summary, session metrics, audit summary hash, and cached PR head SHA. Repeated feedback is deduplicated by fingerprint.

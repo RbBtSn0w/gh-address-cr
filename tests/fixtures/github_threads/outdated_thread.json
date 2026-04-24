@@ -1,0 +1,41 @@
+{
+  "input": {
+    "viewer_login": "agent-login",
+    "threads": [
+      {
+        "id": "THREAD_OUTDATED",
+        "isResolved": false,
+        "isOutdated": true,
+        "path": "src/legacy.py",
+        "line": 44,
+        "comments": {
+          "nodes": [
+            {
+              "url": "https://example.test/thread/outdated",
+              "body": "This older comment still needs explicit handling.",
+              "author": {
+                "login": "reviewer"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "item_id": "github-thread:THREAD_OUTDATED",
+      "item_kind": "github_thread",
+      "source": "github",
+      "thread_id": "THREAD_OUTDATED",
+      "title": "GitHub review thread THREAD_OUTDATED",
+      "body": "This older comment still needs explicit handling.",
+      "path": "src/legacy.py",
+      "line": 44,
+      "url": "https://example.test/thread/outdated",
+      "is_resolved": false,
+      "is_outdated": true,
+      "reply_evidence": null
+    }
+  ]
+}

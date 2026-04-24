@@ -161,8 +161,9 @@ resolved:
 - item independence: parallel claims require distinct work item IDs and no
   known conflicting file or side-effect ownership
 - side-effect safety: serialize GitHub publication through the CLI
-- GitHub transient failures: retry within bounded policy, record evidence, and
-  block without duplicate side effects when exhausted
+- GitHub transient failures: distinguish immediate retry from scheduled
+  backoff, record retry/backoff evidence, and block without duplicate side
+  effects when exhausted
 - schema format: versioned JSON-compatible dictionaries validated with stdlib
 - migration path: root runtime first, skill-local compatibility shim delegates
   or fails loudly
@@ -237,8 +238,9 @@ The plan explicitly covers the high-risk checklist gaps:
 - `ClaimLease` has an explicit lifecycle and reclaim path
 - parallel item processing requires distinct work item IDs plus no known file or
   side-effect ownership conflict
-- GitHub API rate-limit handling has bounded retry and duplicate side-effect
-  prevention requirements
+- GitHub API rate-limit handling has bounded retry, scheduled backoff,
+  retry/backoff evidence, blocking, and duplicate side-effect prevention
+  requirements
 
 ## Complexity Tracking
 

@@ -866,7 +866,7 @@ else:
         self.assertNotEqual(result.returncode, 0)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "FAILED")
-        self.assertEqual(summary["reason_code"], "MISSING_GH_CLI")
+        self.assertEqual(summary["reason_code"], "GH_NOT_FOUND")
         self.assertEqual(summary["waiting_on"], "github_cli")
         self.assertIn("gh", result.stderr)
 

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-agent-control-plane`  
 **Created**: 2026-04-24
-**Status**: Draft  
+**Status**: Implementing
 **Input**: User description: "Evolve directly to the latest architecture: a physically separated deterministic CLI/runtime, a thin packaged skill adapter, and multi-agent coordination for complex PR repair work."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -103,7 +103,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 ### Edge Cases
 
 - What happens when the agent returns a malformed `ActionResponse`? (CLI should reject it, log an error, and retry or fail the session)
-- How does the system handle GitHub API rate limits during IO operations? (CLI classifies the failure, retries within a bounded policy, records evidence, and blocks without duplicate side effects when retry budget is exhausted)
+- How does the system handle GitHub API rate limits during IO operations? (CLI classifies the failure, distinguishes immediate retry from scheduled backoff, records retry/backoff evidence, and blocks without duplicate side effects when retry budget is exhausted)
 - What happens if the agent tries to claim completion without generating evidence? (CLI's policy checks block the resolve and demand evidence)
 - What happens when two agents try to claim the same item? (CLI grants one active lease and rejects stale or conflicting submissions)
 - What happens when an agent is interrupted mid-fix? (CLI reclaims the stale lease after the configured timeout and preserves existing evidence)
@@ -139,7 +139,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 - **FR-022**: System MUST use `CapabilityManifest` data to decide which agents are eligible for each role, action, and request format before issuing claim leases.
 - **FR-023**: System MUST define item independence for parallel processing using distinct work item IDs, compatible active leases, and no known conflicting file or side-effect ownership.
 - **FR-024**: System MUST define the claim lease lifecycle across creation, active ownership, submission, acceptance, rejection, expiry, release, and reclaiming.
-- **FR-025**: System MUST define bounded retry, blocking, and evidence-recording behavior for transient GitHub API failures such as rate limits without emitting duplicate side effects.
+- **FR-025**: System MUST define bounded retry, scheduled backoff, blocking, and evidence-recording behavior for transient GitHub API failures such as rate limits without emitting duplicate side effects.
 - **FR-026**: System MUST require recorded triage/classification evidence before issuing any mutating fixer request or accepting code-modifying evidence.
 
 ### Constitution Alignment *(mandatory)*

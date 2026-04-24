@@ -6,7 +6,8 @@ argument-hint: "<review|threads|findings|adapter> ..."
 
 # gh-address-cr
 
-Use this skill as the PR review orchestrator. It owns session state, intake routing, and the final gate.
+Use this skill as the thin agent adapter for the `gh-address-cr` runtime CLI.
+The runtime owns session state, intake routing, GitHub side effects, leases, and the final gate.
 
 ## Usage
 
@@ -22,11 +23,22 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 This file is part of the packaged `gh-address-cr` skill.
 All paths in this document are relative to the installed skill root.
 
-- `scripts/...` means files inside this packaged skill
+- `scripts/cli.py` is a compatibility shim that delegates to the external runtime CLI
 - `references/...` means skill-owned reference docs
 - `agents/openai.yaml` is an assistant-specific hint file inside the skill
 
 A surrounding source repository may also contain repo-level tests, CI, and release metadata, but those are outside the packaged skill payload.
+
+## Runtime Boundary
+
+The packaged skill must not be treated as the implementation owner for workflow state.
+
+- Runtime public entrypoint: `gh-address-cr`
+- Module entrypoint: `python3 -m gh_address_cr`
+- Compatibility shim: `python3 scripts/cli.py`
+- Compatibility check: `python3 scripts/cli.py adapter check-runtime`
+
+If the runtime is missing or incompatible, the shim must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
 
 ## Agent Execution Ladder
 
@@ -39,7 +51,8 @@ Read this skill in this order when you are an AI agent:
    - `incoming-findings.md`
 3. Rerun the same `review` command. It will auto-consume findings JSON or fixed `finding` blocks and continue orchestration.
 4. If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, or `defer`, then rerun the same `review` command.
-5. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
+5. For multi-agent execution, use `agent manifest`, `agent next`, `agent submit`, `agent leases`, and `agent reclaim` through the runtime CLI.
+6. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
 
 Fail-fast rules:
 
@@ -50,11 +63,12 @@ Fail-fast rules:
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` require `gh` on `PATH` and fail immediately when it is missing.
 - The high-level CLI commands are the only agent-safe public surface. Treat low-level scripts as internal implementation details.
+- AI agents must not post GitHub replies or resolve threads directly; the runtime records evidence and performs deterministic side effects.
 
 Important:
 
 - `review` is the default end-to-end orchestrator and the public main entrypoint.
-- `review` manages session state, external review handoff, GitHub threads, and final-gate.
+- `review` delegates to the runtime to manage session state, external review handoff, GitHub threads, and final-gate.
 - `threads`, `findings`, `adapter`, and `review-to-findings` are advanced/internal entrypoints for explicit integrations.
 - `review-to-findings` is only a converter. It is not a review engine and it is not a general Markdown parser.
 
@@ -117,10 +131,39 @@ High-level commands emit structured JSON by default. Agents should consume these
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 
+## Multi-Agent Protocol
+
+Use the runtime as the coordinator:
+
+- `gh-address-cr agent manifest`
+  - discover supported roles, actions, formats, and protocol versions
+- `gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>`
+  - claims one eligible item and writes an `ActionRequest`
+- `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
+  - validates an `ActionResponse`, lease ownership, and required evidence
+- `gh-address-cr agent leases <owner/repo> <pr_number>`
+  - inspects active and terminal claims
+- `gh-address-cr agent reclaim <owner/repo> <pr_number>`
+  - expires stale leases without deleting accepted evidence
+
+Role boundaries:
+
+- coordinator: deterministic runtime CLI
+- review_producer: emits normalized findings
+- triage: classifies fix/clarify/defer/reject
+- fixer: changes files and returns evidence
+- verifier: checks submitted evidence
+- publisher: deterministic runtime side-effect role
+- gatekeeper: deterministic final-gate role
+
+Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
+Fix responses require changed files and validation evidence. Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
+
 ## Advanced References
 
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
+- Evidence ledger expectations: `references/evidence-ledger.md`
 - Optional OTel -> Worker -> Better Stack logging: `references/otel-worker-better-stack.md`
 - Low-level scripts are implementation details, not the public agent surface.
 

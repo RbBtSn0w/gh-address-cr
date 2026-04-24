@@ -212,7 +212,8 @@ The gatekeeper must block completion unless the current PR session proves:
 
 ## Transient GitHub Failure Handling
 
-GitHub API rate limits and transient failures must be represented as blocking
-workflow evidence after bounded retry exhaustion. The publisher must preserve
-idempotency keys so a retry cannot duplicate a previously successful reply or
-resolve operation.
+GitHub API rate limits and transient failures must be represented as retry,
+scheduled-backoff, or blocking workflow evidence. After bounded retry/backoff
+exhaustion, the item must block with a resume action. The publisher must
+preserve idempotency keys so a retry cannot duplicate a previously successful
+reply or resolve operation.

@@ -1,6 +1,6 @@
 # gh-address-cr skill
 
-An auditable PR-session workflow skill for AI coding agents.
+An auditable PR-session workflow skill and runtime CLI for AI coding agents.
 
 Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `gh-address-cr/SKILL.md`; keep
@@ -15,6 +15,32 @@ Both become session items that move through one evidence-first workflow with a f
 For handled GitHub threads, replying and resolving are still two separate required operations.
 `final-gate` now also verifies that every terminal GitHub thread has durable reply evidence, not only that unresolved-thread count reached zero.
 
+## Runtime / Skill Split
+
+The deterministic implementation belongs to the runtime package:
+
+- console entrypoint: `gh-address-cr`
+- module entrypoint: `python3 -m gh_address_cr`
+- source package: `src/gh_address_cr/`
+
+The packaged skill remains under `gh-address-cr/` and acts as a thin adapter:
+
+- `gh-address-cr/SKILL.md` explains agent behavior
+- `gh-address-cr/scripts/cli.py` is a compatibility shim
+- `gh-address-cr/runtime-requirements.json` declares runtime compatibility
+- `gh-address-cr/agents/` and `gh-address-cr/references/` provide hints and reference docs
+
+The shim must delegate to the runtime or fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
+
+Runtime install for local development:
+
+```bash
+python3 -m pip install -e .
+gh-address-cr --help
+python3 -m gh_address_cr --help
+python3 gh-address-cr/scripts/cli.py adapter check-runtime
+```
+
 ## Public Interface
 
 `gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint:
@@ -27,6 +53,11 @@ Advanced/internal integration entrypoints:
 - `findings`
 - `adapter`
 - `review-to-findings`
+- `agent manifest`
+- `agent next`
+- `agent submit`
+- `agent leases`
+- `agent reclaim`
 
 Fail-fast contract:
 
@@ -71,6 +102,30 @@ Stable machine summary fields:
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+
+## Multi-Agent Coordination
+
+The runtime is the coordinator. AI agents consume structured requests and return structured evidence.
+
+```bash
+gh-address-cr agent manifest
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+gh-address-cr agent submit owner/repo 123 --input action-response.json
+gh-address-cr agent leases owner/repo 123
+gh-address-cr agent reclaim owner/repo 123
+```
+
+Role split:
+
+- `coordinator`: deterministic runtime CLI
+- `review_producer`: external findings producer
+- `triage`: classifies review items as fix/clarify/defer/reject
+- `fixer`: modifies code and returns evidence
+- `verifier`: validates evidence and test results
+- `publisher`: deterministic runtime role for GitHub replies/resolves
+- `gatekeeper`: deterministic final-gate role
+
+Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 
 Main entrypoint examples:
 

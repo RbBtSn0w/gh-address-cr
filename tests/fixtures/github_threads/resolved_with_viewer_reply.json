@@ -1,0 +1,51 @@
+{
+  "input": {
+    "viewer_login": "agent-login",
+    "threads": [
+      {
+        "id": "THREAD_RESOLVED",
+        "isResolved": true,
+        "isOutdated": false,
+        "path": "src/resolved.py",
+        "line": 7,
+        "comments": {
+          "nodes": [
+            {
+              "url": "https://example.test/thread/resolved",
+              "body": "Please tighten this branch.",
+              "author": {
+                "login": "reviewer"
+              }
+            },
+            {
+              "url": "https://example.test/thread/resolved#reply",
+              "body": "Handled in the latest patch.",
+              "author": {
+                "login": "agent-login"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "item_id": "github-thread:THREAD_RESOLVED",
+      "item_kind": "github_thread",
+      "source": "github",
+      "thread_id": "THREAD_RESOLVED",
+      "title": "GitHub review thread THREAD_RESOLVED",
+      "body": "Handled in the latest patch.",
+      "path": "src/resolved.py",
+      "line": 7,
+      "url": "https://example.test/thread/resolved#reply",
+      "is_resolved": true,
+      "is_outdated": false,
+      "reply_evidence": {
+        "reply_url": "https://example.test/thread/resolved#reply",
+        "author_login": "agent-login"
+      }
+    }
+  ]
+}

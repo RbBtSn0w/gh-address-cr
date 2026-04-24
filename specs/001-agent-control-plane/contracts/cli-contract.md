@@ -46,6 +46,13 @@ posting, or thread resolution, the runtime must verify that `gh` is available
 and authenticated. Missing or unusable `gh` must produce a machine-readable
 failure before session mutation or GitHub side effects.
 
+Required machine reason codes:
+
+- `GH_NOT_FOUND`: `gh` is absent from `PATH`
+- `GH_AUTH_FAILED`: `gh` is installed but not authenticated
+
+Both failures exit non-zero before creating or modifying the PR session.
+
 ## Proposed Advanced/Internal Protocol Commands
 
 These commands are implementation-planning contracts. They remain
@@ -157,6 +164,10 @@ Exit codes:
 - `2`: malformed response
 - `5`: stale lease, missing evidence, verifier rejection, or unsafe side effect
   claim
+
+When a verifier rejects submitted fixer evidence, the runtime emits
+`VERIFICATION_REJECTED`, appends `verification_rejected` evidence, returns the
+item to open/blocked state, and performs no GitHub side-effect attempts.
 
 ## `agent leases`
 

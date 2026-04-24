@@ -1,0 +1,10 @@
+{
+  "runtime_package": "gh-address-cr",
+  "minimum_runtime_version": "0.1.0",
+  "supported_protocol_versions": [">=1.0,<2.0"],
+  "required_entrypoints": [
+    "gh-address-cr",
+    "python3 -m gh_address_cr"
+  ],
+  "skill_contract_version": "1.0"
+}

@@ -1,3 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gh-address-cr"
+version = "0.1.0"
+description = "Deterministic PR review-resolution control plane runtime."
+requires-python = ">=3.10"
+
+[project.scripts]
+gh-address-cr = "gh_address_cr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
