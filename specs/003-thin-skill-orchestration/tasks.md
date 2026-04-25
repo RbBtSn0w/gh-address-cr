@@ -65,7 +65,7 @@
 ### Tests for User Story 2
 
 - [ ] T016 [US2] Add status-to-action fixture contract tests in `tests/test_thin_skill_orchestration.py`
-- [ ] T017 [US2] Add malformed and unknown machine-summary fail-loud tests in `tests/test_thin_skill_orchestration.py`
+- [ ] T017 [US2] Add malformed and unknown machine-summary fail-loud tests with actionable recovery-path assertions in `tests/test_thin_skill_orchestration.py`
 - [ ] T018 [US2] Add completion-summary final-gate evidence tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 2
@@ -87,7 +87,7 @@
 - [ ] T022 Create multi-agent orchestration fixture corpus for three items and four roles in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
 - [ ] T023 [P] Create producer intake fixture corpus in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
 - [ ] T024 [P] Add shared multi-agent session fixture loading helpers in `tests/test_control_plane_workflow.py`
-- [ ] T025 [P] Add shared producer-intake fixture loading helpers in `tests/test_findings_intake.py`
+- [ ] T025 Add shared producer-intake fixture loading helpers in `tests/test_findings_intake.py`
 - [ ] T026 Add Stage 5 scope-guard assertions in `tests/test_thin_skill_orchestration.py`
 
 **Checkpoint**: Contract-first orchestration readiness work can proceed without blocking Stage 4 delivery.
@@ -103,8 +103,8 @@
 ### Tests for User Story 3
 
 - [ ] T027 [P] [US3] Add capability manifest role/action eligibility tests in `tests/test_agent_protocol.py`
-- [ ] T028 [US3] Add multi-agent three-item lease conflict tests in `tests/test_control_plane_workflow.py`
-- [ ] T029 [US3] Add verifier-rejection blocks publishing regression tests in `tests/test_control_plane_workflow.py`
+- [ ] T028 [US3] Add multi-agent three-item lease conflict, stale submission, and interrupted lease resume/reclaim tests in `tests/test_control_plane_workflow.py`
+- [ ] T029 [US3] Add required-evidence rejection, verifier-rejection, and no-duplicate reply/resolve publishing regression tests in `tests/test_control_plane_workflow.py`
 - [ ] T030 [US3] Add role-coordination documentation contract tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 3
@@ -155,7 +155,7 @@
 
 ### Implementation for User Story 4
 
-- [ ] T045 [US4] Add manual orchestration runbook in `gh-address-cr/references/multi-agent-runbook.md`
+- [ ] T045 [US4] Add manual orchestration runbook with active-lease interruption recovery in `gh-address-cr/references/multi-agent-runbook.md`
 - [ ] T046 [US4] Link the runbook from `gh-address-cr/SKILL.md`
 - [ ] T047 [US4] Align the feature quickstart with shipped runbook references in `specs/003-thin-skill-orchestration/quickstart.md`
 
@@ -172,7 +172,7 @@
 ### Tests for User Story 5
 
 - [ ] T048 [US5] Add repo-root versus skill-root path-scope tests in `tests/test_skill_docs.py`
-- [ ] T049 [US5] Add low-level script non-public-surface tests in `tests/test_skill_docs.py`
+- [ ] T049 [US5] Add low-level script non-public-surface and legacy delegate-or-fail-loud guidance tests in `tests/test_skill_docs.py`
 - [ ] T050 [US5] Add ownership contradiction scan tests in `tests/test_skill_docs.py`
 - [ ] T051 [US5] Add final-gate-backed completion example tests in `tests/test_skill_docs.py`
 
