@@ -11,10 +11,10 @@
 
 **Purpose**: Establish Stage 4 fixture and test-file scaffolding only.
 
-- [ ] T001 Create thin-skill orchestration fixture directory at `tests/fixtures/thin_skill_orchestration/`
-- [ ] T002 [P] Create documentation contract fixture/allowlist data in `tests/fixtures/thin_skill_orchestration/documentation_contracts.json`
-- [ ] T003 [P] Create representative runtime machine summary fixture corpus in `tests/fixtures/thin_skill_orchestration/status_summaries.json`
-- [ ] T004 [P] Create thin-skill orchestration contract test module in `tests/test_thin_skill_orchestration.py`
+- [x] T001 Create thin-skill orchestration fixture directory at `tests/fixtures/thin_skill_orchestration/`
+- [x] T002 [P] Create documentation contract fixture/allowlist data in `tests/fixtures/thin_skill_orchestration/documentation_contracts.json`
+- [x] T003 [P] Create representative runtime machine summary fixture corpus in `tests/fixtures/thin_skill_orchestration/status_summaries.json`
+- [x] T004 [P] Create thin-skill orchestration contract test module in `tests/test_thin_skill_orchestration.py`
 
 ---
 
@@ -24,10 +24,10 @@
 
 **Critical**: This phase blocks US1 and US2 only. Stage 5 multi-agent and producer fixtures are introduced later so they do not delay the thin-skill MVP.
 
-- [ ] T005 Add shared documentation-contract helpers and fixture loading in `tests/test_skill_docs.py`
-- [ ] T006 [P] Add shared status-action fixture loading helpers in `tests/test_thin_skill_orchestration.py`
-- [ ] T007 [P] Add runtime compatibility pre-mutation helper coverage in `tests/test_runtime_packaging.py`
-- [ ] T008 Define no-runner/no-review-engine scope assertions in `tests/test_thin_skill_orchestration.py`
+- [x] T005 Add shared documentation-contract helpers and fixture loading in `tests/test_skill_docs.py`
+- [x] T006 [P] Add shared status-action fixture loading helpers in `tests/test_thin_skill_orchestration.py`
+- [x] T007 [P] Add runtime compatibility pre-mutation helper coverage in `tests/test_runtime_packaging.py`
+- [x] T008 Define no-runner/no-review-engine scope assertions in `tests/test_thin_skill_orchestration.py`
 
 **Checkpoint**: Stage 4 validation scaffolding is ready; US1 and US2 can proceed.
 
@@ -41,16 +41,16 @@
 
 ### Tests for User Story 1
 
-- [ ] T009 [US1] Add failing first-read adapter contract tests in `tests/test_skill_docs.py`
-- [ ] T010 [US1] Add failing runtime compatibility and missing-runtime pre-mutation tests in `tests/test_runtime_packaging.py`
-- [ ] T011 [US1] Add failing assistant hint thin-adapter and no-direct-side-effect tests in `tests/test_skill_docs.py`
+- [x] T009 [US1] Add failing first-read adapter contract tests in `tests/test_skill_docs.py`
+- [x] T010 [US1] Add failing runtime compatibility and missing-runtime pre-mutation tests in `tests/test_runtime_packaging.py`
+- [x] T011 [US1] Add failing assistant hint thin-adapter and no-direct-side-effect tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Rewrite first-read adapter guidance in `gh-address-cr/SKILL.md`
-- [ ] T013 [US1] Delete or compress duplicate workflow-state prose in `gh-address-cr/SKILL.md` and preserve runtime-owned details in `gh-address-cr/references/mode-producer-matrix.md`
-- [ ] T014 [US1] Update assistant-specific thin-adapter hints in `gh-address-cr/agents/openai.yaml`
-- [ ] T015 [US1] Update runtime compatibility wording in `gh-address-cr/runtime-requirements.json`
+- [x] T012 [US1] Rewrite first-read adapter guidance in `gh-address-cr/SKILL.md`
+- [x] T013 [US1] Delete or compress duplicate workflow-state prose in `gh-address-cr/SKILL.md` and preserve runtime-owned details in `gh-address-cr/references/mode-producer-matrix.md`
+- [x] T014 [US1] Update assistant-specific thin-adapter hints in `gh-address-cr/agents/openai.yaml`
+- [x] T015 [US1] Update runtime compatibility wording in `gh-address-cr/runtime-requirements.json`
 
 **Checkpoint**: MVP complete. The packaged skill can be used as a thin adapter without relying on repository-only documentation.
 
@@ -64,15 +64,15 @@
 
 ### Tests for User Story 2
 
-- [ ] T016 [US2] Add status-to-action fixture contract tests in `tests/test_thin_skill_orchestration.py`
-- [ ] T017 [US2] Add malformed and unknown machine-summary fail-loud tests with actionable recovery-path assertions in `tests/test_thin_skill_orchestration.py`
-- [ ] T018 [US2] Add completion-summary final-gate evidence tests in `tests/test_skill_docs.py`
+- [x] T016 [US2] Add status-to-action fixture contract tests in `tests/test_thin_skill_orchestration.py`
+- [x] T017 [US2] Add malformed and unknown machine-summary fail-loud tests with actionable recovery-path assertions in `tests/test_thin_skill_orchestration.py`
+- [x] T018 [US2] Add completion-summary final-gate evidence tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] Add packaged status-action reference in `gh-address-cr/references/status-action-map.md`
-- [ ] T020 [US2] Link the status-action map from `gh-address-cr/SKILL.md`
-- [ ] T021 [US2] Update status summary fixtures in `tests/fixtures/thin_skill_orchestration/status_summaries.json`
+- [x] T019 [US2] Add packaged status-action reference in `gh-address-cr/references/status-action-map.md`
+- [x] T020 [US2] Link the status-action map from `gh-address-cr/SKILL.md`
+- [x] T021 [US2] Update status summary fixtures in `tests/fixtures/thin_skill_orchestration/status_summaries.json`
 
 **Checkpoint**: Agents can interpret runtime statuses without parsing prose or inventing an adapter-owned state machine.
 
@@ -84,11 +84,11 @@
 
 **Critical**: This phase blocks US3, US4, and US6 only. It must not introduce scheduler, agent spawning, polling loop, generic runner, or built-in review engine behavior.
 
-- [ ] T022 Create multi-agent orchestration fixture corpus for three items and four roles in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
-- [ ] T023 [P] Create producer intake fixture corpus in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
-- [ ] T024 [P] Add shared multi-agent session fixture loading helpers in `tests/test_control_plane_workflow.py`
-- [ ] T025 Add shared producer-intake fixture loading helpers in `tests/test_findings_intake.py`
-- [ ] T026 Add Stage 5 scope-guard assertions in `tests/test_thin_skill_orchestration.py`
+- [x] T022 Create multi-agent orchestration fixture corpus for three items and four roles in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
+- [x] T023 [P] Create producer intake fixture corpus in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
+- [x] T024 [P] Add shared multi-agent session fixture loading helpers in `tests/test_control_plane_workflow.py`
+- [x] T025 Add shared producer-intake fixture loading helpers in `tests/test_findings_intake.py`
+- [x] T026 Add Stage 5 scope-guard assertions in `tests/test_thin_skill_orchestration.py`
 
 **Checkpoint**: Contract-first orchestration readiness work can proceed without blocking Stage 4 delivery.
 
@@ -102,17 +102,17 @@
 
 ### Tests for User Story 3
 
-- [ ] T027 [P] [US3] Add capability manifest role/action eligibility tests in `tests/test_agent_protocol.py`
-- [ ] T028 [US3] Add multi-agent three-item lease conflict, stale submission, and interrupted lease resume/reclaim tests in `tests/test_control_plane_workflow.py`
-- [ ] T029 [US3] Add required-evidence rejection, verifier-rejection, and no-duplicate reply/resolve publishing regression tests in `tests/test_control_plane_workflow.py`
-- [ ] T030 [US3] Add role-coordination documentation contract tests in `tests/test_skill_docs.py`
+- [x] T027 [P] [US3] Add capability manifest role/action eligibility tests in `tests/test_agent_protocol.py`
+- [x] T028 [US3] Add multi-agent three-item lease conflict, stale submission, and interrupted lease resume/reclaim tests in `tests/test_control_plane_workflow.py`
+- [x] T029 [US3] Add required-evidence rejection, verifier-rejection, and no-duplicate reply/resolve publishing regression tests in `tests/test_control_plane_workflow.py`
+- [x] T030 [US3] Add role-coordination documentation contract tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 3
 
-- [ ] T031 [US3] Add packaged multi-agent orchestration reference in `gh-address-cr/references/multi-agent-orchestration.md`
-- [ ] T032 [US3] Update multi-agent section in `gh-address-cr/SKILL.md`
-- [ ] T033 [US3] Align runtime agent manifest role/action descriptions in `src/gh_address_cr/cli.py` without adding runner, scheduler, or spawning behavior
-- [ ] T034 [US3] Update multi-agent fixture in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
+- [x] T031 [US3] Add packaged multi-agent orchestration reference in `gh-address-cr/references/multi-agent-orchestration.md`
+- [x] T032 [US3] Update multi-agent section in `gh-address-cr/SKILL.md`
+- [x] T033 [US3] Align runtime agent manifest role/action descriptions in `src/gh_address_cr/cli.py` without adding runner, scheduler, or spawning behavior
+- [x] T034 [US3] Update multi-agent fixture in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
 
 **Checkpoint**: Multi-agent execution is contract-first, lease-first, and runtime-owned, without scheduler or runner lock-in.
 
@@ -126,16 +126,16 @@
 
 ### Tests for User Story 6
 
-- [ ] T035 [US6] Add narrative-only producer rejection tests in `tests/test_findings_intake.py`
-- [ ] T036 [US6] Add producer identity replacement tests in `tests/test_findings_intake.py`
-- [ ] T037 [P] [US6] Add fixed `finding` block converter contract tests in `tests/test_native_intake.py`
-- [ ] T038 [US6] Add producer-boundary documentation tests in `tests/test_skill_docs.py`
+- [x] T035 [US6] Add narrative-only producer rejection tests in `tests/test_findings_intake.py`
+- [x] T036 [US6] Add producer identity replacement tests in `tests/test_findings_intake.py`
+- [x] T037 [P] [US6] Add fixed `finding` block converter contract tests in `tests/test_native_intake.py`
+- [x] T038 [US6] Add producer-boundary documentation tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 6
 
-- [ ] T039 [US6] Update producer intake guidance in `gh-address-cr/references/local-review-adapter.md`
-- [ ] T040 [US6] Update concise producer boundary in `gh-address-cr/SKILL.md`
-- [ ] T041 [US6] Update producer intake fixtures in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
+- [x] T039 [US6] Update producer intake guidance in `gh-address-cr/references/local-review-adapter.md`
+- [x] T040 [US6] Update concise producer boundary in `gh-address-cr/SKILL.md`
+- [x] T041 [US6] Update producer intake fixtures in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
 
 **Checkpoint**: The workflow remains a PR review resolution control plane, not a review engine.
 
@@ -149,15 +149,15 @@
 
 ### Tests for User Story 4
 
-- [ ] T042 [US4] Add runbook no-runner scope tests in `tests/test_thin_skill_orchestration.py`
-- [ ] T043 [US4] Add high-level-command-only runbook tests in `tests/test_skill_docs.py`
-- [ ] T044 [US4] Add quickstart dry-run coverage tests in `tests/test_skill_docs.py`
+- [x] T042 [US4] Add runbook no-runner scope tests in `tests/test_thin_skill_orchestration.py`
+- [x] T043 [US4] Add high-level-command-only runbook tests in `tests/test_skill_docs.py`
+- [x] T044 [US4] Add quickstart dry-run coverage tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 4
 
-- [ ] T045 [US4] Add manual orchestration runbook with active-lease interruption recovery in `gh-address-cr/references/multi-agent-runbook.md`
-- [ ] T046 [US4] Link the runbook from `gh-address-cr/SKILL.md`
-- [ ] T047 [US4] Align the feature quickstart with shipped runbook references in `specs/003-thin-skill-orchestration/quickstart.md`
+- [x] T045 [US4] Add manual orchestration runbook with active-lease interruption recovery in `gh-address-cr/references/multi-agent-runbook.md`
+- [x] T046 [US4] Link the runbook from `gh-address-cr/SKILL.md`
+- [x] T047 [US4] Align the feature quickstart with shipped runbook references in `specs/003-thin-skill-orchestration/quickstart.md`
 
 **Checkpoint**: A human operator can coordinate multi-agent work through the runtime contract without a new runner.
 
@@ -171,17 +171,17 @@
 
 ### Tests for User Story 5
 
-- [ ] T048 [US5] Add repo-root versus skill-root path-scope tests in `tests/test_skill_docs.py`
-- [ ] T049 [US5] Add low-level script non-public-surface and legacy delegate-or-fail-loud guidance tests in `tests/test_skill_docs.py`
-- [ ] T050 [US5] Add ownership contradiction scan tests in `tests/test_skill_docs.py`
-- [ ] T051 [US5] Add final-gate-backed completion example tests in `tests/test_skill_docs.py`
+- [x] T048 [US5] Add repo-root versus skill-root path-scope tests in `tests/test_skill_docs.py`
+- [x] T049 [US5] Add low-level script non-public-surface and legacy delegate-or-fail-loud guidance tests in `tests/test_skill_docs.py`
+- [x] T050 [US5] Add ownership contradiction scan tests in `tests/test_skill_docs.py`
+- [x] T051 [US5] Add final-gate-backed completion example tests in `tests/test_skill_docs.py`
 
 ### Implementation for User Story 5
 
-- [ ] T052 [US5] Update public architecture and boundary sections in `README.md`
-- [ ] T053 [P] [US5] Update packaged advanced references in `gh-address-cr/references/mode-producer-matrix.md`
-- [ ] T054 [P] [US5] Update packaged triage and evidence references in `gh-address-cr/references/cr-triage-checklist.md` and `gh-address-cr/references/evidence-ledger.md`
-- [ ] T055 [P] [US5] Update assistant hint boundary wording in `gh-address-cr/agents/openai.yaml`
+- [x] T052 [US5] Update public architecture and boundary sections in `README.md`
+- [x] T053 [P] [US5] Update packaged advanced references in `gh-address-cr/references/mode-producer-matrix.md`
+- [x] T054 [P] [US5] Update packaged triage and evidence references in `gh-address-cr/references/cr-triage-checklist.md` and `gh-address-cr/references/evidence-ledger.md`
+- [x] T055 [P] [US5] Update assistant hint boundary wording in `gh-address-cr/agents/openai.yaml`
 
 **Checkpoint**: Public docs agree on runtime ownership and path scope across repo-root and packaged skill payload.
 
@@ -191,14 +191,14 @@
 
 **Purpose**: Verify all changed contracts together and prepare for implementation review.
 
-- [ ] T056 [P] Run documentation placeholder and contradiction scans for `README.md`, `gh-address-cr/SKILL.md`, `gh-address-cr/references/`, and `gh-address-cr/agents/openai.yaml`
-- [ ] T057 [P] Run quickstart validation commands from `specs/003-thin-skill-orchestration/quickstart.md`
-- [ ] T058 Run `ruff check gh-address-cr tests` for `gh-address-cr/` and `tests/`
-- [ ] T059 Run `python3 -m unittest discover -s tests` for `tests/`
-- [ ] T060 Run `python3 gh-address-cr/scripts/cli.py --help` for `gh-address-cr/scripts/cli.py`
-- [ ] T061 Run `python3 gh-address-cr/scripts/cli.py adapter check-runtime` for `gh-address-cr/scripts/cli.py`
-- [ ] T062 Run `git diff --check` from repository root `/Users/snow/Documents/GitHub/gh-address-cr-skill`
-- [ ] T063 Update implementation evidence and residual risks in `specs/003-thin-skill-orchestration/quickstart.md`
+- [x] T056 [P] Run documentation placeholder and contradiction scans for `README.md`, `gh-address-cr/SKILL.md`, `gh-address-cr/references/`, and `gh-address-cr/agents/openai.yaml`
+- [x] T057 [P] Run quickstart validation commands from `specs/003-thin-skill-orchestration/quickstart.md`
+- [x] T058 Run `ruff check gh-address-cr tests` for `gh-address-cr/` and `tests/`
+- [x] T059 Run `python3 -m unittest discover -s tests` for `tests/`
+- [x] T060 Run `python3 gh-address-cr/scripts/cli.py --help` for `gh-address-cr/scripts/cli.py`
+- [x] T061 Run `python3 gh-address-cr/scripts/cli.py adapter check-runtime` for `gh-address-cr/scripts/cli.py`
+- [x] T062 Run `git diff --check` from repository root `/Users/snow/Documents/GitHub/gh-address-cr-skill`
+- [x] T063 Update implementation evidence and residual risks in `specs/003-thin-skill-orchestration/quickstart.md`
 
 ---
 

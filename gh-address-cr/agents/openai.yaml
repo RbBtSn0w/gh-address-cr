@@ -1,7 +1,7 @@
 version: 1
 interface:
   display_name: GH Address CR
-  short_description: Operate the gh-address-cr runtime through a thin skill adapter.
+  short_description: Operate the gh-address-cr runtime through a thin adapter.
   default_prompt: |
     Use `SKILL.md` as the source of truth.
     1. Treat `python3 scripts/cli.py` as a compatibility shim. Stateful work belongs to the external `gh-address-cr` runtime.

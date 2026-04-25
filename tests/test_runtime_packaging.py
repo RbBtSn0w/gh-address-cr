@@ -242,6 +242,14 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "GH_AUTH_FAILED")
         self.assertFalse(self.session_file().exists())
 
+    def test_runtime_compatibility_preflight(self):
+        result = self.run_runtime_module("adapter", "check-runtime")
+        
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "compatible")
+        self.assertEqual(payload["runtime_package"], "gh-address-cr")
+
 
 if __name__ == "__main__":
     unittest.main()

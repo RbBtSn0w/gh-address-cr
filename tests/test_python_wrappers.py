@@ -1413,7 +1413,8 @@ else:
 
     def test_control_plane_requires_json_input_for_code_review(self):
         result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr]
+            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr],
+            stdin=""
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)

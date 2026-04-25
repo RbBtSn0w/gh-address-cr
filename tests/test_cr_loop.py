@@ -1778,7 +1778,8 @@ print(json.dumps({
                 f"{sys.executable} {fixer}",
                 self.repo,
                 self.pr,
-            ]
+            ],
+            stdin=""
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)

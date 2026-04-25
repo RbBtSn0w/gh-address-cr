@@ -1,4 +1,5 @@
 import unittest
+import json
 
 from tests.helpers import ROOT
 
@@ -13,6 +14,10 @@ OTEL_WORKER_WRANGLER = ROOT / "gh-address-cr" / "references" / "otel-worker-bett
 OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
 
+def load_documentation_contracts():
+    path = ROOT / "tests" / "fixtures" / "thin_skill_orchestration" / "documentation_contracts.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_declares_packaged_skill_root_scope(self):
@@ -78,6 +83,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0", text)
         self.assertNotIn("prefer the human-readable `Current Run Snapshot` block", text)
 
+    def test_skill_identifies_as_thin_adapter(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("thin adapter", text.lower())
+        self.assertIn("adapter check-runtime", text)
+
+    def test_openai_hint_identifies_as_thin_adapter(self):
+        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertIn("thin adapter", text.lower())
+        self.assertNotIn("direct side effect", text.lower())
+
     def test_openai_hint_does_not_require_natural_language_current_run_counts(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertNotIn("summarize the current-run queue counts in natural language", text)
@@ -93,12 +108,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("- when the skill itself blocks progress", text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
-        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
-        self.assertIn("for GitHub thread `fix`: `fix_reply`", skill_text)
-        self.assertIn("`commit_hash`", skill_text)
-        self.assertIn("`files`", skill_text)
-        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", skill_text)
+        self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
+        self.assertIn("`commit_hash`", matrix_text)
+        self.assertIn("`files`", matrix_text)
+        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
         self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
 
@@ -243,3 +258,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
         self.assertIn("`findings --sync` requires an explicit `--source`", readme_text)
         self.assertIn("outdated / `STALE` GitHub threads still count as unresolved until explicitly handled", readme_text)
+
+    def test_completion_summary_final_gate_evidence(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("`Verified: 0 Unresolved Threads found`", text)
+        self.assertIn("`Verified: 0 Pending Reviews found`", text)
+        self.assertIn("unresolved GitHub threads = 0", text)
+        self.assertIn("session blocking items = 0", text)

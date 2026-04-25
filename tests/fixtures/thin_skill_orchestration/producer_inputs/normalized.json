@@ -1,0 +1,8 @@
+[
+  {
+    "rule": "Null check",
+    "filename": "src/a.py",
+    "start_line": 1,
+    "message": "Add null check"
+  }
+]

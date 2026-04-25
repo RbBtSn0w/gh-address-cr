@@ -152,3 +152,14 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
 - GitHub review threads require both reply and resolve.
 - Local findings require valid status transitions and notes for terminal handling.
 - `python3 scripts/cli.py final-gate` must pass before any completion statement.
+
+External fixer commands must read a JSON payload from stdin and return a JSON object containing:
+- `resolution`: `fix`, `clarify`, or `defer`
+- `note`
+- for GitHub thread `fix`: `fix_reply`
+  - `commit_hash`
+  - `files`
+  - optional `severity`, `why`, `test_command`, `test_result`
+  - `validation_commands` may be used as the default validation evidence when `test_command` / `test_result` are omitted
+- for GitHub thread `clarify` or `defer`: `reply_markdown`
+- optional `validation_commands`

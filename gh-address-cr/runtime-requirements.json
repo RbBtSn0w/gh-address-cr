@@ -1,4 +1,5 @@
 {
+  "description": "This skill acts as a thin adapter to the gh-address-cr runtime.",
   "runtime_package": "gh-address-cr",
   "minimum_runtime_version": "0.1.0",
   "supported_protocol_versions": [">=1.0,<2.0"],

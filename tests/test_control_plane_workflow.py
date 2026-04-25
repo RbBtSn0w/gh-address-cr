@@ -9,6 +9,11 @@ from tests.helpers import PythonScriptTestCase
 
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
+def load_multi_agent_session():
+    path = Path(__file__).parent / "fixtures" / "thin_skill_orchestration" / "multi_agent_session.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
 
 def open_item(item_id="local-finding:1", **overrides):
     payload = {

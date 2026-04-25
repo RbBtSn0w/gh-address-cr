@@ -1,0 +1,35 @@
+{
+  "WAITING_FOR_ACTION": {
+    "summary": {
+      "status": "WAITING_FOR_ACTION",
+      "reason_code": "ACTIVE_WORK",
+      "waiting_on": "agent_action",
+      "next_action": "Submit evidence using `gh-address-cr agent submit`",
+      "repo": "owner/repo",
+      "pr_number": "123",
+      "item_id": "item:123",
+      "item_kind": "local_finding"
+    },
+    "safe_next_action": "agent_submit",
+    "stop_condition": false
+  },
+  "NO_WORK_AVAILABLE": {
+    "summary": {
+      "status": "NO_WORK_AVAILABLE",
+      "reason_code": "ALL_CLEAR",
+      "waiting_on": "external_producer",
+      "next_action": "Wait for external review producer"
+    },
+    "safe_next_action": null,
+    "stop_condition": true
+  },
+  "MALFORMED": {
+    "summary": {
+      "status": "UNKNOWN",
+      "invalid_field": true
+    },
+    "safe_next_action": null,
+    "stop_condition": true,
+    "recovery_path": "Check audit logs and retry"
+  }
+}

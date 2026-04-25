@@ -10,3 +10,5 @@ dist/
 *.swp
 .vscode/
 .idea/
+test_output.log
+test_full.log

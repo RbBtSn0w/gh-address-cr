@@ -7,6 +7,11 @@ from tests.helpers import ROOT, SRC_ROOT
 
 sys.path.insert(0, str(SRC_ROOT))
 
+def load_producer_intake_fixture(name):
+    path = ROOT / "tests" / "fixtures" / "thin_skill_orchestration" / "producer_inputs" / name
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
 
 class FindingsIntakeTests(unittest.TestCase):
     def test_fixed_finding_blocks_parse_to_normalized_findings(self):
