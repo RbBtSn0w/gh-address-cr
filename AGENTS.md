@@ -163,5 +163,5 @@ When in doubt, be precise, be explicit, and fail loudly rather than leaving the 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read
-`specs/001-agent-control-plane/plan.md`.
+`specs/002-runtime-native-refactor/plan.md`.
 <!-- SPECKIT END -->

@@ -1,31 +1,25 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 -> 1.0.1
+Version change: 1.0.1 -> 1.1.0
 Amendment reason:
-- Align Runtime Architecture action list with Principle III and feature contracts by adding `reject`.
+- Solidify the "Agent Control Plane" architecture: physically separated runtime, structured agent protocol, and multi-agent coordination.
 Version bump rationale:
-- PATCH clarification only; no public boundary, principle, or workflow contract redefinition.
+- MINOR: Added Principle VI (Multi-Agent Coordination) and materially expanded Principle II (Agent Protocol) and IV (Runtime Separation).
 Modified principles:
-- None
-Affected sections:
-- Runtime Architecture
+- II. CLI Is The Stable Public Interface (expanded with Structured Agent Protocol)
+- IV. Packaged Skill Boundary Is Explicit (expanded with Physical Separation of Runtime)
 Added sections:
-- None
+- Principle VI. Multi-Agent Coordination and Claim Leases
 Removed sections:
 - None
 Templates requiring updates:
-- .specify/templates/plan-template.md: reviewed, no update required
-- .specify/templates/spec-template.md: reviewed, no update required
-- .specify/templates/tasks-template.md: reviewed, no update required
-- .specify/templates/checklist-template.md: reviewed, no update required
+- .specify/templates/plan-template.md: ✅ updated (concepts aligned)
+- .specify/templates/spec-template.md: ✅ updated (concepts aligned)
+- .specify/templates/tasks-template.md: ✅ updated (concepts aligned)
+- .specify/templates/checklist-template.md: ✅ updated (concepts aligned)
 Runtime guidance requiring updates:
-- AGENTS.md: reviewed, no update required
-- README.md: reviewed, no update required
-- gh-address-cr/agents/openai.yaml: reviewed, no update required
-Verification performed:
-- `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks`
-- task ID sequence check for `specs/001-agent-control-plane/tasks.md`
-- `git diff --check`
+- AGENTS.md: ✅ updated (separation and protocol rules aligned)
+- README.md: ✅ updated (architecture overview aligned)
 Follow-up items:
 - None
 -->
@@ -47,7 +41,9 @@ depending on an agent's conversational memory.
 
 ### II. CLI Is The Stable Public Interface
 
-High-level CLI commands are the only agent-safe public surface. The main public
+High-level CLI commands are the only agent-safe public surface. The interaction
+between the agent and the control plane MUST follow the **Structured Agent Protocol**,
+using formal `ActionRequest` and `ActionResponse` schemas. The main public
 entrypoint is `review`; advanced entrypoints such as `threads`, `findings`,
 `adapter`, and `review-to-findings` MAY exist for explicit integrations but
 MUST NOT replace `review` as the default orchestration path. Machine-readable
@@ -55,8 +51,8 @@ outputs, reason codes, wait states, exit codes, cache artifacts, and stable
 input contracts MUST be preserved or versioned when changed.
 
 Rationale: AI agents, humans, CI, and future agent runners need the same stable
-control boundary. Low-level script topology is an implementation detail and
-MUST NOT leak into normal agent instructions.
+control boundary. Formal protocols separate cognitive reasoning from side-effect
+execution.
 
 ### III. Evidence-First Review Handling
 
@@ -75,19 +71,18 @@ prove that the agent responded, resolved, and left recoverable evidence.
 ### IV. Packaged Skill Boundary Is Explicit
 
 This repository has two scopes: the source repository and the packaged skill
-payload under `gh-address-cr/`. Rules that must survive skill installation MUST
-live under the packaged skill root, primarily in `gh-address-cr/SKILL.md` or
-skill-owned references. Repository-level tests, CI, release metadata, and
-development guidance MAY support the packaged skill, but they MUST NOT be
-required at runtime after skill installation unless the installation contract is
-explicitly changed.
+payload under `gh-address-cr/`. The **Deterministic Runtime** MUST be physically
+separated from the packaged skill adapter. The skill adapter MUST remain a thin
+layer that routes to the installed runtime CLI and interprets status codes.
+Runtime logic MUST NOT be authored or maintained as skill-owned workflow code.
 
 Path language MUST match the active scope. Repo-root docs and commands use
 paths such as `gh-address-cr/scripts/cli.py`; skill-owned docs use paths such
 as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`.
 
 Rationale: The project ships a skill. Blurring repo-root and skill-root paths
-creates broken installed instructions and unstable agent behavior.
+creates broken installed instructions and unstable agent behavior. Physical
+separation prevents runtime-logic drift within the skill payload.
 
 ### V. Testable Contracts And Fail-Fast Changes
 
@@ -101,14 +96,27 @@ documented, tested, and versioned as public behavior.
 Rationale: Agent workflows amplify ambiguity. A weak fallback can create false
 completion claims, duplicate side effects, or unrecoverable session drift.
 
+### VI. Multi-Agent Coordination and Claim Leases
+
+The control plane MUST coordinate multi-agent work through explicit, item-scoped
+claim leases. No agent or process MAY mutate a work item without an active lease.
+The system MUST define specialized roles (coordinator, producer, triage, fixer,
+verifier, publisher, gatekeeper) and enforce lease policies (expiry, reclaiming,
+conflict detection) to ensure parallel execution is safe and auditable.
+
+Rationale: PR repair is often multi-dimensional. Without explicit ownership,
+parallel agents can overwrite each other, resolve without evidence, or claim
+completion from stale state.
+
 ## Runtime Architecture
 
 The intended architecture is:
 
 - Core engine: deterministic state machine, GitHub IO, findings normalization,
-  session persistence, loop safety, final gate, audit artifacts, and telemetry.
+  multi-agent lease management, session persistence, loop safety, final gate,
+  audit artifacts, and telemetry.
 - CLI: stable public interface for agents, humans, CI, and future automation.
-- Agent contract: structured action requests and structured action responses
+- Agent protocol: structured `ActionRequest` and `ActionResponse` schemas
   for `fix`, `clarify`, `defer`, and `reject` workflows.
 - Skill: thin usage adapter that tells an AI agent when to invoke the CLI and
   how to react to machine-readable statuses.
@@ -134,6 +142,7 @@ Implementation plans MUST include a Constitution Check covering:
 - evidence requirements for reply, resolve, and final-gate behavior
 - packaged skill boundary and path discipline
 - test coverage for changed contracts
+- agent protocol and lease compatibility (if multi-agent or action-oriented)
 
 Code changes MUST run the smallest verification that matches the scope. Public
 CLI or packaging changes MUST include CLI smoke tests. Session, loop, reply,
@@ -170,4 +179,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.0.1 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24
+**Version**: 1.1.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24
