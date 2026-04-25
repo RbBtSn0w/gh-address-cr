@@ -125,6 +125,7 @@
 - [X] T032 [US5] Move tests that validate core runtime behavior away from direct legacy script file execution
 - [X] T033 [US5] Verify the full test suite passes when native runtime paths are exercised as the primary path
 - [X] T034 [US5] Rerun lint, full regression, CLI smoke, and legacy-unavailable boundary checks before restoring `spec.md` to `Verified`
+- [X] T035 [US5] Add byte-for-byte legacy/native session snapshot parity coverage for FR-007 in `tests/test_session_engine_parity.py` and `tests/fixtures/session_engine/legacy_native_session.json`
 
 ---
 

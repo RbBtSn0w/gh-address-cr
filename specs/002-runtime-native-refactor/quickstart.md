@@ -33,6 +33,14 @@ python3 -m unittest tests.test_native_runtime_boundary
 
 This does not require deleting compatibility scripts. It proves `review`, `threads`, `findings`, and `adapter` no longer depend on `legacy_scripts` as their primary runtime path.
 
+### 3.2 Verify Session Snapshot Parity
+Check that the native session engine preserves the legacy `session.json` shape byte-for-byte for a representative GitHub-thread and local-finding workflow:
+```bash
+python3 -m unittest tests.test_session_engine_parity
+```
+
+The fixture in `tests/fixtures/session_engine/legacy_native_session.json` is generated from the legacy implementation and compared as exact JSON text, not as a normalized object.
+
 ### 4. Run CLI Integration
 Test the native `review` flow via the CLI:
 ```bash
