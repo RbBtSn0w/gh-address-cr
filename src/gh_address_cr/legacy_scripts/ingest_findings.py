@@ -6,6 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from gh_address_cr.intake.findings import (
+    normalize_finding as native_normalize_finding,
+    parse_records as native_parse_records,
+)
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
@@ -133,7 +138,7 @@ def main() -> int:
         print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
         return 2
 
-    findings = [normalize_finding(record) for record in parse_records(load_payload(args.input))]
+    findings = [native_normalize_finding(record) for record in native_parse_records(load_payload(args.input))]
 
     subprocess.run(
         [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],

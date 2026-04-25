@@ -74,6 +74,31 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["state"], "open")
         self.assertIn("request_rejected", [row["event_type"] for row in self.ledger_rows()])
 
+    def test_agent_classify_records_evidence_and_allows_fixer_lease(self):
+        self.write_session(items=[open_item()])
+
+        classified = self.run_runtime_module(
+            "agent",
+            "classify",
+            self.repo,
+            self.pr,
+            "local-finding:1",
+            "--classification",
+            "fix",
+            "--agent-id",
+            "triage-1",
+            "--note",
+            "Real defect.",
+        )
+        requested = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer")
+
+        self.assertEqual(classified.returncode, 0, classified.stderr)
+        self.assertEqual(json.loads(classified.stdout)["status"], "CLASSIFICATION_RECORDED")
+        self.assertEqual(requested.returncode, 0, requested.stderr)
+        session = self.load_session()
+        self.assertEqual(session["items"]["local-finding:1"]["classification_evidence"]["classification"], "fix")
+        self.assertIn("classification_recorded", [row["event_type"] for row in self.ledger_rows()])
+
     def test_agent_next_issues_request_and_claim_lease_for_classified_item(self):
         self.write_session(
             items=[
@@ -252,6 +277,16 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertTrue(item["blocking"])
         self.assertEqual(item["publish_resolution"], "fix")
         self.assertNotIn("side_effect_attempt", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_publish_reports_no_work_when_no_thread_is_publish_ready(self):
+        self.write_session(items=[open_item()])
+
+        result = self.run_runtime_module("agent", "publish", self.repo, self.pr)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "NO_PUBLISH_READY_ITEMS")
+        self.assertEqual(payload["published_count"], 0)
 
     def test_agent_submit_verifier_rejection_reopens_item_without_side_effects(self):
         self.write_session(

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-runtime-native-refactor`  
 **Created**: 2026-04-24
-**Status**: Draft
+**Status**: Verified
 **Input**: User description: "下一阶段不应该继续扩 skill，而是开始拆 legacy_scripts： 优先级建议： 把 session_engine.py 的核心状态机迁到 src/gh_address_cr/core/session.py / workflow.py 把 GitHub reply/resolve/list threads 迁到 src/gh_address_cr/github/ 把 intake/findings 迁到 src/gh_address_cr/intake/ 把 final-gate 完全切到 src/gh_address_cr/core/gate.py 最后删除 runtime 对 legacy_scripts 的依赖，只保留 skill shim 一句话：现在主迁移已经跑完，review remediation 也补上了；接下来是“去 legacy_scripts 化”的 runtime-native 重构阶段。"
 
 ## User Scenarios & Testing *(mandatory)*

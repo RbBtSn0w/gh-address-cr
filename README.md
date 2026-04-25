@@ -41,6 +41,17 @@ python3 -m gh_address_cr --help
 python3 gh-address-cr/scripts/cli.py adapter check-runtime
 ```
 
+Native runtime ownership is now split by responsibility:
+
+- `src/gh_address_cr/core/session.py`: PR-scoped session loading, saving, and workspace paths
+- `src/gh_address_cr/core/workflow.py`: agent classification, leases, action requests, accepted responses, and deterministic publishing transitions
+- `src/gh_address_cr/core/gate.py`: final-gate policy evaluation and the native `Gatekeeper`
+- `src/gh_address_cr/github/client.py`: GitHub CLI IO for thread listing, replies, resolves, and pending reviews
+- `src/gh_address_cr/intake/findings.py`: findings parsing, normalization, source-scoped fingerprints, and fixed finding blocks
+- `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
+
+The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
+
 ## Public Interface
 
 `gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint:
@@ -54,10 +65,13 @@ Advanced/internal integration entrypoints:
 - `adapter`
 - `review-to-findings`
 - `agent manifest`
+- `agent classify`
 - `agent next`
 - `agent submit`
+- `agent publish`
 - `agent leases`
 - `agent reclaim`
+- `final-gate`
 
 Fail-fast contract:
 
@@ -109,10 +123,13 @@ The runtime is the coordinator. AI agents consume structured requests and return
 
 ```bash
 gh-address-cr agent manifest
+gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
+gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
+gh-address-cr final-gate owner/repo 123
 ```
 
 Role split:

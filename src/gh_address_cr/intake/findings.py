@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import textwrap
 from typing import Any
@@ -93,6 +94,51 @@ def normalize_finding(record: dict[str, Any]) -> dict[str, Any]:
         if field in record and record[field] not in (None, ""):
             normalized[field] = record[field]
     return normalized
+
+
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def fingerprint_finding(finding: dict[str, Any]) -> str:
+    stable = "|".join(
+        [
+            str(finding.get("path", "")),
+            str(finding.get("start_line") or finding.get("line") or ""),
+            str(finding.get("end_line") or ""),
+            normalize_text(str(finding.get("category", ""))),
+            normalize_text(str(finding.get("title", ""))),
+            normalize_text(str(finding.get("body", ""))),
+        ]
+    )
+    return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:16]
+
+
+def local_finding_item_id(source: str, finding: dict[str, Any]) -> str:
+    stable = json.dumps(
+        {"source": source, "fingerprint": fingerprint_finding(finding)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"local-finding:{hashlib.sha256(stable.encode('utf-8')).hexdigest()[:16]}"
+
+
+def with_local_item_fields(source: str, finding: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(finding)
+    normalized["item_id"] = local_finding_item_id(source, normalized)
+    normalized["item_kind"] = "local_finding"
+    normalized["source"] = source
+    return normalized
+
+
+def normalize_findings_payload(source: str, raw: str) -> list[dict[str, Any]]:
+    if source in {"review-to-findings", "finding-blocks"}:
+        findings = parse_finding_blocks(raw)
+    elif source in {"json", "code-review", "adapter"}:
+        findings = [normalize_finding(record) for record in parse_records(raw)]
+    else:
+        raise FindingsFormatError(f"Unsupported findings source: {source}")
+    return [with_local_item_fields(source, finding) for finding in findings]
 
 
 def extract_finding_blocks(raw: str) -> list[str]:

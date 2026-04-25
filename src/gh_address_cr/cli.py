@@ -14,7 +14,15 @@ from pathlib import Path
 from types import ModuleType
 
 from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
+from gh_address_cr.core import gate as core_gate
+from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.intake.findings import (
+    normalize_finding as native_normalize_finding,
+    parse_finding_blocks as native_parse_finding_blocks,
+    parse_records as native_parse_records,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent / "legacy_scripts"
@@ -72,15 +80,15 @@ def _legacy_module(name: str) -> ModuleType:
 
 
 def _normalize_finding(record: dict) -> dict:
-    return _legacy_module("ingest_findings").normalize_finding(record)
+    return native_normalize_finding(record)
 
 
 def _parse_records(raw: str) -> list[dict]:
-    return _legacy_module("ingest_findings").parse_records(raw)
+    return native_parse_records(raw)
 
 
 def _parse_findings(raw: str) -> list[dict]:
-    return _legacy_module("review_to_findings").parse_findings(raw)
+    return native_parse_finding_blocks(raw)
 
 
 def _python_common() -> ModuleType:
@@ -634,6 +642,7 @@ def build_agent_manifest() -> dict:
             "review",
             "produce_findings",
             "triage",
+            "classify",
             "fix",
             "clarify",
             "defer",
@@ -663,23 +672,54 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
 
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,next,submit,leases,reclaim} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,publish,leases,reclaim} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
     if args.repo == "manifest" and not args.pr_number and not args.args:
         sys.stdout.write(json.dumps(build_agent_manifest(), indent=2, sort_keys=True) + "\n")
         return 0
+    if args.repo == "classify":
+        return handle_agent_classify(args.pr_number, args.args)
     if args.repo == "next":
         return handle_agent_next(args.pr_number, args.args)
     if args.repo == "submit":
         return handle_agent_submit(args.pr_number, args.args)
+    if args.repo == "publish":
+        return handle_agent_publish(args.pr_number, args.args)
     if args.repo == "leases":
         return handle_agent_leases(args.pr_number, args.args)
     if args.repo == "reclaim":
         return handle_agent_reclaim(args.pr_number, args.args)
-    print("Unknown agent command. Supported commands: manifest, next, submit, leases, reclaim.", file=sys.stderr)
+    print(
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, publish, leases, reclaim.",
+        file=sys.stderr,
+    )
     return 2
+
+
+def handle_agent_classify(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent classify")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("item_id")
+    parser.add_argument("--classification", required=True, choices=["fix", "clarify", "defer", "reject"])
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--note", required=True)
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        payload = workflow.record_classification(
+            parsed.repo,
+            parsed.pr_number,
+            item_id=parsed.item_id,
+            classification=parsed.classification,
+            agent_id=parsed.agent_id,
+            note=parsed.note,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
 
 
 def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
@@ -723,6 +763,31 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
         )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent publish")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--agent-id", default="gh-address-cr-publisher")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        payload = workflow.publish_github_thread_responses(
+            parsed.repo,
+            parsed.pr_number,
+            agent_id=parsed.agent_id,
+            now=now_dt,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except Exception as exc:
+        return output_generic_agent_error(parsed.repo, parsed.pr_number, "PUBLISH_ERROR", str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 
@@ -806,6 +871,94 @@ def handle_superpowers_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr final-gate")
+    auto_group = parser.add_mutually_exclusive_group()
+    auto_group.add_argument("--auto-clean", dest="auto_clean", action="store_true")
+    auto_group.add_argument("--no-auto-clean", dest="auto_clean", action="store_false")
+    parser.set_defaults(auto_clean=True)
+    parser.add_argument("--audit-id", default="default")
+    parser.add_argument("--snapshot", default="")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parsed = parser.parse_args(_prepend_optional(repo, _prepend_optional(pr_number, passthrough)))
+    try:
+        result = core_gate.Gatekeeper().run(
+            parsed.repo,
+            parsed.pr_number,
+            snapshot_path=parsed.snapshot or None,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
+        return 5
+
+    _emit_final_gate_result(result)
+    if not result.passed:
+        print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
+        return result.exit_code
+
+    if parsed.auto_clean:
+        _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
+    return 0
+
+
+def _emit_final_gate_result(result: core_gate.GateResult) -> None:
+    print("== Final Freshness Check ==")
+    print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
+    print(f"Pending review count: {result.counts['pending_current_login_review_count']}")
+    print()
+    if result.passed:
+        print("== Gate Result ==")
+        print("Verified: 0 Unresolved Threads found")
+        print("Verified: 0 Pending Reviews found")
+        print(f"Session blocking items: {result.counts['blocking_items_count']}")
+    else:
+        print("== Gate Result ==")
+        print(f"Gate FAILED: {_final_gate_failure_message(result)}")
+    print()
+    print("== Machine Gate Diagnostics ==")
+    for key in core_gate.COUNT_KEYS:
+        print(f"{key}={result.counts[key]}")
+    print(f"reason_code={result.reason_code or 'PASSED'}")
+    print(f"exit_code={result.exit_code}")
+
+
+def _final_gate_failure_message(result: core_gate.GateResult) -> str:
+    reasons: list[str] = []
+    if result.counts["unresolved_remote_threads_count"]:
+        reasons.append(f"{result.counts['unresolved_remote_threads_count']} unresolved thread(s)")
+    if result.counts["blocking_local_items_count"]:
+        reasons.append(f"{result.counts['blocking_local_items_count']} blocking item(s)")
+    if result.counts["github_threads_missing_reply_count"]:
+        reasons.append(f"{result.counts['github_threads_missing_reply_count']} GitHub thread(s) missing reply evidence")
+    if result.counts["pending_current_login_review_count"]:
+        reasons.append(f"{result.counts['pending_current_login_review_count']} pending review(s)")
+    if result.counts["missing_validation_evidence_count"]:
+        reasons.append(f"{result.counts['missing_validation_evidence_count']} local item(s) missing validation evidence")
+    return " and ".join(reasons) or "gate checks reported failure"
+
+
+def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> None:
+    workspace = session_store.workspace_dir(repo, pr_number)
+    if not workspace.exists():
+        return
+    archive_root = core_paths.state_dir() / "archive" / core_paths.normalize_repo(repo) / f"pr-{pr_number}"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    base_name = audit_id or "final-gate"
+    archive_target = archive_root / base_name
+    suffix = 1
+    while archive_target.exists():
+        archive_target = archive_root / f"{base_name}-{suffix}"
+        suffix += 1
+    shutil.copytree(workspace, archive_target)
+    shutil.rmtree(workspace, ignore_errors=True)
+    print(f"Archived PR workspace: {archive_target}")
+    print(f"Auto-cleaned PR workspace: {workspace}")
+
+
 def _prepend_optional(value: str | None, args: list[str]) -> list[str]:
     return [*([value] if value else []), *args]
 
@@ -884,7 +1037,11 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
             "",
             f"Required gh-address-cr runtime script is missing: {target}\n",
         )
-    return subprocess.run([sys.executable, str(target), *passthrough_args], text=True, capture_output=True)
+    env = os.environ.copy()
+    src_root = str(Path(__file__).resolve().parents[1])
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = src_root if not existing_pythonpath else f"{src_root}{os.pathsep}{existing_pythonpath}"
+    return subprocess.run([sys.executable, str(target), *passthrough_args], text=True, capture_output=True, env=env)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -895,6 +1052,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "superpowers":
         return handle_superpowers_command(args)
+
+    if args.command == "final-gate":
+        if args.machine or args.human:
+            print(
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                file=sys.stderr,
+            )
+            return 2
+        return handle_final_gate(args.repo, args.pr_number, args.args)
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")

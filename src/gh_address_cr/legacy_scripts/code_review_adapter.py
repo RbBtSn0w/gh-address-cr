@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from ingest_findings import normalize_finding, parse_records
+from gh_address_cr.intake.findings import normalize_finding, parse_records
 
 
 def load_payload(input_path: str) -> str:

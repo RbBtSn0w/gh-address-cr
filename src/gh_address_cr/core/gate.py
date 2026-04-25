@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from gh_address_cr.core.session import SessionError, SessionManager
+from gh_address_cr.github.client import GitHubClient
 
 
 FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"
@@ -101,6 +106,42 @@ class GateResult:
         }
 
 
+class Gatekeeper:
+    def __init__(self, *, github_client: Any | None = None):
+        self.github_client = github_client or GitHubClient()
+
+    def run(
+        self,
+        repo: str,
+        pr_number: str,
+        *,
+        snapshot_path: str | Path | None = None,
+    ) -> GateResult:
+        session = self._load_session(repo, pr_number)
+        current_login = self.github_client.viewer_login()
+        remote_threads = (
+            _load_thread_snapshot(snapshot_path)
+            if snapshot_path
+            else self.github_client.list_threads(repo, str(pr_number))
+        )
+        pending_reviews = self.github_client.list_pending_reviews(repo, str(pr_number), current_login)
+        merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
+        return evaluate_final_gate(
+            merged_session,
+            remote_threads=remote_threads,
+            pending_reviews=pending_reviews,
+            current_login=current_login,
+        )
+
+    @staticmethod
+    def _load_session(repo: str, pr_number: str) -> dict[str, Any]:
+        manager = SessionManager(repo, str(pr_number))
+        try:
+            return manager.load()
+        except SessionError:
+            return manager.create(status="WAITING_FOR_GATE")
+
+
 def evaluate_final_gate(
     session: Mapping[str, Any],
     *,
@@ -149,6 +190,83 @@ def evaluate_final_gate(
         counts={key: counts[key] for key in COUNT_KEYS},
         failure_codes=failure_codes,
     )
+
+
+def _load_thread_snapshot(snapshot_path: str | Path | None) -> list[dict[str, Any]]:
+    if not snapshot_path:
+        return []
+    path = Path(snapshot_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Snapshot file not found: {path}")
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        payload = json.loads(raw)
+        if not isinstance(payload, list):
+            raise ValueError(f"Snapshot file must contain a JSON array or JSONL rows: {path}")
+        return [row for row in payload if isinstance(row, dict)]
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(raw.splitlines(), start=1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError(f"Snapshot row {line_number} must be a JSON object: {path}")
+        rows.append(row)
+    return rows
+
+
+def _session_with_remote_threads(
+    session: Mapping[str, Any],
+    remote_threads: Iterable[Mapping[str, Any]],
+    *,
+    current_login: str | None = None,
+) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(session)
+    raw_items = session.get("items") or {}
+    items = dict(raw_items) if isinstance(raw_items, Mapping) else {}
+    for thread in remote_threads:
+        thread_id = _thread_identifier(thread)
+        if not thread_id:
+            continue
+        item_id = f"github-thread:{thread_id}"
+        existing = items.get(item_id)
+        item = dict(existing) if isinstance(existing, Mapping) else {}
+        item.setdefault("item_id", item_id)
+        item.setdefault("item_kind", "github_thread")
+        item.setdefault("source", "github")
+        item["thread_id"] = thread_id
+        item["origin_ref"] = thread_id
+        item["path"] = thread.get("path") or item.get("path")
+        item["line"] = thread.get("line") or item.get("line")
+        item["url"] = thread.get("url") or item.get("url")
+        item["body"] = thread.get("body") or item.get("body")
+        is_resolved = _thread_is_resolved(thread)
+        is_outdated = bool(thread.get("isOutdated", thread.get("is_outdated", False)))
+        if is_resolved:
+            item["state"] = item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
+            item["status"] = "CLOSED"
+            item["blocking"] = False
+            item["handled"] = True
+        elif is_outdated:
+            item["state"] = "stale"
+            item["status"] = "STALE"
+            item["blocking"] = False
+        else:
+            item["state"] = "open"
+            item["status"] = "OPEN"
+            item["blocking"] = True
+        if thread.get("viewer_replied") and thread.get("viewer_reply_url"):
+            item["reply_evidence"] = {
+                "reply_url": thread["viewer_reply_url"],
+                "author_login": thread.get("viewer_login") or item.get("reply_author_login") or current_login,
+            }
+            item["reply_url"] = thread["viewer_reply_url"]
+            item["reply_posted"] = True
+        items[item_id] = item
+    merged["items"] = items
+    return merged
 
 
 def _session_items(session: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -259,6 +377,8 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
         return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
+    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {"accept", "manual", "sync"}:
+        return True
     return False
 
 
