@@ -13,50 +13,50 @@ init_commit_message: "[Spec Kit] Initial commit"
 auto_commit:
   default: false
   before_clarify:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before clarification"
   before_plan:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before planning"
   before_tasks:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before task generation"
   before_implement:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before implementation"
   before_checklist:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before checklist"
   before_analyze:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before analysis"
   before_taskstoissues:
-    enabled: false
+    enabled: true
     message: "[Spec Kit] Save progress before issue sync"
   after_constitution:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add project constitution"
   after_specify:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add specification"
   after_clarify:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Clarify specification"
   after_plan:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add implementation plan"
   after_tasks:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add tasks"
   after_implement:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Implementation progress"
   after_checklist:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add checklist"
   after_analyze:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Add analysis report"
   after_taskstoissues:
-    enabled: true
+    enabled: false
     message: "[Spec Kit] Sync tasks to issues"
