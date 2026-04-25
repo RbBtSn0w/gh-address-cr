@@ -56,6 +56,106 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(lines[0], "0")
         self.assertIn("usage:", result.stdout)
 
+    def test_session_engine_legacy_script_is_thin_native_delegate(self):
+        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "session_engine.py"
+        text = legacy_script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.session_engine import main", text)
+        self.assertNotIn("def default_session", text)
+        self.assertNotIn("def load_session", text)
+        self.assertNotIn("from python_common import", text)
+
+    def test_cr_loop_legacy_script_is_thin_native_delegate(self):
+        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "cr_loop.py"
+        text = legacy_script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.cr_loop import main", text)
+        self.assertNotIn("def handle_batch", text)
+        self.assertNotIn("import session_engine as engine", text)
+        self.assertNotIn("from python_common import", text)
+
+    def test_control_plane_legacy_script_is_thin_native_delegate(self):
+        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "control_plane.py"
+        text = legacy_script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.control_plane import main", text)
+        self.assertNotIn("def run_or_return", text)
+        self.assertNotIn("from python_common import", text)
+
+    def test_native_session_engine_exposes_legacy_cli_contract(self):
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(SRC_ROOT)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from gh_address_cr.core import session_engine\n"
+                    "parser = session_engine.build_parser()\n"
+                    "print(parser.prog)\n"
+                    "print(hasattr(session_engine, 'main'))\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("True", result.stdout)
+
+    def test_native_cr_loop_exposes_legacy_cli_contract(self):
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(SRC_ROOT)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from gh_address_cr.core import cr_loop\n"
+                    "parser = cr_loop.build_parser()\n"
+                    "print(parser.prog)\n"
+                    "print(hasattr(cr_loop, 'main'))\n"
+                    "print(hasattr(cr_loop, 'handle_batch'))\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("True\nTrue", result.stdout)
+
+    def test_native_control_plane_exposes_legacy_cli_contract(self):
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(SRC_ROOT)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from gh_address_cr.core import control_plane\n"
+                    "parser = control_plane.build_parser()\n"
+                    "print(parser.prog)\n"
+                    "print(hasattr(control_plane, 'main'))\n"
+                    "print(hasattr(control_plane, 'run_or_return'))\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("True\nTrue", result.stdout)
+
     def test_runtime_module_help_lists_public_commands(self):
         result = self.run_runtime_module("--help")
 

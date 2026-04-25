@@ -9,29 +9,30 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
+from uuid import uuid4
 
 from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.github.client import GitHubClient
+from gh_address_cr.github.errors import GitHubError
 from gh_address_cr.intake.findings import (
+    FindingsFormatError,
     normalize_finding as native_normalize_finding,
+    normalize_findings_payload,
     parse_finding_blocks as native_parse_finding_blocks,
     parse_records as native_parse_records,
+    with_local_item_fields,
 )
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent / "legacy_scripts"
 
 COMMAND_TO_SCRIPT = {
-    "review": "cr_loop.py",
-    "threads": "cr_loop.py",
-    "findings": "cr_loop.py",
-    "adapter": "cr_loop.py",
     "cr-loop": "cr_loop.py",
     "control-plane": "control_plane.py",
     "code-review-adapter": "code_review_adapter.py",
@@ -56,6 +57,7 @@ COMMAND_TO_SCRIPT = {
 }
 
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter", "submit-action"}
+NATIVE_HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
@@ -66,17 +68,8 @@ PR_URL_RE = re.compile(
 )
 
 
-def _ensure_script_import_path() -> None:
-    if not SCRIPT_DIR.is_dir():
-        raise RuntimeError(f"gh-address-cr legacy script directory is missing: {SCRIPT_DIR}")
-    script_path = str(SCRIPT_DIR)
-    if script_path not in sys.path:
-        sys.path.insert(0, script_path)
-
-
-def _legacy_module(name: str) -> ModuleType:
-    _ensure_script_import_path()
-    return __import__(name)
+def _legacy_module(name: str):
+    raise RuntimeError(f"Legacy module imports are not supported by the native CLI path: {name}")
 
 
 def _normalize_finding(record: dict) -> dict:
@@ -89,10 +82,6 @@ def _parse_records(raw: str) -> list[dict]:
 
 def _parse_findings(raw: str) -> list[dict]:
     return native_parse_finding_blocks(raw)
-
-
-def _python_common() -> ModuleType:
-    return _legacy_module("python_common")
 
 
 def normalize_repo(repo: str) -> str:
@@ -116,6 +105,30 @@ def default_state_dir_without_create() -> Path:
 
 def workspace_path_without_create(repo: str, pr_number: str) -> Path:
     return default_state_dir_without_create() / normalize_repo(repo) / f"pr-{pr_number}"
+
+
+def workspace_root(repo: str, pr_number: str) -> Path:
+    return session_store.workspace_dir(repo, pr_number)
+
+
+def producer_request_file(repo: str, pr_number: str) -> Path:
+    return workspace_root(repo, pr_number) / "producer-request.md"
+
+
+def incoming_findings_json_file(repo: str, pr_number: str) -> Path:
+    return workspace_root(repo, pr_number) / "incoming-findings.json"
+
+
+def incoming_findings_markdown_file(repo: str, pr_number: str) -> Path:
+    return workspace_root(repo, pr_number) / "incoming-findings.md"
+
+
+def normalized_handoff_findings_file(repo: str, pr_number: str) -> Path:
+    return workspace_root(repo, pr_number) / "incoming-findings.normalized.json"
+
+
+def last_machine_summary_file(repo: str, pr_number: str) -> Path:
+    return workspace_root(repo, pr_number) / "last-machine-summary.json"
 
 
 def inline_output_flags(command: str, passthrough_args: list[str]) -> set[str]:
@@ -218,12 +231,8 @@ def alias_help(command: str) -> str:
     return ""
 
 
-def workspace_root(repo: str, pr_number: str) -> Path:
-    return _python_common().workspace_dir(repo, pr_number)
-
-
 def persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
-    path = _python_common().last_machine_summary_file(repo, pr_number)
+    path = last_machine_summary_file(repo, pr_number)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -237,12 +246,11 @@ def _write_if_missing(path: Path, content: str = "") -> None:
 
 
 def ensure_external_review_handoff(repo: str, pr_number: str) -> Path:
-    common = _python_common()
     workspace = workspace_root(repo, pr_number)
     workspace.mkdir(parents=True, exist_ok=True)
-    request_path = common.producer_request_file(repo, pr_number)
-    incoming_json = common.incoming_findings_json_file(repo, pr_number)
-    incoming_md = common.incoming_findings_markdown_file(repo, pr_number)
+    request_path = producer_request_file(repo, pr_number)
+    incoming_json = incoming_findings_json_file(repo, pr_number)
+    incoming_md = incoming_findings_markdown_file(repo, pr_number)
     request_path.write_text(
         (
             "# External Review Producer Handoff\n\n"
@@ -280,9 +288,8 @@ def last_consumed_handoff_sha256(repo: str, pr_number: str) -> str | None:
 
 
 def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None, str | None]:
-    common = _python_common()
-    incoming_json = common.incoming_findings_json_file(repo, pr_number)
-    incoming_md = common.incoming_findings_markdown_file(repo, pr_number)
+    incoming_json = incoming_findings_json_file(repo, pr_number)
+    incoming_md = incoming_findings_markdown_file(repo, pr_number)
     raw_json = incoming_json.read_text(encoding="utf-8") if incoming_json.exists() else ""
     raw_md = incoming_md.read_text(encoding="utf-8") if incoming_md.exists() else ""
     findings: list[dict] | None = None
@@ -305,7 +312,7 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
     if findings is None:
         return None, None, None
 
-    normalized_path = common.normalized_handoff_findings_file(repo, pr_number)
+    normalized_path = normalized_handoff_findings_file(repo, pr_number)
     normalized_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return (
         str(normalized_path),
@@ -617,6 +624,410 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
         )
     return None
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _load_or_create_session(repo: str, pr_number: str) -> dict:
+    manager = session_store.SessionManager(repo, str(pr_number))
+    try:
+        session = manager.load()
+    except session_store.SessionError:
+        session = manager.create(status="ACTIVE")
+    _ensure_native_session_fields(session)
+    return session
+
+
+def _ensure_native_session_fields(session: dict) -> None:
+    now = _utc_now()
+    session.setdefault("schema_version", 1)
+    session.setdefault("created_at", now)
+    session.setdefault("updated_at", now)
+    session.setdefault("current_scan_id", None)
+    session.setdefault("items", {})
+    session.setdefault("leases", {})
+    session.setdefault("history", [])
+    session.setdefault("handoff", {"last_consumed_sha256": None})
+    session.setdefault(
+        "loop_state",
+        {
+            "run_id": None,
+            "status": "IDLE",
+            "iteration": 0,
+            "max_iterations": 0,
+            "current_item_id": None,
+            "last_error": "",
+            "last_started_at": None,
+            "last_completed_at": None,
+        },
+    )
+    session.setdefault("metrics", {})
+
+
+def _set_loop_state(
+    session: dict,
+    *,
+    run_id: str,
+    status: str,
+    iteration: int,
+    max_iterations: int,
+    current_item_id: str | None = None,
+    last_error: str = "",
+) -> None:
+    loop_state = session.setdefault("loop_state", {})
+    loop_state.update(
+        {
+            "run_id": run_id,
+            "status": status,
+            "iteration": iteration,
+            "max_iterations": max_iterations,
+            "current_item_id": current_item_id,
+            "last_error": last_error,
+            "last_started_at": loop_state.get("last_started_at") or _utc_now(),
+            "last_completed_at": _utc_now() if status in {"PASSED", "FAILED", "BLOCKED", "NEEDS_HUMAN"} else None,
+        }
+    )
+
+
+def _recalc_native_metrics(session: dict) -> None:
+    items = [item for item in session.get("items", {}).values() if isinstance(item, dict)]
+    session["metrics"] = {
+        "blocking_items_count": sum(1 for item in items if item.get("blocking")),
+        "open_local_findings_count": sum(
+            1 for item in items if item.get("item_kind") == "local_finding" and item.get("blocking")
+        ),
+        "unresolved_github_threads_count": sum(
+            1
+            for item in items
+            if item.get("item_kind") == "github_thread" and str(item.get("status") or "").upper() not in {"CLOSED", "DROPPED"}
+        ),
+        "needs_human_items_count": sum(1 for item in items if item.get("needs_human")),
+    }
+
+
+def _read_findings_input(input_path: str | None) -> str:
+    if input_path == "-":
+        return sys.stdin.read()
+    if not input_path:
+        return ""
+    return Path(input_path).read_text(encoding="utf-8")
+
+
+def _ingest_native_findings(
+    session: dict,
+    *,
+    raw: str,
+    source: str,
+    sync: bool = False,
+    scan_id: str | None = None,
+    handoff_sha256: str | None = None,
+) -> list[dict]:
+    format_source = "adapter" if source == "adapter" else "json"
+    findings = []
+    for finding in normalize_findings_payload(format_source, raw):
+        if source != format_source:
+            base = {
+                key: value
+                for key, value in finding.items()
+                if key not in {"item_id", "item_kind", "source"}
+            }
+            finding = with_local_item_fields(source, base)
+        findings.append(finding)
+    items = session.setdefault("items", {})
+    incoming_ids: set[str] = set()
+    now = _utc_now()
+    if scan_id:
+        session["current_scan_id"] = scan_id
+    for finding in findings:
+        item_id = str(finding["item_id"])
+        incoming_ids.add(item_id)
+        existing = items.get(item_id)
+        item = dict(existing) if isinstance(existing, dict) else {}
+        item.update(finding)
+        item.setdefault("created_at", now)
+        item["updated_at"] = now
+        item["status"] = "OPEN"
+        item["state"] = "open"
+        item["blocking"] = True
+        item["handled"] = False
+        item["needs_human"] = False
+        item.setdefault("history", [])
+        item.setdefault("reply_posted", False)
+        item.setdefault("reply_url", None)
+        item.setdefault("validation_commands", [])
+        items[item_id] = item
+    if sync:
+        for item_id, item in list(items.items()):
+            if not isinstance(item, dict) or item.get("item_kind") != "local_finding":
+                continue
+            if item.get("source") == source and item_id not in incoming_ids:
+                item["status"] = "CLOSED"
+                item["state"] = "closed"
+                item["blocking"] = False
+                item["handled"] = True
+                item["handled_at"] = now
+                item["updated_at"] = now
+    if handoff_sha256:
+        handoff = session.setdefault("handoff", {})
+        handoff["last_consumed_sha256"] = handoff_sha256
+    return findings
+
+
+def _write_native_action_request(repo: str, pr_number: str, item: dict, *, command: str, run_id: str) -> Path:
+    request_path = workspace_root(repo, pr_number) / f"loop-request-native-{run_id}-{uuid4().hex}.json"
+    request = {
+        "mode": "native-runtime-fixer",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "run_id": run_id,
+        "item": item,
+        "instructions": [
+            "Inspect the selected item and decide one resolution: fix, clarify, defer, or reject.",
+            "Submit structured evidence with `gh-address-cr agent submit` or rerun the originating command after recording the fix.",
+        ],
+        "resume_command": f"python3 scripts/cli.py {command} {repo} {pr_number}",
+    }
+    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return request_path
+
+
+def _first_blocking_item(session: dict) -> dict | None:
+    for item in session.get("items", {}).values():
+        if isinstance(item, dict) and item.get("blocking"):
+            return item
+    return None
+
+
+def _native_summary(
+    *,
+    command: str,
+    repo: str,
+    pr_number: str,
+    status: str,
+    reason_code: str,
+    waiting_on: str | None,
+    next_action: str,
+    exit_code: int,
+    session: dict,
+    artifact_path: str | None = None,
+    item: dict | None = None,
+) -> dict:
+    metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
+    return {
+        "status": status,
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": item.get("item_id") if item else None,
+        "item_kind": item.get("item_kind") if item else None,
+        "counts": {
+            "blocking_items_count": metrics.get("blocking_items_count", 0),
+            "open_local_findings_count": metrics.get("open_local_findings_count", 0),
+            "unresolved_github_threads_count": metrics.get("unresolved_github_threads_count", 0),
+            "needs_human_items_count": metrics.get("needs_human_items_count", 0),
+        },
+        "artifact_path": artifact_path or str(workspace_root(repo, pr_number)),
+        "reason_code": reason_code,
+        "waiting_on": waiting_on,
+        "next_action": next_action,
+        "exit_code": exit_code,
+    }
+
+
+def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog=f"gh-address-cr {command}", add_help=False)
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("adapter_cmd", nargs="*")
+    parser.add_argument("--input")
+    parser.add_argument("--source")
+    parser.add_argument("--sync", action="store_true")
+    parser.add_argument("--handoff-sha256")
+    parser.add_argument("--scan-id")
+    parser.add_argument("--audit-id")
+    parser.add_argument("--snapshot")
+    parser.add_argument("--max-iterations", type=int, default=1)
+    parsed, unknown = parser.parse_known_args(args)
+    if unknown:
+        parsed.adapter_cmd.extend(unknown)
+    if parsed.adapter_cmd and parsed.adapter_cmd[0] == "--":
+        parsed.adapter_cmd = parsed.adapter_cmd[1:]
+    return parsed
+
+
+def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
+    if not argv:
+        return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
+    result = subprocess.run(argv, text=True, capture_output=True)
+    if result.returncode != 0:
+        return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
+    return result.stdout, None
+
+
+def handle_native_high_level(command: str, passthrough_args: list[str], *, human: bool) -> int:
+    parsed = _parse_native_high_level_args(command, passthrough_args)
+    repo = parsed.repo
+    pr_number = str(parsed.pr_number)
+    run_id = parsed.audit_id or f"native-{_utc_now()}"
+    session = _load_or_create_session(repo, pr_number)
+    _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
+
+    try:
+        if parsed.sync and not parsed.source:
+            raise FindingsFormatError("`--sync` requires an explicit --source so missing findings stay scoped to one producer.")
+        if command in {"review", "findings"} and parsed.input:
+            raw = _read_findings_input(parsed.input)
+            _ingest_native_findings(
+                session,
+                raw=raw,
+                source=parsed.source or "json",
+                sync=parsed.sync,
+                scan_id=parsed.scan_id,
+                handoff_sha256=parsed.handoff_sha256,
+            )
+        elif command == "adapter":
+            raw, error = _run_adapter_command(parsed.adapter_cmd)
+            if error:
+                raise FindingsFormatError(error)
+            _ingest_native_findings(
+                session,
+                raw=raw or "",
+                source=parsed.source or "adapter",
+                sync=parsed.sync,
+                scan_id=parsed.scan_id,
+            )
+
+        remote_threads: list[dict] = []
+        if command in {"review", "threads", "adapter"}:
+            client = GitHubClient()
+            remote_threads = client.list_threads(repo, pr_number)
+            session = core_gate.session_with_remote_threads(session, remote_threads)
+        _recalc_native_metrics(session)
+        result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
+    except (FindingsFormatError, OSError) as exc:
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=parsed.max_iterations,
+            last_error=str(exc),
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code="INVALID_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action=str(exc),
+            exit_code=2,
+            session=session,
+        )
+        _emit_native_summary(summary, human=human)
+        return 2
+    except GitHubError as exc:
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=parsed.max_iterations,
+            last_error=str(exc),
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code=exc.reason_code,
+            waiting_on="github",
+            next_action=str(exc),
+            exit_code=5,
+            session=session,
+        )
+        _emit_native_summary(summary, human=human)
+        return 5
+
+    if not result.passed:
+        item = _first_blocking_item(session)
+        artifact_path = None
+        reason_code = "BLOCKING_ITEMS_REMAIN"
+        waiting_on = "unresolved_items"
+        next_action = result.to_machine_summary()["next_action"]
+        if item and item.get("item_kind") == "local_finding":
+            request_path = _write_native_action_request(repo, pr_number, item, command=command, run_id=run_id)
+            artifact_path = str(request_path)
+            reason_code = "WAITING_FOR_FIX"
+            waiting_on = "human_fix"
+            next_action = (
+                "Address the finding by running: "
+                f"`python3 scripts/cli.py submit-action {request_path} --resolution <fix|clarify|defer> "
+                f"--note <note> -- python3 scripts/cli.py {command} {repo} {pr_number}`"
+            )
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=parsed.max_iterations,
+            current_item_id=item.get("item_id") if item else None,
+            last_error=next_action,
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code=reason_code,
+            waiting_on=waiting_on,
+            next_action=next_action,
+            exit_code=5,
+            session=session,
+            artifact_path=artifact_path,
+            item=item,
+        )
+        _emit_native_summary(summary, human=human)
+        return 5
+
+    _set_loop_state(session, run_id=run_id, status="PASSED", iteration=1, max_iterations=parsed.max_iterations)
+    _recalc_native_metrics(session)
+    session_store.save_session(repo, pr_number, session)
+    summary = _native_summary(
+        command=command,
+        repo=repo,
+        pr_number=pr_number,
+        status="PASSED",
+        reason_code="PASSED",
+        waiting_on=None,
+        next_action="No action required.",
+        exit_code=0,
+        session=session,
+    )
+    _emit_native_summary(summary, human=human)
+    return 0
+
+
+def _emit_native_summary(summary: dict, *, human: bool) -> None:
+    persist_machine_summary(str(summary["repo"]), str(summary["pr_number"]), summary)
+    if human:
+        status = summary["status"]
+        if status == "PASSED":
+            print("cr-loop PASSED")
+        elif status == "BLOCKED":
+            print("cr-loop BLOCKED")
+            print(summary["next_action"])
+        else:
+            print(f"cr-loop {status}")
+        return
+    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
 
 def build_agent_manifest() -> dict:
@@ -1095,8 +1506,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(result.stderr)
         return result.returncode
 
-    if args.command not in COMMAND_TO_SCRIPT:
-        supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, "agent"]))
+    if args.command not in COMMAND_TO_SCRIPT and args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
+        supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "agent"]))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     if not normalize_output_args(args):
@@ -1112,6 +1523,8 @@ def main(argv: list[str] | None = None) -> int:
         preflight_rc = preflight_high_level(args)
         if preflight_rc is not None:
             return preflight_rc
+    if args.command in NATIVE_HIGH_LEVEL_COMMANDS:
+        return handle_native_high_level(args.command, args.args, human=args.human)
     rewritten_args = rewrite_alias_args(
         args.command,
         args.args,

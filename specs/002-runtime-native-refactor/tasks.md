@@ -112,6 +112,22 @@
 
 ---
 
+## Phase 9: Runtime Boundary Closure
+
+**Goal**: Close the gap between checked-off migration tasks and the actual runtime boundary requirements in FR-005, FR-006, FR-008, and US5.
+
+**Independent Test**: Core runtime commands keep working when `src/gh_address_cr/legacy_scripts` is temporarily unavailable, while compatibility shims still delegate to native modules when present.
+
+### Implementation for Runtime Boundary Closure
+- [X] T029 [US5] Add fail-fast tests proving packaged CLI core commands do not require `src/gh_address_cr/legacy_scripts`
+- [X] T030 [US5] Route public CLI core commands in `src/gh_address_cr/cli.py` through native packages instead of legacy script subprocesses
+- [X] T031 [US5] Convert `src/gh_address_cr/legacy_scripts/session_engine.py` and core shim entrypoints to delegate to native packages
+- [X] T032 [US5] Move tests that validate core runtime behavior away from direct legacy script file execution
+- [X] T033 [US5] Verify the full test suite passes when native runtime paths are exercised as the primary path
+- [X] T034 [US5] Rerun lint, full regression, CLI smoke, and legacy-unavailable boundary checks before restoring `spec.md` to `Verified`
+
+---
+
 ## Dependencies & Execution Order
 
 1. **Setup (Phase 1)** & **Foundational (Phase 2)**: Core structure and utilities.

@@ -56,6 +56,31 @@ class SkillRuntimeShimTest(PythonScriptTestCase):
         self.assertIn("usage:", result.stdout)
         self.assertIn("cr_loop.py", result.stdout)
 
+    def test_skill_session_engine_script_is_runtime_delegate(self):
+        script = SKILL_ROOT / "scripts" / "session_engine.py"
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.session_engine import main", text)
+        self.assertNotIn("def default_session", text)
+        self.assertNotIn("from python_common import", text)
+
+    def test_skill_cr_loop_script_is_runtime_delegate(self):
+        script = SKILL_ROOT / "scripts" / "cr_loop.py"
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.cr_loop import main", text)
+        self.assertNotIn("def handle_batch", text)
+        self.assertNotIn("import session_engine as engine", text)
+        self.assertNotIn("from python_common import", text)
+
+    def test_skill_control_plane_script_is_runtime_delegate(self):
+        script = SKILL_ROOT / "scripts" / "control_plane.py"
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("from gh_address_cr.core.control_plane import main", text)
+        self.assertNotIn("def run_or_return", text)
+        self.assertNotIn("from python_common import", text)
+
     def test_skill_shim_rejects_too_old_runtime_before_session_mutation(self):
         runtime_root = self.write_fake_runtime(version="0.0.1", protocol_versions=("1.0",))
         env = self.env.copy()

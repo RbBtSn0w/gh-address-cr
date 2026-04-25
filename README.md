@@ -51,6 +51,7 @@ Native runtime ownership is now split by responsibility:
 - `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
 
 The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
+Public high-level commands (`review`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
 
 ## Public Interface
 

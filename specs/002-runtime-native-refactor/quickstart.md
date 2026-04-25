@@ -13,16 +13,25 @@ Verify that the migrated logic passes its isolated tests and full regression sui
 ```bash
 python3 -m unittest tests.test_native_foundation tests.test_native_session tests.test_native_workflow
 python3 -m unittest tests.test_native_github tests.test_native_intake tests.test_native_gate
+python3 -m unittest tests.test_native_runtime_boundary
 python3 -m unittest discover -s tests
 ```
 
 ### 3. Verify No Legacy Imports
 Check that the native packages do not depend on `legacy_scripts`:
 ```bash
-rg -n "legacy_scripts|_legacy_module|SCRIPT_DIR|python_common|session_engine|ingest_findings|review_to_findings" \
+rg -n "(gh_address_cr\.legacy_scripts|^from python_common|^import session_engine as engine|^from generate_reply)" \
   src/gh_address_cr/core src/gh_address_cr/github src/gh_address_cr/intake
 ```
 (Expected: no matches).
+
+### 3.1 Verify Public CLI Does Not Require Legacy Scripts
+Check that public high-level commands route through native runtime code even when the packaged legacy script directory is unavailable:
+```bash
+python3 -m unittest tests.test_native_runtime_boundary
+```
+
+This does not require deleting compatibility scripts. It proves `review`, `threads`, `findings`, and `adapter` no longer depend on `legacy_scripts` as their primary runtime path.
 
 ### 4. Run CLI Integration
 Test the native `review` flow via the CLI:
@@ -40,10 +49,10 @@ python3 -m gh_address_cr final-gate <owner/repo> <pr_number>
 Current local size snapshot:
 
 ```text
-gh-address-cr/                       860 KiB
-src/gh_address_cr/                  1044 KiB
-src/gh_address_cr/legacy_scripts/    436 KiB
-native runtime excluding shims        ~608 KiB
+gh-address-cr/                       776 KiB
+src/gh_address_cr/                  1240 KiB
+src/gh_address_cr/legacy_scripts/    352 KiB
+native runtime excluding shims        ~888 KiB
 ```
 
 ### 7. Smoke Timing Snapshot

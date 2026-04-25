@@ -217,6 +217,15 @@ def _load_thread_snapshot(snapshot_path: str | Path | None) -> list[dict[str, An
     return rows
 
 
+def session_with_remote_threads(
+    session: Mapping[str, Any],
+    remote_threads: Iterable[Mapping[str, Any]],
+    *,
+    current_login: str | None = None,
+) -> dict[str, Any]:
+    return _session_with_remote_threads(session, remote_threads, current_login=current_login)
+
+
 def _session_with_remote_threads(
     session: Mapping[str, Any],
     remote_threads: Iterable[Mapping[str, Any]],

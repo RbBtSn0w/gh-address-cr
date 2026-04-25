@@ -6,6 +6,7 @@ venv/
 dist/
 *.egg-info/
 *.tmp
+*.log
 *.swp
 .vscode/
 .idea/
