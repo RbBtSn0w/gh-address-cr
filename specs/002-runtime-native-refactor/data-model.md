@@ -24,6 +24,8 @@ A normalized finding before it is converted into a session item.
 | `body` | `str` | Detailed description or AI instruction |
 | `source` | `str` | Identifier of the review producer |
 
+*(Note: Leases apply to Session Items once a Finding is ingested and becomes a work unit; raw Findings do not have independent lease state.)*
+
 ## Item State Transitions
 Transitions are governed by the `src/gh_address_cr/core/workflow.py` module.
 

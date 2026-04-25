@@ -83,7 +83,7 @@ As a project architect, I want the runtime package to have zero dependencies on 
 - **FR-004**: System MUST migrate the final gate logic to `src/gh_address_cr/core/gate.py`.
 - **FR-005**: The `src/gh_address_cr/` runtime package MUST NOT import or depend on any code within `src/gh_address_cr/legacy_scripts/`.
 - **FR-006**: Existing skill shims in `src/gh_address_cr/legacy_scripts/` MAY remain but MUST delegate to the new native implementation.
-- **FR-007**: All migrated logic MUST maintain 100% behavioral parity with the legacy implementation as verified by existing test fixtures.
+- **FR-007**: All migrated logic MUST maintain 100% behavioral parity with the legacy implementation. Verification MUST include byte-for-bit comparison of `session.json` snapshots produced by legacy vs native runtimes for identical inputs.
 - **FR-008**: System MUST update the CLI entrypoints in `src/gh_address_cr/cli.py` to use the new native packages instead of legacy internal modules.
 
 ### Constitution Alignment *(mandatory)*

@@ -1,9 +1,9 @@
 # Tasks: Runtime Native Refactor
 
 **Input**: Design documents from `specs/002-runtime-native-refactor/`
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+**Prerequisites**: plan.md (required), spec.md (required for user stories), data-model.md, contracts/
 
-**Tests**: This refactor requires TDD to ensure behavioral parity. Test tasks are included for every migrated component.
+**Tests**: This refactor follows a TDD approach to ensure behavioral parity.
 
 **Organization**: Tasks are grouped by user story to enable incremental migration and verification.
 
@@ -13,7 +13,7 @@
 
 - [ ] T001 Create native package structure in `src/gh_address_cr/core/`, `src/gh_address_cr/github/`, and `src/gh_address_cr/intake/`
 - [ ] T002 [P] Implement base path resolution logic in `src/gh_address_cr/core/paths.py` (extracted from `python_common.py`)
-- [ ] T003 [P] Define `Session`, `Item`, and `Finding` TypedDicts in `src/gh_address_cr/core/types.py`
+- [ ] T003 [P] Define `Session`, `Item`, `Lease`, and `Finding` TypedDicts in `src/gh_address_cr/core/types.py`
 
 ---
 
@@ -35,11 +35,11 @@
 
 ### Tests for User Story 1
 - [ ] T007 [P] [US1] Create unit tests for session loading/saving in `tests/test_native_session.py`
-- [ ] T008 [P] [US1] Create unit tests for state transitions in `tests/test_native_workflow.py`
+- [ ] T008 [P] [US1] Create unit tests for state transitions and lease logic in `tests/test_native_workflow.py`
 
 ### Implementation for User Story 1
 - [ ] T009 [US1] Implement session store in `src/gh_address_cr/core/session.py`
-- [ ] T010 [US1] Implement state machine and workflow logic in `src/gh_address_cr/core/workflow.py` (including Principle VI Lease support)
+- [ ] T010 [US1] Implement state machine and workflow logic in `src/gh_address_cr/core/workflow.py` (including Principle VI Lease support: expiry, owner tracking, and conflict detection)
 - [ ] T011 [US1] Refactor `src/gh_address_cr/cli.py` to use `core.session` and `core.workflow`
 
 ---
@@ -59,7 +59,7 @@
 
 ---
 
-## Phase 5: User Story 3 - Intake & Findings Normalization (Priority: P1)
+## Phase 5: User Story 3 - Native Intake & Findings Normalization (Priority: P1)
 
 **Goal**: Migrate findings normalization logic to `intake`
 
@@ -118,8 +118,5 @@
 2. **User Story 1 (P1)**: Native session management is the prerequisite for all other logic.
 3. **User Story 2 & 3 (P1)**: Can proceed in parallel after Story 1 is complete.
 4. **User Story 4 (P2)**: Final gate logic.
-5. **User Story 5 (P1)**: Final cleanup and boundary enforcement.
-6. **Polish**: Documentation and final regression.
-gic.
 5. **User Story 5 (P1)**: Final cleanup and boundary enforcement.
 6. **Polish**: Documentation and final regression.
