@@ -1,15 +1,17 @@
 <!--
 Sync Impact Report
-Version change: 1.0.1 -> 1.1.0
+Version change: 1.1.0 -> 1.2.0
 Amendment reason:
-- Solidify the "Agent Control Plane" architecture: physically separated runtime, structured agent protocol, and multi-agent coordination.
+- Solidify the "Thin Skill" as a routing and behavioral policy layer.
+- Define the "Product Boundary" between review resolution (internal) and review production (external/replaceable).
+- Incorporate "Status-to-Action Map" as a core contract for agent reliability.
 Version bump rationale:
-- MINOR: Added Principle VI (Multi-Agent Coordination) and materially expanded Principle II (Agent Protocol) and IV (Runtime Separation).
+- MINOR: Added Principle VII (External Intake Is Replaceable) and materially expanded Principle II (Status-to-Action Map) and IV (Behavioral Policy Layer).
 Modified principles:
-- II. CLI Is The Stable Public Interface (expanded with Structured Agent Protocol)
-- IV. Packaged Skill Boundary Is Explicit (expanded with Physical Separation of Runtime)
+- II. CLI Is The Stable Public Interface (expanded with Status-to-Action Map)
+- IV. Packaged Skill Boundary Is Explicit (expanded with Behavioral Policy Layer definition)
 Added sections:
-- Principle VI. Multi-Agent Coordination and Claim Leases
+- Principle VII. External Intake Is Replaceable
 Removed sections:
 - None
 Templates requiring updates:
@@ -18,8 +20,8 @@ Templates requiring updates:
 - .specify/templates/tasks-template.md: ✅ updated (concepts aligned)
 - .specify/templates/checklist-template.md: ✅ updated (concepts aligned)
 Runtime guidance requiring updates:
-- AGENTS.md: ✅ updated (separation and protocol rules aligned)
-- README.md: ✅ updated (architecture overview aligned)
+- AGENTS.md: ✅ updated (policy layer and intake rules aligned)
+- README.md: ✅ updated (resolution vs production boundary aligned)
 Follow-up items:
 - None
 -->
@@ -43,16 +45,17 @@ depending on an agent's conversational memory.
 
 High-level CLI commands are the only agent-safe public surface. The interaction
 between the agent and the control plane MUST follow the **Structured Agent Protocol**,
-using formal `ActionRequest` and `ActionResponse` schemas. The main public
-entrypoint is `review`; advanced entrypoints such as `threads`, `findings`,
-`adapter`, and `review-to-findings` MAY exist for explicit integrations but
-MUST NOT replace `review` as the default orchestration path. Machine-readable
-outputs, reason codes, wait states, exit codes, cache artifacts, and stable
-input contracts MUST be preserved or versioned when changed.
+using formal `ActionRequest` and `ActionResponse` schemas. The control plane MUST
+provide a stable **Status-to-Action Map** that derives safe next actions or stop
+conditions from machine-readable summaries. The main public entrypoint is `review`;
+advanced entrypoints such as `threads`, `findings`, `adapter`, and `review-to-findings`
+MAY exist for explicit integrations but MUST NOT replace `review` as the default
+orchestration path. Machine-readable outputs, reason codes, wait states, exit codes,
+cache artifacts, and stable input contracts MUST be preserved or versioned when changed.
 
 Rationale: AI agents, humans, CI, and future agent runners need the same stable
-control boundary. Formal protocols separate cognitive reasoning from side-effect
-execution.
+control boundary. Formal protocols and status mapping separate cognitive reasoning
+from side-effect execution and prevent agents from "guessing" the next command.
 
 ### III. Evidence-First Review Handling
 
@@ -72,9 +75,10 @@ prove that the agent responded, resolved, and left recoverable evidence.
 
 This repository has two scopes: the source repository and the packaged skill
 payload under `gh-address-cr/`. The **Deterministic Runtime** MUST be physically
-separated from the packaged skill adapter. The skill adapter MUST remain a thin
-layer that routes to the installed runtime CLI and interprets status codes.
-Runtime logic MUST NOT be authored or maintained as skill-owned workflow code.
+separated from the packaged skill adapter. The skill adapter MUST remain a **Thin
+Layer** that acts as a router and a **Behavioral Policy Layer**. It MUST explain
+how to use the runtime safely but MUST NOT contain authoritative business logic,
+state-machine transitions, or direct implementation of side effects.
 
 Path language MUST match the active scope. Repo-root docs and commands use
 paths such as `gh-address-cr/scripts/cli.py`; skill-owned docs use paths such
@@ -82,7 +86,8 @@ as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`.
 
 Rationale: The project ships a skill. Blurring repo-root and skill-root paths
 creates broken installed instructions and unstable agent behavior. Physical
-separation prevents runtime-logic drift within the skill payload.
+separation and the policy-layer model prevent runtime-logic drift within the
+skill payload.
 
 ### V. Testable Contracts And Fail-Fast Changes
 
@@ -108,6 +113,18 @@ Rationale: PR repair is often multi-dimensional. Without explicit ownership,
 parallel agents can overwrite each other, resolve without evidence, or claim
 completion from stale state.
 
+### VII. External Intake Is Replaceable
+
+`gh-address-cr` productizes **PR Review Resolution**, not review production.
+The project MUST remain agnostic of the specific review engine, prompt, or agent
+vendor that generates findings. Review intake MUST be governed by the **Normalized
+Findings Contract**. The control plane MUST NOT be coupled to a specific review
+producer's internal implementation.
+
+Rationale: Specializing in resolution prevents scope creep and ensures the
+orchestration layer remains a stable boundary for any review tool that can
+emit the accepted findings format.
+
 ## Runtime Architecture
 
 The intended architecture is:
@@ -118,8 +135,8 @@ The intended architecture is:
 - CLI: stable public interface for agents, humans, CI, and future automation.
 - Agent protocol: structured `ActionRequest` and `ActionResponse` schemas
   for `fix`, `clarify`, `defer`, and `reject` workflows.
-- Skill: thin usage adapter that tells an AI agent when to invoke the CLI and
-  how to react to machine-readable statuses.
+- Skill: thin usage adapter (Behavioral Policy Layer) that tells an AI agent
+  when to invoke the CLI and how to react to machine-readable statuses (Status-to-Action Map).
 - External producers: replaceable review sources that emit normalized findings
   JSON or fixed `finding` blocks.
 
@@ -138,9 +155,10 @@ findings intake, telemetry, or final-gate behavior.
 Implementation plans MUST include a Constitution Check covering:
 
 - control-plane ownership of state and side effects
-- public CLI and machine summary compatibility
+- public CLI and machine summary compatibility (including Status-to-Action Map)
 - evidence requirements for reply, resolve, and final-gate behavior
-- packaged skill boundary and path discipline
+- packaged skill boundary and path discipline (Policy Layer vs implementation)
+- external intake replaceability and findings normalization
 - test coverage for changed contracts
 - agent protocol and lease compatibility (if multi-agent or action-oriented)
 
@@ -179,4 +197,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24
+**Version**: 1.2.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-26

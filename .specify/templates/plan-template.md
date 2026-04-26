@@ -37,11 +37,16 @@
 - **Public CLI contract**: Does the plan preserve or explicitly version the
   `review` entrypoint, high-level command semantics, machine summary fields,
   reason codes, wait states, exit codes, and cache artifact contracts?
+  Does it account for the **Status-to-Action Map**?
 - **Evidence-first handling**: Does the plan define how review items are
   verified, classified as `fix` / `clarify` / `defer` / `reject`, replied to,
   resolved, and proven by `final-gate`?
 - **Packaged skill boundary**: Does the plan keep installable-skill behavior
   under `gh-address-cr/` and use repo-root paths only in repo-root docs/tests?
+  Does it treat the skill as a **Thin Adapter and Behavioral Policy Layer**?
+- **External intake replaceability**: Does the plan preserve the **Normalized
+  Findings Contract** and avoid coupling the control plane to a specific
+  review engine or agent vendor?
 - **Fail-fast verification**: Does the plan include tests or smoke checks for
   each changed public behavior, parser, session transition, or CLI surface?
 

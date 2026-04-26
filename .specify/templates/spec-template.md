@@ -98,9 +98,10 @@
 ### Constitution Alignment *(mandatory)*
 
 - **Control Plane Impact**: [Does this feature affect session state, GitHub IO, findings intake, loop safety, audit artifacts, telemetry, or final-gate behavior? If yes, describe the deterministic owner.]
-- **CLI / Agent Contract Impact**: [Does this feature change `review`, high-level commands, machine summary fields, reason codes, wait states, exit codes, or structured action requests/responses?]
+- **CLI / Agent Contract Impact**: [Does this feature change `review`, high-level commands, machine summary fields, reason codes, wait states, exit codes, or structured action requests/responses? Does it preserve the **Status-to-Action Map**?]
 - **Evidence Requirements**: [What evidence proves each review item was verified, classified, replied to, resolved, and gated?]
-- **Packaged Skill Boundary**: [Which changes belong under `gh-address-cr/`, and which are repo-root development/test/release support only?]
+- **Packaged Skill Boundary**: [Which changes belong under `gh-address-cr/`, and which are repo-root development/test/release support only? Does it preserve the **Thin Adapter and Behavioral Policy Layer** model?]
+- **External Intake Replaceability**: [Does the feature preserve the **Normalized Findings Contract** and intake agnostic nature of the control plane?]
 - **Fail-Fast Behavior**: [Which malformed inputs, missing tools, unsafe states, or unsupported usages must fail loudly?]
 
 ### Key Entities *(include if feature involves data)*
