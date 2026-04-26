@@ -73,3 +73,9 @@ A task is complete only when:
 - Consolidated verification commands to match `pyproject.toml`.
 - Added Conventional Commits guideline.
 - Simplified "Execution Discipline" to focus on repository-root behavior.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read
+`specs/004-agent-orchestrator-mvp/plan.md`.
+<!-- SPECKIT END -->
