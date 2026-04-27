@@ -67,10 +67,12 @@ As a maintainer with a large PR, I want the orchestrator to manage multiple inde
 
 ### Edge Cases
 
-- What happens when an agent submits an `ActionResponse` for a lease that just expired?
-- How does the orchestrator handle a verifier rejecting the evidence provided by a fixer? (It MUST return the item to a blocked/fix-required state).
-- What happens if the Runtime CLI version is incompatible with the Orchestrator MVP?
-- How is "completion" defined if one agent passes final-gate but another still has an active lease? (Final-gate MUST be the terminal authority).
+- **Expired Lease Response**: If an agent submits an `ActionResponse` for a lease that just expired, the orchestrator MUST fail loud and reject the submission. The item is returned to the queue or assigned to another agent.
+- **Verifier Reject**: If a verifier rejects the evidence provided by a fixer, the orchestrator MUST return the item to a blocked/fix-required state and explicitly release the verifier's lease.
+- **Runtime Incompatibility**: The Orchestrator MVP MUST fail loud before starting if the underlying Runtime CLI version is incompatible.
+- **Final Gate with Active Lease**: Final-gate completion is strictly forbidden if any active lease exists. `orchestrate stop` or final-gate checks MUST fail loud.
+- **Missing Response**: If a worker fails to write the `ActionResponse` to the expected `response_path`, the step/submit command fails loud. The lease remains until TTL expiry.
+- **Zero Pending Items**: When `orchestrate step` is run with zero pending items, it MUST return a specific exit code (e.g., 0) and status (e.g., `READY_FOR_FINAL_GATE` or `COMPLETED`).
 
 ## Requirements *(mandatory)*
 

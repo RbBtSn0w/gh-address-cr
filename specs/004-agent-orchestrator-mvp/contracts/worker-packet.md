@@ -1,6 +1,6 @@
 # Worker Packet Contract
 
-The `WorkerPacket` is emitted by the orchestrator during `step`.
+The `WorkerPacket` is emitted by the orchestrator during `step`. It MUST be kept as thin as possible. It MUST NOT include the entire session, all active leases, or other agent states.
 
 ```json
 {
@@ -11,7 +11,9 @@ The `WorkerPacket` is emitted by the orchestrator during `step`.
     "item_id": "finding-1",
     "item_kind": "local_finding",
     "allowed_actions": ["fix", "clarify", "defer"],
-    "required_evidence": ["commit_hash", "files"]
+    "required_evidence": ["changed_files", "validation_commands", "terminal_note", "reply_markdown", "github_reply_url", "final_gate_output"],
+    "relevant_file_context": "src/example.py:10-20",
+    "submit_recovery_instruction": "Run validation commands to verify your fix. Write the response JSON strictly to the response_path."
   },
   "response_path": "/tmp/workspace/response-finding-1.json"
 }
