@@ -165,7 +165,11 @@ else:
                 stdout = io.StringIO()
                 stderr = io.StringIO()
 
-                with patch.object(cli, "run_script", side_effect=AssertionError("legacy script")), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                with (
+                    patch.object(cli, "run_script", side_effect=AssertionError("legacy script")),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
                     rc = cli.main(["final-gate", "--no-auto-clean", "--snapshot", str(snapshot), repo, pr_number])
 
                 self.assertEqual(rc, 0, stderr.getvalue())

@@ -66,9 +66,7 @@ class SessionEngineParityTest(PythonScriptTestCase):
 
             session = json.loads(self.session_file().read_text(encoding="utf-8"))
             local_item_id = next(
-                item_id
-                for item_id, item in session["items"].items()
-                if item["item_kind"] == "local_finding"
+                item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding"
             )
 
             session_engine.cmd_update_item(

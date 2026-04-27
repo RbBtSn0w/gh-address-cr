@@ -72,7 +72,9 @@ def normalize_thread(node: dict[str, Any], *, viewer_login: str | None = None) -
     }
 
 
-def normalize_threads(payload: dict[str, Any] | list[dict[str, Any]], *, viewer_login: str | None = None) -> list[dict[str, Any]]:
+def normalize_threads(
+    payload: dict[str, Any] | list[dict[str, Any]], *, viewer_login: str | None = None
+) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [normalize_thread(node, viewer_login=viewer_login) for node in payload]
 
@@ -81,9 +83,7 @@ def normalize_threads(payload: dict[str, Any] | list[dict[str, Any]], *, viewer_
         return [normalize_thread(node, viewer_login=selected_viewer) for node in payload["threads"]]
 
     review_threads = (
-        ((payload.get("data") or {}).get("repository") or {})
-        .get("pullRequest", {})
-        .get("reviewThreads", {})
+        ((payload.get("data") or {}).get("repository") or {}).get("pullRequest", {}).get("reviewThreads", {})
     )
     nodes = review_threads.get("nodes") if isinstance(review_threads, dict) else None
     if isinstance(nodes, list):
@@ -92,7 +92,9 @@ def normalize_threads(payload: dict[str, Any] | list[dict[str, Any]], *, viewer_
 
 
 class ThreadStateProvider:
-    def __init__(self, load_threads: Callable[[], dict[str, Any] | list[dict[str, Any]]], *, viewer_login: str | None = None):
+    def __init__(
+        self, load_threads: Callable[[], dict[str, Any] | list[dict[str, Any]]], *, viewer_login: str | None = None
+    ):
         self._load_threads = load_threads
         self.viewer_login = viewer_login
 

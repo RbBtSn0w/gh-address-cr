@@ -9,6 +9,7 @@ from tests.helpers import PythonScriptTestCase
 
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
+
 def load_multi_agent_session():
     path = Path(__file__).parent / "fixtures" / "thin_skill_orchestration" / "multi_agent_session.json"
     with open(path, "r", encoding="utf-8") as f:
@@ -117,7 +118,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1", "--now", NOW.isoformat())
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1", "--now", NOW.isoformat()
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -133,7 +136,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][payload["lease_id"]]["status"], "active")
         self.assertEqual(session["leases"][payload["lease_id"]]["request_id"], request["request_id"])
-        self.assertEqual(session["leases"][payload["lease_id"]]["request_hash"], ActionRequest.from_dict(request).stable_hash())
+        self.assertEqual(
+            session["leases"][payload["lease_id"]]["request_hash"], ActionRequest.from_dict(request).stable_hash()
+        )
 
     def test_agent_submit_accepts_fix_response_with_active_lease(self):
         self.write_session(
@@ -147,7 +152,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                 )
             ]
         )
-        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(issued.returncode, 0, issued.stderr)
         issued_payload = json.loads(issued.stdout)
         request = json.loads(Path(issued_payload["request_path"]).read_text(encoding="utf-8"))
@@ -162,9 +169,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                     "resolution": "fix",
                     "note": "Fixed validation.",
                     "files": ["src/example.py"],
-                    "validation_commands": [
-                        {"command": "python3 -m unittest tests.test_example", "result": "passed"}
-                    ],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                 }
             ),
             encoding="utf-8",
@@ -195,7 +200,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                 )
             ]
         )
-        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(issued.returncode, 0, issued.stderr)
         issued_payload = json.loads(issued.stdout)
         request = json.loads(Path(issued_payload["request_path"]).read_text(encoding="utf-8"))
@@ -210,9 +217,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                     "resolution": "fix",
                     "note": "This response belongs to a different request.",
                     "files": ["src/example.py"],
-                    "validation_commands": [
-                        {"command": "python3 -m unittest tests.test_example", "result": "passed"}
-                    ],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                 }
             ),
             encoding="utf-8",
@@ -245,7 +250,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                 )
             ]
         )
-        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(issued.returncode, 0, issued.stderr)
         issued_payload = json.loads(issued.stdout)
         request = json.loads(Path(issued_payload["request_path"]).read_text(encoding="utf-8"))
@@ -260,9 +267,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                     "resolution": "fix",
                     "note": "Fixed thread issue.",
                     "files": ["src/example.py"],
-                    "validation_commands": [
-                        {"command": "python3 -m unittest tests.test_example", "result": "passed"}
-                    ],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                     "fix_reply": {
                         "summary": "Fixed thread issue.",
                         "commit_hash": "abc123",
@@ -328,9 +333,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                     "resolution": "reject",
                     "note": "The supplied validation does not cover the changed path.",
                     "reply_markdown": "Please add coverage for the changed path.",
-                    "validation_commands": [
-                        {"command": "python3 -m unittest tests.test_example", "result": "failed"}
-                    ],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "failed"}],
                 }
             ),
             encoding="utf-8",

@@ -46,7 +46,10 @@ class NativeGitHubClientTests(unittest.TestCase):
                                                 "comments": {
                                                     "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
                                                     "nodes": [
-                                                        {"url": "https://github.test/original", "author": {"login": "reviewer"}}
+                                                        {
+                                                            "url": "https://github.test/original",
+                                                            "author": {"login": "reviewer"},
+                                                        }
                                                     ],
                                                 },
                                                 "firstComment": {
@@ -74,9 +77,7 @@ class NativeGitHubClientTests(unittest.TestCase):
                             "node": {
                                 "comments": {
                                     "pageInfo": {"hasNextPage": False, "endCursor": None},
-                                    "nodes": [
-                                        {"url": "https://github.test/reply", "author": {"login": "octocat"}}
-                                    ],
+                                    "nodes": [{"url": "https://github.test/reply", "author": {"login": "octocat"}}],
                                 }
                             }
                         }
@@ -107,13 +108,7 @@ class NativeGitHubClientTests(unittest.TestCase):
             [
                 lambda cmd: completed(
                     cmd,
-                    {
-                        "data": {
-                            "addPullRequestReviewThreadReply": {
-                                "comment": {"url": "https://github.test/reply"}
-                            }
-                        }
-                    },
+                    {"data": {"addPullRequestReviewThreadReply": {"comment": {"url": "https://github.test/reply"}}}},
                 )
             ]
         )
@@ -132,13 +127,7 @@ class NativeGitHubClientTests(unittest.TestCase):
             [
                 lambda cmd: completed(
                     cmd,
-                    {
-                        "data": {
-                            "resolveReviewThread": {
-                                "thread": {"id": "THREAD_1", "isResolved": True}
-                            }
-                        }
-                    },
+                    {"data": {"resolveReviewThread": {"thread": {"id": "THREAD_1", "isResolved": True}}}},
                 )
             ]
         )
@@ -154,14 +143,14 @@ class NativeGitHubClientTests(unittest.TestCase):
         from gh_address_cr.github.errors import GitHubAuthError, GitHubRateLimitError, GitHubTransientError
 
         with self.assertRaises(GitHubAuthError):
-            GitHubClient(runner=RecordingRunner([completed(["gh"], {}, returncode=1, stderr="authentication required")])).post_reply(
-                "owner/repo", "123", "THREAD_1", "body"
-            )
+            GitHubClient(
+                runner=RecordingRunner([completed(["gh"], {}, returncode=1, stderr="authentication required")])
+            ).post_reply("owner/repo", "123", "THREAD_1", "body")
 
         with self.assertRaises(GitHubRateLimitError):
-            GitHubClient(runner=RecordingRunner([completed(["gh"], {"errors": [{"message": "API rate limit exceeded"}]})])).resolve_thread(
-                "owner/repo", "123", "THREAD_1"
-            )
+            GitHubClient(
+                runner=RecordingRunner([completed(["gh"], {"errors": [{"message": "API rate limit exceeded"}]})])
+            ).resolve_thread("owner/repo", "123", "THREAD_1")
 
         with self.assertRaises(GitHubTransientError):
             GitHubClient(

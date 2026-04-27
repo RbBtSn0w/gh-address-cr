@@ -141,7 +141,9 @@ else:
             },
         }
 
-        with patch.object(module.engine, "load_session", side_effect=AssertionError("load_session should not be called")):
+        with patch.object(
+            module.engine, "load_session", side_effect=AssertionError("load_session should not be called")
+        ):
             needs_human, found_item_id = module.detect_needs_human(
                 self.repo,
                 self.pr,
@@ -237,9 +239,11 @@ else:
             counts["save"] += 1
             return real_save_session(updated_session)
 
-        with patch.object(module.engine, "load_session", side_effect=counted_load_session), patch.object(
-            module.engine, "save_session", side_effect=counted_save_session
-        ), patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+        with (
+            patch.object(module.engine, "load_session", side_effect=counted_load_session),
+            patch.object(module.engine, "save_session", side_effect=counted_save_session),
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}),
+        ):
             status, error = module.handle_batch(
                 args,
                 self.repo,
@@ -825,7 +829,9 @@ else:
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/string-validation"}}),
+                    json.dumps(
+                        {item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/string-validation"}}
+                    ),
                     "",
                 )
             if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
@@ -939,7 +945,9 @@ else:
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/mixed-validation"}}),
+                    json.dumps(
+                        {item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/mixed-validation"}}
+                    ),
                     "",
                 )
             if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
@@ -1060,6 +1068,7 @@ else:
         updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
@@ -1261,7 +1270,9 @@ else:
     def test_cr_loop_does_not_repost_reply_after_resolve_failure(self):
         gh = self.bin_dir / "gh"
         state_file = Path(self.temp_dir.name) / "gh_state_reply_retry.json"
-        state_file.write_text(json.dumps({"reply_calls": 0, "resolve_attempts": 0, "resolved": False}), encoding="utf-8")
+        state_file.write_text(
+            json.dumps({"reply_calls": 0, "resolve_attempts": 0, "resolved": False}), encoding="utf-8"
+        )
         gh.write_text(
             f"""#!/usr/bin/env python3
 import json
@@ -1748,7 +1759,9 @@ else:
         self.assertIn("cr-loop PAUSED: Interaction Required", result.stdout + result.stderr)
         self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
 
-        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"]["github-thread:THREAD_LOOP_THRESHOLD"]
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][
+            "github-thread:THREAD_LOOP_THRESHOLD"
+        ]
         self.assertFalse(updated["needs_human"])
 
     def test_cr_loop_mixed_code_review_requires_findings_json(self):
@@ -1779,7 +1792,7 @@ print(json.dumps({
                 self.repo,
                 self.pr,
             ],
-            stdin=""
+            stdin="",
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)

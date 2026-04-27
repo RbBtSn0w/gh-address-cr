@@ -8,9 +8,7 @@ from python_common import findings_file, reply_file, loop_artifact_file, workspa
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Emit a standard prompt for producer=code-review findings generation."
-    )
+    parser = argparse.ArgumentParser(description="Emit a standard prompt for producer=code-review findings generation.")
     parser.add_argument("mode", choices=["local", "mixed"])
     parser.add_argument("repo")
     parser.add_argument("pr_number")
@@ -40,8 +38,7 @@ def main() -> int:
             f"{workspace_dir(args.repo, args.pr_number)}"
         ),
         "ingest_command": (
-            f"python3 scripts/cli.py control-plane {args.mode} code-review "
-            f"--input - {args.repo} {args.pr_number}"
+            f"python3 scripts/cli.py control-plane {args.mode} code-review --input - {args.repo} {args.pr_number}"
         ),
         "json_contract": [
             {

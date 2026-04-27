@@ -63,9 +63,7 @@ HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
-PR_URL_RE = re.compile(
-    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$"
-)
+PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
 
 
 def _legacy_module(name: str):
@@ -148,7 +146,9 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
         print("--machine and --human are mutually exclusive.", file=sys.stderr)
         return False
     if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
-        print(f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr)
+        print(
+            f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr
+        )
         return False
     args.machine = "--machine" in requested_flags
     args.human = "--human" in requested_flags
@@ -370,7 +370,9 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     item_id = loop_state.get("current_item_id")
     item = items.get(item_id, {}) if item_id else {}
     item_kind = item.get("item_kind") if isinstance(item, dict) else None
-    artifact_path = extract_artifact_path(str(loop_state.get("last_error") or "")) or str(workspace_root(repo, pr_number))
+    artifact_path = extract_artifact_path(str(loop_state.get("last_error") or "")) or str(
+        workspace_root(repo, pr_number)
+    )
     stderr_text = result.stderr or ""
     last_error = str(loop_state.get("last_error") or "")
     combined_error = "\n".join(part for part in [last_error, stderr_text] if part)
@@ -396,7 +398,9 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         reason_code = "NEEDS_HUMAN_REVIEW"
         waiting_on = "human_review"
         next_action = f"Inspect {artifact_path} and resolve manually."
-    elif status == "BLOCKED" and ("Internal fixer action required:" in combined_error or "Interaction Required" in combined_error):
+    elif status == "BLOCKED" and (
+        "Internal fixer action required:" in combined_error or "Interaction Required" in combined_error
+    ):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
         next_action = f"Address the finding by running: `python3 {sys.argv[0]} submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 {sys.argv[0]} {command} {repo} {pr_number}`"
@@ -701,7 +705,8 @@ def _recalc_native_metrics(session: dict) -> None:
         "unresolved_github_threads_count": sum(
             1
             for item in items
-            if item.get("item_kind") == "github_thread" and str(item.get("status") or "").upper() not in {"CLOSED", "DROPPED"}
+            if item.get("item_kind") == "github_thread"
+            and str(item.get("status") or "").upper() not in {"CLOSED", "DROPPED"}
         ),
         "needs_human_items_count": sum(1 for item in items if item.get("needs_human")),
     }
@@ -728,11 +733,7 @@ def _ingest_native_findings(
     findings = []
     for finding in normalize_findings_payload(format_source, raw):
         if source != format_source:
-            base = {
-                key: value
-                for key, value in finding.items()
-                if key not in {"item_id", "item_kind", "source"}
-            }
+            base = {key: value for key, value in finding.items() if key not in {"item_id", "item_kind", "source"}}
             finding = with_local_item_fields(source, base)
         findings.append(finding)
     items = session.setdefault("items", {})
@@ -875,7 +876,9 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
 
     try:
         if parsed.sync and not parsed.source:
-            raise FindingsFormatError("`--sync` requires an explicit --source so missing findings stay scoped to one producer.")
+            raise FindingsFormatError(
+                "`--sync` requires an explicit --source so missing findings stay scoped to one producer."
+            )
         if command in {"review", "findings"} and parsed.input:
             raw = _read_findings_input(parsed.input)
             _ingest_native_findings(
@@ -1081,9 +1084,8 @@ def build_agent_manifest() -> dict:
 
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
-
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,publish,leases,reclaim} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -1102,8 +1104,10 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_leases(args.pr_number, args.args)
     if args.repo == "reclaim":
         return handle_agent_reclaim(args.pr_number, args.args)
+    if args.repo == "orchestrate":
+        return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, publish, leases, reclaim.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -1169,9 +1173,7 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = workflow.submit_action_response(
-            parsed.repo, parsed.pr_number, response_path=parsed.input, now=now_dt
-        )
+        payload = workflow.submit_action_response(parsed.repo, parsed.pr_number, response_path=parsed.input, now=now_dt)
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -1233,6 +1235,12 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, "SESSION_ERROR", str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
+
+
+def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
+    from gh_address_cr.orchestrator import harness
+
+    return harness.handle_agent_orchestrate(repo, passthrough)
 
 
 def handle_superpowers_command(args: argparse.Namespace) -> int:
@@ -1348,7 +1356,9 @@ def _final_gate_failure_message(result: core_gate.GateResult) -> str:
     if result.counts["pending_current_login_review_count"]:
         reasons.append(f"{result.counts['pending_current_login_review_count']} pending review(s)")
     if result.counts["missing_validation_evidence_count"]:
-        reasons.append(f"{result.counts['missing_validation_evidence_count']} local item(s) missing validation evidence")
+        reasons.append(
+            f"{result.counts['missing_validation_evidence_count']} local item(s) missing validation evidence"
+        )
     return " and ".join(reasons) or "gate checks reported failure"
 
 
@@ -1541,7 +1551,9 @@ def main(argv: list[str] | None = None) -> int:
         if result.stderr:
             error_text = result.stderr
             if args.command in HIGH_LEVEL_COMMANDS and "Unsupported producer:" in error_text:
-                error_text += "\nproducer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name.\n"
+                error_text += (
+                    "\nproducer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name.\n"
+                )
             sys.stderr.write(error_text)
     return result.returncode
 

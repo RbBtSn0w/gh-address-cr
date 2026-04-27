@@ -98,7 +98,9 @@ def main() -> int:
             check=False,
         )
         if result.returncode != 0:
-            payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+            payload["status"] = (
+                "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+            )
             payload["error"] = result.stderr or "resolve failed"
             audit_event(
                 "resolve_thread",
@@ -126,7 +128,9 @@ def main() -> int:
                 {"thread_id": args.thread_id, "error": payload["error"]},
             )
             return emit_result(payload, 1, error_message=payload["error"])
-        resolved = resolve_payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved", False)
+        resolved = (
+            resolve_payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved", False)
+        )
         payload["remote_status"] = "succeeded"
         payload["resolved"] = bool(resolved)
 

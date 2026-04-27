@@ -223,7 +223,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_unauthenticated_gh_preflight_fails_before_session_mutation(self):
         gh = self.bin_dir / "gh"
-        gh.write_text("#!/bin/sh\nif [ \"$1\" = \"auth\" ]; then exit 1; fi\nexit 0\n", encoding="utf-8")
+        gh.write_text('#!/bin/sh\nif [ "$1" = "auth" ]; then exit 1; fi\nexit 0\n', encoding="utf-8")
         gh.chmod(0o755)
         env = self.env.copy()
         env["PYTHONPATH"] = str(SRC_ROOT)
@@ -244,7 +244,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_runtime_compatibility_preflight(self):
         result = self.run_runtime_module("adapter", "check-runtime")
-        
+
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "compatible")

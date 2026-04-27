@@ -38,7 +38,10 @@ def protocol_is_supported(runtime_protocols: tuple[str, ...], requirement: str) 
     upper = "2.0"
     if requirement.startswith(">=") and ",<" in requirement:
         lower, upper = requirement[2:].split(",<", 1)
-    return any(version_is_at_least(protocol, lower) and parse_version(protocol) < parse_version(upper) for protocol in runtime_protocols)
+    return any(
+        version_is_at_least(protocol, lower) and parse_version(protocol) < parse_version(upper)
+        for protocol in runtime_protocols
+    )
 
 
 def fail_compatibility(status: str, remediation: str) -> int:

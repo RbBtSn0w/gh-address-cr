@@ -13,7 +13,12 @@ def has_durable_reply_evidence(item: dict[str, Any] | None) -> bool:
     if isinstance(evidence, dict):
         reply_url = evidence.get("reply_url")
         author_login = evidence.get("author_login")
-        return isinstance(reply_url, str) and bool(reply_url.strip()) and isinstance(author_login, str) and bool(author_login.strip())
+        return (
+            isinstance(reply_url, str)
+            and bool(reply_url.strip())
+            and isinstance(author_login, str)
+            and bool(author_login.strip())
+        )
 
     reply_url = item.get("reply_url")
     return bool(item.get("reply_posted")) and isinstance(reply_url, str) and bool(reply_url.strip())

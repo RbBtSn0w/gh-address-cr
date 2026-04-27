@@ -28,7 +28,9 @@ def state_dir() -> Path:
     else:
         base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/.cache" if home else None)
     if not base:
-        raise PathResolutionError("STATE_DIR_UNAVAILABLE", "Set GH_ADDRESS_CR_STATE_DIR or HOME before running gh-address-cr.")
+        raise PathResolutionError(
+            "STATE_DIR_UNAVAILABLE", "Set GH_ADDRESS_CR_STATE_DIR or HOME before running gh-address-cr."
+        )
     return Path(base) / "gh-address-cr"
 
 

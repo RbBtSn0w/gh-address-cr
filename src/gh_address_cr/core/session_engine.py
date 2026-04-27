@@ -298,7 +298,9 @@ def gate_progress_counts(session: dict, blocking: list[dict], unresolved_threads
     github_items = [item for item in items if item["item_kind"] == "github_thread"]
     local_items = [item for item in items if item["item_kind"] == "local_finding"]
     missing_reply_items = [
-        item for item in github_items if item["status"] in GITHUB_TERMINAL_STATUSES and not item_has_reply_evidence(item)
+        item
+        for item in github_items
+        if item["status"] in GITHUB_TERMINAL_STATUSES and not item_has_reply_evidence(item)
     ]
     run_id = current_run_id(session)
     return {
@@ -343,7 +345,9 @@ def fingerprint_finding(finding: dict) -> str:
 
 
 def local_finding_item_id(source: str, finding: dict) -> str:
-    stable = json.dumps({"source": source, "fingerprint": fingerprint_finding(finding)}, sort_keys=True, separators=(",", ":"))
+    stable = json.dumps(
+        {"source": source, "fingerprint": fingerprint_finding(finding)}, sort_keys=True, separators=(",", ":")
+    )
     return f"local-finding:{hashlib.sha256(stable.encode('utf-8')).hexdigest()[:16]}"
 
 
@@ -390,8 +394,10 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         status = "OPEN"
     reopened = bool(existing) and existing_status in GITHUB_TERMINAL_STATUSES and status == "OPEN"
     viewer_reply_checked = row.get("viewer_reply_checked")
-    viewer_reply_known = bool(viewer_reply_checked) if isinstance(viewer_reply_checked, bool) else any(
-        key in row for key in ("viewer_replied", "viewer_reply_url")
+    viewer_reply_known = (
+        bool(viewer_reply_checked)
+        if isinstance(viewer_reply_checked, bool)
+        else any(key in row for key in ("viewer_replied", "viewer_reply_url"))
     )
     if reopened:
         reply_posted = False
@@ -570,7 +576,11 @@ def reconcile_published_findings(session: dict):
         if item["item_kind"] != "local_finding" or item["status"] != "PUBLISHED":
             continue
         for github_item in github_items:
-            github_urls = {value for value in (github_item.get("url"), github_item.get("first_url"), github_item.get("latest_url")) if value}
+            github_urls = {
+                value
+                for value in (github_item.get("url"), github_item.get("first_url"), github_item.get("latest_url"))
+                if value
+            }
             same_url = bool(item.get("url")) and item.get("url") in github_urls
             same_location = item.get("path") == github_item.get("path") and item.get("line") == github_item.get("line")
             same_body = normalize_text(item.get("body", "")) == normalize_text(github_item.get("body", ""))
@@ -684,12 +694,16 @@ def cmd_ingest_local(args):
             item["updated_at"] = now
             item["resolution_note"] = "Auto-resolved because the finding disappeared from synchronized input."
             clear_claim(item)
-            item["history"].append(history_event("auto-resolved", "Auto-resolved from synchronized findings", actor="ingest-local"))
+            item["history"].append(
+                history_event("auto-resolved", "Auto-resolved from synchronized findings", actor="ingest-local")
+            )
             synced += 1
     if args.handoff_sha256:
         session["handoff"]["last_consumed_sha256"] = args.handoff_sha256
     save_session(session)
-    active_local_items = sum(1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking"))
+    active_local_items = sum(
+        1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking")
+    )
     append_audit_event(
         args.repo,
         args.pr_number,
@@ -707,7 +721,9 @@ def cmd_ingest_local(args):
         },
         run_id=current_run_id(session),
     )
-    print(f"Created {created} local item(s) from {len(findings)} finding(s). Existing active local item(s): {active_local_items}.")
+    print(
+        f"Created {created} local item(s) from {len(findings)} finding(s). Existing active local item(s): {active_local_items}."
+    )
     if args.sync:
         print(f"Synced {synced} missing local item(s) to CLOSED.")
     return 0
@@ -809,7 +825,6 @@ def cmd_update_item(args):
     return 0
 
 
-
 def cmd_update_items_batch(args):
     session = load_session(args.repo, args.pr_number)
     run_id = current_run_id(session)
@@ -871,6 +886,7 @@ def cmd_update_items_batch(args):
     )
     print(f"Updated {len(updates)} items.")
     return 0
+
 
 def cmd_reclaim_stale_claims(args):
     session = load_session(args.repo, args.pr_number)
@@ -1081,7 +1097,11 @@ def cmd_gate(args):
         for item in session["items"].values()
         if item["item_kind"] == "github_thread" and item["status"] not in GITHUB_TERMINAL_STATUSES
     ]
-    session_gate = "PASS" if not blocking and not invalid_local_items and not invalid_github_reply_items and not loop_warning_items else "FAIL"
+    session_gate = (
+        "PASS"
+        if not blocking and not invalid_local_items and not invalid_github_reply_items and not loop_warning_items
+        else "FAIL"
+    )
     remote_gate = "PASS" if not unresolved_threads else "FAIL"
     progress = gate_progress_counts(session, blocking, unresolved_threads)
     summary = summary_path(args.repo, args.pr_number)
@@ -1107,8 +1127,7 @@ def cmd_gate(args):
     if invalid_local_items:
         lines.extend(["", "## Invalid Local Items"])
         lines.extend(
-            f"- {item['item_id']} status={item['status']} missing=resolution_note"
-            for item in invalid_local_items
+            f"- {item['item_id']} status={item['status']} missing=resolution_note" for item in invalid_local_items
         )
     if invalid_github_reply_items:
         lines.extend(["", "## Invalid GitHub Reply Items"])
@@ -1119,7 +1138,7 @@ def cmd_gate(args):
     if loop_warning_items:
         lines.extend(["", "## Loop Warning Items"])
         lines.extend(
-            f"- {item['item_id']} repeat_count={item.get('repeat_count',0)} reopen_count={item.get('reopen_count',0)}"
+            f"- {item['item_id']} repeat_count={item.get('repeat_count', 0)} reopen_count={item.get('reopen_count', 0)}"
             for item in loop_warning_items
         )
     summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1210,7 +1229,6 @@ def build_parser():
     update_item.add_argument("--actor", default="system")
     update_item.add_argument("--handled", action="store_true")
     update_item.set_defaults(func=cmd_update_item)
-
 
     update_items_batch = sub.add_parser("update-items-batch")
     update_items_batch.add_argument("repo")

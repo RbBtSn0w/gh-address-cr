@@ -115,9 +115,7 @@ def normalize_finding(record: dict) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Ingest findings JSON from stdin or a file into the PR session."
-    )
+    parser = argparse.ArgumentParser(description="Ingest findings JSON from stdin or a file into the PR session.")
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
@@ -135,7 +133,9 @@ def main() -> int:
         print(f"Missing session engine: {SESSION_ENGINE}", file=sys.stderr)
         return 1
     if args.sync and not args.source:
-        print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
+        print(
+            "`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr
+        )
         return 2
 
     findings = [native_normalize_finding(record) for record in native_parse_records(load_payload(args.input))]

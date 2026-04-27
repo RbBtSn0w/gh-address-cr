@@ -307,7 +307,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
         )
 
         first = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=first_payload)
-        second = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=second_payload)
+        second = self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=second_payload
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn("Created 1 local item", first.stdout)
@@ -328,13 +330,19 @@ class SessionEngineCLITest(SessionEngineTestCase):
             ]
         )
 
-        first = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload)
+        first = self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         session = self.load_session()
         item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
-        self.run_engine("update-item", self.repo, self.pr, item_id, "CLOSED", "--note", "Resolved after review.", check=True)
+        self.run_engine(
+            "update-item", self.repo, self.pr, item_id, "CLOSED", "--note", "Resolved after review.", check=True
+        )
 
-        second = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload)
+        second = self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--sync", stdin=payload
+        )
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn("Synced 0 missing local item(s) to CLOSED.", second.stdout)
 
@@ -511,11 +519,15 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
-        self.run_engine("update-item", self.repo, self.pr, local_id, "CLOSED", "--note", "Temporarily closed.", check=True)
+        self.run_engine(
+            "update-item", self.repo, self.pr, local_id, "CLOSED", "--note", "Temporarily closed.", check=True
+        )
 
         reopen = self.run_engine(
             "update-item",
@@ -565,7 +577,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
             ]
         )
         self.run_engine("sync-github", self.repo, self.pr, stdin=gh_payload, check=True)
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
 
         fail = self.run_engine("gate", self.repo, self.pr)
         self.assertEqual(fail.returncode, 1)
@@ -591,8 +605,12 @@ class SessionEngineCLITest(SessionEngineTestCase):
         )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
-        self.run_engine("update-item", self.repo, self.pr, local_id, "ACCEPTED", "--note", "Confirmed the issue.", check=True)
-        self.run_engine("update-item", self.repo, self.pr, local_id, "FIXED", "--note", "Implemented the local fix.", check=True)
+        self.run_engine(
+            "update-item", self.repo, self.pr, local_id, "ACCEPTED", "--note", "Confirmed the issue.", check=True
+        )
+        self.run_engine(
+            "update-item", self.repo, self.pr, local_id, "FIXED", "--note", "Implemented the local fix.", check=True
+        )
         self.run_engine("update-item", self.repo, self.pr, local_id, "VERIFIED", "--note", "Fixed locally.", check=True)
 
         passed = self.run_engine("gate", self.repo, self.pr)
@@ -676,7 +694,17 @@ class SessionEngineCLITest(SessionEngineTestCase):
             ]
         )
         self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "seed-run", stdin=gh_seed_payload, check=True)
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--scan-id", "seed-run", stdin=local_seed_payload, check=True)
+        self.run_engine(
+            "ingest-local",
+            self.repo,
+            self.pr,
+            "--source",
+            "local-agent:test",
+            "--scan-id",
+            "seed-run",
+            stdin=local_seed_payload,
+            check=True,
+        )
 
         gh_current_payload = json.dumps(
             [
@@ -700,7 +728,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 },
             ]
         )
-        self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "current-run", stdin=gh_current_payload, check=True)
+        self.run_engine(
+            "sync-github", self.repo, self.pr, "--scan-id", "current-run", stdin=gh_current_payload, check=True
+        )
         self.run_engine(
             "update-items-batch",
             self.repo,
@@ -770,7 +800,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
 
@@ -798,7 +830,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
@@ -837,7 +871,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
@@ -915,7 +951,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
 
@@ -979,8 +1017,12 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
         session = self.load_session()
         item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
-        self.run_engine("update-item", self.repo, self.pr, item_id, "DEFERRED", "--note", "Deferring for later.", check=True)
-        self.run_engine("update-item", self.repo, self.pr, item_id, "OPEN", "--note", "Reopened after follow-up review.", check=True)
+        self.run_engine(
+            "update-item", self.repo, self.pr, item_id, "DEFERRED", "--note", "Deferring for later.", check=True
+        )
+        self.run_engine(
+            "update-item", self.repo, self.pr, item_id, "OPEN", "--note", "Reopened after follow-up review.", check=True
+        )
 
         session = self.load_session()
         item = session["items"][item_id]
@@ -1184,7 +1226,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
             ]
         )
         self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
-        self.run_engine("claim", self.repo, self.pr, "github-thread:THREAD_6", "--agent", "fixer-1", "--minutes", "-1", check=True)
+        self.run_engine(
+            "claim", self.repo, self.pr, "github-thread:THREAD_6", "--agent", "fixer-1", "--minutes", "-1", check=True
+        )
 
         reclaimed = self.run_engine("reclaim-stale-claims", self.repo, self.pr)
         self.assertEqual(reclaimed.returncode, 0, reclaimed.stderr)
@@ -1240,7 +1284,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
 
@@ -1270,7 +1316,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine(
@@ -1322,7 +1370,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
@@ -1381,7 +1431,9 @@ class SessionEngineCLITest(SessionEngineTestCase):
                 }
             ]
         )
-        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        self.run_engine(
+            "ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine(

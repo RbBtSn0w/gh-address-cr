@@ -307,7 +307,9 @@ class EvidenceLedger:
         return attempts
 
     def successful_side_effect_url(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
-        for attempt in reversed(self.side_effect_attempts(idempotency_key=idempotency_key, side_effect_type=side_effect_type)):
+        for attempt in reversed(
+            self.side_effect_attempts(idempotency_key=idempotency_key, side_effect_type=side_effect_type)
+        ):
             if attempt.status == "succeeded" and attempt.external_url:
                 return attempt.external_url
         return None

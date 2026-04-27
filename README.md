@@ -130,6 +130,7 @@ gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
+gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```
 

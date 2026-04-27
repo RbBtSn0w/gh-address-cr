@@ -53,8 +53,7 @@ class NativeWorkflowTests(unittest.TestCase):
 
                 session = manager.load()
                 evidence_rows = [
-                    json.loads(line)
-                    for line in Path(session["ledger_path"]).read_text(encoding="utf-8").splitlines()
+                    json.loads(line) for line in Path(session["ledger_path"]).read_text(encoding="utf-8").splitlines()
                 ]
                 self.assertEqual(classified["status"], "CLASSIFICATION_RECORDED")
                 self.assertEqual(session["items"]["local:1"]["classification_evidence"]["classification"], "fix")
@@ -154,7 +153,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 ]
                 self.assertEqual(result["status"], "PUBLISH_COMPLETE")
                 self.assertEqual(result["published_count"], 1)
-                self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", "Can you confirm the intended behavior?"))
+                self.assertEqual(
+                    client.replies[0], (repo, pr_number, "THREAD_1", "Can you confirm the intended behavior?")
+                )
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(updated["state"], "closed")
                 self.assertEqual(updated["status"], "CLOSED")

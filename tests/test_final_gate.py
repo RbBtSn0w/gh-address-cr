@@ -46,9 +46,7 @@ class FinalGateTestCase(unittest.TestCase):
                     "item_kind": "local_finding",
                     "state": "fixed",
                     "blocking": False,
-                    "validation_evidence": [
-                        {"command": "python3 -m unittest tests.test_final_gate", "exit_code": 0}
-                    ],
+                    "validation_evidence": [{"command": "python3 -m unittest tests.test_final_gate", "exit_code": 0}],
                 },
             },
         }

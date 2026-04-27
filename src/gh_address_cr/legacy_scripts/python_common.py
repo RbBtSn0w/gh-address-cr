@@ -170,7 +170,9 @@ def item_has_reply_evidence(item: dict | None) -> bool:
     return bool(item.get("reply_posted")) and isinstance(reply_url, str) and bool(reply_url.strip())
 
 
-def github_thread_reply_evidence(repo: str, pr_number: str, thread_id: str, *, require_tracked: bool = False) -> tuple[bool, str]:
+def github_thread_reply_evidence(
+    repo: str, pr_number: str, thread_id: str, *, require_tracked: bool = False
+) -> tuple[bool, str]:
     session = load_session_payload(repo, pr_number)
     items = session.get("items")
     if not isinstance(items, dict):
@@ -792,30 +794,46 @@ TRANSIENT_GH_FAILURE_MARKERS = (
 )
 
 
-def is_transient_gh_failure(stderr: str | None = None, stdout: str | None = None, returncode: int | None = None) -> bool:
+def is_transient_gh_failure(
+    stderr: str | None = None, stdout: str | None = None, returncode: int | None = None
+) -> bool:
     _ = returncode
     text = f"{stderr or ''}\n{stdout or ''}".lower()
     return any(marker in text for marker in TRANSIENT_GH_FAILURE_MARKERS)
 
 
-def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 1) -> subprocess.CompletedProcess:
+def run_cmd(
+    cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 1
+) -> subprocess.CompletedProcess:
     attempts = max(1, retries)
     for attempt in range(attempts):
         try:
             result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
-            if result.returncode != 0 and cmd and cmd[0] == "gh" and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
+            if (
+                result.returncode != 0
+                and cmd
+                and cmd[0] == "gh"
+                and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+            ):
                 if attempt < attempts - 1:
                     time.sleep(2**attempt)
                     continue
             return result
         except subprocess.CalledProcessError as exc:
-            if cmd and cmd[0] == "gh" and attempt < attempts - 1 and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode):
+            if (
+                cmd
+                and cmd[0] == "gh"
+                and attempt < attempts - 1
+                and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode)
+            ):
                 time.sleep(2**attempt)
                 continue
             raise
         except FileNotFoundError as exc:
             if cmd and cmd[0] == "gh":
-                raise SystemExit("Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command.") from exc
+                raise SystemExit(
+                    "Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command."
+                ) from exc
             raise
     raise AssertionError("run_cmd exhausted without returning a result")
 
@@ -831,19 +849,31 @@ def gh_read_cmd(
     for attempt in range(attempts):
         try:
             result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
-            if result.returncode != 0 and cmd and cmd[0] == "gh" and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
+            if (
+                result.returncode != 0
+                and cmd
+                and cmd[0] == "gh"
+                and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+            ):
                 if attempt < attempts - 1:
                     time.sleep(2**attempt)
                     continue
             return result
         except subprocess.CalledProcessError as exc:
-            if cmd and cmd[0] == "gh" and attempt < attempts - 1 and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode):
+            if (
+                cmd
+                and cmd[0] == "gh"
+                and attempt < attempts - 1
+                and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode)
+            ):
                 time.sleep(2**attempt)
                 continue
             raise
         except FileNotFoundError as exc:
             if cmd and cmd[0] == "gh":
-                raise SystemExit("Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command.") from exc
+                raise SystemExit(
+                    "Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command."
+                ) from exc
             raise
     raise AssertionError("gh_read_cmd exhausted without returning a result")
 
@@ -901,7 +931,9 @@ def load_pull_request_head_sha(repo: str, pr_number: str) -> str:
     return result.stdout.strip()
 
 
-def session_engine(args: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
+def session_engine(
+    args: list[str], *, input_text: str | None = None, check: bool = False
+) -> subprocess.CompletedProcess:
     return run_cmd([sys.executable, str(SESSION_ENGINE), *args], input_text=input_text, check=check)
 
 
@@ -945,7 +977,7 @@ def _load_thread_comments(thread_id: str, initial_connection: dict | None) -> li
         if cursor:
             cmd.extend(["-F", f"after={cursor}"])
         response = gh_read_json(cmd)
-        node = ((response.get("data", {}) or {}).get("node", {}) or {})
+        node = (response.get("data", {}) or {}).get("node", {}) or {}
         comment_connection = node.get("comments") if isinstance(node, dict) else {}
         comments.extend(_comment_nodes(comment_connection))
         has_next_page, cursor = _comment_page_state(comment_connection)
@@ -1001,7 +1033,18 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
     threads: list[dict] = []
     cursor = None
     while True:
-        cmd = ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={pr_number}"]
+        cmd = [
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={pr_number}",
+        ]
         if cursor:
             cmd.extend(["-F", f"after={cursor}"])
         response = gh_read_json(cmd)

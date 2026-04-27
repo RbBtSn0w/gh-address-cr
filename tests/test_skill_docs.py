@@ -14,10 +14,12 @@ OTEL_WORKER_WRANGLER = ROOT / "gh-address-cr" / "references" / "otel-worker-bett
 OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
 
+
 def load_documentation_contracts():
     path = ROOT / "tests" / "fixtures" / "thin_skill_orchestration" / "documentation_contracts.json"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_declares_packaged_skill_root_scope(self):
@@ -167,7 +169,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = README_MD.read_text(encoding="utf-8")
         self.assertIn("Published skill payload: the entire `gh-address-cr/` directory", text)
         self.assertIn("Repo-level verification harness: `tests/`", text)
-        self.assertIn("If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`", text)
+        self.assertIn(
+            "If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`", text
+        )
 
     def test_readme_and_skill_document_optional_otlp_worker_logging(self):
         readme_text = README_MD.read_text(encoding="utf-8")
@@ -226,8 +230,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = README_MD.read_text(encoding="utf-8")
         self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
-        self.assertIn("python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text)
-        self.assertIn("python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human", text)
+        self.assertIn(
+            "python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text
+        )
+        self.assertIn(
+            "python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
+            text,
+        )
 
     def test_readme_documents_external_review_handoff_contract(self):
         readme_text = README_MD.read_text(encoding="utf-8")
@@ -257,7 +266,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         )
         self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
         self.assertIn("`findings --sync` requires an explicit `--source`", readme_text)
-        self.assertIn("outdated / `STALE` GitHub threads still count as unresolved until explicitly handled", readme_text)
+        self.assertIn(
+            "outdated / `STALE` GitHub threads still count as unresolved until explicitly handled", readme_text
+        )
 
     def test_completion_summary_final_gate_evidence(self):
         text = SKILL_MD.read_text(encoding="utf-8")

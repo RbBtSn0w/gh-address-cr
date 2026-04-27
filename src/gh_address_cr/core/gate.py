@@ -154,11 +154,7 @@ def evaluate_final_gate(
     local_items = [item for item in items if _item_kind(item) == "local_finding"]
 
     remote_thread_rows = list(remote_threads)
-    remote_by_id = {
-        thread_id: thread
-        for thread in remote_thread_rows
-        if (thread_id := _thread_identifier(thread))
-    }
+    remote_by_id = {thread_id: thread for thread in remote_thread_rows if (thread_id := _thread_identifier(thread))}
     unresolved_remote_threads = [thread for thread in remote_thread_rows if not _thread_is_resolved(thread)]
     pending_current_login_reviews = [
         review for review in pending_reviews if _is_current_login_pending_review(review, current_login)
@@ -166,7 +162,9 @@ def evaluate_final_gate(
     blocking_local_items = [item for item in local_items if _is_local_blocking(item)]
     blocking_items = [item for item in items if _is_blocking_item(item)]
     missing_reply_items = [
-        item for item in github_items if _github_thread_requires_reply_evidence(item, remote_by_id) and not _has_reply_evidence(item, current_login)
+        item
+        for item in github_items
+        if _github_thread_requires_reply_evidence(item, remote_by_id) and not _has_reply_evidence(item, current_login)
     ]
     missing_validation_items = [
         item for item in local_items if _is_terminal_local_item(item) and not _has_validation_evidence(item)
@@ -254,7 +252,9 @@ def _session_with_remote_threads(
         is_resolved = _thread_is_resolved(thread)
         is_outdated = bool(thread.get("isOutdated", thread.get("is_outdated", False)))
         if is_resolved:
-            item["state"] = item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
+            item["state"] = (
+                item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
+            )
             item["status"] = "CLOSED"
             item["blocking"] = False
             item["handled"] = True
@@ -386,7 +386,11 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
         return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
-    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {"accept", "manual", "sync"}:
+    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
+        "accept",
+        "manual",
+        "sync",
+    }:
         return True
     return False
 

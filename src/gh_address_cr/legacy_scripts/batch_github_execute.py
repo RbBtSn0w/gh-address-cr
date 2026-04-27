@@ -14,8 +14,9 @@ from python_common import (
     list_pending_review_ids,
 )
 
+
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
-    return [actions[i:i + max_size] for i in range(0, len(actions), max_size)]
+    return [actions[i : i + max_size] for i in range(0, len(actions), max_size)]
 
 
 def item_result(
@@ -81,9 +82,15 @@ def execute_reply_phase(actions: list[dict]) -> dict[str, dict]:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             if result.returncode != 0:
-                status = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "unknown"
+                status = (
+                    "retryable"
+                    if is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+                    else "unknown"
+                )
                 for action in chunk:
-                    results[action["item_id"]] = item_result(status=status, error=result.stderr or "GraphQL request failed")
+                    results[action["item_id"]] = item_result(
+                        status=status, error=result.stderr or "GraphQL request failed"
+                    )
                 continue
         errors = payload.get("errors")
         data = payload.get("data") or {}
@@ -106,9 +113,13 @@ def execute_reply_phase(actions: list[dict]) -> dict[str, dict]:
             if result.returncode == 0 and isinstance(reply_url, str) and reply_url.strip():
                 results[item_id] = item_result(status="succeeded", reply_url=reply_url)
             elif result.returncode != 0 and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
-                results[item_id] = item_result(status="retryable", error=result.stderr or "GraphQL request failed", reply_url=reply_url)
+                results[item_id] = item_result(
+                    status="retryable", error=result.stderr or "GraphQL request failed", reply_url=reply_url
+                )
             else:
-                results[item_id] = item_result(status="unknown", error=result.stderr or "GraphQL response was incomplete", reply_url=reply_url)
+                results[item_id] = item_result(
+                    status="unknown", error=result.stderr or "GraphQL response was incomplete", reply_url=reply_url
+                )
     return results
 
 
@@ -120,7 +131,9 @@ def execute_resolve_phase(actions: list[dict]) -> dict[str, dict]:
         flags = []
         for i, action in enumerate(chunk):
             thread_id = action["thread_id"]
-            query_parts.append(f"resolve{i}: resolveReviewThread(input:{{threadId: $resolve{i}_threadId}}) {{ thread {{ id isResolved }} }}")
+            query_parts.append(
+                f"resolve{i}: resolveReviewThread(input:{{threadId: $resolve{i}_threadId}}) {{ thread {{ id isResolved }} }}"
+            )
             variables[f"resolve{i}_threadId"] = "ID!"
             flags.extend(["-F", f"resolve{i}_threadId={thread_id}"])
 
@@ -133,9 +146,15 @@ def execute_resolve_phase(actions: list[dict]) -> dict[str, dict]:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             if result.returncode != 0:
-                status = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "unknown"
+                status = (
+                    "retryable"
+                    if is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+                    else "unknown"
+                )
                 for action in chunk:
-                    results[action["item_id"]] = item_result(status=status, error=result.stderr or "GraphQL request failed")
+                    results[action["item_id"]] = item_result(
+                        status=status, error=result.stderr or "GraphQL request failed"
+                    )
                 continue
         errors = payload.get("errors")
         data = payload.get("data") or {}
@@ -158,9 +177,13 @@ def execute_resolve_phase(actions: list[dict]) -> dict[str, dict]:
             if result.returncode == 0 and resolved is True:
                 results[item_id] = item_result(status="succeeded", resolved=True)
             elif result.returncode != 0 and is_transient_gh_failure(result.stderr, result.stdout, result.returncode):
-                results[item_id] = item_result(status="retryable", error=result.stderr or "GraphQL request failed", resolved=resolved)
+                results[item_id] = item_result(
+                    status="retryable", error=result.stderr or "GraphQL request failed", resolved=resolved
+                )
             else:
-                results[item_id] = item_result(status="unknown", error=result.stderr or "GraphQL response was incomplete", resolved=resolved)
+                results[item_id] = item_result(
+                    status="unknown", error=result.stderr or "GraphQL response was incomplete", resolved=resolved
+                )
     return results
 
 
@@ -207,7 +230,9 @@ def main() -> int:
                 results[item_id] = item_result(status="failed", error=error)
                 continue
         if not action.get("reply_body") and not action.get("resolve"):
-            results[item_id] = item_result(status="failed", error="GitHub thread actions require reply_body or resolve=true.")
+            results[item_id] = item_result(
+                status="failed", error="GitHub thread actions require reply_body or resolve=true."
+            )
             continue
         validated_actions.append(action)
 
@@ -253,11 +278,15 @@ def main() -> int:
             continue
 
         if reply_requested:
-            results[item_id] = reply_result or item_result(status="failed", error="Reply phase did not return a result.")
+            results[item_id] = reply_result or item_result(
+                status="failed", error="Reply phase did not return a result."
+            )
             continue
 
         if resolve_requested:
-            results[item_id] = resolve_result or item_result(status="failed", error="Resolve phase did not return a result.")
+            results[item_id] = resolve_result or item_result(
+                status="failed", error="Resolve phase did not return a result."
+            )
 
     had_error = any(value.get("status") != "succeeded" for value in results.values())
 
@@ -271,7 +300,9 @@ def main() -> int:
             for value in results.values():
                 if value.get("status") == "succeeded":
                     value["status"] = "unknown"
-                    value["error"] = submit_result["error"] or "batch actions succeeded but review submission did not complete"
+                    value["error"] = (
+                        submit_result["error"] or "batch actions succeeded but review submission did not complete"
+                    )
 
     audit_event(
         "batch_github_execute",
@@ -297,6 +328,7 @@ def main() -> int:
 
     print(json.dumps(results, indent=2))
     return 1 if had_error else 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -198,7 +198,9 @@ def main(argv: list[str] | None = None) -> int:
             elif producer == "code-review":
                 input_arg = args.input
                 if stdin_payload is not None:
-                    persisted_input_path = findings_file(repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json")
+                    persisted_input_path = findings_file(
+                        repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json"
+                    )
                     persisted_input_path.write_text(stdin_payload, encoding="utf-8")
                     input_arg = str(persisted_input_path)
                 cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]

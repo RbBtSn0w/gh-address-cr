@@ -26,7 +26,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--validation-cmd", action="append", default=[])
     parser.add_argument("--human", action="store_true", help="Emit human-oriented text instead of machine summary.")
     parser.add_argument("--machine", action="store_true", help="Compatibility alias.")
-    parser.add_argument("resume_cmd", nargs=argparse.REMAINDER, help="Original command to resume (e.g. python3 scripts/cli.py review owner/repo 1)")
+    parser.add_argument(
+        "resume_cmd",
+        nargs=argparse.REMAINDER,
+        help="Original command to resume (e.g. python3 scripts/cli.py review owner/repo 1)",
+    )
     return parser.parse_args(argv)
 
 
@@ -105,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Action '{args.resolution}' formulated for {item.get('item_id')}.")
     print("To resume the PR session, run your original loop command and append:")
-    print(f"  --fixer-cmd \"{script_path}\"")
+    print(f'  --fixer-cmd "{script_path}"')
     return 0
 
 

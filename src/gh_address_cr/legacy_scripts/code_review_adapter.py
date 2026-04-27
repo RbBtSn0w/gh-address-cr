@@ -15,9 +15,7 @@ def load_payload(input_path: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Normalize structured code-review findings into adapter output JSON."
-    )
+    parser = argparse.ArgumentParser(description="Normalize structured code-review findings into adapter output JSON.")
     parser.add_argument(
         "--input",
         default="-",

@@ -156,7 +156,9 @@ def build_action_request(
             agent_id=None,
             evidence_sink=evidence_sink,
         )
-        raise RequestValidationError("missing_classification_evidence", "Fixer requests require classification evidence.", evidence=evidence)
+        raise RequestValidationError(
+            "missing_classification_evidence", "Fixer requests require classification evidence.", evidence=evidence
+        )
     forbidden_actions = list(GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS) if is_ai_agent_role(role) else []
     request = ActionRequest(
         schema_version="1.0",

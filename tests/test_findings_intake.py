@@ -7,6 +7,7 @@ from tests.helpers import ROOT, SRC_ROOT
 
 sys.path.insert(0, str(SRC_ROOT))
 
+
 def load_producer_intake_fixture(name):
     path = ROOT / "tests" / "fixtures" / "thin_skill_orchestration" / "producer_inputs" / name
     with open(path, "r", encoding="utf-8") as f:

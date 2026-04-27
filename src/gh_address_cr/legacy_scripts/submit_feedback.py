@@ -29,9 +29,7 @@ DEFAULT_FEEDBACK_PR = "feedback"
 DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE = 10
 FINGERPRINT_MARKER_PREFIX = "gh-address-cr-feedback-fingerprint:"
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PR_URL_RE = re.compile(
-    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$"
-)
+PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
 REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 VALID_CATEGORIES = (
     "workflow-gap",
@@ -430,7 +428,9 @@ def parse_github_time(value: str | None) -> datetime | None:
 
 def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[dict]:
     query = f"repo:{target_repo} is:issue {fingerprint} in:body"
-    response = gh_read_json(["api", f"search/issues?q={quote_plus(query)}&per_page={DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE}"])
+    response = gh_read_json(
+        ["api", f"search/issues?q={quote_plus(query)}&per_page={DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE}"]
+    )
     if not isinstance(response, dict):
         raise SystemExit("Expected a JSON object when searching existing feedback issues.")
     items = response.get("items")
@@ -439,7 +439,9 @@ def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[
     return [issue for issue in items if isinstance(issue, dict) and "pull_request" not in issue]
 
 
-def find_existing_feedback_issue(target_repo: str, fingerprint: str, cooldown_hours: int) -> tuple[str | None, dict | None]:
+def find_existing_feedback_issue(
+    target_repo: str, fingerprint: str, cooldown_hours: int
+) -> tuple[str | None, dict | None]:
     now = datetime.now(timezone.utc)
     cooldown_cutoff = now - timedelta(hours=cooldown_hours)
     recent_closed_match: dict | None = None
@@ -560,7 +562,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Create a structured AI-agent feedback issue for gh-address-cr-skill.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--target-repo", default=DEFAULT_TARGET_REPO, help="GitHub repository that receives skill feedback issues.")
+    parser.add_argument(
+        "--target-repo", default=DEFAULT_TARGET_REPO, help="GitHub repository that receives skill feedback issues."
+    )
     parser.add_argument("--agent", default="ai-agent")
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("--cooldown-hours", type=int, default=DEFAULT_COOLDOWN_HOURS)

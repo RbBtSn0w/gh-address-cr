@@ -189,7 +189,13 @@ def issue_action_request(
     lease_id = f"lease_{uuid4().hex}"
     request_id = _stable_id(
         "req",
-        {"session_id": session["session_id"], "item_id": item_id, "role": role, "agent_id": agent_id, "lease_id": lease_id},
+        {
+            "session_id": session["session_id"],
+            "item_id": item_id,
+            "role": role,
+            "agent_id": agent_id,
+            "lease_id": lease_id,
+        },
     )
     request_item = dict(item)
     request_item["state"] = "claimed"
@@ -473,7 +479,9 @@ def publish_github_thread_responses(
                 message=f"Publish-ready item has no valid GitHub reply body: {item_id}",
                 payload={"item_id": item_id},
             )
-        plans.append({"item_id": item_id, "item": item, "response": response, "thread_id": thread_id, "reply_body": reply_body})
+        plans.append(
+            {"item_id": item_id, "item": item, "response": response, "thread_id": thread_id, "reply_body": reply_body}
+        )
 
     published: list[str] = []
     for plan in plans:
@@ -684,9 +692,7 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
     if not test_result:
         return None, "MISSING_FIX_REPLY_TEST_RESULT"
     summary = str(fix_reply.get("summary") or response.get("note") or "Addressed the review thread.").strip()
-    why = str(
-        fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence."
-    ).strip()
+    why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
     body = "\n".join(
         [
             summary,
@@ -860,7 +866,9 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     return None
 
 
-def _expected_request_hash_for_response(response: dict[str, Any], lease: dict[str, Any]) -> tuple[str | None, str | None]:
+def _expected_request_hash_for_response(
+    response: dict[str, Any], lease: dict[str, Any]
+) -> tuple[str | None, str | None]:
     response_request_id = str(response["request_id"])
     request_path = _get(lease, "request_path")
     if request_path:
@@ -977,7 +985,9 @@ def _return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) -
 
 
 def _ledger(session: dict[str, Any]) -> EvidenceLedger:
-    return EvidenceLedger(session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"])))
+    return EvidenceLedger(
+        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
+    )
 
 
 def _required_response_field(response: dict[str, Any], field: str) -> str:
@@ -998,7 +1008,9 @@ def _stable_id(prefix: str, payload: dict[str, Any]) -> str:
 
 
 def _hash_payload(payload: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(_json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(_json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _coerce_now(value: datetime | str | None) -> datetime:

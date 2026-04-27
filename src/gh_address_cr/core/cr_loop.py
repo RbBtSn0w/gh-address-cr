@@ -377,7 +377,9 @@ def detect_needs_human(
     return False, ""
 
 
-def run_gate(mode: str, repo: str, pr_number: str, audit_id: str, *, snapshot: str = "") -> subprocess.CompletedProcess[str]:
+def run_gate(
+    mode: str, repo: str, pr_number: str, audit_id: str, *, snapshot: str = ""
+) -> subprocess.CompletedProcess[str]:
     if mode == "local":
         return run_cmd([sys.executable, str(SESSION_ENGINE), "gate", repo, pr_number])
     cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
@@ -398,7 +400,15 @@ def current_snapshot_path(mode: str, repo: str, pr_number: str) -> str:
     return str(path)
 
 
-def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_number: str, extra: list[str], iteration: int, stdin_payload: str | None) -> subprocess.CompletedProcess[str]:
+def run_intake(
+    args: argparse.Namespace,
+    producer: str | None,
+    repo: str,
+    pr_number: str,
+    extra: list[str],
+    iteration: int,
+    stdin_payload: str | None,
+) -> subprocess.CompletedProcess[str]:
     if iteration == 1:
         run_cmd([sys.executable, str(SESSION_ENGINE), "init", repo, pr_number])
 
@@ -443,7 +453,9 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
             persisted_input_path: Path | None = None
             try:
                 if stdin_payload is not None:
-                    persisted_input_path = findings_file(repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json")
+                    persisted_input_path = findings_file(
+                        repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json"
+                    )
                     persisted_input_path.write_text(stdin_payload, encoding="utf-8")
                     input_arg = str(persisted_input_path)
                 cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
@@ -478,12 +490,7 @@ def _extract_reply_url(stdout: str) -> str | None:
         payload = json.loads(stdout)
     except json.JSONDecodeError:
         return None
-    return (
-        payload.get("data", {})
-        .get("addPullRequestReviewThreadReply", {})
-        .get("comment", {})
-        .get("url")
-    )
+    return payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url")
 
 
 def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iteration: int, payload: dict) -> Path:
@@ -655,7 +662,9 @@ def release_item_for_retry(
     _save_if_needed(session, loaded_here=loaded_here, persist=persist)
 
 
-def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_items: list[dict], *, run_id: str, iteration: int) -> tuple[str, str]:
+def handle_batch(
+    args: argparse.Namespace, repo: str, pr_number: str, batch_items: list[dict], *, run_id: str, iteration: int
+) -> tuple[str, str]:
     github_actions = []
     local_updates = []
     has_needs_human = False
@@ -678,11 +687,18 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
             "default_validation_commands": args.validation_cmd,
         }
         if accepted_action is None and not args.fixer_cmd:
-            request_path = write_internal_fixer_request(repo, pr_number, run_id=run_id, iteration=iteration, payload=payload)
+            request_path = write_internal_fixer_request(
+                repo, pr_number, run_id=run_id, iteration=iteration, payload=payload
+            )
             update_loop_state(
-                repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration,
-                max_iterations=args.max_iterations, current_item_id=item["item_id"],
-                last_error=f"Internal fixer action required: {request_path}"
+                repo,
+                pr_number,
+                run_id=run_id,
+                status="BLOCKED",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                current_item_id=item["item_id"],
+                last_error=f"Internal fixer action required: {request_path}",
             )
             return "internal_required", str(request_path)
 
@@ -694,7 +710,9 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
             validation_already_accepted = True
         if action is None:
             item_session = engine.load_session(repo, pr_number)
-            record_auto_attempt(repo, pr_number, item["item_id"], action=None, failure=error, session=item_session, persist=False)
+            record_auto_attempt(
+                repo, pr_number, item["item_id"], action=None, failure=error, session=item_session, persist=False
+            )
             mark_needs_human(
                 repo,
                 pr_number,
@@ -754,7 +772,16 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
         commands_to_run = default_validation_commands if validation_already_accepted else validation_commands
         if resolution == "fix" and commands_to_run:
             ok, validation_error = run_validation(commands_to_run)
-            write_validation_record(repo, pr_number, run_id=run_id, iteration=iteration, item_id=item["item_id"], commands=validation_commands, ok=ok, error=validation_error)
+            write_validation_record(
+                repo,
+                pr_number,
+                run_id=run_id,
+                iteration=iteration,
+                item_id=item["item_id"],
+                commands=validation_commands,
+                ok=ok,
+                error=validation_error,
+            )
             if not ok:
                 current = engine.ensure_item(item_session, item["item_id"])
                 if current.get("auto_attempt_count", 0) >= 2:
@@ -818,24 +845,37 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
             if not reply_already_posted:
                 reply_path.write_text(reply_markdown, encoding="utf-8")
 
-            github_actions.append({
-                "item_id": item["item_id"],
-                "thread_id": thread_id,
-                "reply_body": reply_markdown if not reply_already_posted else None,
-                "resolve": True,
-                "resolution": resolution,
-                "note": note,
-            })
+            github_actions.append(
+                {
+                    "item_id": item["item_id"],
+                    "thread_id": thread_id,
+                    "reply_body": reply_markdown if not reply_already_posted else None,
+                    "resolve": True,
+                    "resolution": resolution,
+                    "note": note,
+                }
+            )
         else:
-            local_updates.append({
-                "item_id": item["item_id"],
-                "resolution": resolution,
-                "note": note,
-            })
+            local_updates.append(
+                {
+                    "item_id": item["item_id"],
+                    "resolution": resolution,
+                    "note": note,
+                }
+            )
 
     if github_actions:
         payload_str = json.dumps(github_actions)
-        cmd = [sys.executable, str(SCRIPT_DIR / "batch_github_execute.py"), "--repo", repo, "--pr", pr_number, "--audit-id", run_id]
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "batch_github_execute.py"),
+            "--repo",
+            repo,
+            "--pr",
+            pr_number,
+            "--audit-id",
+            run_id,
+        ]
         result = run_cmd(cmd, stdin=payload_str)
         emit(result)
         if result.returncode != 0 and not result.stdout.strip():
@@ -872,11 +912,7 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
                     persist=True,
                 )
                 if action["reply_body"] and res.get("reply_url"):
-                    session_updates.append({
-                        "item_id": item_id,
-                        "reply_posted": True,
-                        "reply_url": res["reply_url"]
-                    })
+                    session_updates.append({"item_id": item_id, "reply_posted": True, "reply_url": res["reply_url"]})
             else:
                 update = {
                     "item_id": item_id,
@@ -886,7 +922,7 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
                     "last_auto_action": action["resolution"],
                     "last_auto_failure": None,
                     "needs_human": False,
-                    "clear_claim": True
+                    "clear_claim": True,
                 }
                 if action["reply_body"]:
                     update["reply_posted"] = True
@@ -896,9 +932,8 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
         if session_updates:
             run_cmd(
                 [sys.executable, str(SESSION_ENGINE), "update-items-batch", repo, pr_number],
-                stdin=json.dumps(session_updates)
+                stdin=json.dumps(session_updates),
             )
-
 
     for update in local_updates:
         result = run_cmd(
@@ -944,17 +979,22 @@ def handle_batch(args: argparse.Namespace, repo: str, pr_number: str, batch_item
 
         run_cmd(
             [sys.executable, str(SESSION_ENGINE), "update-items-batch", repo, pr_number],
-            stdin=json.dumps([{
-                "item_id": update["item_id"],
-                "last_auto_action": update["resolution"],
-                "last_auto_failure": None,
-                "needs_human": False
-            }])
+            stdin=json.dumps(
+                [
+                    {
+                        "item_id": update["item_id"],
+                        "last_auto_action": update["resolution"],
+                        "last_auto_failure": None,
+                        "needs_human": False,
+                    }
+                ]
+            ),
         )
 
     if has_needs_human:
         return "needs_human", first_error
     return "done", ""
+
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
@@ -997,12 +1037,22 @@ def main(argv: list[str] | None = None) -> int:
     update_loop_state(repo, pr_number, run_id=run_id, status="ACTIVE", iteration=0, max_iterations=args.max_iterations)
 
     for iteration in range(1, args.max_iterations + 1):
-        update_loop_state(repo, pr_number, run_id=run_id, status="ACTIVE", iteration=iteration, max_iterations=args.max_iterations)
+        update_loop_state(
+            repo, pr_number, run_id=run_id, status="ACTIVE", iteration=iteration, max_iterations=args.max_iterations
+        )
 
         intake = run_intake(args, producer, repo, pr_number, extra, iteration, stdin_payload)
         emit(intake)
         if intake.returncode != 0:
-            update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, last_error=intake.stderr or "intake failed")
+            update_loop_state(
+                repo,
+                pr_number,
+                run_id=run_id,
+                status="BLOCKED",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                last_error=intake.stderr or "intake failed",
+            )
             print("cr-loop BLOCKED", file=sys.stderr)
             return BLOCKED_EXIT
 
@@ -1022,41 +1072,95 @@ def main(argv: list[str] | None = None) -> int:
 
         batch_items = select_ready_batch(session)
         if not batch_items:
-            gate = run_gate(args.mode, repo, pr_number, run_id, snapshot=current_snapshot_path(args.mode, repo, pr_number))
+            gate = run_gate(
+                args.mode, repo, pr_number, run_id, snapshot=current_snapshot_path(args.mode, repo, pr_number)
+            )
             emit(gate)
             if gate.returncode == 0:
-                update_loop_state(repo, pr_number, run_id=run_id, status="PASSED", iteration=iteration, max_iterations=args.max_iterations)
+                update_loop_state(
+                    repo,
+                    pr_number,
+                    run_id=run_id,
+                    status="PASSED",
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                )
                 print("cr-loop PASSED")
                 return 0
-            update_loop_state(repo, pr_number, run_id=run_id, status="FAILED", iteration=iteration, max_iterations=args.max_iterations, last_error="Gate failed without selectable items.")
+            update_loop_state(
+                repo,
+                pr_number,
+                run_id=run_id,
+                status="FAILED",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                last_error="Gate failed without selectable items.",
+            )
             print("cr-loop FAILED", file=sys.stderr)
             return 1
 
         if args.fixer_cmd:
             for item in batch_items:
                 claim = run_cmd(
-                    [sys.executable, str(SESSION_ENGINE), "claim", repo, pr_number, item["item_id"], "--agent", "cr-loop"]
+                    [
+                        sys.executable,
+                        str(SESSION_ENGINE),
+                        "claim",
+                        repo,
+                        pr_number,
+                        item["item_id"],
+                        "--agent",
+                        "cr-loop",
+                    ]
                 )
                 emit(claim)
                 if claim.returncode != 0:
-                    update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, current_item_id=item["item_id"], last_error=claim.stderr or "claim failed")
+                    update_loop_state(
+                        repo,
+                        pr_number,
+                        run_id=run_id,
+                        status="BLOCKED",
+                        iteration=iteration,
+                        max_iterations=args.max_iterations,
+                        current_item_id=item["item_id"],
+                        last_error=claim.stderr or "claim failed",
+                    )
                     print("cr-loop BLOCKED", file=sys.stderr)
                     return BLOCKED_EXIT
 
-        update_loop_state(repo, pr_number, run_id=run_id, status="ACTIVE", iteration=iteration, max_iterations=args.max_iterations, current_item_id=batch_items[0]["item_id"])
+        update_loop_state(
+            repo,
+            pr_number,
+            run_id=run_id,
+            status="ACTIVE",
+            iteration=iteration,
+            max_iterations=args.max_iterations,
+            current_item_id=batch_items[0]["item_id"],
+        )
         status, error = handle_batch(args, repo, pr_number, batch_items, run_id=run_id, iteration=iteration)
         if status != "done":
             if status == "internal_required":
                 print("cr-loop PAUSED: Interaction Required")
                 print("------------------------------------")
                 print(f"Artifact to Address: {error}")
-                print(f"Next Step: Address the finding by running: `python3 {sys.argv[0]} submit-action {error} --resolution <fix|clarify|defer> --note <note> ... -- {shlex.join([sys.executable, *sys.argv])}`")
+                print(
+                    f"Next Step: Address the finding by running: `python3 {sys.argv[0]} submit-action {error} --resolution <fix|clarify|defer> --note <note> ... -- {shlex.join([sys.executable, *sys.argv])}`"
+                )
                 print(f"cr-loop INTERNAL_FIXER_REQUIRED artifact={error}")
                 return BLOCKED_EXIT
             if status == "needs_human":
                 print("cr-loop NEEDS_HUMAN")
                 return NEEDS_HUMAN_EXIT
-            update_loop_state(repo, pr_number, run_id=run_id, status="BLOCKED", iteration=iteration, max_iterations=args.max_iterations, current_item_id=batch_items[0]["item_id"], last_error=error)
+            update_loop_state(
+                repo,
+                pr_number,
+                run_id=run_id,
+                status="BLOCKED",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                current_item_id=batch_items[0]["item_id"],
+                last_error=error,
+            )
             print("cr-loop BLOCKED", file=sys.stderr)
             return BLOCKED_EXIT
 
@@ -1066,7 +1170,9 @@ def main(argv: list[str] | None = None) -> int:
         gate = run_gate(args.mode, repo, pr_number, run_id, snapshot=gate_snapshot)
         emit(gate)
         if gate.returncode == 0:
-            update_loop_state(repo, pr_number, run_id=run_id, status="PASSED", iteration=iteration, max_iterations=args.max_iterations)
+            update_loop_state(
+                repo, pr_number, run_id=run_id, status="PASSED", iteration=iteration, max_iterations=args.max_iterations
+            )
             print("cr-loop PASSED")
             return 0
 
@@ -1084,7 +1190,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cr-loop NEEDS_HUMAN item={item_id}")
             return NEEDS_HUMAN_EXIT
 
-    update_loop_state(repo, pr_number, run_id=run_id, status="FAILED", iteration=args.max_iterations, max_iterations=args.max_iterations, last_error="Max iterations reached.")
+    update_loop_state(
+        repo,
+        pr_number,
+        run_id=run_id,
+        status="FAILED",
+        iteration=args.max_iterations,
+        max_iterations=args.max_iterations,
+        last_error="Max iterations reached.",
+    )
     print("cr-loop FAILED: max iterations reached", file=sys.stderr)
     return 1
 

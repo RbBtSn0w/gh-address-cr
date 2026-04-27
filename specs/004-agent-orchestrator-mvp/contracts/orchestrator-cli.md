@@ -7,6 +7,7 @@ The MVP Orchestrator adds the following commands under the `agent orchestrate` g
 - `gh-address-cr agent orchestrate resume <owner/repo> <pr_number>`: Reloads `orchestration.json`, validates active leases, and continues execution.
 - `gh-address-cr agent orchestrate status <owner/repo> <pr_number>`: Prints the current queue and active leases.
 - `gh-address-cr agent orchestrate stop <owner/repo> <pr_number>`: Gracefully pauses coordination and flushes state.
+- `gh-address-cr agent orchestrate submit <owner/repo> <pr_number> --item-id <id> --token <lease_token> --input <path>`: Verifies evidence in the agent response and releases the lease before submitting to the runtime.
 
 ## Command Conventions
 All commands MUST accept standard `<owner/repo> <pr_number>` arguments and support `--human` and `--machine` output flags consistent with the main `gh-address-cr` CLI.

@@ -84,7 +84,9 @@ class GitHubClient:
             review_threads = _review_threads(payload)
             for node in _connection_nodes(review_threads):
                 comments_connection = node.get("comments") if isinstance(node.get("comments"), dict) else None
-                comments = self._load_thread_comments(str(node["id"]), comments_connection) if comments_connection else []
+                comments = (
+                    self._load_thread_comments(str(node["id"]), comments_connection) if comments_connection else []
+                )
                 latest = _connection_nodes(node.get("latestComment"))
                 first = _connection_nodes(node.get("firstComment"))
                 latest_node = latest[0] if latest else {}
@@ -133,19 +135,16 @@ class GitHubClient:
                 f"body={body}",
             ]
         )
-        reply_url = (
-            payload.get("data", {})
-            .get("addPullRequestReviewThreadReply", {})
-            .get("comment", {})
-            .get("url")
-        )
+        reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url")
         if not isinstance(reply_url, str) or not reply_url.strip():
             raise GitHubError("GITHUB_INCOMPLETE_RESPONSE", "GitHub reply response did not include comment.url.")
         return reply_url
 
     def resolve_thread(self, repo: str, pr_number: str, thread_id: str) -> bool:
         _ = (repo, pr_number)
-        query = "mutation($threadId:ID!){ resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } } }"
+        query = (
+            "mutation($threadId:ID!){ resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } } }"
+        )
         payload = self._read_json(
             [
                 "api",
@@ -156,12 +155,7 @@ class GitHubClient:
                 f"threadId={thread_id}",
             ]
         )
-        resolved = (
-            payload.get("data", {})
-            .get("resolveReviewThread", {})
-            .get("thread", {})
-            .get("isResolved")
-        )
+        resolved = payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved")
         if resolved is not True:
             raise GitHubError("GITHUB_INCOMPLETE_RESPONSE", "GitHub resolve response did not confirm isResolved=true.")
         return True
@@ -216,7 +210,7 @@ class GitHubClient:
             if cursor:
                 cmd.extend(["-F", f"after={cursor}"])
             payload = self._read_json(cmd)
-            node = ((payload.get("data") or {}).get("node") or {})
+            node = (payload.get("data") or {}).get("node") or {}
             comment_connection = node.get("comments") if isinstance(node, dict) else {}
             comments.extend(_connection_nodes(comment_connection))
             has_next_page, cursor = _comment_page_state(comment_connection)

@@ -102,7 +102,9 @@ def ensure_manifest_eligible(
     if action not in manifest.actions:
         raise ManifestValidationError("manifest_action_not_declared", f"Action {action} is not declared.")
     if input_format not in manifest.input_formats:
-        raise ManifestValidationError("manifest_input_format_not_declared", f"Input format {input_format} is not declared.")
+        raise ManifestValidationError(
+            "manifest_input_format_not_declared", f"Input format {input_format} is not declared."
+        )
     if output_format not in manifest.output_formats:
         raise ManifestValidationError(
             "manifest_output_format_not_declared",

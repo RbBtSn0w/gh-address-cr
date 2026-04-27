@@ -80,15 +80,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         module.gh_write_cmd = fake_write_cmd
         module.audit_event = lambda *args, **kwargs: None
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -129,15 +132,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         module.is_transient_gh_failure = lambda *_args, **_kwargs: True
         module.audit_event = lambda *args, **kwargs: None
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -162,20 +168,29 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         audit_calls = []
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": submitted, "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": submitted,
+            "error": None,
+        }
         module.github_viewer_login = lambda: "tester"
-        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gh_write_cmd should not be called")
+        )
         module.audit_event = lambda *args, **kwargs: audit_calls.append((args, kwargs))
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -220,20 +235,29 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         )
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
         module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
-        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gh_write_cmd should not be called")
+        )
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -280,20 +304,27 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             raise AssertionError(f"unexpected extra GraphQL call: {cmd}")
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
         module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
         module.gh_write_cmd = fake_write_cmd
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -331,20 +362,27 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             )
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
         module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
         module.gh_write_cmd = fake_write_cmd
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -390,15 +428,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         )
         module.audit_event = lambda *args, **kwargs: None
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -422,7 +463,11 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         )
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
         module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
         module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
@@ -432,15 +477,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             "",
         )
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -488,15 +536,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         )
         module.audit_event = lambda *args, **kwargs: None
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())
@@ -561,15 +612,18 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
 
         module.gh_write_cmd = fake_write_cmd
 
-        with patched_argv(
-            [
-                "batch_github_execute.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        ), patched_stdin(action_payload):
+        with (
+            patched_argv(
+                [
+                    "batch_github_execute.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                ]
+            ),
+            patched_stdin(action_payload),
+        ):
             with patch("sys.stdout", new=io.StringIO()) as stdout:
                 rc = module.main()
                 payload = json.loads(stdout.getvalue())

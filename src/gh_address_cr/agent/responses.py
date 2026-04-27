@@ -81,7 +81,9 @@ def _validate_validation_commands(commands: Any) -> None:
             )
 
 
-def validate_action_response(payload: ActionResponse | dict[str, Any], *, item_kind: str | None = None) -> ActionResponse:
+def validate_action_response(
+    payload: ActionResponse | dict[str, Any], *, item_kind: str | None = None
+) -> ActionResponse:
     if isinstance(payload, ActionResponse):
         payload = payload.to_dict()
     if not isinstance(payload, dict):

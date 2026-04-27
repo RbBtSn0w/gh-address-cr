@@ -77,7 +77,10 @@ class ReplyPublisher:
                 reply_url = self._post_reply(thread_id, body)
             except GitHubTransientError as exc:
                 error = str(exc)
-                if attempt_number <= self.retry_policy.immediate_retries and attempt_number < self.retry_policy.max_attempts:
+                if (
+                    attempt_number <= self.retry_policy.immediate_retries
+                    and attempt_number < self.retry_policy.max_attempts
+                ):
                     self._record_attempt(
                         session_id=session_id,
                         item_id=item_id,

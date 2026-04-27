@@ -2,7 +2,7 @@
 
 **Feature Branch**: `004-agent-orchestrator-mvp`  
 **Created**: 2026-04-26  
-**Status**: Tasked
+**Status**: Verified
 **Input**: User description: "004-agent-orchestrator-mvp. 目标：PR-scoped 的多 agent 协调器 MVP。Runtime CLI 仍然是权威控制面；Orchestrator 只负责任务调度、租约领取、状态轮转、恢复；Worker Agent 只处理 ActionRequest；Publisher / Final Gate 仍由 runtime 执行；Skill 仍然只是 adapter。"
 
 ## User Scenarios & Testing *(mandatory)*

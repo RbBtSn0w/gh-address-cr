@@ -6,7 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import PullRequestReadCache, audit_event, gh_read_json, gh_write_cmd, is_transient_gh_failure, load_pull_request_head_sha, run_cmd
+from python_common import (
+    PullRequestReadCache,
+    audit_event,
+    gh_read_json,
+    gh_write_cmd,
+    is_transient_gh_failure,
+    load_pull_request_head_sha,
+    run_cmd,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -112,9 +120,7 @@ def main() -> int:
         return 1
 
     comment_body = (
-        "Local AI review finding:\n\n"
-        f"Title: {item.get('title', 'Local review finding')}\n\n"
-        f"{item.get('body', '')}"
+        f"Local AI review finding:\n\nTitle: {item.get('title', 'Local review finding')}\n\n{item.get('body', '')}"
     )
 
     payload = {
@@ -184,7 +190,9 @@ def main() -> int:
         check=False,
     )
     if result.returncode != 0:
-        payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+        payload["status"] = (
+            "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+        )
         payload["error"] = result.stderr or "publish finding failed"
         audit_event(
             "publish_finding",
