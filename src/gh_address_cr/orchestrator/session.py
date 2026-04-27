@@ -70,6 +70,7 @@ class OrchestrationSession:
     state: str = STATE_INITIALIZED
     active_leases: Dict[str, LeaseRecord] = field(default_factory=dict)
     queued_items: List[str] = field(default_factory=list)
+    retry_counts: Dict[str, int] = field(default_factory=dict)
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -153,6 +154,7 @@ class OrchestrationSession:
             "state": self.state,
             "active_leases": {k: v.to_dict() for k, v in self.active_leases.items()},
             "queued_items": self.queued_items,
+            "retry_counts": self.retry_counts,
         }
 
     @classmethod
@@ -163,6 +165,7 @@ class OrchestrationSession:
             pr_number=data["pr_number"],
             state=data.get("state", STATE_INITIALIZED),
             queued_items=data.get("queued_items", []),
+            retry_counts=data.get("retry_counts", {}),
         )
         session.active_leases = {k: LeaseRecord.from_dict(v) for k, v in data.get("active_leases", {}).items()}
         return session

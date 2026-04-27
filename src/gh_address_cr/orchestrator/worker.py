@@ -36,22 +36,28 @@ def parse_and_validate_response(
 
 
 def build_worker_packet(
-    run_id: str, lease_token: str, role: str, session_id: str, item: Dict[str, Any], response_path: str
+    run_id: str,
+    lease_token: str,
+    role: str,
+    session_id: str,
+    item: Dict[str, Any],
+    response_path: str,
+    action_request: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-
+    request_payload = action_request or {
+        "request_id": f"req-{uuid4().hex}",
+        "session_id": session_id,
+        "lease_id": lease_token,
+        "agent_role": role,
+        "item": item,
+        "allowed_actions": ["fix", "clarify", "defer"],
+        "required_evidence": ["files", "validation_commands", "note", "fix_reply"],
+    }
     return {
         "orchestration_run_id": run_id,
         "lease_token": lease_token,
         "role_requested": role,
-        "action_request": {
-            "request_id": f"req-{uuid4().hex}",
-            "session_id": session_id,
-            "lease_id": lease_token,
-            "agent_role": role,
-            "item": item,
-            "allowed_actions": ["fix", "clarify", "defer"],
-            "required_evidence": ["files", "validation_commands", "note", "fix_reply"],
-        },
+        "action_request": request_payload,
         "relevant_file_context": f"{item.get('path', 'unknown')}:{item.get('line', '0')}",
         "submit_recovery_instruction": "Run validation commands to verify your fix. Write the response JSON strictly to the response_path.",
         "response_path": response_path,
@@ -59,12 +65,9 @@ def build_worker_packet(
 
 
 def validate_action_response(response: Dict[str, Any], required_evidence: List[str]) -> None:
-    if "evidence" not in response:
-        raise WorkerPacketValidationError("ActionResponse missing 'evidence' field.")
-
-    evidence = response["evidence"]
+    evidence = response.get("evidence") if isinstance(response.get("evidence"), dict) else response
     if not isinstance(evidence, dict):
-        raise WorkerPacketValidationError("'evidence' must be a dictionary.")
+        raise WorkerPacketValidationError("ActionResponse evidence payload must be a dictionary.")
 
     for req in required_evidence:
         if req not in evidence:
