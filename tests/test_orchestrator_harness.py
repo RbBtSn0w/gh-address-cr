@@ -244,17 +244,17 @@ class TestOrchestratorHarness(unittest.TestCase):
         post = load_orchestration_session(self.repo, self.pr)
         self.assertIn("finding-1", post.active_leases)
 
-    @patch("gh_address_cr.orchestrator.harness.sys.stderr", new_callable=io.StringIO)
-    def test_stop_enforces_authoritative_final_gate(self, mock_stderr):
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_stop_enforces_authoritative_final_gate(self, mock_stdout):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
         with patch("gh_address_cr.orchestrator.harness.session_engine.cmd_gate", return_value=1):
             exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
         self.assertEqual(exit_code, 2)
-        self.assertIn("final-gate", mock_stderr.getvalue().lower())
+        self.assertIn("final-gate", mock_stdout.getvalue().lower())
 
-    @patch("gh_address_cr.orchestrator.harness.sys.stderr", new_callable=io.StringIO)
-    def test_submit_retry_count_persisted_and_handoff_at_three_failures(self, mock_stderr):
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_submit_retry_count_persisted_and_handoff_at_three_failures(self, mock_stdout):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
         self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
@@ -282,7 +282,7 @@ class TestOrchestratorHarness(unittest.TestCase):
             current = load_orchestration_session(self.repo, self.pr)
             self.assertEqual(current.retry_counts.get("finding-1"), attempt)
 
-        self.assertIn("human handoff", mock_stderr.getvalue().lower())
+        self.assertIn("human handoff", mock_stdout.getvalue().lower())
 
     @patch("gh_address_cr.orchestrator.harness.sys.stderr", new_callable=io.StringIO)
     def test_status_reconciliation_budget_guard_fails_loud_when_exceeded(self, mock_stderr):
@@ -293,6 +293,61 @@ class TestOrchestratorHarness(unittest.TestCase):
             exit_code = handle_agent_orchestrate("status", [self.repo, self.pr])
         self.assertEqual(exit_code, 2)
         self.assertIn("reconciliation", mock_stderr.getvalue().lower())
+
+
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_step_enforces_max_concurrency(self, mock_stdout):
+        self._write_core_session({
+            "finding-1": self._open_item("finding-1", classified=True, path="src/a.py"),
+            "finding-2": self._open_item("finding-2", classified=True, path="src/b.py"),
+            "finding-3": self._open_item("finding-3", classified=True, path="src/c.py")
+        })
+        self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr, "--max-concurrency", "2"]), 0)
+        self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
+        self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
+        
+        mock_stdout.truncate(0)
+        mock_stdout.seek(0)
+        
+        self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        
+        self.assertEqual(payload["status"], "WAITING")
+        self.assertEqual(payload["reason_code"], "MAX_CONCURRENCY_REACHED")
+        self.assertEqual(payload["next_action"], "RETRY")
+
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_start_and_step_respect_completion_lock(self, mock_stdout):
+        self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
+        self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
+        
+        session = load_orchestration_session(self.repo, self.pr)
+        session.completed = True
+        from gh_address_cr.orchestrator.session import save_orchestration_session
+        save_orchestration_session(session)
+
+        mock_stdout.truncate(0)
+        mock_stdout.seek(0)
+        
+        # If there are no eligible items, it's locked
+        with patch("gh_address_cr.orchestrator.harness._eligible_runtime_items", return_value=[]):
+            self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
+            payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+            self.assertEqual(payload["status"], "LOCKED")
+            self.assertEqual(payload["reason_code"], "SESSION_LOCKED")
+            self.assertEqual(payload["next_action"], "HALT")
+        
+        mock_stdout.truncate(0)
+        mock_stdout.seek(0)
+        session.queued_items = []
+        session.active_leases = {}
+        save_orchestration_session(session)
+        with patch("gh_address_cr.orchestrator.harness._eligible_runtime_items", return_value=[]):
+            self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr]), 0)
+            payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+            self.assertEqual(payload["status"], "LOCKED")
+            self.assertEqual(payload["reason_code"], "SESSION_LOCKED")
+            self.assertEqual(payload["next_action"], "HALT")
 
 
 if __name__ == "__main__":

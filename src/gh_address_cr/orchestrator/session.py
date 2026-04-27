@@ -34,6 +34,10 @@ class LeaseRecord:
     lease_token: str
     expires_at: datetime
     context_key: str = ""
+    retry_count: int = 0
+    waiting_for_human: bool = False
+    handoff_reason: Optional[str] = None
+    artifact_path: Optional[str] = None
 
     def is_expired(self, now: Optional[datetime] = None) -> bool:
         if now is None:
@@ -48,6 +52,10 @@ class LeaseRecord:
             "lease_token": self.lease_token,
             "expires_at": self.expires_at.isoformat(),
             "context_key": self.context_key,
+            "retry_count": self.retry_count,
+            "waiting_for_human": self.waiting_for_human,
+            "handoff_reason": self.handoff_reason,
+            "artifact_path": self.artifact_path,
         }
 
     @classmethod
@@ -59,6 +67,10 @@ class LeaseRecord:
             lease_token=data["lease_token"],
             expires_at=datetime.fromisoformat(data["expires_at"]),
             context_key=data.get("context_key", ""),
+            retry_count=data.get("retry_count", 0),
+            waiting_for_human=data.get("waiting_for_human", False),
+            handoff_reason=data.get("handoff_reason"),
+            artifact_path=data.get("artifact_path"),
         )
 
 
@@ -68,6 +80,10 @@ class OrchestrationSession:
     repo: str
     pr_number: str
     state: str = STATE_INITIALIZED
+    config: Dict[str, int] = field(default_factory=lambda: {"max_concurrency": 3, "circuit_breaker_threshold": 3})
+    completed: bool = False
+    completed_at: Optional[str] = None
+    completed_reason: Optional[str] = None
     active_leases: Dict[str, LeaseRecord] = field(default_factory=dict)
     queued_items: List[str] = field(default_factory=list)
     retry_counts: Dict[str, int] = field(default_factory=dict)
@@ -170,6 +186,10 @@ class OrchestrationSession:
             "repo": self.repo,
             "pr_number": self.pr_number,
             "state": self.state,
+            "config": self.config,
+            "completed": self.completed,
+            "completed_at": self.completed_at,
+            "completed_reason": self.completed_reason,
             "active_leases": {k: v.to_dict() for k, v in self.active_leases.items()},
             "queued_items": self.queued_items,
             "retry_counts": self.retry_counts,
@@ -183,6 +203,10 @@ class OrchestrationSession:
             repo=data["repo"],
             pr_number=data["pr_number"],
             state=data.get("state", STATE_INITIALIZED),
+            config=data.get("config", {"max_concurrency": 3, "circuit_breaker_threshold": 3}),
+            completed=data.get("completed", False),
+            completed_at=data.get("completed_at"),
+            completed_reason=data.get("completed_reason"),
             queued_items=data.get("queued_items", []),
             retry_counts=data.get("retry_counts", {}),
             audit_warnings=data.get("audit_warnings", []),

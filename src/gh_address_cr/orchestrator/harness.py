@@ -4,7 +4,8 @@ import json
 import time
 from pathlib import Path
 from uuid import uuid4
-from typing import List
+import os
+from typing import List, Optional
 from gh_address_cr import __version__
 from packaging.version import Version
 from gh_address_cr.orchestrator.session import (
@@ -29,6 +30,18 @@ MIN_REQUIRED_VERSION = "0.0.1"
 MAX_QUEUE_RECONCILIATION_SECONDS = 1.0
 
 
+def _output_signal(status: str, reason_code: str, next_action: str, message: str, warnings: Optional[List[str]] = None) -> None:
+    payload = {
+        "status": status,
+        "reason_code": reason_code,
+        "next_action": next_action,
+        "message": message
+    }
+    if warnings:
+        payload["warnings"] = warnings
+    sys.stdout.write(json.dumps(payload) + "\n")
+
+
 def check_runtime_version() -> bool:
     try:
         current = Version(__version__)
@@ -47,6 +60,8 @@ def _parse_common_args(args: List[str]):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
+    parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
+    parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
     return parser.parse_known_args(args)
 
 
@@ -98,25 +113,34 @@ def handle_submit(args: List[str]) -> int:
         except WorkerPacketValidationError as e:
             retry_count += 1
             session.retry_counts[parsed.item_id] = retry_count
-            save_orchestration_session(session)
-            if retry_count >= MAX_RETRIES:
-                sys.stderr.write(
-                    f"CRITICAL: Human Handoff Required: Max retries ({MAX_RETRIES}) reached for {parsed.item_id}.\n"
-                )
+            cb_threshold = session.config.get("circuit_breaker_threshold", MAX_RETRIES)
+            if retry_count >= cb_threshold:
+                if parsed.item_id in session.active_leases:
+                    session.active_leases[parsed.item_id].waiting_for_human = True
+                    session.active_leases[parsed.item_id].handoff_reason = str(e)
+                    session.active_leases[parsed.item_id].artifact_path = parsed.input
+                save_orchestration_session(session)
+                _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: Max retries ({cb_threshold}) reached for {parsed.item_id}.")
                 return 2
-            sys.stderr.write(f"Submission failed: {e}\n")
+            save_orchestration_session(session)
+            _output_signal("FAILED", "PAYLOAD_CORRUPT", "RETRY", f"Submission failed: {e}")
             return 2
         except HumanHandoffRequired as e:
-            session.retry_counts[parsed.item_id] = max(retry_count, MAX_RETRIES)
+            cb_threshold = session.config.get("circuit_breaker_threshold", MAX_RETRIES)
+            session.retry_counts[parsed.item_id] = max(retry_count, cb_threshold)
+            if parsed.item_id in session.active_leases:
+                session.active_leases[parsed.item_id].waiting_for_human = True
+                session.active_leases[parsed.item_id].handoff_reason = str(e)
+                session.active_leases[parsed.item_id].artifact_path = parsed.input
             save_orchestration_session(session)
-            sys.stderr.write(f"CRITICAL: Human Handoff Required: {e}\n")
+            _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: {e}")
             return 2
 
         try:
             result = workflow.submit_action_response(repo, pr, response_path=str(parsed.input))
         except workflow.WorkflowError as e:
             save_orchestration_session(session)
-            sys.stderr.write(f"Submission failed: {e.reason_code}: {e}\n")
+            _output_signal("FAILED", e.reason_code, "RETRY", f"Submission failed: {e.reason_code}: {e}")
             return 2
 
         session.release_lease(parsed.item_id, parsed.token)
@@ -128,6 +152,8 @@ def handle_submit(args: List[str]) -> int:
             json.dumps(
                 {
                     "status": "SUCCESS",
+                    "reason_code": "SUBMITTED",
+                    "next_action": "PROCEED",
                     "message": f"Verified and submitted {parsed.item_id}",
                     "runtime_status": result.get("status"),
                     **({"warnings": warnings} if warnings else {}),
@@ -136,14 +162,17 @@ def handle_submit(args: List[str]) -> int:
             + "\n"
         )
         return 0
-    except (OrchestrationSessionError, WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
-        sys.stderr.write(f"Submission failed: {e}\n")
+    except (WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
+        _output_signal("FAILED", "STALE_REQUEST_CONTEXT", "RETRY", f"Submission failed: {e}")
+        return 2
+    except OrchestrationSessionError as e:
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", f"Submission failed: {e}")
         return 2
     except HumanHandoffRequired as e:
-        sys.stderr.write(f"CRITICAL: Human Handoff Required: {e}\n")
+        _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: {e}")
         return 2
     except Exception as e:
-        sys.stderr.write(f"Unexpected error: {e}\n")
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Unexpected error: {e}")
         return 5
 
 
@@ -151,9 +180,22 @@ def handle_start(args: List[str]) -> int:
     parsed, _ = _parse_common_args(args)
     repo, pr = parsed.repo, parsed.pr_number
 
-    # Initialize from core session
     try:
-        session = OrchestrationSession(run_id=f"run-{uuid4().hex[:8]}", repo=repo, pr_number=pr)
+        try:
+            session = load_orchestration_session(repo, pr)
+            if session.completed:
+                runtime_state = _load_runtime_state(repo, pr)
+                if not _eligible_runtime_items(runtime_state):
+                    _output_signal("LOCKED", "SESSION_LOCKED", "HALT", "Session is locked and fully handled.")
+                    return 0
+                else:
+                    session.completed = False
+        except OrchestrationSessionError:
+            session = OrchestrationSession(run_id=f"run-{uuid4().hex[:8]}", repo=repo, pr_number=pr)
+
+        session.config["max_concurrency"] = parsed.max_concurrency
+        session.config["circuit_breaker_threshold"] = parsed.circuit_breaker_threshold
+
         _sync_queue_from_runtime(session, enforce_budget=False)
         warnings = session.pop_audit_warnings()
 
@@ -165,7 +207,7 @@ def handle_start(args: List[str]) -> int:
         )
         return 0
     except Exception as e:
-        sys.stderr.write(f"Failed to start orchestration: {e}\n")
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to start orchestration: {e}")
         return 5
 
 
@@ -174,34 +216,48 @@ def handle_step(args: List[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--role", help="Role-based filtering (e.g., triage)")
+    parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
+    parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
     parsed, _ = parser.parse_known_args(args)
     repo, pr = parsed.repo, parsed.pr_number
 
     try:
         session = load_orchestration_session(repo, pr)
+        if "--max-concurrency" in args:
+            session.config["max_concurrency"] = parsed.max_concurrency
+        if "--circuit-breaker-threshold" in args:
+            session.config["circuit_breaker_threshold"] = parsed.circuit_breaker_threshold
+
         _sync_queue_from_runtime(session, enforce_budget=False)
+
+        if session.completed:
+            if not session.queued_items and not session.active_leases:
+                _output_signal("LOCKED", "SESSION_LOCKED", "HALT", "Session is locked and fully handled.")
+                return 0
+            else:
+                session.completed = False
+
+        if len(session.active_leases) >= session.config.get("max_concurrency", 3):
+            warnings = session.pop_audit_warnings()
+            _output_signal("WAITING", "MAX_CONCURRENCY_REACHED", "RETRY", f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.", warnings)
+            return 0
+
     except OrchestrationSessionError as e:
-        sys.stderr.write(f"{e}\n")
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
         return 2
     except Exception as e:
-        sys.stderr.write(f"Failed to synchronize runtime queue: {e}\n")
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to synchronize runtime queue: {e}")
         return 2
 
     # Simple dequeue logic
     if not session.queued_items:
         if not session.active_leases:
             warnings = session.pop_audit_warnings()
-            payload = {"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}
-            if warnings:
-                payload["warnings"] = warnings
-            sys.stdout.write(json.dumps(payload) + "\n")
+            _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
             return 0
         else:
             warnings = session.pop_audit_warnings()
-            payload = {"status": "WAITING", "message": f"Waiting for {len(session.active_leases)} active leases."}
-            if warnings:
-                payload["warnings"] = warnings
-            sys.stdout.write(json.dumps(payload) + "\n")
+            _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
             return 0
 
     role = parsed.role or "fixer"  # Default to fixer for MVP
@@ -219,38 +275,18 @@ def handle_step(args: List[str]) -> int:
             save_orchestration_session(session)
             warnings = session.pop_audit_warnings()
             if not session.active_leases:
-                payload = {"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}
-                if warnings:
-                    payload["warnings"] = warnings
-                sys.stdout.write(json.dumps(payload) + "\n")
+                _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
             else:
-                payload = {
-                    "status": "WAITING",
-                    "message": f"Waiting for {len(session.active_leases)} active leases.",
-                    "reason_code": e.reason_code,
-                }
-                if warnings:
-                    payload["warnings"] = warnings
-                sys.stdout.write(json.dumps(payload) + "\n")
+                _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
             return 0
 
         if e.reason_code in {"MISSING_CLASSIFICATION", "REQUEST_REJECTED"}:
             save_orchestration_session(session)
             warnings = session.pop_audit_warnings()
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "status": "WAITING",
-                        "reason_code": e.reason_code,
-                        "message": str(e),
-                        **({"warnings": warnings} if warnings else {}),
-                    }
-                )
-                + "\n"
-            )
+            _output_signal("WAITING", e.reason_code, "RETRY", str(e), warnings)
             return 0
 
-        sys.stderr.write(f"Workflow dispatch failed: {e.reason_code}: {e}\n")
+        _output_signal("FAILED", "WORKFLOW_DISPATCH_FAILED", "RETRY", f"Workflow dispatch failed: {e.reason_code}: {e}")
         return 2
 
     try:
@@ -259,6 +295,10 @@ def handle_step(args: List[str]) -> int:
         action_request = json.loads(Path(request_path).read_text(encoding="utf-8"))
 
         item_data = action_request.get("item", {})
+        
+        # T008: Role-Based Visibility filtering in handle_step
+        # Actually, workflow.issue_action_request(role=role) already filters by role.
+        # So we just ensure it correctly outputs NEW_TASK signal
         context_key = str(item_data.get("path") or item_id)
         lease = session.grant_lease(item_id, role, agent_id=f"orchestrator:{session.run_id}", context_key=context_key)
         warnings = session.pop_audit_warnings()
@@ -279,13 +319,19 @@ def handle_step(args: List[str]) -> int:
         )
 
         save_orchestration_session(session)
-        payload = {"status": "DISPATCHED", "packet": packet}
+        
+        payload = {
+            "status": "DISPATCHED",
+            "reason_code": "NEW_TASK",
+            "next_action": "PROCEED",
+            "packet": packet
+        }
         if warnings:
             payload["warnings"] = warnings
         sys.stdout.write(json.dumps(payload) + "\n")
         return 0
     except LeaseConflictError as e:
-        sys.stderr.write(f"Lease conflict: {e}\n")
+        _output_signal("FAILED", "LEASE_CONFLICT", "RETRY", f"Lease conflict: {e}")
         return 2
 
 
@@ -342,17 +388,23 @@ def handle_stop(args: List[str]) -> int:
     try:
         session = load_orchestration_session(repo, pr)
         if session.active_leases:
-            sys.stderr.write(f"Cannot stop: {len(session.active_leases)} active leases exist.\n")
+            _output_signal("FAILED", "ACTIVE_LEASES_EXIST", "HALT", f"Cannot stop: {len(session.active_leases)} active leases exist.")
             return 2
         gate_rc = _run_authoritative_gate(repo, pr)
         if gate_rc != 0:
-            sys.stderr.write("Cannot stop: final-gate failed.\n")
+            _output_signal("FAILED", "GATE_FAILED", "HALT", "Cannot stop: final-gate failed.")
             return 2
-        sys.stdout.write("agent orchestrate stop completed\n")
+        
+        session.completed = True
+        from datetime import datetime, timezone
+        session.completed_at = datetime.now(timezone.utc).isoformat()
+        session.completed_reason = "Manual stop via agent orchestrate stop"
+        save_orchestration_session(session)
+
+        _output_signal("SUCCESS", "COMPLETED", "HALT", "agent orchestrate stop completed")
         return 0
     except OrchestrationSessionError:
-        # If no session, stopping is trivial
-        sys.stdout.write("agent orchestrate stop: no active session found\n")
+        _output_signal("SUCCESS", "COMPLETED", "HALT", "agent orchestrate stop: no active session found")
         return 0
 
 

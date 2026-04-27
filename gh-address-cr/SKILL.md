@@ -45,9 +45,9 @@ If the runtime is missing or incompatible, the shim must fail loudly before sess
 Read this skill in this order when you are an AI agent:
 
 1. Start from the public main entrypoint: `review <owner/repo> <pr_number>`.
-2. Inspect the machine summary from the runtime.
-3. Consult `references/status-action-map.md` to map the runtime status to your next safe action.
-4. For multi-agent execution, use `agent manifest`, `agent next`, `agent submit`, `agent leases`, and `agent reclaim` through the runtime CLI.
+2. Inspect the JSON machine summary output from the runtime.
+3. Consult `references/status-action-map.md` to map the runtime `status`, `reason_code`, and `next_action` to your next safe step. You MUST branch your execution strictly based on these structured fields. Never parse or infer state from human prose or logs.
+4. For multi-agent execution, use `agent orchestrate start`, `agent orchestrate step`, `agent orchestrate submit`, `agent orchestrate status`, and `agent orchestrate stop` through the runtime CLI.
 5. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
 
 Fail-fast rules:
@@ -55,10 +55,11 @@ Fail-fast rules:
 - `review` is the only public main entrypoint.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format. This converter rejects plain narrative Markdown review output.
 - AI agents must not post GitHub replies or resolve threads directly; the runtime records evidence and performs deterministic side effects.
+- If a command outputs a `reason_code` or `next_action`, your next step MUST be determined solely by that code, ignoring all other prose in the `message` field.
 
 ## Machine Summary Contract
 
-High-level commands emit structured JSON by default. Agents should consume these fields, not parse human prose:
+High-level commands emit structured JSON by default. Agents MUST consume these fields and MUST NOT parse human prose to determine system state:
 
 - `status`
 - `repo`
