@@ -82,7 +82,7 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         session = load_orchestration_session(self.repo, self.pr)
         self.assertEqual(session.queued_items, ["finding-1"])
-        self.assertIn("initialized session", mock_stdout.getvalue())
+        self.assertIn("INITIALIZED", mock_stdout.getvalue())
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_status_reports_authoritative_queue_count_after_start(self, mock_stdout):
@@ -284,15 +284,15 @@ class TestOrchestratorHarness(unittest.TestCase):
 
         self.assertIn("human handoff", mock_stdout.getvalue().lower())
 
-    @patch("gh_address_cr.orchestrator.harness.sys.stderr", new_callable=io.StringIO)
-    def test_status_reconciliation_budget_guard_fails_loud_when_exceeded(self, mock_stderr):
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_status_reconciliation_budget_guard_fails_loud_when_exceeded(self, mock_stdout):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
 
         with patch("gh_address_cr.orchestrator.harness.time.perf_counter", side_effect=[1.0, 2.2]):
             exit_code = handle_agent_orchestrate("status", [self.repo, self.pr])
         self.assertEqual(exit_code, 2)
-        self.assertIn("reconciliation", mock_stderr.getvalue().lower())
+        self.assertIn("reconciliation", mock_stdout.getvalue().lower())
 
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)

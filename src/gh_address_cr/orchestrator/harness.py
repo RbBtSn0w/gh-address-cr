@@ -67,12 +67,12 @@ def _parse_common_args(args: List[str]):
 
 def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> int:
     if not check_runtime_version():
+        _output_signal("FAILED", "INCOMPATIBLE_RUNTIME", "HALT", f"Incompatible Runtime CLI version: {__version__}")
         return 2
 
-    if subcommand not in ["start", "status", "step", "resume", "stop", "submit"]:
-        sys.stderr.write(
-            "usage: gh-address-cr agent orchestrate {start,status,step,resume,stop,submit} <repo> <pr_number> ...\n"
-        )
+    valid_subcommands = ["start", "status", "step", "resume", "stop", "submit"]
+    if subcommand not in valid_subcommands:
+        _output_signal("FAILED", "INVALID_SUBCOMMAND", "HALT", f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}")
         return 2
 
     if subcommand == "start":
@@ -202,8 +202,13 @@ def handle_start(args: List[str]) -> int:
         save_orchestration_session(session)
         if warnings:
             sys.stderr.write(f"Orchestration warning(s): {'; '.join(warnings)}\n")
-        sys.stdout.write(
-            f"agent orchestrate start: initialized session {session.run_id} for {repo}/pr-{pr} (queued={len(session.queued_items)})\n"
+        
+        _output_signal(
+            "SUCCESS", 
+            "INITIALIZED", 
+            "PROCEED", 
+            f"Initialized session {session.run_id} for {repo}/pr-{pr} (queued={len(session.queued_items)})",
+            warnings
         )
         return 0
     except Exception as e:
@@ -343,13 +348,15 @@ def handle_resume(args: List[str]) -> int:
         _sync_queue_from_runtime(session, enforce_budget=False)
         warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
-        if warnings:
-            sys.stderr.write(f"Orchestration warning(s): {'; '.join(warnings)}\n")
-        sys.stdout.write(f"agent orchestrate resume reloaded state for {repo}/pr-{pr}\n")
+        
+        _output_signal("SUCCESS", "RESUMED", "PROCEED", f"Resumed session {session.run_id} for {repo}/pr-{pr}", warnings)
         return 0
     except OrchestrationSessionError as e:
-        sys.stderr.write(f"{str(e)}\n")
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
         return 2
+    except Exception as e:
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to resume orchestration: {e}")
+        return 5
 
 
 def handle_status(args: List[str]) -> int:
@@ -360,26 +367,29 @@ def handle_status(args: List[str]) -> int:
         elapsed = _sync_queue_from_runtime(session, enforce_budget=True)
         warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "status": "READY",
-                    "run_id": session.run_id,
-                    "active_leases": len(session.active_leases),
-                    "queued_items": len(session.queued_items),
-                    "reconciliation_seconds": round(elapsed, 6),
-                    **({"warnings": warnings} if warnings else {}),
-                }
-            )
-            + "\n"
-        )
+        
+        payload = {
+            "status": "READY",
+            "reason_code": "STATUS_OK",
+            "next_action": "PROCEED",
+            "run_id": session.run_id,
+            "active_leases": len(session.active_leases),
+            "queued_items": len(session.queued_items),
+            "reconciliation_seconds": round(elapsed, 6),
+        }
+        if warnings:
+            payload["warnings"] = warnings
+        sys.stdout.write(json.dumps(payload) + "\n")
         return 0
     except OrchestrationSessionError as e:
-        sys.stderr.write(f"{str(e)}\n")
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
         return 2
     except RuntimeError as e:
-        sys.stderr.write(f"Queue reconciliation failed: {e}\n")
+        _output_signal("FAILED", "RECONCILIATION_TIMEOUT", "RETRY", str(e))
         return 2
+    except Exception as e:
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Unexpected error during status: {e}")
+        return 5
 
 
 def handle_stop(args: List[str]) -> int:

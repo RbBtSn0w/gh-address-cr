@@ -11,7 +11,7 @@
 ## Phase 2: Foundational
 
 - [x] T002 Update `OrchestrationSession` and lease data model fields (`config`, `completed`, `waiting_for_human`, `handoff_reason`, `artifact_path`) in `src/gh_address_cr/orchestrator/session.py`
-- [ ] T003 Ensure CLI output handlers support structured `reason_code` and `next_action` fields in `src/gh_address_cr/orchestrator/harness.py`
+- [x] T003 Ensure CLI output handlers support structured `reason_code` and `next_action` fields in `src/gh_address_cr/orchestrator/harness.py`
 
 ## Phase 3: User Story 1 - Signal-Driven Control (Priority: P1)
 
