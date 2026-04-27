@@ -1,6 +1,6 @@
 # Feature Specification: Orchestrator-Runtime Integration
 
-**Feature Branch**: `005-orchestrator-runtime-integration`  
+**Feature Branch**: `005-orchestrator-runtime-integration`
 **Created**: 2026-04-27  
 **Status**: Draft  
 **Input**: User description: "Fixing 004 Orchestrator gaps. Goal: Transform the skeleton orchestrator into a fully integrated coordinator that drives the Runtime CLI control plane. This includes real task dispatching via workflow.py, authoritative state feedback through submit_action_response, and enforcing final-gate during stop. It must also implement real bounded retry logic for worker responses and bind WorkerPacket to real runtime context."
@@ -80,7 +80,7 @@ As a system, I want to robustly handle transient failures when parsing agent res
 - **FR-003**: `handle_submit` MUST call `workflow.submit_action_response` after local evidence verification.
 - **FR-004**: `handle_stop` MUST execute the `session_engine.cmd_gate` logic to verify session completion.
 - **FR-005**: `WorkerPacket` MUST be constructed using real metadata from the `ActionRequest` vended by the runtime.
-- **FR-006**: The system MUST implement a loop-aware bounded retry mechanism for `parse_and_validate_response`.
+- **FR-005**: The system MUST implement a loop-aware bounded retry mechanism for `parse_and_validate_response`.
 - **FR-007**: `handle_step` MUST re-verify the queue status from `session.json` before issuing any new packet.
 
 ### Constitution Alignment *(mandatory)*
