@@ -1,27 +1,26 @@
 <!--
 Sync Impact Report
-Version change: 1.1.0 -> 1.2.0
+Version change: 1.2.0 -> 1.3.0
 Amendment reason:
-- Solidify the "Thin Skill" as a routing and behavioral policy layer.
-- Define the "Product Boundary" between review resolution (internal) and review production (external/replaceable).
-- Incorporate "Status-to-Action Map" as a core contract for agent reliability.
+- Formally define the "Orchestrator as Delegator" pattern.
+- Clarify the relationship between volatile Orchestration state and authoritative Runtime state.
+- Incorporate "Bounded Retry Persistence" as a stability contract.
 Version bump rationale:
-- MINOR: Added Principle VII (External Intake Is Replaceable) and materially expanded Principle II (Status-to-Action Map) and IV (Behavioral Policy Layer).
+- MINOR: Materially expanded Principle VI (Multi-Agent Coordination) and Principle I (Control Plane Owns Runtime State) to include delegation and persistence rules.
 Modified principles:
-- II. CLI Is The Stable Public Interface (expanded with Status-to-Action Map)
-- IV. Packaged Skill Boundary Is Explicit (expanded with Behavioral Policy Layer definition)
+- I. Control Plane Owns Runtime State (clarified transient vs authoritative state)
+- VI. Multi-Agent Coordination and Claim Leases (added Delegation Pattern)
 Added sections:
-- Principle VII. External Intake Is Replaceable
+- None
 Removed sections:
 - None
 Templates requiring updates:
-- .specify/templates/plan-template.md: ✅ updated (concepts aligned)
-- .specify/templates/spec-template.md: ✅ updated (concepts aligned)
-- .specify/templates/tasks-template.md: ✅ updated (concepts aligned)
-- .specify/templates/checklist-template.md: ✅ updated (concepts aligned)
+- .specify/templates/plan-template.md: ✅ updated
+- .specify/templates/spec-template.md: ✅ updated
+- .specify/templates/tasks-template.md: ✅ updated
 Runtime guidance requiring updates:
-- AGENTS.md: ✅ updated (policy layer and intake rules aligned)
-- README.md: ✅ updated (resolution vs production boundary aligned)
+- AGENTS.md: ✅ updated
+- README.md: ✅ updated
 Follow-up items:
 - None
 -->
@@ -36,6 +35,10 @@ state, intake routing, GitHub side effects, reply evidence, session metrics,
 loop safety, and final gating MUST be owned by deterministic code. Markdown
 files and agent hints MAY describe how to use the system, but they MUST NOT be
 the authoritative implementation of state transitions or completion checks.
+**Orchestration state (leases, active worker queues) is a volatile, transient
+shadow of the authoritative Runtime state (`session.json`). The control plane
+MUST reconcile orchestration state from the runtime truth before every major
+action.**
 
 Rationale: PR review handling has external side effects and resumable state.
 The workflow must be auditable after interruptions and reproducible without
@@ -108,10 +111,14 @@ claim leases. No agent or process MAY mutate a work item without an active lease
 The system MUST define specialized roles (coordinator, producer, triage, fixer,
 verifier, publisher, gatekeeper) and enforce lease policies (expiry, reclaiming,
 conflict detection) to ensure parallel execution is safe and auditable.
+**The coordination layer (Orchestrator) MUST follow a strict Delegation Pattern:
+it manages the fleet and lease lifecycle, but MUST delegate all state transitions
+and finding-specific logic to the authoritative Runtime Workflow.**
 
 Rationale: PR repair is often multi-dimensional. Without explicit ownership,
 parallel agents can overwrite each other, resolve without evidence, or claim
-completion from stale state.
+completion from stale state. Delegation prevents "state drift" between the
+orchestrator and the engine.
 
 ### VII. External Intake Is Replaceable
 
@@ -197,4 +204,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.2.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-26
+**Version**: 1.3.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-27
