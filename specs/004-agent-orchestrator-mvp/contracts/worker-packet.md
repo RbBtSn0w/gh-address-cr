@@ -29,3 +29,6 @@ The `WorkerPacket` is emitted by the orchestrator during `step`. It MUST be kept
 ```
 
 Workers must write their standard `ActionResponse` to the `response_path` and use the `lease_token` when interacting with the orchestrator.
+
+## Validity
+A `WorkerPacket` generation is valid ONLY if all fields defined in the Stage 5 `ActionRequest` schema are present and well-formed, and the `response_path` points to a writable directory in the current PR workspace.
