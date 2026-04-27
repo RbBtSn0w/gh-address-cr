@@ -84,9 +84,9 @@ As a maintainer with a large PR, I want the orchestrator to manage multiple inde
 - **FR-004**: Orchestrator MUST issue `ActionRequest` packets and accept `ActionResponse` packets following the **Structured Agent Protocol**.
 - **FR-005**: System MUST enforce **Claim Leases** (expiry, conflict detection, reclaiming) to prevent parallel mutation hazards.
 - **FR-006**: The Orchestrator MUST track the `run_id` and maintain an audit log of coordination events (dispatches, claims, submissions, rejections).
-- **FR-007**: System MUST support a **Deterministic Mode** where it does not automatically invoke LLMs but prepares worker packets for manual or external execution.
+- **FR-007**: System MUST support a **Deterministic Mode** where it does not automatically invoke LLMs but prepares worker packets for manual or external execution. It MUST implement **Bounded Retry + Fail Loud + Human Handoff** (e.g., max 3 retries for JSON parsing failures) rather than silently degrading or guessing intent.
 - **FR-008**: The Orchestrator MUST NOT bypass the **Final Gate** authority of the Runtime CLI.
-- **FR-009**: System MUST allow for role-based filtering (e.g., "only step triage tasks").
+- **FR-009**: System MUST allow for role-based filtering (e.g., "only step triage tasks"). If `--role` is passed, `step` MUST ONLY consider items that require that role and return `READY` if no items match.
 
 ### Constitution Alignment *(mandatory)*
 
@@ -111,9 +111,15 @@ As a maintainer with a large PR, I want the orchestrator to manage multiple inde
 - **SC-002**: Resuming an interrupted orchestration session takes less than 5 seconds (excluding IO) and restores 100% of accepted-but-not-published evidence.
 - **SC-003**: 100% of GitHub side effects are executed through the Runtime CLI's serialized publishing path.
 - **SC-004**: 0% of orchestration steps bypass the final-gate proof for completion claims.
+- **SC-005**: Successful translation of an open item into a WorkerPacket can be tested by validating the output against the JSON schema.
+- **SC-006**: Rejection of conflicting claims can be tested deterministically by injecting an active lease in `orchestration.json` and asserting a non-zero exit code.
+- **SC-007**: Restoration of evidence during resume can be objectively verified by comparing the queue state before and after the interruption.
 
 ## Assumptions
 
 - The `ActionRequest` and `ActionResponse` schemas defined in Stage 5 are sufficient for the MVP.
-- Worker agents are capable of reading the `WorkerPacket` and producing the required JSON response.
+- Worker agents MUST be validated against the `WorkerPacket` schema via integration tests to ensure they can successfully read it and produce valid JSON.
+- The Runtime CLI's `session.json` and machine summary are the reliable source of truth for the orchestrator.
+nd `ActionResponse` schemas defined in Stage 5 are sufficient for the MVP.
+- Worker agents MUST be validated against the `WorkerPacket` schema via integration tests to ensure they can successfully read it and produce valid JSON.
 - The Runtime CLI's `session.json` and machine summary are the reliable source of truth for the orchestrator.
