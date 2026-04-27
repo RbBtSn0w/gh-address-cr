@@ -77,5 +77,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read
-`specs/005-orchestrator-runtime-integration/plan.md`.
+`specs/006-orchestrator-product-safety/plan.md`.
 <!-- SPECKIT END -->
