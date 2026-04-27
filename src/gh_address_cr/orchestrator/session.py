@@ -71,11 +71,24 @@ class OrchestrationSession:
     active_leases: Dict[str, LeaseRecord] = field(default_factory=dict)
     queued_items: List[str] = field(default_factory=list)
     retry_counts: Dict[str, int] = field(default_factory=dict)
+    audit_warnings: List[str] = field(default_factory=list)
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
 
-    def log_audit_event(self, event_type: str, details: dict) -> None:
+    def _append_audit_warning(self, event_type: str, error: Exception) -> None:
+        message = f"{event_type}: {type(error).__name__}: {error}"
+        if message not in self.audit_warnings:
+            self.audit_warnings.append(message)
+        if len(self.audit_warnings) > 8:
+            self.audit_warnings = self.audit_warnings[-8:]
+
+    def pop_audit_warnings(self) -> List[str]:
+        warnings = list(self.audit_warnings)
+        self.audit_warnings.clear()
+        return warnings
+
+    def log_audit_event(self, event_type: str, details: dict) -> bool:
         workspace = core_session.workspace_dir(self.repo, self.pr_number)
         audit_file = workspace / "orchestration_audit.log"
         event = {
@@ -84,8 +97,13 @@ class OrchestrationSession:
             "event_type": event_type,
             "details": details,
         }
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+        try:
+            with open(audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
+            return True
+        except OSError as exc:
+            self._append_audit_warning(event_type, exc)
+            return False
 
     def grant_lease(self, item_id: str, role: str, agent_id: str = "agent", context_key: str = "") -> LeaseRecord:
         now = self._utc_now()
@@ -155,6 +173,7 @@ class OrchestrationSession:
             "active_leases": {k: v.to_dict() for k, v in self.active_leases.items()},
             "queued_items": self.queued_items,
             "retry_counts": self.retry_counts,
+            "audit_warnings": self.audit_warnings,
         }
 
     @classmethod
@@ -166,6 +185,7 @@ class OrchestrationSession:
             state=data.get("state", STATE_INITIALIZED),
             queued_items=data.get("queued_items", []),
             retry_counts=data.get("retry_counts", {}),
+            audit_warnings=data.get("audit_warnings", []),
         )
         session.active_leases = {k: LeaseRecord.from_dict(v) for k, v in data.get("active_leases", {}).items()}
         return session

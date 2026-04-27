@@ -121,6 +121,7 @@ def handle_submit(args: List[str]) -> int:
 
         session.release_lease(parsed.item_id, parsed.token)
         session.retry_counts.pop(parsed.item_id, None)
+        warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
         sys.stdout.write(
@@ -129,6 +130,7 @@ def handle_submit(args: List[str]) -> int:
                     "status": "SUCCESS",
                     "message": f"Verified and submitted {parsed.item_id}",
                     "runtime_status": result.get("status"),
+                    **({"warnings": warnings} if warnings else {}),
                 }
             )
             + "\n"
@@ -153,8 +155,11 @@ def handle_start(args: List[str]) -> int:
     try:
         session = OrchestrationSession(run_id=f"run-{uuid4().hex[:8]}", repo=repo, pr_number=pr)
         _sync_queue_from_runtime(session, enforce_budget=False)
+        warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
+        if warnings:
+            sys.stderr.write(f"Orchestration warning(s): {'; '.join(warnings)}\n")
         sys.stdout.write(
             f"agent orchestrate start: initialized session {session.run_id} for {repo}/pr-{pr} (queued={len(session.queued_items)})\n"
         )
@@ -185,13 +190,18 @@ def handle_step(args: List[str]) -> int:
     # Simple dequeue logic
     if not session.queued_items:
         if not session.active_leases:
-            sys.stdout.write(json.dumps({"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}) + "\n")
+            warnings = session.pop_audit_warnings()
+            payload = {"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}
+            if warnings:
+                payload["warnings"] = warnings
+            sys.stdout.write(json.dumps(payload) + "\n")
             return 0
         else:
-            sys.stdout.write(
-                json.dumps({"status": "WAITING", "message": f"Waiting for {len(session.active_leases)} active leases."})
-                + "\n"
-            )
+            warnings = session.pop_audit_warnings()
+            payload = {"status": "WAITING", "message": f"Waiting for {len(session.active_leases)} active leases."}
+            if warnings:
+                payload["warnings"] = warnings
+            sys.stdout.write(json.dumps(payload) + "\n")
             return 0
 
     role = parsed.role or "fixer"  # Default to fixer for MVP
@@ -207,31 +217,33 @@ def handle_step(args: List[str]) -> int:
         if e.reason_code in {"NO_ELIGIBLE_ITEM"}:
             _sync_queue_from_runtime(session, enforce_budget=False)
             save_orchestration_session(session)
+            warnings = session.pop_audit_warnings()
             if not session.active_leases:
-                sys.stdout.write(
-                    json.dumps({"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}) + "\n"
-                )
+                payload = {"status": "READY_FOR_FINAL_GATE", "message": "Zero pending items."}
+                if warnings:
+                    payload["warnings"] = warnings
+                sys.stdout.write(json.dumps(payload) + "\n")
             else:
-                sys.stdout.write(
-                    json.dumps(
-                        {
-                            "status": "WAITING",
-                            "message": f"Waiting for {len(session.active_leases)} active leases.",
-                            "reason_code": e.reason_code,
-                        }
-                    )
-                    + "\n"
-                )
+                payload = {
+                    "status": "WAITING",
+                    "message": f"Waiting for {len(session.active_leases)} active leases.",
+                    "reason_code": e.reason_code,
+                }
+                if warnings:
+                    payload["warnings"] = warnings
+                sys.stdout.write(json.dumps(payload) + "\n")
             return 0
 
         if e.reason_code in {"MISSING_CLASSIFICATION", "REQUEST_REJECTED"}:
             save_orchestration_session(session)
+            warnings = session.pop_audit_warnings()
             sys.stdout.write(
                 json.dumps(
                     {
                         "status": "WAITING",
                         "reason_code": e.reason_code,
                         "message": str(e),
+                        **({"warnings": warnings} if warnings else {}),
                     }
                 )
                 + "\n"
@@ -249,6 +261,7 @@ def handle_step(args: List[str]) -> int:
         item_data = action_request.get("item", {})
         context_key = str(item_data.get("path") or item_id)
         lease = session.grant_lease(item_id, role, agent_id=f"orchestrator:{session.run_id}", context_key=context_key)
+        warnings = session.pop_audit_warnings()
 
         session.queued_items = [queued_id for queued_id in session.queued_items if queued_id != item_id]
 
@@ -266,7 +279,10 @@ def handle_step(args: List[str]) -> int:
         )
 
         save_orchestration_session(session)
-        sys.stdout.write(json.dumps({"status": "DISPATCHED", "packet": packet}) + "\n")
+        payload = {"status": "DISPATCHED", "packet": packet}
+        if warnings:
+            payload["warnings"] = warnings
+        sys.stdout.write(json.dumps(payload) + "\n")
         return 0
     except LeaseConflictError as e:
         sys.stderr.write(f"Lease conflict: {e}\n")
@@ -279,7 +295,10 @@ def handle_resume(args: List[str]) -> int:
     try:
         session = load_orchestration_session(repo, pr)
         _sync_queue_from_runtime(session, enforce_budget=False)
+        warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
+        if warnings:
+            sys.stderr.write(f"Orchestration warning(s): {'; '.join(warnings)}\n")
         sys.stdout.write(f"agent orchestrate resume reloaded state for {repo}/pr-{pr}\n")
         return 0
     except OrchestrationSessionError as e:
@@ -293,6 +312,7 @@ def handle_status(args: List[str]) -> int:
     try:
         session = load_orchestration_session(repo, pr)
         elapsed = _sync_queue_from_runtime(session, enforce_budget=True)
+        warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
         sys.stdout.write(
             json.dumps(
@@ -302,6 +322,7 @@ def handle_status(args: List[str]) -> int:
                     "active_leases": len(session.active_leases),
                     "queued_items": len(session.queued_items),
                     "reconciliation_seconds": round(elapsed, 6),
+                    **({"warnings": warnings} if warnings else {}),
                 }
             )
             + "\n"
