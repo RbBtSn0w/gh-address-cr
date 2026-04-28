@@ -31,7 +31,7 @@ template content.
 - [x] Safety/guardrail behavior covered by unit tests in `tests/test_orchestrator_harness.py`
   (circuit breaker handoff, max concurrency, lock).
 - [x] Full unit test suite passes: `python3 -m unittest discover -s tests`.
-- [ ] Runtime/CI timing guard for the `< 100ms` status+lock convergence target is explicitly measured.
+- [x] Runtime/CI timing guard for the `< 100ms` status+lock convergence target is explicitly measured.
 
 ## Governance
 

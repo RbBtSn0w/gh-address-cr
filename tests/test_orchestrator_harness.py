@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -297,6 +298,39 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertIn("reconciliation", mock_stdout.getvalue().lower())
 
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_status_and_lock_reconciliation_target_is_under_100ms(self, mock_stdout):
+        self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
+        self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
+
+        mock_stdout.truncate(0)
+        mock_stdout.seek(0)
+        status_start = time.perf_counter()
+        exit_code = handle_agent_orchestrate("status", [self.repo, self.pr])
+        status_elapsed = time.perf_counter() - status_start
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "READY")
+        self.assertLess(payload["reconciliation_seconds"], 0.1)
+        self.assertLess(status_elapsed, 0.1)
+
+        session = load_orchestration_session(self.repo, self.pr)
+        session.completed = True
+        session.queued_items = []
+        session.active_leases = {}
+        from gh_address_cr.orchestrator.session import save_orchestration_session
+
+        save_orchestration_session(session)
+        with patch("gh_address_cr.orchestrator.harness._eligible_runtime_items", return_value=[]):
+            mock_stdout.truncate(0)
+            mock_stdout.seek(0)
+            lock_start = time.perf_counter()
+            exit_code = handle_agent_orchestrate("start", [self.repo, self.pr])
+            lock_elapsed = time.perf_counter() - lock_start
+            self.assertEqual(exit_code, 0)
+            lock_payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+            self.assertEqual(lock_payload["status"], "LOCKED")
+            self.assertLess(lock_elapsed, 0.1)
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_step_enforces_max_concurrency(self, mock_stdout):
