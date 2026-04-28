@@ -47,9 +47,6 @@ def check_runtime_version() -> bool:
         current = Version(__version__)
         required = Version(MIN_REQUIRED_VERSION)
         if current < required:
-            sys.stderr.write(
-                f"Incompatible Runtime CLI version: {__version__}. Orchestrator requires >={MIN_REQUIRED_VERSION}.\n"
-            )
             return False
     except Exception:
         pass
@@ -200,8 +197,6 @@ def handle_start(args: List[str]) -> int:
         warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
-        if warnings:
-            sys.stderr.write(f"Orchestration warning(s): {'; '.join(warnings)}\n")
         
         _output_signal(
             "SUCCESS", 

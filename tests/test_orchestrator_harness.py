@@ -61,12 +61,15 @@ class TestOrchestratorHarness(unittest.TestCase):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
-    @patch("gh_address_cr.orchestrator.harness.sys.stderr", new_callable=io.StringIO)
-    def test_runtime_version_incompatibility_fails_loudly(self, mock_stderr):
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_runtime_version_incompatibility_fails_loudly(self, mock_stdout):
         with patch("gh_address_cr.orchestrator.harness.__version__", "0.0.0"):
-            exit_code = handle_agent_orchestrate("step", [self.repo, self.pr])
-            self.assertEqual(exit_code, 2)
-            self.assertIn("Incompatible Runtime CLI version", mock_stderr.getvalue())
+            exit_code = handle_agent_orchestrate("start", [self.repo, self.pr])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "INCOMPATIBLE_RUNTIME")
+        self.assertEqual(payload["next_action"], "HALT")
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_start_syncs_queue_from_authoritative_runtime(self, mock_stdout):
@@ -348,6 +351,28 @@ class TestOrchestratorHarness(unittest.TestCase):
             self.assertEqual(payload["status"], "LOCKED")
             self.assertEqual(payload["reason_code"], "SESSION_LOCKED")
             self.assertEqual(payload["next_action"], "HALT")
+
+
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_status_and_resume_emit_structured_failure_signals(self, mock_stdout):
+        # Case 1: Status failure (Session missing)
+        exit_code = handle_agent_orchestrate("status", [self.repo, self.pr])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "SESSION_ERROR")
+        self.assertEqual(payload["next_action"], "HALT")
+
+        mock_stdout.truncate(0)
+        mock_stdout.seek(0)
+
+        # Case 2: Resume failure (Session missing)
+        exit_code = handle_agent_orchestrate("resume", [self.repo, self.pr])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "SESSION_ERROR")
+        self.assertEqual(payload["next_action"], "HALT")
 
 
 if __name__ == "__main__":
