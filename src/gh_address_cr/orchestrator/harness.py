@@ -54,48 +54,68 @@ def check_runtime_version() -> bool:
 
 
 def _parse_common_args(args: List[str]):
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
     parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
-    return parser.parse_known_args(args)
+    try:
+        return parser.parse_known_args(args)
+    except (argparse.ArgumentError, SystemExit) as e:
+        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        sys.exit(2)
 
 
 def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> int:
-    if not check_runtime_version():
-        _output_signal("FAILED", "INCOMPATIBLE_RUNTIME", "HALT", f"Incompatible Runtime CLI version: {__version__}")
+    try:
+        if not check_runtime_version():
+            _output_signal("FAILED", "INCOMPATIBLE_RUNTIME", "HALT", f"Incompatible Runtime CLI version: {__version__}")
+            return 2
+
+        valid_subcommands = ["start", "status", "step", "resume", "stop", "submit"]
+        if subcommand not in valid_subcommands:
+            _output_signal("FAILED", "INVALID_SUBCOMMAND", "HALT", f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}")
+            return 2
+
+        if subcommand == "start":
+            return handle_start(passthrough)
+        elif subcommand == "status":
+            return handle_status(passthrough)
+        elif subcommand == "step":
+            return handle_step(passthrough)
+        elif subcommand == "resume":
+            return handle_resume(passthrough)
+        elif subcommand == "stop":
+            return handle_stop(passthrough)
+        elif subcommand == "submit":
+            return handle_submit(passthrough)
+
         return 2
-
-    valid_subcommands = ["start", "status", "step", "resume", "stop", "submit"]
-    if subcommand not in valid_subcommands:
-        _output_signal("FAILED", "INVALID_SUBCOMMAND", "HALT", f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}")
-        return 2
-
-    if subcommand == "start":
-        return handle_start(passthrough)
-    elif subcommand == "status":
-        return handle_status(passthrough)
-    elif subcommand == "step":
-        return handle_step(passthrough)
-    elif subcommand == "resume":
-        return handle_resume(passthrough)
-    elif subcommand == "stop":
-        return handle_stop(passthrough)
-    elif subcommand == "submit":
-        return handle_submit(passthrough)
-
-    return 2
+    except SystemExit as e:
+        # If it reached here, it was likely from a sub-call that we didn't catch
+        # We don't want to double-signal if _output_signal was already called
+        # But if it's a raw SystemExit from core, we should signal it.
+        # We'll assume if e.code is a string, it's a message we should signal.
+        if isinstance(e.code, str):
+            _output_signal("FAILED", "SYSTEM_EXIT", "HALT", e.code)
+        return e.code if isinstance(e.code, int) else 2
+    except Exception as e:
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", str(e))
+        return 5
 
 
 def handle_submit(args: List[str]) -> int:
-    parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate submit")
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate submit", exit_on_error=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--item-id", required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--input", required=True)
-    parsed, _ = parser.parse_known_args(args)
+    try:
+        parsed, _ = parser.parse_known_args(args)
+    except (argparse.ArgumentError, SystemExit) as e:
+        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        return 2
     repo, pr = parsed.repo, parsed.pr_number
 
     try:
@@ -134,7 +154,7 @@ def handle_submit(args: List[str]) -> int:
             return 2
 
         try:
-            result = workflow.submit_action_response(repo, pr, response_path=str(parsed.input))
+            _ = workflow.submit_action_response(repo, pr, response_path=str(parsed.input))
         except workflow.WorkflowError as e:
             save_orchestration_session(session)
             _output_signal("FAILED", e.reason_code, "RETRY", f"Submission failed: {e.reason_code}: {e}")
@@ -200,19 +220,24 @@ def handle_start(args: List[str]) -> int:
             warnings
         )
         return 0
-    except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to start orchestration: {e}")
+    except (Exception, SystemExit) as e:
+        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
+        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to start orchestration: {msg}")
         return 5
 
 
 def handle_step(args: List[str]) -> int:
-    parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate step")
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate step", exit_on_error=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--role", help="Role-based filtering (e.g., triage)")
     parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
     parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
-    parsed, _ = parser.parse_known_args(args)
+    try:
+        parsed, _ = parser.parse_known_args(args)
+    except (argparse.ArgumentError, SystemExit) as e:
+        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        return 2
     repo, pr = parsed.repo, parsed.pr_number
 
     try:
@@ -236,8 +261,9 @@ def handle_step(args: List[str]) -> int:
             _output_signal("WAITING", "MAX_CONCURRENCY_REACHED", "RETRY", f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.", warnings)
             return 0
 
-    except OrchestrationSessionError as e:
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
+    except (OrchestrationSessionError, SystemExit) as e:
+        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
         return 2
     except Exception as e:
         _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to synchronize runtime queue: {e}")
@@ -337,8 +363,9 @@ def handle_resume(args: List[str]) -> int:
         
         _output_signal("SUCCESS", "RESUMED", "PROCEED", f"Resumed session {session.run_id} for {repo}/pr-{pr}", warnings)
         return 0
-    except OrchestrationSessionError as e:
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
+    except (OrchestrationSessionError, SystemExit) as e:
+        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
         return 2
     except Exception as e:
         _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to resume orchestration: {e}")
@@ -367,8 +394,9 @@ def handle_status(args: List[str]) -> int:
             payload["warnings"] = warnings
         sys.stdout.write(json.dumps(payload) + "\n")
         return 0
-    except OrchestrationSessionError as e:
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", str(e))
+    except (OrchestrationSessionError, SystemExit) as e:
+        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
+        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
         return 2
     except RuntimeError as e:
         _output_signal("FAILED", "RECONCILIATION_TIMEOUT", "RETRY", str(e))

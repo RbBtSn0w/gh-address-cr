@@ -354,6 +354,17 @@ class TestOrchestratorHarness(unittest.TestCase):
 
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_missing_arguments_emit_structured_failure_signal(self, mock_stdout):
+        # Missing 'repo' and 'pr'
+        exit_code = handle_agent_orchestrate("status", [])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "INVALID_ARGUMENTS")
+        self.assertEqual(payload["next_action"], "HALT")
+
+
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_status_and_resume_emit_structured_failure_signals(self, mock_stdout):
         # Case 1: Status failure (Session missing)
         exit_code = handle_agent_orchestrate("status", [self.repo, self.pr])
