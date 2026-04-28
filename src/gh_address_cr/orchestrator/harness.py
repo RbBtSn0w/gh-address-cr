@@ -145,18 +145,12 @@ def handle_submit(args: List[str]) -> int:
         warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "status": "SUCCESS",
-                    "reason_code": "SUBMITTED",
-                    "next_action": "PROCEED",
-                    "message": f"Verified and submitted {parsed.item_id}",
-                    "runtime_status": result.get("status"),
-                    **({"warnings": warnings} if warnings else {}),
-                }
-            )
-            + "\n"
+        _output_signal(
+            "SUCCESS",
+            "SUBMITTED",
+            "PROCEED",
+            f"Verified and submitted {parsed.item_id}",
+            warnings
         )
         return 0
     except (WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
@@ -296,9 +290,6 @@ def handle_step(args: List[str]) -> int:
 
         item_data = action_request.get("item", {})
         
-        # T008: Role-Based Visibility filtering in handle_step
-        # Actually, workflow.issue_action_request(role=role) already filters by role.
-        # So we just ensure it correctly outputs NEW_TASK signal
         context_key = str(item_data.get("path") or item_id)
         lease = session.grant_lease(item_id, role, agent_id=f"orchestrator:{session.run_id}", context_key=context_key)
         warnings = session.pop_audit_warnings()
