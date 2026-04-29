@@ -17,6 +17,9 @@ module.exports = {
       {
         preset: "conventionalcommits",
         parserOpts: releaseParserOpts,
+        releaseRules: [
+          { type: "refactor", release: "patch" },
+        ],
       },
     ],
     [
