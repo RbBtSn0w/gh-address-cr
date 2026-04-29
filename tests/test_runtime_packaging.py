@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,7 +9,15 @@ from pathlib import Path
 
 from gh_address_cr.agent.manifests import validate_capability_manifest
 
-from tests.helpers import RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
+from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
+
+
+PYPROJECT = ROOT / "pyproject.toml"
+RELEASE_CONFIG = ROOT / ".releaserc.json"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+README = ROOT / "README.md"
+VERSION_SYNC_SCRIPT = ROOT / "scripts" / "set_package_version.py"
 
 
 class RuntimePackagingTest(PythonScriptTestCase):
@@ -249,6 +258,113 @@ class RuntimePackagingTest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "compatible")
         self.assertEqual(payload["runtime_package"], "gh-address-cr")
+
+    def test_pyproject_declares_distribution_metadata_and_runtime_dependencies(self):
+        text = PYPROJECT.read_text(encoding="utf-8")
+
+        self.assertIn('name = "gh-address-cr"', text)
+        self.assertIn('requires-python = ">=3.10"', text)
+        self.assertIn('readme = "README.md"', text)
+        self.assertIn('license = "MIT"', text)
+        self.assertIn('license-files = ["LICENSE"]', text)
+        self.assertIn('"packaging>=24"', text)
+        self.assertIn("Programming Language :: Python :: 3.10", text)
+        self.assertIn("Operating System :: OS Independent", text)
+        self.assertIn("Homepage", text)
+
+    def test_version_sync_script_updates_pyproject_and_runtime_version(self):
+        pyproject = Path(self.temp_dir.name) / "pyproject.toml"
+        init_file = Path(self.temp_dir.name) / "__init__.py"
+        pyproject.write_text(
+            '[project]\nname = "gh-address-cr"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        init_file.write_text('__version__ = "0.1.0"\nPROTOCOL_VERSION = "1.0"\n', encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VERSION_SYNC_SCRIPT),
+                "--version",
+                "1.2.3",
+                "--pyproject",
+                str(pyproject),
+                "--init-file",
+                str(init_file),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=self.env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["version"], "1.2.3")
+        self.assertIn('version = "1.2.3"', pyproject.read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "1.2.3"', init_file.read_text(encoding="utf-8"))
+
+    def test_semantic_release_prepares_python_package_version(self):
+        config = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))
+        plugin_names = [plugin[0] if isinstance(plugin, list) else plugin for plugin in config["plugins"]]
+
+        self.assertIn("@semantic-release/exec", plugin_names)
+        exec_plugin = next(plugin for plugin in config["plugins"] if isinstance(plugin, list) and plugin[0] == "@semantic-release/exec")
+        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", exec_plugin[1]["prepareCmd"])
+
+        git_plugin = next(plugin for plugin in config["plugins"] if isinstance(plugin, list) and plugin[0] == "@semantic-release/git")
+        self.assertIn("pyproject.toml", git_plugin[1]["assets"])
+        self.assertIn("src/gh_address_cr/__init__.py", git_plugin[1]["assets"])
+
+    def test_ci_workflow_has_build_install_and_installed_smoke_gates(self):
+        text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("Package build", text)
+        self.assertIn("Package install", text)
+        self.assertIn("Installed CLI smoke", text)
+        self.assertIn("python -m build", text)
+        self.assertIn("python -m pip install dist/*.whl", text)
+        self.assertIn("ModuleNotFoundError", text)
+        self.assertIn("Final gate failed to evaluate", text)
+        self.assertIn("error connecting to api.github.com", text)
+        for command in (
+            "gh-address-cr --help",
+            "python -m gh_address_cr --help",
+            "gh-address-cr agent manifest",
+            "gh-address-cr agent orchestrate status owner/repo 123",
+            "gh-address-cr final-gate owner/repo 123",
+        ):
+            self.assertIn(command, text)
+
+    def test_release_workflow_has_trusted_publishing_version_and_staging_gates(self):
+        text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("publish_target", text)
+        self.assertIn("id-token: write", text)
+        self.assertIn("scripts/set_package_version.py", text)
+        self.assertIn("python -m build", text)
+        self.assertIn("twine check dist/*", text)
+        self.assertIn("Verify package version", text)
+        self.assertIn("pypa/gh-action-pypi-publish", text)
+        self.assertIn("repository-url: https://test.pypi.org/legacy/", text)
+        self.assertIn("environment: pypi", text)
+        self.assertRegex(text, re.compile(r"confirm_pypi_publish.*true", re.DOTALL))
+
+    def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
+        text = README.read_text(encoding="utf-8")
+
+        self.assertIn("Install the released runtime CLI", text)
+        self.assertIn("pipx install gh-address-cr", text)
+        self.assertIn("uv tool install gh-address-cr", text)
+        self.assertIn("GitHub-direct runtime validation install", text)
+        self.assertIn("pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git", text)
+        self.assertIn("Local editable development install", text)
+        self.assertIn("python3 -m pip install -e .", text)
+        self.assertIn("Packaged skill install", text)
+        self.assertIn("does not install the runtime CLI package", text)
+        self.assertIn("Upgrade from skill-shim usage", text)
+        self.assertIn("reinstall the runtime CLI with `pipx` or `uv tool`", text)
 
 
 if __name__ == "__main__":

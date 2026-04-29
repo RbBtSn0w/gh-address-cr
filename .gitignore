@@ -2,9 +2,13 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-package-smoke/
 venv/
 dist/
+build/
 *.egg-info/
+.coverage
+coverage/
 *.tmp
 *.log
 *.swp

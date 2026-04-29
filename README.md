@@ -32,6 +32,92 @@ The packaged skill remains under `gh-address-cr/` and acts as a thin adapter:
 
 The shim must delegate to the runtime or fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
 
+## Installation
+
+### Install the released runtime CLI
+
+Use this path when you want the stable `gh-address-cr` executable from PyPI. The runtime CLI requires Python 3.10 or newer.
+
+```bash
+pipx install gh-address-cr
+gh-address-cr --help
+python -m gh_address_cr --help
+```
+
+The `uv` equivalent is:
+
+```bash
+uv tool install gh-address-cr
+gh-address-cr --help
+python -m gh_address_cr --help
+```
+
+These commands install the Python runtime package. They do not install or update the packaged skill adapter under `gh-address-cr/`.
+
+### GitHub-direct runtime validation install
+
+Use this path only for pre-release validation of the current repository state before a PyPI release is available.
+
+```bash
+pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+The `uv` equivalent is:
+
+```bash
+uv tool install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+### Local editable development install
+
+Use this path when editing this repository.
+
+```bash
+python3 -m pip install -e .
+gh-address-cr --help
+python3 -m gh_address_cr --help
+gh-address-cr agent manifest
+```
+
+### Packaged skill install
+
+Use this path when installing the Codex/agent skill adapter. This does not install the runtime CLI package; install the runtime separately with `pipx`, `uv tool`, GitHub-direct validation, or local editable development commands above.
+
+```bash
+npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
+npx skills check
+```
+
+After installing the skill, verify that a runtime CLI is available:
+
+```bash
+gh-address-cr --help
+python3 gh-address-cr/scripts/cli.py adapter check-runtime
+```
+
+### Upgrade from skill-shim usage
+
+If you previously relied on `python3 gh-address-cr/scripts/cli.py` from the packaged skill compatibility shim, reinstall the runtime CLI with `pipx` or `uv tool` instead of reinstalling the skill as a substitute:
+
+```bash
+pipx reinstall gh-address-cr
+# or
+uv tool upgrade gh-address-cr
+```
+
+Then verify:
+
+```bash
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+If PyPI does not yet contain `gh-address-cr`, use the GitHub-direct runtime validation install until a release is published.
+
 Runtime install for local development:
 
 ```bash
@@ -1065,6 +1151,16 @@ If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 3. Re-run `python3 gh-address-cr/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
 4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `python3 gh-address-cr/scripts/cli.py final-gate`.
 
+## Troubleshooting installation and release
+
+- Unsupported Python: use Python 3.10 or newer through `pipx`, `uv tool`, or a local virtual environment.
+- Missing PyPI package: `gh-address-cr` may not have been published yet. Use the GitHub-direct runtime validation install for pre-release validation.
+- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr-skill`, workflow `.github/workflows/release.yml`, and `id-token: write`.
+- Stale artifact version: release-built wheel and sdist metadata must match the semantic-release version. If a publish partially succeeds, inspect PyPI before retrying because uploaded files are immutable.
+- Installed smoke domain failure: `agent orchestrate status` may report a missing session and `final-gate` may report `Final gate failed to evaluate: error connecting to api.github.com` when GitHub state or network access is unavailable. These are acceptable smoke outcomes only when there is no traceback, missing import, or missing console entrypoint.
+- Skill install confusion: `npx skills add ... --skill gh-address-cr` installs the packaged skill adapter only. It does not install the runtime CLI package.
+- Skill-shim migration confusion: if `python3 gh-address-cr/scripts/cli.py` works from a checkout but `gh-address-cr` is unavailable, install or reinstall the runtime CLI with `pipx` or `uv tool`.
+
 ## CI semantic release (tag + changelog)
 
 This repo includes a `semantic-release` workflow:
@@ -1072,6 +1168,12 @@ This repo includes a `semantic-release` workflow:
 - Trigger: push to `main`
 - Input: Conventional Commits history
 - Output: semantic version tag (`vX.Y.Z`) + GitHub Release + `CHANGELOG.md`
+- Python package release: `pyproject.toml` and `src/gh_address_cr/__init__.py` are synchronized to the semantic-release version before wheel/sdist build.
+- Stable package registry: PyPI is the only documented stable runtime CLI package registry.
+- GitHub Releases remain release-note, tag, source-archive, and optional provenance surfaces; they are not the primary Python package registry.
+- Dry-run/staging validation: use the `workflow_dispatch` `dry-run` or `testpypi` target before enabling production PyPI publishing.
+- Production PyPI publishing: requires PyPI Trusted Publishing, package-name ownership, and the protected `pypi` environment. Do not use long-lived PyPI API tokens unless a separate explicit release-policy change approves that fallback.
+- Failed or partial publish recovery: inspect the PyPI project state and release artifacts before retrying; immutable package files may require a follow-up semantic-release version.
 
 Commit format examples:
 
