@@ -73,7 +73,7 @@
 - [X] T022 [US4] Add README section for released runtime CLI installation via `uv tool install gh-address-cr`, including post-install smoke. Covers FR-010, FR-011, SC-004, CHK010.
 - [X] T023 [US4] Add README section for GitHub-direct runtime validation install, clearly marked as pre-release/manual validation rather than the stable channel. Covers FR-010, SC-004, CHK006, CHK020.
 - [X] T024 [US4] Add README section for local editable development install (`python3 -m pip install -e .`) and keep it separate from end-user install paths. Covers FR-010, CHK006, CHK020.
-- [X] T025 [US4] Keep packaged skill installation documented separately with `npx skills add ... --skill gh-address-cr`, state that it does not replace the runtime CLI package, and include upgrade/reinstall guidance for users moving from skill-shim usage to `pipx` or `uv tool` runtime installation. Covers FR-010, FR-014, SC-005, SC-007, CHK001, CHK013, CHK018, CHK023.
+- [X] T025 [US4] Keep packaged skill installation documented separately with `npx skills add ... --skill skill`, state that it does not replace the runtime CLI package, and include upgrade/reinstall guidance for users moving from skill-shim usage to `pipx` or `uv tool` runtime installation. Covers FR-010, FR-014, SC-005, SC-007, CHK001, CHK013, CHK018, CHK023.
 - [X] T026 [US4] Add README troubleshooting notes for unsupported Python versions, missing PyPI package, missing Trusted Publishing, stale artifact versions, skill-shim migration confusion, and users confusing skill install with CLI install. Covers FR-012, FR-013, FR-014, CHK021, CHK025, CHK026.
 
 **Checkpoint**: README distinguishes runtime CLI distribution from packaged skill installation and local development setup.

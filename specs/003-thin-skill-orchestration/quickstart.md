@@ -9,8 +9,8 @@ Validate the next-stage contract manually without introducing a custom autonomou
 From repository root:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py --help
-python3 gh-address-cr/scripts/cli.py adapter check-runtime
+python3 skill/scripts/cli.py --help
+python3 skill/scripts/cli.py adapter check-runtime
 ```
 
 Expected result:
@@ -24,7 +24,7 @@ Expected result:
 ### 1. Coordinator Starts Or Resumes A PR Session
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number>
+python3 skill/scripts/cli.py review <owner/repo> <pr_number>
 ```
 
 Expected behavior:
@@ -48,7 +48,7 @@ Rejected producer output:
 Continue with:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number>
+python3 skill/scripts/cli.py review <owner/repo> <pr_number>
 ```
 
 Expected behavior:
@@ -101,7 +101,7 @@ When verifier evidence rejects a fixer response:
 After accepted evidence is ready:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number>
+python3 skill/scripts/cli.py review <owner/repo> <pr_number>
 ```
 
 Expected behavior:
@@ -113,7 +113,7 @@ Expected behavior:
 ### 7. Gatekeeper Proves Completion
 
 ```bash
-python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>
+python3 skill/scripts/cli.py final-gate <owner/repo> <pr_number>
 ```
 
 Expected behavior:
@@ -128,7 +128,7 @@ Run the planned local checks:
 ```bash
 ruff check gh-address-cr tests
 python3 -m unittest discover -s tests
-python3 gh-address-cr/scripts/cli.py --help
+python3 skill/scripts/cli.py --help
 ```
 
 Expected additional test coverage for this feature:

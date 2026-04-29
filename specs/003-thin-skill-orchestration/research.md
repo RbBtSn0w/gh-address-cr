@@ -59,7 +59,7 @@
 
 **Decision**: Repository docs, packaged skill docs, advanced references, and assistant hints should be checked for ownership claims, path-scope language, completion semantics, and low-level script exposure.
 
-**Rationale**: This repository ships documentation as product behavior. Contract drift in `README.md` or `gh-address-cr/SKILL.md` can change agent behavior as much as code.
+**Rationale**: This repository ships documentation as product behavior. Contract drift in `README.md` or `skill/SKILL.md` can change agent behavior as much as code.
 
 **Alternatives considered**:
 

@@ -36,7 +36,7 @@ GitHub-direct runtime validation:
   uv tool install git+https://github.com/RbBtSn0w/gh-address-cr.git
 
 Packaged skill adapter:
-  npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr
+  npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 ```
 
 The released runtime CLI is the implementation owner. The packaged skill is not a bundled replacement for the Python package; it routes agent behavior to the installed runtime or compatibility shim.
@@ -145,7 +145,7 @@ tests/
 └── test_runtime_packaging.py  # extend package/manifest/installability checks if needed
 ```
 
-**Structure Decision**: Keep package configuration and release engineering at repository root. Do not move implementation code into `gh-address-cr/`, and do not make the packaged skill own runtime state.
+**Structure Decision**: Keep package configuration and release engineering at repository root. Do not move implementation code into `skill/`, and do not make the packaged skill own runtime state.
 
 ## Phase Plan
 

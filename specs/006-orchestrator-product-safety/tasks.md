@@ -40,7 +40,7 @@
 **Goal**: Update skill instructions to explicitly forbid agents from inferring state from prose.
 **Independent Test**: Inspection of `SKILL.md` to ensure branching is strictly based on `reason_code` and `next_action`.
 
-- [x] T014 [US2] Rewrite Orchestrator section in `gh-address-cr/SKILL.md` to mandate Status-to-Action map branches
+- [x] T014 [US2] Rewrite Orchestrator section in `skill/SKILL.md` to mandate Status-to-Action map branches
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 

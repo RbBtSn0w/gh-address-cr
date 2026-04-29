@@ -7,7 +7,7 @@ Represents the shipped skill entrypoint and references that route agents to the 
 **Ownership**
 
 - `owner`: packaged skill documentation
-- `persisted_by`: files under `gh-address-cr/`
+- `persisted_by`: files under `skill/`
 - `mutated_by`: repository maintainers during skill releases
 - `forbidden_mutators`: runtime sessions and AI agents during PR handling
 

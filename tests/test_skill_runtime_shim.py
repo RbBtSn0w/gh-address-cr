@@ -14,7 +14,7 @@ class SkillRuntimeShimTest(PythonScriptTestCase):
         env["GH_ADDRESS_CR_DISABLE_LOCAL_SRC_RUNTIME"] = "1"
 
         result = subprocess.run(
-            [sys.executable, str(CLI_PY), "--help"],
+            [sys.executable, "-S", str(CLI_PY), "--help"],
             text=True,
             capture_output=True,
             cwd=self.cwd,

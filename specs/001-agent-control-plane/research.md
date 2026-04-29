@@ -3,7 +3,7 @@
 ## Decision: Physically Separate Runtime From Packaged Skill
 
 Use `src/gh_address_cr/` as the runtime package boundary. Keep
-`gh-address-cr/scripts/cli.py` only as a compatibility shim that delegates to
+`skill/scripts/cli.py` only as a compatibility shim that delegates to
 the installed runtime or fails loudly.
 
 **Rationale**: The control plane is now a real product runtime, not skill-owned
@@ -13,7 +13,7 @@ adapter.
 
 **Alternatives considered**:
 
-- In-payload `gh-address-cr/gh_address_cr`: preserves self-contained skill
+- In-payload `skill/gh_address_cr`: preserves self-contained skill
   installation, but keeps the runtime coupled to the skill payload and delays
   the architecture goal.
 - Keep all logic in `scripts/`: lowest migration cost, but it preserves the

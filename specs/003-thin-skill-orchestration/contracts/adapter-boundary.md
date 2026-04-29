@@ -30,7 +30,7 @@ Define what belongs in the packaged skill adapter versus the deterministic runti
 
 ## Repository Rules
 
-- Repo-level docs use repo-root paths such as `gh-address-cr/SKILL.md` and `gh-address-cr/scripts/cli.py`.
+- Repo-level docs use repo-root paths such as `skill/SKILL.md` and `skill/scripts/cli.py`.
 - Tests own executable validation of documentation contracts.
 - README may explain architecture and release behavior but must stay aligned with packaged skill guidance.
 

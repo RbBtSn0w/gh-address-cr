@@ -220,6 +220,17 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
 
         self.assertEqual(caught.exception.code, "manifest_role_not_declared")
 
+    def test_action_request_rejects_skill_shim_resume_commands(self):
+        for resume_command in (
+            "python3 skill/scripts/cli.py review octo/example 42",
+            "python3 gh-address-cr/scripts/cli.py review octo/example 42",
+        ):
+            with self.subTest(resume_command=resume_command):
+                payload = self.request_payload(resume_command=resume_command)
+                with self.assertRaises(RequestValidationError) as caught:
+                    validate_action_request(payload)
+                self.assertEqual(caught.exception.code, "skill_shim_resume_command")
+
 
 class ActionResponseSchemaTests(ActionProtocolTestCase):
     def test_fix_response_requires_changed_files_validation_summary_and_lease(self):

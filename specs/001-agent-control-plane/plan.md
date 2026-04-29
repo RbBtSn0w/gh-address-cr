@@ -17,8 +17,8 @@ routes agents to the CLI and explains status handling, while the CLI remains the
 stable public interface for humans, agents, CI, and future runners.
 
 The implementation target is a physically separated runtime package under
-`src/gh_address_cr/`, with `gh-address-cr/` reduced to packaged skill adapter
-content. `gh-address-cr/scripts/cli.py` remains only as a compatibility shim
+`src/gh_address_cr/`, with `skill/` reduced to packaged skill adapter
+content. `skill/scripts/cli.py` remains only as a compatibility shim
 that delegates to the installed runtime or fails loudly with remediation.
 
 ## Technical Context
@@ -91,7 +91,7 @@ specs/001-agent-control-plane/
 ```text
 pyproject.toml                  # project metadata, package config, console script
 
-gh-address-cr/
+skill/
 ├── SKILL.md
 ├── runtime-requirements.json   # required runtime/protocol compatibility
 ├── agents/
@@ -193,7 +193,7 @@ Design artifacts:
   evidence that matches the action and active lease. Final-gate includes
   unresolved remote work, pending reviews, missing reply evidence, blocking
   local items, and required validation evidence.
-- **Packaged skill boundary**: PASS. Runtime code is outside `gh-address-cr/`;
+- **Packaged skill boundary**: PASS. Runtime code is outside `skill/`;
   skill-owned files contain instructions, references, hints, assets, and shims.
 - **Fail-fast verification**: PASS. Contracts define rejection behavior for
   malformed responses, stale leases, missing evidence, and unsafe side effects.
@@ -215,9 +215,9 @@ Design artifacts:
 - `src/gh_address_cr/`: owns runtime state, protocol validation, GitHub IO,
   evidence ledger writes, telemetry, final-gate evaluation, and public CLI
   behavior.
-- `gh-address-cr/`: owns skill instructions, status interpretation guidance,
+- `skill/`: owns skill instructions, status interpretation guidance,
   references, agent hints, assets, and compatibility/bootstrap shims.
-- `gh-address-cr/scripts/cli.py`: delegates to the installed runtime or fails
+- `skill/scripts/cli.py`: delegates to the installed runtime or fails
   before session mutation; it must not contain a forked state machine.
 - `README.md`, specs, tests, and CI: document and verify the source repository
   and release process; they are not installed skill runtime.

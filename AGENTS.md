@@ -7,9 +7,15 @@
 This repository has two different scopes. Do not blur them:
 
 - **Repository root**: Development, verification, CI, release metadata, and contributor guidance.
-- **`gh-address-cr/`**: The installable and published skill folder.
+- **`skill/`**: The installable and published skill folder.
 
-The released skill payload is the entire `gh-address-cr/` directory. Files such as `tests/`, `.github/`, `pyproject.toml`, `README.md`, and this `AGENTS.md` support development and release, but are not part of the installed skill.
+The released skill payload is the entire `skill/` directory. Files such as `tests/`, `.github/`, `pyproject.toml`, `README.md`, and this `AGENTS.md` support development and release, but are not part of the installed skill.
+
+The payload directory name is `skill/`, but the product/runtime identity remains
+`gh-address-cr`: the Python package, console entrypoint, repository URL,
+`SKILL.md` frontmatter `name`, and `/gh-address-cr` invocation must not be
+renamed to `skill`. Skills installer examples should select the payload folder
+with `--skill skill`.
 
 ## Scope and Authority
 
@@ -30,7 +36,7 @@ Follow this order of precedence:
 Before claiming work is complete, run these local checks:
 - **Linting**: `ruff check src tests` (configured in `pyproject.toml`).
 - **Unit Tests**: `python3 -m unittest discover -s tests`.
-- **CLI Smoke Test**: `python3 -m gh_address_cr --help` or `python3 gh-address-cr/scripts/cli.py --help`.
+- **CLI Smoke Test**: `python3 -m gh_address_cr --help` or `python3 skill/scripts/cli.py --help`.
 
 ### Git Workflow
 - **Status Check**: Always run `git status` before starting work.
@@ -39,8 +45,9 @@ Before claiming work is complete, run these local checks:
 
 ## Path Conventions
 
-- **In repo-root docs/tests**: Use repo-root paths like `gh-address-cr/scripts/cli.py`.
-- **In skill-owned docs (`gh-address-cr/`)**: Use skill-root-relative paths like `scripts/cli.py`.
+- **In repo-root docs/tests**: Use repo-root paths like `skill/scripts/cli.py`.
+- **In skill-owned docs (`skill/`)**: Use skill-root-relative paths like `scripts/cli.py`.
+- **Do not rename product identifiers**: Use `gh-address-cr` for the runtime CLI, PyPI package, GitHub repository, skill name, and slash command.
 
 ## Execution Discipline
 

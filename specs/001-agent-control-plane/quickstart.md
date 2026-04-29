@@ -11,15 +11,15 @@ commands and will become executable during implementation.
 - Lease Coordinator Agent: `src/gh_address_cr/core/leases.py`, lease lifecycle and conflict-key rules
 - GitHub Evidence Agent: `src/gh_address_cr/github/`, `src/gh_address_cr/evidence/`, `src/gh_address_cr/intake/`
 - Gate Agent: `src/gh_address_cr/core/gate.py`
-- Skill Adapter Agent: `gh-address-cr/SKILL.md`, `gh-address-cr/scripts/cli.py`, `gh-address-cr/agents/`, `gh-address-cr/references/`
+- Skill Adapter Agent: `skill/SKILL.md`, `skill/scripts/cli.py`, `skill/agents/`, `skill/references/`
 - Verification Agent: `tests/`, this quickstart, and final validation evidence
 
 ## 1. Run Existing Baseline Checks
 
 ```bash
 python3 -m unittest discover -s tests
-python3 gh-address-cr/scripts/cli.py --help
-python3 gh-address-cr/scripts/cli.py cr-loop --help
+python3 skill/scripts/cli.py --help
+python3 skill/scripts/cli.py cr-loop --help
 ```
 
 ## 2. Validate Runtime Installation
@@ -35,7 +35,7 @@ python3 -m gh_address_cr --help
 During migration, the skill-local shim remains available:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py --help
+python3 skill/scripts/cli.py --help
 ```
 
 The shim must delegate to the installed runtime or fail loudly with remediation.
@@ -144,10 +144,10 @@ Fresh verification commands to run before claiming this implementation ready:
 ```bash
 ruff check gh-address-cr src tests
 python3 -m unittest discover -s tests
-python3 gh-address-cr/scripts/cli.py --help
+python3 skill/scripts/cli.py --help
 PYTHONPATH=src python3 -m gh_address_cr --help
-python3 gh-address-cr/scripts/cli.py cr-loop --help
-python3 gh-address-cr/scripts/cli.py final-gate --help
+python3 skill/scripts/cli.py cr-loop --help
+python3 skill/scripts/cli.py final-gate --help
 git diff --check
 ```
 
@@ -173,9 +173,9 @@ Latest verification snapshot:
 
 - `ruff check gh-address-cr src tests` -> `All checks passed!`
 - `python3 -m unittest discover -s tests` -> `Ran 306 tests in 99.602s OK`
-- `python3 gh-address-cr/scripts/cli.py --help` -> exit `0`
+- `python3 skill/scripts/cli.py --help` -> exit `0`
 - `PYTHONPATH=src python3 -m gh_address_cr --help` -> exit `0`
-- `python3 gh-address-cr/scripts/cli.py adapter check-runtime` -> `status: compatible`
-- `python3 gh-address-cr/scripts/cli.py cr-loop --help` -> exit `0`
-- `python3 gh-address-cr/scripts/cli.py final-gate --help` -> exit `0`
+- `python3 skill/scripts/cli.py adapter check-runtime` -> `status: compatible`
+- `python3 skill/scripts/cli.py cr-loop --help` -> exit `0`
+- `python3 skill/scripts/cli.py final-gate --help` -> exit `0`
 - `git diff --check` -> exit `0`

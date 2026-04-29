@@ -10,7 +10,7 @@
 
 ### Session 2026-04-29
 
-- Q: What is being distributed? -> A: The Python runtime CLI package (`gh-address-cr`) is distributed through PyPI. The packaged skill (`gh-address-cr/`) remains installed through the skills installer and is not bundled as the Python package's primary user-facing install target.
+- Q: What is being distributed? -> A: The Python runtime CLI package (`gh-address-cr`) is distributed through PyPI. The packaged skill (`skill/`) remains installed through the skills installer and is not bundled as the Python package's primary user-facing install target.
 - Q: Does "PyPI exclusive" forbid GitHub Releases? -> A: No. PyPI is the exclusive package registry and the only documented end-user CLI install source for released packages. GitHub Releases may still contain semantic-release notes, tags, source archives, and optional build attestations, but they must not be documented as the primary CLI package registry.
 - Q: What does the clean-install smoke test mean? -> A: It proves the installed package imports all runtime dependencies and starts critical CLI command groups. Business-state failures such as a missing PR session are acceptable only when emitted as structured CLI output, not as import errors or Python tracebacks.
 - Q: How is package-name availability handled? -> A: Before enabling production PyPI publishing, the implementation must verify that `gh-address-cr` is available or already controlled by the project owner. If it is unavailable, implementation must stop and require a naming decision.
@@ -23,7 +23,7 @@ This feature has three distinct install surfaces:
 
 1. **Released runtime CLI**: `pipx install gh-address-cr` or `uv tool install gh-address-cr` from PyPI. This installs the `gh-address-cr` executable and `python -m gh_address_cr`.
 2. **GitHub direct runtime install**: `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git` or equivalent. This is a pre-release/manual validation path, not the primary stable release channel.
-3. **Packaged skill install**: `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr`. This installs the skill adapter and compatibility shim, not the Python package as an implementation owner.
+3. **Packaged skill install**: `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill`. This installs the skill adapter and compatibility shim, not the Python package as an implementation owner.
 
 README installation guidance must keep these surfaces separate so users do not confuse skill installation with runtime CLI installation.
 
@@ -103,7 +103,7 @@ As a new user, I want clear installation instructions for the runtime CLI, GitHu
 - GitHub Releases are produced by semantic-release before or without a successful PyPI publish.
 - Semantic-release creates a version/tag, but the built wheel or sdist metadata still uses a stale package version.
 - Users run the CLI with Python versions older than the supported `>=3.10` range.
-- Users confuse `npx skills add ... --skill gh-address-cr` with the runtime CLI install.
+- Users confuse `npx skills add ... --skill skill` with the runtime CLI install.
 - Users move from packaged skill or compatibility-shim usage to the installed runtime CLI and need clear upgrade or reinstall guidance.
 - A PyPI publish partially succeeds and cannot be overwritten because package files are immutable.
 
@@ -138,7 +138,7 @@ As a new user, I want clear installation instructions for the runtime CLI, GitHu
 ### Key Entities
 
 - **Runtime CLI Package**: The Python package named `gh-address-cr`, installed from PyPI and exposing the `gh-address-cr` executable.
-- **Packaged Skill**: The `gh-address-cr/` directory installed through the skills installer; it routes agents to the runtime and compatibility shim.
+- **Packaged Skill**: The `skill/` directory installed through the skills installer; it routes agents to the runtime and compatibility shim.
 - **Package Artifacts**: The generated wheel and sdist files.
 - **Package Gate**: The CI build/install/installed-smoke sequence.
 - **Release Workflow**: The GitHub Actions workflow that coordinates semantic-release and PyPI publishing.

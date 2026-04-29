@@ -108,7 +108,7 @@ def validate_action_request(payload: ActionRequest | dict[str, Any]) -> ActionRe
                 "AI-agent requests must forbid direct GitHub reply and resolve operations.",
             )
     resume_command = payload.get("resume_command") or ""
-    if "gh-address-cr/scripts/cli.py" in resume_command:
+    if "skill/scripts/cli.py" in resume_command or "gh-address-cr/scripts/cli.py" in resume_command:
         raise RequestValidationError(
             "skill_shim_resume_command",
             "ActionRequest resume_command must target the runtime CLI, not the skill-local shim.",

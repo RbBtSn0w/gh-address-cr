@@ -19,7 +19,7 @@ Compatibility during migration:
 
 ```text
 python3 -m gh_address_cr review <owner/repo> <pr_number>
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number>
+python3 skill/scripts/cli.py review <owner/repo> <pr_number>
 ```
 
 The skill-local `scripts/cli.py` path is a shim only. It must delegate to the

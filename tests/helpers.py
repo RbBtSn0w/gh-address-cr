@@ -9,9 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
-SKILL_ROOT = ROOT / "gh-address-cr"
+SKILL_ROOT = ROOT / "skill"
 RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
-SCRIPTS_DIR = ROOT / "gh-address-cr" / "scripts"
+SCRIPTS_DIR = ROOT / "skill" / "scripts"
 CLI_PY = SCRIPTS_DIR / "cli.py"
 SCRIPT = SCRIPTS_DIR / "session_engine.py"
 RUN_LOCAL_REVIEW_PY = SCRIPTS_DIR / "run_local_review.py"
