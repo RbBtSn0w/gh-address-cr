@@ -23,7 +23,7 @@ from python_common import (
 )
 
 
-DEFAULT_TARGET_REPO = "RbBtSn0w/gh-address-cr-skill"
+DEFAULT_TARGET_REPO = "RbBtSn0w/gh-address-cr"
 DEFAULT_COOLDOWN_HOURS = 24
 DEFAULT_FEEDBACK_PR = "feedback"
 DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE = 10
@@ -559,7 +559,7 @@ def write_feedback_audit(args: argparse.Namespace, status: str, message: str, de
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a structured AI-agent feedback issue for gh-address-cr-skill.",
+        description="Create a structured AI-agent feedback issue for gh-address-cr.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

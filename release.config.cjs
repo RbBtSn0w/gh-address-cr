@@ -9,6 +9,7 @@ const releaseParserOpts = {
 
 module.exports = {
   branches: ["main"],
+  repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git",
   tagFormat: "v${version}",
   plugins: [
     [

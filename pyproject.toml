@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RbBtSn0w/gh-address-cr-skill"
-Source = "https://github.com/RbBtSn0w/gh-address-cr-skill"
-Issues = "https://github.com/RbBtSn0w/gh-address-cr-skill/issues"
+Homepage = "https://github.com/RbBtSn0w/gh-address-cr"
+Source = "https://github.com/RbBtSn0w/gh-address-cr"
+Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"
 
 [project.scripts]
 gh-address-cr = "gh_address_cr.cli:main"

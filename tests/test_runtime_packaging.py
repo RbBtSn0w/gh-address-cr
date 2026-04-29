@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
+from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
 
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
@@ -35,7 +36,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((RUNTIME_PACKAGE_DIR / "cli.py").exists())
-        self.assertIn("0.1.0", result.stdout)
+        self.assertIn(RUNTIME_VERSION, result.stdout)
 
     def test_installed_runtime_carries_legacy_command_scripts(self):
         install_root = Path(self.temp_dir.name) / "installed"
@@ -270,7 +271,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('"packaging>=24"', text)
         self.assertIn("Programming Language :: Python :: 3.10", text)
         self.assertIn("Operating System :: OS Independent", text)
-        self.assertIn("Homepage", text)
+        self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
+        self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
+        self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
 
     def test_version_sync_script_updates_pyproject_and_runtime_version(self):
         pyproject = Path(self.temp_dir.name) / "pyproject.toml"
@@ -314,6 +317,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('"src/gh_address_cr/__init__.py"', text)
         self.assertIn("@semantic-release/commit-analyzer", text)
         self.assertIn("@semantic-release/release-notes-generator", text)
+        self.assertIn('repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git"', text)
         self.assertIn("parserOpts: releaseParserOpts", text)
         self.assertIn(r"(\\S.*)", text)
 
@@ -359,7 +363,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("pipx install gh-address-cr", text)
         self.assertIn("uv tool install gh-address-cr", text)
         self.assertIn("GitHub-direct runtime validation install", text)
-        self.assertIn("pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git", text)
+        self.assertIn("pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git", text)
         self.assertIn("Local editable development install", text)
         self.assertIn("python3 -m pip install -e .", text)
         self.assertIn("Packaged skill install", text)

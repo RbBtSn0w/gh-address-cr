@@ -59,7 +59,7 @@ These commands install the Python runtime package. They do not install or update
 Use this path only for pre-release validation of the current repository state before a PyPI release is available.
 
 ```bash
-pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git
 gh-address-cr --help
 gh-address-cr agent manifest
 ```
@@ -67,7 +67,7 @@ gh-address-cr agent manifest
 The `uv` equivalent is:
 
 ```bash
-uv tool install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+uv tool install git+https://github.com/RbBtSn0w/gh-address-cr.git
 gh-address-cr --help
 gh-address-cr agent manifest
 ```
@@ -88,7 +88,7 @@ gh-address-cr agent manifest
 Use this path when installing the Codex/agent skill adapter. This does not install the runtime CLI package; install the runtime separately with `pipx`, `uv tool`, GitHub-direct validation, or local editable development commands above.
 
 ```bash
-npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
+npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr
 npx skills check
 ```
 
@@ -383,7 +383,7 @@ Ready-to-use prompt variants:
 
 When the skill itself blocks progress, file a feedback issue in this repository instead of silently dropping the problem.
 
-- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr-skill`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
+- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
 - Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
 - Do not file feedback issues for normal PR findings, target-repository bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
 - Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
@@ -913,7 +913,7 @@ Current test layout:
 ## Install with npx skills
 
 ```bash
-npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
+npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr
 ```
 
 ## Breaking changes (2026-04-09)
@@ -1155,7 +1155,7 @@ If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 
 - Unsupported Python: use Python 3.10 or newer through `pipx`, `uv tool`, or a local virtual environment.
 - Missing PyPI package: `gh-address-cr` may not have been published yet. Use the GitHub-direct runtime validation install for pre-release validation.
-- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr-skill`, workflow `.github/workflows/release.yml`, and `id-token: write`.
+- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr`, workflow `.github/workflows/release.yml`, and `id-token: write`.
 - Stale artifact version: release-built wheel and sdist metadata must match the semantic-release version. If a publish partially succeeds, inspect PyPI before retrying because uploaded files are immutable.
 - Installed smoke domain failure: `agent orchestrate status` may report a missing session and `final-gate` may report `Final gate failed to evaluate: error connecting to api.github.com` when GitHub state or network access is unavailable. These are acceptable smoke outcomes only when there is no traceback, missing import, or missing console entrypoint.
 - Skill install confusion: `npx skills add ... --skill gh-address-cr` installs the packaged skill adapter only. It does not install the runtime CLI package.

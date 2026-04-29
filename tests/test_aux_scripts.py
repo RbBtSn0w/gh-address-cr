@@ -172,7 +172,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "dry-run")
-        self.assertEqual(payload["target_repo"], "RbBtSn0w/gh-address-cr-skill")
+        self.assertEqual(payload["target_repo"], "RbBtSn0w/gh-address-cr")
         self.assertTrue(payload["title"].startswith("[AI Feedback] "))
         self.assertIn("## Summary", payload["body"])
         self.assertIn("## Category", payload["body"])
@@ -345,12 +345,12 @@ from pathlib import Path
 
 request_path = Path({str(request_path)!r})
 args = sys.argv[1:]
-if len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+') and args[1].endswith('&per_page=10'):
+if len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr+') and args[1].endswith('&per_page=10'):
     print(json.dumps({{'items': []}}))
-elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
+elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr/issues', '--method', 'POST']:
     payload = json.load(sys.stdin)
     request_path.write_text(json.dumps(payload), encoding='utf-8')
-    print(json.dumps({{'number': 321, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/321'}}))
+    print(json.dumps({{'number': 321, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr/issues/321'}}))
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
 """,
@@ -388,7 +388,7 @@ else:
         self.assertEqual(payload["issue_number"], 321)
         self.assertEqual(
             payload["issue_url"],
-            "https://github.com/RbBtSn0w/gh-address-cr-skill/issues/321",
+            "https://github.com/RbBtSn0w/gh-address-cr/issues/321",
         )
         issue_request = json.loads(request_path.read_text(encoding="utf-8"))
         self.assertTrue(issue_request["title"].startswith("[AI Feedback] "))
@@ -498,9 +498,9 @@ fingerprint_payload = {{
     'failing_command': '',
 }}
 fingerprint = hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
-if len(args) >= 2 and args[0] == 'api' and args[1] == f'search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{{fingerprint}}+in%3Abody&per_page=10':
-    print(json.dumps({{'items': [{{'number': 88, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/88', 'state': 'open', 'body': f'<!-- gh-address-cr-feedback-fingerprint: {{fingerprint}} -->'}}]}}))
-elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
+if len(args) >= 2 and args[0] == 'api' and args[1] == f'search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr+is%3Aissue+{{fingerprint}}+in%3Abody&per_page=10':
+    print(json.dumps({{'items': [{{'number': 88, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr/issues/88', 'state': 'open', 'body': f'<!-- gh-address-cr-feedback-fingerprint: {{fingerprint}} -->'}}]}}))
+elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr/issues', '--method', 'POST']:
     raise SystemExit('create should not be called')
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
@@ -531,14 +531,14 @@ else:
         self.assertEqual(payload["issue_number"], 88)
         calls = json.loads(calls_path.read_text(encoding="utf-8"))
         self.assertFalse(
-            any(call[:4] == ["api", "repos/RbBtSn0w/gh-address-cr-skill/issues", "--method", "POST"] for call in calls)
+            any(call[:4] == ["api", "repos/RbBtSn0w/gh-address-cr/issues", "--method", "POST"] for call in calls)
         )
         self.assertTrue(
             any(
                 call[:2]
                 == [
                     "api",
-                    f"search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{payload['fingerprint']}+in%3Abody&per_page=10",
+                    f"search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr+is%3Aissue+{payload['fingerprint']}+in%3Abody&per_page=10",
                 ]
                 for call in calls
             )
@@ -552,9 +552,9 @@ import json
 import sys
 
 args = sys.argv[1:]
-if args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
-    print(json.dumps({'number': 322, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/322'}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+') and args[1].endswith('&per_page=10'):
+if args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr/issues', '--method', 'POST']:
+    print(json.dumps({'number': 322, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr/issues/322'}))
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr+') and args[1].endswith('&per_page=10'):
     print(json.dumps({'items': []}))
 else:
     raise SystemExit(f'unhandled gh args: {args}')

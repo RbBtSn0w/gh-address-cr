@@ -1,4 +1,4 @@
-# Contributing to gh-address-cr-skill
+# Contributing to gh-address-cr
 
 We welcome contributions! Please follow these guidelines:
 

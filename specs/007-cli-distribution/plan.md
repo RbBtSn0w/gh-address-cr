@@ -32,11 +32,11 @@ Released runtime CLI:
   uv tool install gh-address-cr
 
 GitHub-direct runtime validation:
-  pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
-  uv tool install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+  pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git
+  uv tool install git+https://github.com/RbBtSn0w/gh-address-cr.git
 
 Packaged skill adapter:
-  npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
+  npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr
 ```
 
 The released runtime CLI is the implementation owner. The packaged skill is not a bundled replacement for the Python package; it routes agent behavior to the installed runtime or compatibility shim.
@@ -81,7 +81,7 @@ GitHub Releases must not be documented as the primary Python package registry an
 Production PyPI publishing must use Trusted Publishing:
 
 - PyPI project name: `gh-address-cr`
-- GitHub repository: `RbBtSn0w/gh-address-cr-skill`
+- GitHub repository: `RbBtSn0w/gh-address-cr`
 - workflow file: `.github/workflows/release.yml`
 - publish action: `pypa/gh-action-pypi-publish`
 - permissions: `id-token: write` and appropriate repository read permissions

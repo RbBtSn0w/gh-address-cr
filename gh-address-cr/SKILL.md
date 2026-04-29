@@ -232,7 +232,7 @@ Do not use this skill as the review engine itself.
 ## Agent Feedback
 
 - When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
-- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr-skill`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
+- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
 - Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
 - Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
 - Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.

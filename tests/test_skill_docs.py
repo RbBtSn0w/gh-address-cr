@@ -104,7 +104,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/submit_feedback.py", text)
         self.assertIn("When the skill itself blocks progress", text)
-        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", text)
+        self.assertIn("`RbBtSn0w/gh-address-cr`", text)
         self.assertIn("`--using-repo` and `--using-pr`", text)
         self.assertIn("Do not file feedback issues for normal PR findings", text)
         self.assertNotIn("- when the skill itself blocks progress", text)
@@ -122,7 +122,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertIn("run `python3 scripts/submit_feedback.py`", text)
-        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", text)
+        self.assertIn("`RbBtSn0w/gh-address-cr`", text)
         self.assertIn("contradictory instructions", text)
         self.assertIn("missing automation", text)
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", text)
@@ -254,7 +254,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_documents_feedback_target_repo_and_source_fields(self):
         readme_text = README_MD.read_text(encoding="utf-8")
-        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", readme_text)
+        self.assertIn("`RbBtSn0w/gh-address-cr`", readme_text)
         self.assertIn("`--using-repo` and `--using-pr`", readme_text)
 
     def test_readme_moves_input_and_producer_routing_to_advanced_section(self):

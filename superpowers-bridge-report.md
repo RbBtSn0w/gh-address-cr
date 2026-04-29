@@ -1,6 +1,6 @@
 # Superpowers Bridge Report
 
-This report verifies the presence of required and optional skills for the gh-address-cr-skill control plane.
+This report verifies the presence of required and optional skills for the gh-address-cr control plane.
 
 ## Required Skills
 

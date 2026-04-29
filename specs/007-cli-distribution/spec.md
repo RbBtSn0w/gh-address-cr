@@ -22,8 +22,8 @@
 This feature has three distinct install surfaces:
 
 1. **Released runtime CLI**: `pipx install gh-address-cr` or `uv tool install gh-address-cr` from PyPI. This installs the `gh-address-cr` executable and `python -m gh_address_cr`.
-2. **GitHub direct runtime install**: `pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git` or equivalent. This is a pre-release/manual validation path, not the primary stable release channel.
-3. **Packaged skill install**: `npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr`. This installs the skill adapter and compatibility shim, not the Python package as an implementation owner.
+2. **GitHub direct runtime install**: `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git` or equivalent. This is a pre-release/manual validation path, not the primary stable release channel.
+3. **Packaged skill install**: `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill gh-address-cr`. This installs the skill adapter and compatibility shim, not the Python package as an implementation owner.
 
 README installation guidance must keep these surfaces separate so users do not confuse skill installation with runtime CLI installation.
 
