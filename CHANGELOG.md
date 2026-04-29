@@ -1,3 +1,17 @@
+## [2.0.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.5.1...v2.0.0) (2026-04-29)
+
+### ⚠ BREAKING CHANGES
+
+* **001-007:** release v2
+
+### Features
+
+* **001-007:** release v2 ([bf5dd4a](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/bf5dd4a61ef220480397b8df3a25110ee3645d71))
+
+### Bug Fixes
+
+* harden semantic-release parsing ([#14](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/14)) ([d0b3e35](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/d0b3e35a15308b7640972ae8344ce288aadba52e))
+
 ## [1.5.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.5.0...v1.5.1) (2026-04-23)
 
 ### Bug Fixes
