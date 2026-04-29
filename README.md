@@ -1,6 +1,10 @@
 # gh-address-cr skill
 
-An auditable PR-session workflow skill for AI coding agents.
+An auditable PR-session workflow skill and runtime CLI for AI coding agents.
+
+Project architecture governance lives in `.specify/memory/constitution.md`.
+The installed skill contract remains `gh-address-cr/SKILL.md`; keep
+repo-root governance and packaged-skill instructions in their own scopes.
 
 It now treats a Pull Request as the session root and can ingest both:
 
@@ -10,6 +14,130 @@ It now treats a Pull Request as the session root and can ingest both:
 Both become session items that move through one evidence-first workflow with a final gate.
 For handled GitHub threads, replying and resolving are still two separate required operations.
 `final-gate` now also verifies that every terminal GitHub thread has durable reply evidence, not only that unresolved-thread count reached zero.
+
+## Runtime / Skill Split
+
+The deterministic implementation belongs to the runtime package:
+
+- console entrypoint: `gh-address-cr`
+- module entrypoint: `python3 -m gh_address_cr`
+- source package: `src/gh_address_cr/`
+
+The packaged skill remains under `gh-address-cr/` and acts as a thin adapter:
+
+- `gh-address-cr/SKILL.md` explains agent behavior
+- `gh-address-cr/scripts/cli.py` is a compatibility shim
+- `gh-address-cr/runtime-requirements.json` declares runtime compatibility
+- `gh-address-cr/agents/` and `gh-address-cr/references/` provide hints and reference docs
+
+The shim must delegate to the runtime or fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
+
+## Installation
+
+### Install the released runtime CLI
+
+Use this path when you want the stable `gh-address-cr` executable from PyPI. The runtime CLI requires Python 3.10 or newer.
+
+```bash
+pipx install gh-address-cr
+gh-address-cr --help
+python -m gh_address_cr --help
+```
+
+The `uv` equivalent is:
+
+```bash
+uv tool install gh-address-cr
+gh-address-cr --help
+python -m gh_address_cr --help
+```
+
+These commands install the Python runtime package. They do not install or update the packaged skill adapter under `gh-address-cr/`.
+
+### GitHub-direct runtime validation install
+
+Use this path only for pre-release validation of the current repository state before a PyPI release is available.
+
+```bash
+pipx install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+The `uv` equivalent is:
+
+```bash
+uv tool install git+https://github.com/RbBtSn0w/gh-address-cr-skill.git
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+### Local editable development install
+
+Use this path when editing this repository.
+
+```bash
+python3 -m pip install -e .
+gh-address-cr --help
+python3 -m gh_address_cr --help
+gh-address-cr agent manifest
+```
+
+### Packaged skill install
+
+Use this path when installing the Codex/agent skill adapter. This does not install the runtime CLI package; install the runtime separately with `pipx`, `uv tool`, GitHub-direct validation, or local editable development commands above.
+
+```bash
+npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-address-cr
+npx skills check
+```
+
+After installing the skill, verify that a runtime CLI is available:
+
+```bash
+gh-address-cr --help
+python3 gh-address-cr/scripts/cli.py adapter check-runtime
+```
+
+### Upgrade from skill-shim usage
+
+If you previously relied on `python3 gh-address-cr/scripts/cli.py` from the packaged skill compatibility shim, reinstall the runtime CLI with `pipx` or `uv tool` instead of reinstalling the skill as a substitute:
+
+```bash
+pipx reinstall gh-address-cr
+# or
+uv tool upgrade gh-address-cr
+```
+
+Then verify:
+
+```bash
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+If PyPI does not yet contain `gh-address-cr`, use the GitHub-direct runtime validation install until a release is published.
+
+Runtime install for local development:
+
+```bash
+python3 -m pip install -e .
+gh-address-cr --help
+python3 -m gh_address_cr --help
+python3 gh-address-cr/scripts/cli.py adapter check-runtime
+```
+
+Native runtime ownership is now split by responsibility:
+
+- `src/gh_address_cr/core/session.py`: PR-scoped session loading, saving, and workspace paths
+- `src/gh_address_cr/core/workflow.py`: agent classification, leases, action requests, accepted responses, and deterministic publishing transitions
+- `src/gh_address_cr/core/gate.py`: final-gate policy evaluation and the native `Gatekeeper`
+- `src/gh_address_cr/github/client.py`: GitHub CLI IO for thread listing, replies, resolves, and pending reviews
+- `src/gh_address_cr/intake/findings.py`: findings parsing, normalization, source-scoped fingerprints, and fixed finding blocks
+- `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
+
+The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
+Public high-level commands (`review`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
 
 ## Public Interface
 
@@ -23,6 +151,14 @@ Advanced/internal integration entrypoints:
 - `findings`
 - `adapter`
 - `review-to-findings`
+- `agent manifest`
+- `agent classify`
+- `agent next`
+- `agent submit`
+- `agent publish`
+- `agent leases`
+- `agent reclaim`
+- `final-gate`
 
 Fail-fast contract:
 
@@ -67,6 +203,34 @@ Stable machine summary fields:
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+
+## Multi-Agent Coordination
+
+The runtime is the coordinator. AI agents consume structured requests and return structured evidence.
+
+```bash
+gh-address-cr agent manifest
+gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+gh-address-cr agent submit owner/repo 123 --input action-response.json
+gh-address-cr agent publish owner/repo 123
+gh-address-cr agent leases owner/repo 123
+gh-address-cr agent reclaim owner/repo 123
+gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/repo 123
+gh-address-cr final-gate owner/repo 123
+```
+
+Role split:
+
+- `coordinator`: deterministic runtime CLI
+- `review_producer`: external findings producer
+- `triage`: classifies review items as fix/clarify/defer/reject
+- `fixer`: modifies code and returns evidence
+- `verifier`: validates evidence and test results
+- `publisher`: deterministic runtime role for GitHub replies/resolves
+- `gatekeeper`: deterministic final-gate role
+
+Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 
 Main entrypoint examples:
 
@@ -987,6 +1151,16 @@ If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 3. Re-run `python3 gh-address-cr/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
 4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `python3 gh-address-cr/scripts/cli.py final-gate`.
 
+## Troubleshooting installation and release
+
+- Unsupported Python: use Python 3.10 or newer through `pipx`, `uv tool`, or a local virtual environment.
+- Missing PyPI package: `gh-address-cr` may not have been published yet. Use the GitHub-direct runtime validation install for pre-release validation.
+- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr-skill`, workflow `.github/workflows/release.yml`, and `id-token: write`.
+- Stale artifact version: release-built wheel and sdist metadata must match the semantic-release version. If a publish partially succeeds, inspect PyPI before retrying because uploaded files are immutable.
+- Installed smoke domain failure: `agent orchestrate status` may report a missing session and `final-gate` may report `Final gate failed to evaluate: error connecting to api.github.com` when GitHub state or network access is unavailable. These are acceptable smoke outcomes only when there is no traceback, missing import, or missing console entrypoint.
+- Skill install confusion: `npx skills add ... --skill gh-address-cr` installs the packaged skill adapter only. It does not install the runtime CLI package.
+- Skill-shim migration confusion: if `python3 gh-address-cr/scripts/cli.py` works from a checkout but `gh-address-cr` is unavailable, install or reinstall the runtime CLI with `pipx` or `uv tool`.
+
 ## CI semantic release (tag + changelog)
 
 This repo includes a `semantic-release` workflow:
@@ -994,6 +1168,12 @@ This repo includes a `semantic-release` workflow:
 - Trigger: push to `main`
 - Input: Conventional Commits history
 - Output: semantic version tag (`vX.Y.Z`) + GitHub Release + `CHANGELOG.md`
+- Python package release: `pyproject.toml` and `src/gh_address_cr/__init__.py` are synchronized to the semantic-release version before wheel/sdist build.
+- Stable package registry: PyPI is the only documented stable runtime CLI package registry.
+- GitHub Releases remain release-note, tag, source-archive, and optional provenance surfaces; they are not the primary Python package registry.
+- Dry-run/staging validation: use the `workflow_dispatch` `dry-run` or `testpypi` target before enabling production PyPI publishing.
+- Production PyPI publishing: requires PyPI Trusted Publishing, package-name ownership, and the protected `pypi` environment. Do not use long-lived PyPI API tokens unless a separate explicit release-policy change approves that fallback.
+- Failed or partial publish recovery: inspect the PyPI project state and release artifacts before retrying; immutable package files may require a follow-up semantic-release version.
 
 Commit format examples:
 

@@ -1,0 +1,30 @@
+{
+  "public_commands": [
+    "review",
+    "final-gate",
+    "agent manifest",
+    "agent next",
+    "agent submit",
+    "adapter check-runtime"
+  ],
+  "forbidden_script_exports": [
+    "session_engine.py",
+    "cr_loop.py",
+    "list_threads.py",
+    "review_to_findings.py"
+  ],
+  "allowed_resolutions": [
+    "fix",
+    "clarify",
+    "defer",
+    "reject"
+  ],
+  "allowed_roles": [
+    "coordinator",
+    "triage",
+    "fixer",
+    "verifier",
+    "publisher",
+    "gatekeeper"
+  ]
+}

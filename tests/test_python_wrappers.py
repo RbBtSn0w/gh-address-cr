@@ -140,7 +140,19 @@ else:
         summary = json.loads(result.stdout)
         self.assertEqual(
             set(summary),
-            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "reason_code", "repo", "status", "waiting_on"},
+            {
+                "artifact_path",
+                "counts",
+                "exit_code",
+                "item_id",
+                "item_kind",
+                "next_action",
+                "pr_number",
+                "reason_code",
+                "repo",
+                "status",
+                "waiting_on",
+            },
         )
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["repo"], self.repo)
@@ -198,7 +210,7 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
-        self.assertNotIn("\"status\"", result.stdout)
+        self.assertNotIn('"status"', result.stdout)
 
     def test_cli_review_machine_trailing_flag_emits_structured_summary(self):
         gh = self.bin_dir / "gh"
@@ -577,7 +589,19 @@ else:
         summary = json.loads(result.stdout)
         self.assertEqual(
             set(summary),
-            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "reason_code", "repo", "status", "waiting_on"},
+            {
+                "artifact_path",
+                "counts",
+                "exit_code",
+                "item_id",
+                "item_kind",
+                "next_action",
+                "pr_number",
+                "reason_code",
+                "repo",
+                "status",
+                "waiting_on",
+            },
         )
         self.assertEqual(summary["status"], "BLOCKED")
         self.assertEqual(summary["repo"], self.repo)
@@ -866,7 +890,7 @@ else:
         self.assertNotEqual(result.returncode, 0)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "FAILED")
-        self.assertEqual(summary["reason_code"], "MISSING_GH_CLI")
+        self.assertEqual(summary["reason_code"], "GH_NOT_FOUND")
         self.assertEqual(summary["waiting_on"], "github_cli")
         self.assertIn("gh", result.stderr)
 
@@ -1405,37 +1429,29 @@ else:
         self.assertIn("Created 1 local item", result.stdout)
 
     def test_control_plane_rejects_remote_with_producer(self):
-        result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "remote", "code-review", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", "code-review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("remote expects", result.stderr)
 
     def test_control_plane_requires_json_input_for_code_review(self):
         result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr]
+            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr], stdin=""
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)
 
     def test_control_plane_rejects_ingest_code_review(self):
-        result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "ingest", "code-review", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "ingest", "code-review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ingest mode only supports producer=json", result.stderr)
 
     def test_control_plane_requires_explicit_source_for_sync(self):
-        result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "local", "json", "--sync", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "local", "json", "--sync", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires an explicit --source", result.stderr)
 
     def test_prepare_code_review_emits_bridge_prompt(self):
-        result = self.run_cmd(
-            [sys.executable, str(PREPARE_CODE_REVIEW_PY), "mixed", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(PREPARE_CODE_REVIEW_PY), "mixed", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["producer"], "code-review")
@@ -1548,9 +1564,7 @@ body: Missing title should fail.
         self.assertEqual(findings[0]["line"], 9)
 
     def test_cli_dispatches_prepare_code_review(self):
-        result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "prepare-code-review", "local", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(CLI_PY), "prepare-code-review", "local", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["mode"], "local")
@@ -1660,7 +1674,9 @@ else:
         )
         self.assertIn("Created 1 local item", ingest.stdout)
 
-        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        list_result = self.run_cmd(
+            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
+        )
         item_id = json.loads(list_result.stdout.strip())["item_id"]
         result = self.run_cmd(
             [
@@ -1720,7 +1736,9 @@ else:
             stdin=payload,
             check=True,
         )
-        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        list_result = self.run_cmd(
+            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
+        )
         item_id = json.loads(list_result.stdout.strip())["item_id"]
 
         result = self.run_cmd(
@@ -1781,7 +1799,9 @@ else:
             stdin=payload,
             check=True,
         )
-        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        list_result = self.run_cmd(
+            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
+        )
         item_id = json.loads(list_result.stdout.strip())["item_id"]
 
         result = self.run_cmd(
@@ -1859,7 +1879,9 @@ else:
             check=True,
         )
 
-        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        list_result = self.run_cmd(
+            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
+        )
         item_id = json.loads(list_result.stdout.strip())["item_id"]
 
         for _ in range(2):
@@ -2056,7 +2078,9 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("== Current Run Snapshot ==", result.stdout)
         self.assertNotIn("GitHub threads: total 1;", result.stdout)
@@ -2636,7 +2660,9 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
         self.assertTrue(self.archive_root().exists())
@@ -2684,9 +2710,13 @@ else:
         )
         gh.chmod(0o755)
 
-        first = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-a", self.repo, self.pr])
+        first = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-a", self.repo, self.pr]
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
-        second = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-b", self.repo, self.pr])
+        second = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-b", self.repo, self.pr]
+        )
         self.assertEqual(second.returncode, 0, second.stderr)
 
         report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "run-a", self.repo, self.pr])

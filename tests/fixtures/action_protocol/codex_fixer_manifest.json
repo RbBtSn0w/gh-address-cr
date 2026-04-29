@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "agent_id": "codex-fixer-1",
+  "roles": ["fixer", "verifier"],
+  "actions": ["fix", "clarify", "defer", "reject", "verify"],
+  "input_formats": ["action_request.v1"],
+  "output_formats": ["action_response.v1"],
+  "protocol_versions": ["1.0"],
+  "constraints": {
+    "max_parallel_claims": 2
+  }
+}

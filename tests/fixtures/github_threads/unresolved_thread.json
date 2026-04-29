@@ -1,0 +1,41 @@
+{
+  "input": {
+    "viewer_login": "agent-login",
+    "threads": [
+      {
+        "id": "THREAD_UNRESOLVED",
+        "isResolved": false,
+        "isOutdated": false,
+        "path": "src/example.py",
+        "line": 12,
+        "comments": {
+          "nodes": [
+            {
+              "url": "https://example.test/thread/unresolved",
+              "body": "Validate the input before use.",
+              "author": {
+                "login": "reviewer"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "item_id": "github-thread:THREAD_UNRESOLVED",
+      "item_kind": "github_thread",
+      "source": "github",
+      "thread_id": "THREAD_UNRESOLVED",
+      "title": "GitHub review thread THREAD_UNRESOLVED",
+      "body": "Validate the input before use.",
+      "path": "src/example.py",
+      "line": 12,
+      "url": "https://example.test/thread/unresolved",
+      "is_resolved": false,
+      "is_outdated": false,
+      "reply_evidence": null
+    }
+  ]
+}

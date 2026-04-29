@@ -1,0 +1,26 @@
+{
+  "session_id": "session-123",
+  "repo": "owner/repo",
+  "pr_number": "123",
+  "items": {
+    "item:1": {
+      "item_id": "item:1",
+      "status": "OPEN",
+      "state": "open",
+      "path": "src/a.py"
+    },
+    "item:2": {
+      "item_id": "item:2",
+      "status": "OPEN",
+      "state": "open",
+      "path": "src/b.py"
+    },
+    "item:3": {
+      "item_id": "item:3",
+      "status": "OPEN",
+      "state": "open",
+      "path": "src/c.py"
+    }
+  },
+  "leases": {}
+}

@@ -1,4 +1,4 @@
-import importlib.util
+import importlib
 import json
 import os
 import sys
@@ -8,7 +8,7 @@ import subprocess
 import types
 from unittest.mock import patch
 
-from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT
+from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT, SRC_ROOT
 
 
 class CRLoopCLITest(PythonScriptTestCase):
@@ -16,16 +16,13 @@ class CRLoopCLITest(PythonScriptTestCase):
         return super().artifacts_dir()
 
     def load_module(self):
-        sys.path.insert(0, str(CR_LOOP_PY.parent))
-        spec = importlib.util.spec_from_file_location("cr_loop_under_test", CR_LOOP_PY)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
+        sys.path.insert(0, str(SRC_ROOT))
         try:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
-                spec.loader.exec_module(module)
+                module = importlib.import_module("gh_address_cr.core.cr_loop")
+                return importlib.reload(module)
         finally:
             sys.path.pop(0)
-        return module
 
     def test_select_next_item_skips_active_claims(self):
         module = self.load_module()
@@ -144,7 +141,9 @@ else:
             },
         }
 
-        with patch.object(module.engine, "load_session", side_effect=AssertionError("load_session should not be called")):
+        with patch.object(
+            module.engine, "load_session", side_effect=AssertionError("load_session should not be called")
+        ):
             needs_human, found_item_id = module.detect_needs_human(
                 self.repo,
                 self.pr,
@@ -240,9 +239,11 @@ else:
             counts["save"] += 1
             return real_save_session(updated_session)
 
-        with patch.object(module.engine, "load_session", side_effect=counted_load_session), patch.object(
-            module.engine, "save_session", side_effect=counted_save_session
-        ), patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+        with (
+            patch.object(module.engine, "load_session", side_effect=counted_load_session),
+            patch.object(module.engine, "save_session", side_effect=counted_save_session),
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}),
+        ):
             status, error = module.handle_batch(
                 args,
                 self.repo,
@@ -606,6 +607,126 @@ else:
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
 
+    def test_handle_batch_publishes_accepted_agent_github_response_without_fixer(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_AGENT_ACCEPTED"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_AGENT_ACCEPTED",
+                    "title": "Publish accepted agent response",
+                    "body": "The deterministic loop should publish accepted agent evidence.",
+                    "path": "src/agent_publish.py",
+                    "line": 12,
+                    "severity": "P1",
+                    "state": "publish_ready",
+                    "status": "OPEN",
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/agent-accepted",
+                    "url": "https://example.test/thread/agent-accepted",
+                    "first_url": "https://example.test/thread/agent-accepted",
+                    "latest_url": "https://example.test/thread/agent-accepted",
+                    "is_outdated": False,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "accepted_response": {
+                        "resolution": "fix",
+                        "note": "Fixed via agent evidence.",
+                        "files": ["src/agent_publish.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_agent_publish", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc999",
+                            "files": ["src/agent_publish.py"],
+                            "why": "The accepted agent response included the required fix evidence.",
+                        },
+                    },
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        captured = {}
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            raise AssertionError("accepted agent responses must publish without invoking a fixer")
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                payload = json.loads(stdin or "[]")
+                self.assertEqual(len(payload), 1)
+                captured["github_action"] = payload[0]
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            item_id: {
+                                "status": "succeeded",
+                                "reply_url": "https://example.test/reply/agent-accepted",
+                            }
+                        }
+                    ),
+                    "",
+                )
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                updates = json.loads(stdin or "[]")
+                session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
+                for update in updates:
+                    session_data["items"][update["item_id"]].update(update)
+                self.session_file().write_text(json.dumps(session_data), encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        module.run_fixer = fake_run_fixer
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
+
+        args = types.SimpleNamespace(
+            fixer_cmd=None,
+            validation_cmd=[],
+            max_iterations=10,
+        )
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-agent-accepted",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "done")
+        self.assertEqual(error, "")
+        self.assertEqual(captured["github_action"]["thread_id"], "THREAD_AGENT_ACCEPTED")
+        self.assertEqual(captured["github_action"]["resolution"], "fix")
+        self.assertIn("Fixed in `abc999`.", captured["github_action"]["reply_body"])
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
+        self.assertEqual(updated["status"], "CLOSED")
+        self.assertTrue(updated["handled"])
+        self.assertTrue(updated["reply_posted"])
+
     def test_build_github_fix_reply_normalizes_unknown_severity_to_p2(self):
         module = self.load_module()
 
@@ -708,7 +829,9 @@ else:
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/string-validation"}}),
+                    json.dumps(
+                        {item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/string-validation"}}
+                    ),
                     "",
                 )
             if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
@@ -822,7 +945,9 @@ else:
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    json.dumps({item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/mixed-validation"}}),
+                    json.dumps(
+                        {item_id: {"status": "succeeded", "reply_url": "https://example.test/reply/mixed-validation"}}
+                    ),
                     "",
                 )
             if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
@@ -943,6 +1068,7 @@ else:
         updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
         self.assertTrue(updated["needs_human"])
         self.assertFalse(updated["reply_posted"])
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
@@ -1144,7 +1270,9 @@ else:
     def test_cr_loop_does_not_repost_reply_after_resolve_failure(self):
         gh = self.bin_dir / "gh"
         state_file = Path(self.temp_dir.name) / "gh_state_reply_retry.json"
-        state_file.write_text(json.dumps({"reply_calls": 0, "resolve_attempts": 0, "resolved": False}), encoding="utf-8")
+        state_file.write_text(
+            json.dumps({"reply_calls": 0, "resolve_attempts": 0, "resolved": False}), encoding="utf-8"
+        )
         gh.write_text(
             f"""#!/usr/bin/env python3
 import json
@@ -1473,16 +1601,9 @@ print(json.dumps({{
         self.assertIn("cr-loop PASSED", result.stdout)
 
     def test_handle_batch_blocks_when_batch_github_helper_fails(self):
-        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
-            sys.path.insert(0, str(CR_LOOP_PY.parent))
-            spec = importlib.util.spec_from_file_location("cr_loop_under_test", CR_LOOP_PY)
-            module = importlib.util.module_from_spec(spec)
-            assert spec.loader is not None
-            try:
-                spec.loader.exec_module(module)
-            finally:
-                sys.path.pop(0)
+        module = self.load_module()
 
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
             init_result = self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
             self.assertEqual(init_result.returncode, 0, init_result.stderr)
             session = json.loads(self.session_file().read_text(encoding="utf-8"))
@@ -1549,33 +1670,33 @@ print(json.dumps({{
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             raise AssertionError(f"unexpected command: {cmd}")
 
-            module.run_fixer = fake_run_fixer
-            module.run_cmd = fake_run_cmd
-            module.emit = lambda _result: None
+        module.run_fixer = fake_run_fixer
+        module.run_cmd = fake_run_cmd
+        module.emit = lambda _result: None
 
-            args = types.SimpleNamespace(
-                fixer_cmd="fixer",
-                validation_cmd=[],
-                max_iterations=10,
-            )
+        args = types.SimpleNamespace(
+            fixer_cmd="fixer",
+            validation_cmd=[],
+            max_iterations=10,
+        )
 
-            status, error = module.handle_batch(
-                args,
-                self.repo,
-                self.pr,
-                [session["items"][item_id]],
-                run_id="batch-failure",
-                iteration=1,
-            )
+        status, error = module.handle_batch(
+            args,
+            self.repo,
+            self.pr,
+            [session["items"][item_id]],
+            run_id="batch-failure",
+            iteration=1,
+        )
 
-            self.assertEqual(status, "blocked")
-            self.assertIn("batch helper failed", error)
+        self.assertEqual(status, "blocked")
+        self.assertIn("batch helper failed", error)
 
-            updated = json.loads(self.session_file().read_text(encoding="utf-8"))
-            item = updated["items"][item_id]
-            self.assertEqual(item["status"], "OPEN")
-            self.assertFalse(item["handled"])
-            self.assertFalse(item["reply_posted"])
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = updated["items"][item_id]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertFalse(item["handled"])
+        self.assertFalse(item["reply_posted"])
 
     def test_cr_loop_does_not_mark_github_thread_needs_human_from_loop_warning_threshold(self):
         gh = self.bin_dir / "gh"
@@ -1638,7 +1759,9 @@ else:
         self.assertIn("cr-loop PAUSED: Interaction Required", result.stdout + result.stderr)
         self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
 
-        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"]["github-thread:THREAD_LOOP_THRESHOLD"]
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][
+            "github-thread:THREAD_LOOP_THRESHOLD"
+        ]
         self.assertFalse(updated["needs_human"])
 
     def test_cr_loop_mixed_code_review_requires_findings_json(self):
@@ -1668,7 +1791,8 @@ print(json.dumps({
                 f"{sys.executable} {fixer}",
                 self.repo,
                 self.pr,
-            ]
+            ],
+            stdin="",
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)

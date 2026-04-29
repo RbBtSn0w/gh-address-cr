@@ -31,7 +31,9 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         return module
 
     def seed_github_thread(self, thread_id: str, *, reply_posted: bool = True):
-        init = self.run_cmd([sys.executable, str(SCRIPTS_DIR / "session_engine.py"), "init", self.repo, self.pr], check=True)
+        init = self.run_cmd(
+            [sys.executable, str(SCRIPTS_DIR / "session_engine.py"), "init", self.repo, self.pr], check=True
+        )
         self.assertEqual(init.returncode, 0, init.stderr)
         session_path = self.state_dir / "octo__example" / f"pr-{self.pr}" / "session.json"
         session = json.loads(session_path.read_text(encoding="utf-8"))
@@ -75,16 +77,20 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         module.run_cmd = failing_run_cmd
 
-        with patched_argv(
-            [
-                "resolve_thread.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_RESOLVE",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "resolve_thread.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "THREAD_RESOLVE",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -101,18 +107,24 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         module = self.load_module("resolve_thread.py", "resolve_thread_reply_guard_under_test")
         module.audit_event = lambda *args, **kwargs: None
-        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gh_write_cmd should not be called")
+        )
 
-        with patched_argv(
-            [
-                "resolve_thread.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY_REQUIRED",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "resolve_thread.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "THREAD_REPLY_REQUIRED",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -124,18 +136,24 @@ class NetworkWriteContractTest(PythonScriptTestCase):
     def test_resolve_thread_refuses_when_thread_is_not_tracked(self):
         module = self.load_module("resolve_thread.py", "resolve_thread_missing_item_under_test")
         module.audit_event = lambda *args, **kwargs: None
-        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gh_write_cmd should not be called")
+        )
 
-        with patched_argv(
-            [
-                "resolve_thread.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_NOT_TRACKED",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "resolve_thread.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "THREAD_NOT_TRACKED",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -156,7 +174,9 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             "line": 4,
         }
         module.load_pull_request_head_sha = lambda *args, **kwargs: "deadbeef"
-        module.load_pr_files = lambda *args, **kwargs: [{"filename": "src/a.py", "patch": "@@ -1,1 +1,4 @@\n line1\n+line2\n+line3\n+line4"}]
+        module.load_pr_files = lambda *args, **kwargs: [
+            {"filename": "src/a.py", "patch": "@@ -1,1 +1,4 @@\n line1\n+line2\n+line3\n+line4"}
+        ]
         module.audit_event = lambda *args, **kwargs: None
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
@@ -170,16 +190,20 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         module.run_cmd = failing_run_cmd
 
-        with patched_argv(
-            [
-                "publish_finding.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "local-finding:abc",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "publish_finding.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "local-finding:abc",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -201,21 +225,29 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         module.github_viewer_login = lambda: "tester"
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "submitted": [],
+            "error": None,
+        }
         module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
 
-        with patched_argv(
-            [
-                "post_reply.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY",
-                str(reply_file),
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "post_reply.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "THREAD_REPLY",
+                    str(reply_file),
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -236,16 +268,20 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module.run_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
         module.append_handled = lambda *args, **kwargs: None
 
-        with patched_argv(
-            [
-                "resolve_thread.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_RESOLVE",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "resolve_thread.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "THREAD_RESOLVE",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -267,21 +303,27 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             "line": 4,
         }
         module.load_pull_request_head_sha = lambda *args, **kwargs: "deadbeef"
-        module.load_pr_files = lambda *args, **kwargs: [{"filename": "src/a.py", "patch": "@@ -1,1 +1,4 @@\n line1\n+line2\n+line3\n+line4"}]
+        module.load_pr_files = lambda *args, **kwargs: [
+            {"filename": "src/a.py", "patch": "@@ -1,1 +1,4 @@\n line1\n+line2\n+line3\n+line4"}
+        ]
         audits = []
         module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
 
-        with patched_argv(
-            [
-                "publish_finding.py",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "local-finding:abc",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "publish_finding.py",
+                    "--repo",
+                    self.repo,
+                    "--pr",
+                    self.pr,
+                    "local-finding:abc",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -299,21 +341,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module.gh_read_json = lambda *args, **kwargs: {"items": []}
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
 
-        with patched_argv(
-            [
-                "submit_feedback.py",
-                "--category",
-                "tooling-bug",
-                "--title",
-                "bad response",
-                "--summary",
-                "summary",
-                "--expected",
-                "expected",
-                "--actual",
-                "actual",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "submit_feedback.py",
+                    "--category",
+                    "tooling-bug",
+                    "--title",
+                    "bad response",
+                    "--summary",
+                    "summary",
+                    "--expected",
+                    "expected",
+                    "--actual",
+                    "actual",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -335,21 +381,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         module.gh_write_cmd = failing_gh_write_cmd
 
-        with patched_argv(
-            [
-                "submit_feedback.py",
-                "--category",
-                "tooling-bug",
-                "--title",
-                "create system exit",
-                "--summary",
-                "summary",
-                "--expected",
-                "expected",
-                "--actual",
-                "actual",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "submit_feedback.py",
+                    "--category",
+                    "tooling-bug",
+                    "--title",
+                    "create system exit",
+                    "--summary",
+                    "summary",
+                    "--expected",
+                    "expected",
+                    "--actual",
+                    "actual",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -363,6 +413,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertNotIn("snow@example.com", payload["error"])
         self.assertTrue(audits)
         self.assertIn("gh missing", stderr.getvalue())
+
     def test_submit_feedback_rejects_success_response_missing_required_fields(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_missing_fields_under_test")
 
@@ -376,21 +427,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             "",
         )
 
-        with patched_argv(
-            [
-                "submit_feedback.py",
-                "--category",
-                "tooling-bug",
-                "--title",
-                "bad response",
-                "--summary",
-                "summary",
-                "--expected",
-                "expected",
-                "--actual",
-                "actual",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "submit_feedback.py",
+                    "--category",
+                    "tooling-bug",
+                    "--title",
+                    "bad response",
+                    "--summary",
+                    "summary",
+                    "--expected",
+                    "expected",
+                    "--actual",
+                    "actual",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -414,21 +469,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module.gh_read_json = failing_gh_read_json
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "{}", "")
 
-        with patched_argv(
-            [
-                "submit_feedback.py",
-                "--category",
-                "tooling-bug",
-                "--title",
-                "dedupe lookup failure",
-                "--summary",
-                "summary",
-                "--expected",
-                "expected",
-                "--actual",
-                "actual",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+        with (
+            patched_argv(
+                [
+                    "submit_feedback.py",
+                    "--category",
+                    "tooling-bug",
+                    "--title",
+                    "dedupe lookup failure",
+                    "--summary",
+                    "summary",
+                    "--expected",
+                    "expected",
+                    "--actual",
+                    "actual",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 
@@ -499,6 +558,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertNotIn("auth-token=hunter2", sanitized)
         self.assertNotIn("refresh_token=abc123", sanitized)
         self.assertNotIn("token=value", sanitized)
+
     def test_submit_feedback_sanitize_command_redacts_key_value_tokens_and_file_uri_args(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_command_under_test")
 
@@ -528,21 +588,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             "token=ghp_abcdefghijklmnopqrstuvwxyz12 path=/Users/snow/private/state.json email=alice@example.com",
         )
 
-        with patched_argv(
-            [
-                "submit_feedback.py",
-                "--category",
-                "tooling-bug",
-                "--title",
-                "bad response",
-                "--summary",
-                "summary",
-                "--expected",
-                "expected",
-                "--actual",
-                "actual",
-            ]
-        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()):
+        with (
+            patched_argv(
+                [
+                    "submit_feedback.py",
+                    "--category",
+                    "tooling-bug",
+                    "--title",
+                    "bad response",
+                    "--summary",
+                    "summary",
+                    "--expected",
+                    "expected",
+                    "--actual",
+                    "actual",
+                ]
+            ),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()),
+        ):
             rc = module.main()
             payload = json.loads(stdout.getvalue())
 

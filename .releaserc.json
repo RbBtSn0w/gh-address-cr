@@ -23,10 +23,18 @@
       }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "python3 scripts/set_package_version.py ${nextRelease.version}"
+      }
+    ],
+    [
       "@semantic-release/git",
       {
         "assets": [
-          "CHANGELOG.md"
+          "CHANGELOG.md",
+          "pyproject.toml",
+          "src/gh_address_cr/__init__.py"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

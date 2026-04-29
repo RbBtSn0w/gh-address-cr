@@ -45,7 +45,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
             spec.loader.exec_module(module)
         finally:
             sys.path.pop(0)
-        snapshot_text = '\n'.join(
+        snapshot_text = "\n".join(
             [
                 '{"id":"THREAD_1","isResolved":false}',
                 '{"id":"THREAD_2","isResolved":true}',
@@ -56,7 +56,9 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertEqual(module.unresolved_ids_from_snapshot_text(snapshot_text), ["THREAD_1", "THREAD_3"])
 
     def test_ingest_findings_reports_invalid_json_array(self):
-        ingest_spec = importlib.util.spec_from_file_location("ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py")
+        ingest_spec = importlib.util.spec_from_file_location(
+            "ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py"
+        )
         self.assertIsNotNone(ingest_spec)
         ingest_module = importlib.util.module_from_spec(ingest_spec)
         sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
@@ -70,7 +72,9 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("Invalid JSON array input", str(ctx.exception))
 
     def test_ingest_findings_reports_invalid_ndjson_line(self):
-        ingest_spec = importlib.util.spec_from_file_location("ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py")
+        ingest_spec = importlib.util.spec_from_file_location(
+            "ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py"
+        )
         self.assertIsNotNone(ingest_spec)
         ingest_module = importlib.util.module_from_spec(ingest_spec)
         sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
@@ -526,8 +530,19 @@ else:
         self.assertEqual(payload["status"], "duplicate")
         self.assertEqual(payload["issue_number"], 88)
         calls = json.loads(calls_path.read_text(encoding="utf-8"))
-        self.assertFalse(any(call[:4] == ["api", "repos/RbBtSn0w/gh-address-cr-skill/issues", "--method", "POST"] for call in calls))
-        self.assertTrue(any(call[:2] == ["api", f"search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{payload['fingerprint']}+in%3Abody&per_page=10"] for call in calls))
+        self.assertFalse(
+            any(call[:4] == ["api", "repos/RbBtSn0w/gh-address-cr-skill/issues", "--method", "POST"] for call in calls)
+        )
+        self.assertTrue(
+            any(
+                call[:2]
+                == [
+                    "api",
+                    f"search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{payload['fingerprint']}+in%3Abody&per_page=10",
+                ]
+                for call in calls
+            )
+        )
 
     def test_submit_feedback_writes_local_audit_event(self):
         gh = self.bin_dir / "gh"
@@ -571,7 +586,9 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        audit_rows = [json.loads(line) for line in self.audit_log_file().read_text(encoding="utf-8").splitlines() if line.strip()]
+        audit_rows = [
+            json.loads(line) for line in self.audit_log_file().read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
         self.assertTrue(audit_rows)
         last = audit_rows[-1]
         self.assertEqual(last["action"], "submit_feedback")
@@ -892,17 +909,13 @@ print("ok")
         resource_logs = payload["resourceLogs"]
         self.assertEqual(len(resource_logs), 1)
         resource_attributes = {
-            item["key"]: next(iter(item["value"].values()))
-            for item in resource_logs[0]["resource"]["attributes"]
+            item["key"]: next(iter(item["value"].values())) for item in resource_logs[0]["resource"]["attributes"]
         }
         self.assertEqual(resource_attributes["service.name"], "gh-address-cr-cli")
         self.assertEqual(resource_attributes["deployment.environment"], "test")
         log_record = resource_logs[0]["scopeLogs"][0]["logRecords"][0]
         self.assertEqual(log_record["body"]["stringValue"], "Starting triage snapshot")
-        record_attributes = {
-            item["key"]: next(iter(item["value"].values()))
-            for item in log_record["attributes"]
-        }
+        record_attributes = {item["key"]: next(iter(item["value"].values())) for item in log_record["attributes"]}
         self.assertEqual(record_attributes["gh.address_cr.log_kind"], "trace")
         self.assertEqual(record_attributes["gh.address_cr.action"], "run_once")
         self.assertEqual(record_attributes["gh.address_cr.status"], "start")
@@ -1058,15 +1071,19 @@ print("ok")
                 module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
                 self.assertTrue(
                     self._wait_until(
-                        lambda: module.trace_log_file(self.repo, self.pr).exists()
-                        and len(
-                            [
-                                line
-                                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
-                                if line.strip()
-                            ]
+                        lambda: (
+                            module.trace_log_file(self.repo, self.pr).exists()
+                            and len(
+                                [
+                                    line
+                                    for line in module.trace_log_file(self.repo, self.pr)
+                                    .read_text(encoding="utf-8")
+                                    .splitlines()
+                                    if line.strip()
+                                ]
+                            )
+                            >= 2
                         )
-                        >= 2
                     )
                 )
             trace_rows = [
@@ -1106,15 +1123,17 @@ print("ok")
                 release_export.set()
                 self.assertTrue(
                     self._wait_until(
-                        lambda: expected_trace_file.exists()
-                        and len(
-                            [
-                                line
-                                for line in expected_trace_file.read_text(encoding="utf-8").splitlines()
-                                if line.strip()
-                            ]
+                        lambda: (
+                            expected_trace_file.exists()
+                            and len(
+                                [
+                                    line
+                                    for line in expected_trace_file.read_text(encoding="utf-8").splitlines()
+                                    if line.strip()
+                                ]
+                            )
+                            >= 2
                         )
-                        >= 2
                     )
                 )
             trace_rows = [

@@ -4,38 +4,193 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      publish_target:
+        description: "Validation or publish target"
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - testpypi
+          - pypi
+      confirm_pypi_publish:
+        description: "Required for manual production PyPI publishing"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+  id-token: write
 
 jobs:
-  semantic-release:
+  build-release-package:
     runs-on: ubuntu-latest
+    outputs:
+      package_version: ${{ steps.package-version.outputs.version }}
+      publish_target: ${{ steps.publish-target.outputs.target }}
+      released: ${{ steps.package-version.outputs.released }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Resolve publish target
+        id: publish-target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "target=${{ inputs.publish_target }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=pypi" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.publish-target.outputs.target == 'pypi'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install release dependencies
+        if: steps.publish-target.outputs.target == 'pypi'
         run: |
           npm install --no-save \
             semantic-release \
             @semantic-release/changelog \
             @semantic-release/commit-analyzer \
+            @semantic-release/exec \
             @semantic-release/git \
             @semantic-release/github \
             @semantic-release/release-notes-generator \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release
+        if: steps.publish-target.outputs.target == 'pypi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+
+      - name: Prepare staging package version
+        if: steps.publish-target.outputs.target != 'pypi'
+        run: python3 scripts/set_package_version.py --version "0.0.0.dev${GITHUB_RUN_NUMBER}"
+
+      - name: Resolve package version
+        id: package-version
+        run: |
+          if [ "${{ steps.publish-target.outputs.target }}" = "pypi" ]; then
+            tag="$(git tag --points-at HEAD | grep '^v' | sort -V | tail -n 1 || true)"
+            if [ -z "$tag" ]; then
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              echo "version=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=0.0.0.dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        if: steps.package-version.outputs.released == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install package build dependencies
+        if: steps.package-version.outputs.released == 'true'
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Package build
+        if: steps.package-version.outputs.released == 'true'
+        run: |
+          rm -rf dist build
+          python -m build
+
+      - name: Verify package version
+        if: steps.package-version.outputs.released == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import email.parser
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          expected = os.environ["PACKAGE_VERSION"]
+          wheel = next(Path("dist").glob("*.whl"))
+          sdist = next(Path("dist").glob("*.tar.gz"))
+
+          with zipfile.ZipFile(wheel) as archive:
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = email.parser.Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
+          if metadata["Version"] != expected:
+              raise SystemExit(f"wheel version {metadata['Version']} does not match {expected}")
+
+          with tarfile.open(sdist) as archive:
+              metadata_member = next(member for member in archive.getmembers() if member.name.endswith("PKG-INFO"))
+              metadata = email.parser.Parser().parsestr(archive.extractfile(metadata_member).read().decode("utf-8"))
+          if metadata["Version"] != expected:
+              raise SystemExit(f"sdist version {metadata['Version']} does not match {expected}")
+          PY
+
+      - name: Check package metadata
+        if: steps.package-version.outputs.released == 'true'
+        run: twine check dist/*
+
+      - name: Upload package artifacts
+        if: steps.package-version.outputs.released == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-address-cr-dist
+          path: dist/*
+
+  publish-testpypi:
+    needs: build-release-package
+    runs-on: ubuntu-latest
+    if: needs.build-release-package.outputs.released == 'true' && needs.build-release-package.outputs.publish_target == 'testpypi'
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-address-cr-dist
+          path: dist
+
+      - name: Publish package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build-release-package
+    runs-on: ubuntu-latest
+    environment: pypi
+    if: >-
+      needs.build-release-package.outputs.released == 'true' &&
+      needs.build-release-package.outputs.publish_target == 'pypi' &&
+      (github.event_name != 'workflow_dispatch' || inputs.confirm_pypi_publish == true)
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-address-cr-dist
+          path: dist
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

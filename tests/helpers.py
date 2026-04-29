@@ -8,6 +8,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = ROOT / "src"
+SKILL_ROOT = ROOT / "gh-address-cr"
+RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
 SCRIPTS_DIR = ROOT / "gh-address-cr" / "scripts"
 CLI_PY = SCRIPTS_DIR / "cli.py"
 SCRIPT = SCRIPTS_DIR / "session_engine.py"
@@ -105,6 +108,20 @@ class PythonScriptTestCase(unittest.TestCase):
             capture_output=True,
             cwd=self.cwd,
             env=self.env,
+            check=check,
+        )
+
+    def run_runtime_module(self, *args, check=False, stdin=None):
+        env = self.env.copy()
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = str(SRC_ROOT) if not existing else f"{SRC_ROOT}:{existing}"
+        return subprocess.run(
+            [sys.executable, "-m", "gh_address_cr", *args],
+            input=stdin,
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
             check=check,
         )
 
