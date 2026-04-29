@@ -353,8 +353,15 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("Verify package version", text)
         self.assertIn("pypa/gh-action-pypi-publish", text)
         self.assertIn("repository-url: https://test.pypi.org/legacy/", text)
-        self.assertIn("environment: pypi", text)
-        self.assertRegex(text, re.compile(r"confirm_pypi_publish.*true", re.DOTALL))
+        self.assertNotIn("environment: pypi", text)
+        self.assertNotIn("confirm_pypi_publish", text)
+        self.assertRegex(
+            text,
+            re.compile(
+                r"publish-pypi:.*needs\.build-release-package\.outputs\.publish_target == 'pypi'",
+                re.DOTALL,
+            ),
+        )
 
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = README.read_text(encoding="utf-8")

@@ -1155,7 +1155,7 @@ If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 
 - Unsupported Python: use Python 3.10 or newer through `pipx`, `uv tool`, or a local virtual environment.
 - Missing PyPI package: `gh-address-cr` may not have been published yet. Use the GitHub-direct runtime validation install for pre-release validation.
-- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr`, workflow `.github/workflows/release.yml`, and `id-token: write`.
+- Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr`, workflow `.github/workflows/release.yml`, no GitHub environment constraint, and `id-token: write`.
 - Stale artifact version: release-built wheel and sdist metadata must match the semantic-release version. If a publish partially succeeds, inspect PyPI before retrying because uploaded files are immutable.
 - Installed smoke domain failure: `agent orchestrate status` may report a missing session and `final-gate` may report `Final gate failed to evaluate: error connecting to api.github.com` when GitHub state or network access is unavailable. These are acceptable smoke outcomes only when there is no traceback, missing import, or missing console entrypoint.
 - Skill install confusion: `npx skills add ... --skill gh-address-cr` installs the packaged skill adapter only. It does not install the runtime CLI package.
@@ -1172,7 +1172,7 @@ This repo includes a `semantic-release` workflow:
 - Stable package registry: PyPI is the only documented stable runtime CLI package registry.
 - GitHub Releases remain release-note, tag, source-archive, and optional provenance surfaces; they are not the primary Python package registry.
 - Dry-run/staging validation: use the `workflow_dispatch` `dry-run` or `testpypi` target before enabling production PyPI publishing.
-- Production PyPI publishing: requires PyPI Trusted Publishing, package-name ownership, and the protected `pypi` environment. Do not use long-lived PyPI API tokens unless a separate explicit release-policy change approves that fallback.
+- Production PyPI publishing: requires PyPI Trusted Publishing and package-name ownership. It runs without a GitHub deployment environment approval gate; do not use long-lived PyPI API tokens unless a separate explicit release-policy change approves that fallback.
 - Failed or partial publish recovery: inspect the PyPI project state and release artifacts before retrying; immutable package files may require a follow-up semantic-release version.
 
 Commit format examples:

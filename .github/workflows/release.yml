@@ -15,11 +15,6 @@ on:
           - dry-run
           - testpypi
           - pypi
-      confirm_pypi_publish:
-        description: "Required for manual production PyPI publishing"
-        type: boolean
-        required: true
-        default: false
 
 permissions:
   contents: write
@@ -175,11 +170,9 @@ jobs:
   publish-pypi:
     needs: build-release-package
     runs-on: ubuntu-latest
-    environment: pypi
     if: >-
       needs.build-release-package.outputs.released == 'true' &&
-      needs.build-release-package.outputs.publish_target == 'pypi' &&
-      (github.event_name != 'workflow_dispatch' || inputs.confirm_pypi_publish == true)
+      needs.build-release-package.outputs.publish_target == 'pypi'
     permissions:
       contents: read
       id-token: write
