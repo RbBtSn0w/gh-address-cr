@@ -1,3 +1,9 @@
+## [2.0.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.1...v2.0.2) (2026-04-29)
+
+### Bug Fixes
+
+* include refactor commits in patch releases ([654dee2](https://github.com/RbBtSn0w/gh-address-cr/commit/654dee27b49668a9ce08cddb849632aefaa4a822))
+
 ## [2.0.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.0...v2.0.1) (2026-04-29)
 
 ### Bug Fixes
