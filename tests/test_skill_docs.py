@@ -4,14 +4,15 @@ import json
 from tests.helpers import ROOT
 
 
-SKILL_MD = ROOT / "gh-address-cr" / "SKILL.md"
+SKILL_MD = ROOT / "skill" / "SKILL.md"
 README_MD = ROOT / "README.md"
-MODE_PRODUCER_MATRIX_MD = ROOT / "gh-address-cr" / "references" / "mode-producer-matrix.md"
-LOCAL_REVIEW_ADAPTER_MD = ROOT / "gh-address-cr" / "references" / "local-review-adapter.md"
-OTEL_WORKER_BETTER_STACK_MD = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack.md"
-OTEL_WORKER_MJS = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack" / "worker.mjs"
-OTEL_WORKER_WRANGLER = ROOT / "gh-address-cr" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
-OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
+AGENTS_MD = ROOT / "AGENTS.md"
+MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
+LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
+OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
+OTEL_WORKER_MJS = ROOT / "skill" / "references" / "otel-worker-better-stack" / "worker.mjs"
+OTEL_WORKER_WRANGLER = ROOT / "skill" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
+OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
 
 
@@ -73,8 +74,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_paths_are_relative_to_skill_root(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertNotIn("gh-address-cr/scripts/", text)
-        self.assertNotIn("gh-address-cr/references/", text)
+        self.assertNotIn("skill/scripts/", text)
+        self.assertNotIn("skill/references/", text)
         self.assertIn("python3 scripts/cli.py review <owner/repo> <pr_number>", text)
         self.assertIn("python3 scripts/cli.py final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
@@ -145,8 +146,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
             text = path.read_text(encoding="utf-8")
-            self.assertNotIn("gh-address-cr/scripts/", text, msg=str(path))
-            self.assertNotIn("gh-address-cr/references/", text, msg=str(path))
+            self.assertNotIn("skill/scripts/", text, msg=str(path))
+            self.assertNotIn("skill/references/", text, msg=str(path))
             self.assertIn("scripts/cli.py", text, msg=str(path))
 
     def test_referenced_skill_owned_docs_exist(self):
@@ -167,11 +168,18 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_documents_repo_root_vs_skill_root_layout(self):
         text = README_MD.read_text(encoding="utf-8")
-        self.assertIn("Published skill payload: the entire `gh-address-cr/` directory", text)
+        self.assertIn("Published skill payload: the entire `skill/` directory", text)
         self.assertIn("Repo-level verification harness: `tests/`", text)
         self.assertIn(
-            "If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`", text
+            "If a rule or instruction must ship with the installed skill, it must live inside `skill/`", text
         )
+
+    def test_agents_documents_skill_directory_without_renaming_product_identity(self):
+        text = AGENTS_MD.read_text(encoding="utf-8")
+        self.assertIn("The released skill payload is the entire `skill/` directory", text)
+        self.assertIn("product/runtime identity remains", text)
+        self.assertIn("`gh-address-cr`: the Python package, console entrypoint, repository URL", text)
+        self.assertIn("with `--skill skill`", text)
 
     def test_readme_and_skill_document_optional_otlp_worker_logging(self):
         readme_text = README_MD.read_text(encoding="utf-8")
@@ -198,7 +206,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_documents_machine_summary_fields(self):
         text = README_MD.read_text(encoding="utf-8")
-        self.assertNotIn("The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.", text)
+        self.assertNotIn("The exact machine summary fields are documented in `skill/SKILL.md`.", text)
         for field in (
             "status",
             "repo",
@@ -231,10 +239,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
         self.assertIn(
-            "python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text
+            "python3 skill/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text
         )
         self.assertIn(
-            "python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
+            "python3 skill/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
             text,
         )
 

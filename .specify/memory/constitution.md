@@ -77,14 +77,14 @@ prove that the agent responded, resolved, and left recoverable evidence.
 ### IV. Packaged Skill Boundary Is Explicit
 
 This repository has two scopes: the source repository and the packaged skill
-payload under `gh-address-cr/`. The **Deterministic Runtime** MUST be physically
+payload under `skill/`. The **Deterministic Runtime** MUST be physically
 separated from the packaged skill adapter. The skill adapter MUST remain a **Thin
 Layer** that acts as a router and a **Behavioral Policy Layer**. It MUST explain
 how to use the runtime safely but MUST NOT contain authoritative business logic,
 state-machine transitions, or direct implementation of side effects.
 
 Path language MUST match the active scope. Repo-root docs and commands use
-paths such as `gh-address-cr/scripts/cli.py`; skill-owned docs use paths such
+paths such as `skill/scripts/cli.py`; skill-owned docs use paths such
 as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`.
 
 Rationale: The project ships a skill. Blurring repo-root and skill-root paths
@@ -154,7 +154,7 @@ transitions, GitHub writes, reply/resolve ordering, and final-gate evaluation.
 ## Development Workflow And Quality Gates
 
 All non-trivial changes MUST begin by reading the smallest governing contract:
-the relevant tests, `README.md`, `gh-address-cr/SKILL.md`, or this constitution.
+the relevant tests, `README.md`, `skill/SKILL.md`, or this constitution.
 Feature specs MUST identify whether they affect the public CLI, the packaged
 skill payload, agent-facing instructions, session state, GitHub side effects,
 findings intake, telemetry, or final-gate behavior.

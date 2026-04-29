@@ -21,5 +21,5 @@
 - **Rationale**: Essential for safe AI consumption. Runners should branch on explicit signals rather than parsing unstructured stderr output.
 
 ### SKILL.md Policy Enforcement
-- **Decision**: Rewrite the orchestration section of `gh-address-cr/SKILL.md` to mandate that agents branch *only* on the machine summary reason codes and signals.
+- **Decision**: Rewrite the orchestration section of `skill/SKILL.md` to mandate that agents branch *only* on the machine summary reason codes and signals.
 - **Rationale**: Enforces the "Thin Skill" and "Behavioral Policy Layer" principles, decoupling agent reasoning from control plane state transitions.

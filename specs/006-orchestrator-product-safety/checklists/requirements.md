@@ -19,7 +19,7 @@ template content.
 - [x] `FR-001` Status-to-Action convergence is implemented for non-zero orchestrator control paths.
 - [x] `FR-002` Human intervention persistence is implemented with `waiting_for_human`,
   `handoff_reason`, and `artifact_path`, and successful submit clears intervention state.
-- [x] `FR-003` `gh-address-cr/SKILL.md` is aligned to policy-only branching on reason_code and next_action.
+- [x] `FR-003` `skill/SKILL.md` is aligned to policy-only branching on reason_code and next_action.
 - [x] `FR-004` Guardrail overrides (`max_concurrency`, `circuit_breaker_threshold`) are parsed from CLI/ENV and persisted to session config.
 - [x] `FR-005` Role-based dispatch visibility is enforced in `handle_step`.
 - [x] `FR-006` Orchestration lock (`completed: true`) is set on stop and revalidated against runtime truth in start/step.

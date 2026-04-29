@@ -37,7 +37,7 @@
 
 **Goal**: Make the packaged skill first-read entrypoint a concise adapter that routes agents to the runtime and does not redefine runtime workflow behavior.
 
-**Independent Test**: Reading `gh-address-cr/SKILL.md` proves it identifies itself as an adapter, routes first to the high-level runtime command, keeps runtime ownership explicit, and fails loudly when runtime compatibility is missing.
+**Independent Test**: Reading `skill/SKILL.md` proves it identifies itself as an adapter, routes first to the high-level runtime command, keeps runtime ownership explicit, and fails loudly when runtime compatibility is missing.
 
 ### Tests for User Story 1
 
@@ -47,10 +47,10 @@
 
 ### Implementation for User Story 1
 
-- [x] T012 [US1] Rewrite first-read adapter guidance in `gh-address-cr/SKILL.md`
-- [x] T013 [US1] Delete or compress duplicate workflow-state prose in `gh-address-cr/SKILL.md` and preserve runtime-owned details in `gh-address-cr/references/mode-producer-matrix.md`
-- [x] T014 [US1] Update assistant-specific thin-adapter hints in `gh-address-cr/agents/openai.yaml`
-- [x] T015 [US1] Update runtime compatibility wording in `gh-address-cr/runtime-requirements.json`
+- [x] T012 [US1] Rewrite first-read adapter guidance in `skill/SKILL.md`
+- [x] T013 [US1] Delete or compress duplicate workflow-state prose in `skill/SKILL.md` and preserve runtime-owned details in `skill/references/mode-producer-matrix.md`
+- [x] T014 [US1] Update assistant-specific thin-adapter hints in `skill/agents/openai.yaml`
+- [x] T015 [US1] Update runtime compatibility wording in `skill/runtime-requirements.json`
 
 **Checkpoint**: MVP complete. The packaged skill can be used as a thin adapter without relying on repository-only documentation.
 
@@ -70,8 +70,8 @@
 
 ### Implementation for User Story 2
 
-- [x] T019 [US2] Add packaged status-action reference in `gh-address-cr/references/status-action-map.md`
-- [x] T020 [US2] Link the status-action map from `gh-address-cr/SKILL.md`
+- [x] T019 [US2] Add packaged status-action reference in `skill/references/status-action-map.md`
+- [x] T020 [US2] Link the status-action map from `skill/SKILL.md`
 - [x] T021 [US2] Update status summary fixtures in `tests/fixtures/thin_skill_orchestration/status_summaries.json`
 
 **Checkpoint**: Agents can interpret runtime statuses without parsing prose or inventing an adapter-owned state machine.
@@ -109,8 +109,8 @@
 
 ### Implementation for User Story 3
 
-- [x] T031 [US3] Add packaged multi-agent orchestration reference in `gh-address-cr/references/multi-agent-orchestration.md`
-- [x] T032 [US3] Update multi-agent section in `gh-address-cr/SKILL.md`
+- [x] T031 [US3] Add packaged multi-agent orchestration reference in `skill/references/multi-agent-orchestration.md`
+- [x] T032 [US3] Update multi-agent section in `skill/SKILL.md`
 - [x] T033 [US3] Align runtime agent manifest role/action descriptions in `src/gh_address_cr/cli.py` without adding runner, scheduler, or spawning behavior
 - [x] T034 [US3] Update multi-agent fixture in `tests/fixtures/thin_skill_orchestration/multi_agent_session.json`
 
@@ -133,8 +133,8 @@
 
 ### Implementation for User Story 6
 
-- [x] T039 [US6] Update producer intake guidance in `gh-address-cr/references/local-review-adapter.md`
-- [x] T040 [US6] Update concise producer boundary in `gh-address-cr/SKILL.md`
+- [x] T039 [US6] Update producer intake guidance in `skill/references/local-review-adapter.md`
+- [x] T040 [US6] Update concise producer boundary in `skill/SKILL.md`
 - [x] T041 [US6] Update producer intake fixtures in `tests/fixtures/thin_skill_orchestration/producer_inputs/`
 
 **Checkpoint**: The workflow remains a PR review resolution control plane, not a review engine.
@@ -155,8 +155,8 @@
 
 ### Implementation for User Story 4
 
-- [x] T045 [US4] Add manual orchestration runbook with active-lease interruption recovery in `gh-address-cr/references/multi-agent-runbook.md`
-- [x] T046 [US4] Link the runbook from `gh-address-cr/SKILL.md`
+- [x] T045 [US4] Add manual orchestration runbook with active-lease interruption recovery in `skill/references/multi-agent-runbook.md`
+- [x] T046 [US4] Link the runbook from `skill/SKILL.md`
 - [x] T047 [US4] Align the feature quickstart with shipped runbook references in `specs/003-thin-skill-orchestration/quickstart.md`
 
 **Checkpoint**: A human operator can coordinate multi-agent work through the runtime contract without a new runner.
@@ -179,9 +179,9 @@
 ### Implementation for User Story 5
 
 - [x] T052 [US5] Update public architecture and boundary sections in `README.md`
-- [x] T053 [P] [US5] Update packaged advanced references in `gh-address-cr/references/mode-producer-matrix.md`
-- [x] T054 [P] [US5] Update packaged triage and evidence references in `gh-address-cr/references/cr-triage-checklist.md` and `gh-address-cr/references/evidence-ledger.md`
-- [x] T055 [P] [US5] Update assistant hint boundary wording in `gh-address-cr/agents/openai.yaml`
+- [x] T053 [P] [US5] Update packaged advanced references in `skill/references/mode-producer-matrix.md`
+- [x] T054 [P] [US5] Update packaged triage and evidence references in `skill/references/cr-triage-checklist.md` and `skill/references/evidence-ledger.md`
+- [x] T055 [P] [US5] Update assistant hint boundary wording in `skill/agents/openai.yaml`
 
 **Checkpoint**: Public docs agree on runtime ownership and path scope across repo-root and packaged skill payload.
 
@@ -191,12 +191,12 @@
 
 **Purpose**: Verify all changed contracts together and prepare for implementation review.
 
-- [x] T056 [P] Run documentation placeholder and contradiction scans for `README.md`, `gh-address-cr/SKILL.md`, `gh-address-cr/references/`, and `gh-address-cr/agents/openai.yaml`
+- [x] T056 [P] Run documentation placeholder and contradiction scans for `README.md`, `skill/SKILL.md`, `skill/references/`, and `skill/agents/openai.yaml`
 - [x] T057 [P] Run quickstart validation commands from `specs/003-thin-skill-orchestration/quickstart.md`
-- [x] T058 Run `ruff check gh-address-cr tests` for `gh-address-cr/` and `tests/`
+- [x] T058 Run `ruff check gh-address-cr tests` for `skill/` and `tests/`
 - [x] T059 Run `python3 -m unittest discover -s tests` for `tests/`
-- [x] T060 Run `python3 gh-address-cr/scripts/cli.py --help` for `gh-address-cr/scripts/cli.py`
-- [x] T061 Run `python3 gh-address-cr/scripts/cli.py adapter check-runtime` for `gh-address-cr/scripts/cli.py`
+- [x] T060 Run `python3 skill/scripts/cli.py --help` for `skill/scripts/cli.py`
+- [x] T061 Run `python3 skill/scripts/cli.py adapter check-runtime` for `skill/scripts/cli.py`
 - [x] T062 Run `git diff --check` from repository root `/Users/snow/Documents/GitHub/gh-address-cr-skill`
 - [x] T063 Update implementation evidence and residual risks in `specs/003-thin-skill-orchestration/quickstart.md`
 
@@ -209,10 +209,10 @@
 - **Setup (Phase 1)**: No dependencies.
 - **Stage 4 Foundational (Phase 2)**: Depends on Setup and blocks US1/US2.
 - **US1 Thin Skill Entry Contract (Phase 3)**: Depends on Stage 4 Foundational and is the MVP.
-- **US2 Structured Status Navigation (Phase 4)**: Depends on Stage 4 Foundational; can run after or alongside US1 with an adapter-doc owner coordinating `gh-address-cr/SKILL.md`.
+- **US2 Structured Status Navigation (Phase 4)**: Depends on Stage 4 Foundational; can run after or alongside US1 with an adapter-doc owner coordinating `skill/SKILL.md`.
 - **Stage 5 Contract Foundation (Phase 5)**: Depends on Setup and can start after US1 begins; blocks US3/US4/US6.
 - **US3 Multi-Agent Role Coordination (Phase 6)**: Depends on Stage 5 Contract Foundation.
-- **US6 Replaceable Review Producer Intake (Phase 7)**: Depends on Stage 5 Contract Foundation; can run in parallel with US3 except for shared `gh-address-cr/SKILL.md` edits.
+- **US6 Replaceable Review Producer Intake (Phase 7)**: Depends on Stage 5 Contract Foundation; can run in parallel with US3 except for shared `skill/SKILL.md` edits.
 - **US4 Orchestration Readiness (Phase 8)**: Depends on US3 role vocabulary for final runbook wording.
 - **US5 Documentation Consistency (Phase 9)**: Final documentation pass; depends on all selected story docs changes.
 - **Polish (Phase 10)**: Depends on selected story phases being complete.
@@ -220,7 +220,7 @@
 ### User Story Dependencies
 
 - **US1 (P1)**: MVP; no dependency on other user stories after Stage 4 Foundation.
-- **US2 (P1)**: Independent after Stage 4 Foundation; shares final `gh-address-cr/SKILL.md` link wording with US1.
+- **US2 (P1)**: Independent after Stage 4 Foundation; shares final `skill/SKILL.md` link wording with US1.
 - **US3 (P1)**: Independent after Stage 5 Foundation; runtime protocol tests may run separately from docs edits.
 - **US6 (P2)**: Independent after Stage 5 Foundation; can run in parallel with US3.
 - **US4 (P2)**: Depends on US3 role vocabulary and should not introduce runner behavior.
@@ -241,11 +241,11 @@
 
 ```text
 Agent A: US1 adapter entry contract
-  Owns gh-address-cr/SKILL.md, gh-address-cr/runtime-requirements.json, and gh-address-cr/agents/openai.yaml.
+  Owns skill/SKILL.md, skill/runtime-requirements.json, and skill/agents/openai.yaml.
   Coordinates all first-read SKILL.md edits.
 
 Agent B: US2 status-action map
-  Owns tests/test_thin_skill_orchestration.py, tests/fixtures/thin_skill_orchestration/status_summaries.json, and gh-address-cr/references/status-action-map.md.
+  Owns tests/test_thin_skill_orchestration.py, tests/fixtures/thin_skill_orchestration/status_summaries.json, and skill/references/status-action-map.md.
   Requests Agent A to add only the final SKILL.md link.
 ```
 
@@ -253,18 +253,18 @@ Agent B: US2 status-action map
 
 ```text
 Agent C: US3 role coordination
-  Owns tests/test_agent_protocol.py, tests/test_control_plane_workflow.py, tests/fixtures/thin_skill_orchestration/multi_agent_session.json, and gh-address-cr/references/multi-agent-orchestration.md.
+  Owns tests/test_agent_protocol.py, tests/test_control_plane_workflow.py, tests/fixtures/thin_skill_orchestration/multi_agent_session.json, and skill/references/multi-agent-orchestration.md.
   May only align src/gh_address_cr/cli.py manifest descriptions; must not add runner behavior.
 
 Agent D: US6 producer intake
-  Owns tests/test_findings_intake.py, tests/test_native_intake.py, tests/fixtures/thin_skill_orchestration/producer_inputs/, and gh-address-cr/references/local-review-adapter.md.
+  Owns tests/test_findings_intake.py, tests/test_native_intake.py, tests/fixtures/thin_skill_orchestration/producer_inputs/, and skill/references/local-review-adapter.md.
 ```
 
 ### Final Documentation Pass
 
 ```text
 Agent E: US5 docs consistency
-  Owns README.md plus final consistency checks across gh-address-cr/SKILL.md, gh-address-cr/references/, and gh-address-cr/agents/openai.yaml.
+  Owns README.md plus final consistency checks across skill/SKILL.md, skill/references/, and skill/agents/openai.yaml.
   Runs after story docs settle to avoid parallel edits to the same public docs.
 ```
 
@@ -272,7 +272,7 @@ Agent E: US5 docs consistency
 
 ```text
 Agent F: US4 manual orchestration runbook
-  Owns gh-address-cr/references/multi-agent-runbook.md and specs/003-thin-skill-orchestration/quickstart.md.
+  Owns skill/references/multi-agent-runbook.md and specs/003-thin-skill-orchestration/quickstart.md.
   Must not add scheduler, spawning, polling loop, or generic runner implementation.
 ```
 

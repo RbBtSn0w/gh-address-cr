@@ -57,7 +57,7 @@ python3 -m gh_address_cr final-gate <owner/repo> <pr_number>
 Current local size snapshot:
 
 ```text
-gh-address-cr/                       776 KiB
+skill/                       776 KiB
 src/gh_address_cr/                  1240 KiB
 src/gh_address_cr/legacy_scripts/    352 KiB
 native runtime excluding shims        ~888 KiB

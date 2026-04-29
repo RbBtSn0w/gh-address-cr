@@ -55,7 +55,7 @@ specs/003-thin-skill-orchestration/
 ### Source Code (repository root)
 
 ```text
-gh-address-cr/
+skill/
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
@@ -86,7 +86,7 @@ tests/
 └── test_skill_runtime_shim.py
 ```
 
-**Structure Decision**: This feature uses the existing single-repository layout. Packaged skill changes stay under `gh-address-cr/`; runtime contract checks and validators stay under `tests/` and `src/gh_address_cr/`; product documentation stays in `README.md` and feature artifacts under `specs/003-thin-skill-orchestration/`. Existing runtime protocol modules are listed as contract surfaces, not as authorization to add a scheduler, agent spawner, generic runner, or built-in review engine in this stage.
+**Structure Decision**: This feature uses the existing single-repository layout. Packaged skill changes stay under `skill/`; runtime contract checks and validators stay under `tests/` and `src/gh_address_cr/`; product documentation stays in `README.md` and feature artifacts under `specs/003-thin-skill-orchestration/`. Existing runtime protocol modules are listed as contract surfaces, not as authorization to add a scheduler, agent spawner, generic runner, or built-in review engine in this stage.
 
 ## Phase 0: Research Plan
 

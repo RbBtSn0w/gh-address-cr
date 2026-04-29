@@ -505,14 +505,14 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         sanitized = module.sanitize_text(
             "Repo octo/example uses tmp/file.json and https://example.com/docs/a "
-            "plus /Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "plus /Users/snow/workspace/skill/scripts/cli.py "
             "and C:\\Users\\snow\\workspace\\notes.txt."
         )
 
         self.assertIn("octo/example", sanitized)
         self.assertIn("tmp/file.json", sanitized)
         self.assertIn("https://example.com/docs/a", sanitized)
-        self.assertIn(".../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn(".../skill/scripts/cli.py", sanitized)
         self.assertIn(".../workspace/notes.txt", sanitized)
         self.assertNotIn("/Users/snow/workspace", sanitized)
         self.assertNotIn("C:\\Users\\snow\\workspace\\notes.txt", sanitized)
@@ -521,11 +521,11 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_mounted_path_under_test")
 
         sanitized = module.sanitize_text(
-            "Mounted path file is /mnt/c/Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "Mounted path file is /mnt/c/Users/snow/workspace/skill/scripts/cli.py "
             "and build cache is /mnt/c/var/home/snow/tmp/state.json."
         )
 
-        self.assertIn(".../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn(".../skill/scripts/cli.py", sanitized)
         self.assertIn(".../tmp/state.json", sanitized)
         self.assertNotIn("/mnt/c/Users/snow", sanitized)
         self.assertNotIn("/mnt/c/var/home/snow", sanitized)
@@ -534,11 +534,11 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_file_uri_under_test")
 
         sanitized = module.sanitize_text(
-            "Local file URI file:///Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "Local file URI file:///Users/snow/workspace/skill/scripts/cli.py "
             "should be redacted while https://example.com/file:///docs stays intact."
         )
 
-        self.assertIn("file://.../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn("file://.../skill/scripts/cli.py", sanitized)
         self.assertIn("https://example.com/file:///docs", sanitized)
         self.assertNotIn("file:///Users/snow/workspace", sanitized)
 

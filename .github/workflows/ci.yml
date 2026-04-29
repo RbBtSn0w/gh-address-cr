@@ -38,15 +38,15 @@ jobs:
       - name: Shell syntax
         run: |
           shopt -s nullglob
-          sh_files=(gh-address-cr/scripts/*.sh)
+          sh_files=(skill/scripts/*.sh)
           if (( ${#sh_files[@]} > 0 )); then
             bash -n "${sh_files[@]}"
           fi
 
       - name: CLI smoke
         run: |
-          python gh-address-cr/scripts/cli.py --help
-          python gh-address-cr/scripts/cli.py cr-loop --help
+          python skill/scripts/cli.py --help
+          python skill/scripts/cli.py cr-loop --help
 
       - name: Package build
         run: |

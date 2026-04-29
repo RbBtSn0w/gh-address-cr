@@ -374,6 +374,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("Local editable development install", text)
         self.assertIn("python3 -m pip install -e .", text)
         self.assertIn("Packaged skill install", text)
+        self.assertIn("npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill", text)
+        self.assertNotIn("--skill gh-address-cr", text)
         self.assertIn("does not install the runtime CLI package", text)
         self.assertIn("Upgrade from skill-shim usage", text)
         self.assertIn("reinstall the runtime CLI with `pipx` or `uv tool`", text)

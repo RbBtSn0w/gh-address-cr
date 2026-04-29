@@ -42,7 +42,7 @@
   verified, classified as `fix` / `clarify` / `defer` / `reject`, replied to,
   resolved, and proven by `final-gate`?
 - **Packaged skill boundary**: Does the plan keep installable-skill behavior
-  under `gh-address-cr/` and use repo-root paths only in repo-root docs/tests?
+  under `skill/` and use repo-root paths only in repo-root docs/tests?
   Does it treat the skill as a **Thin Adapter and Behavioral Policy Layer**?
 - **External intake replaceability**: Does the plan preserve the **Normalized
   Findings Contract** and avoid coupling the control plane to a specific

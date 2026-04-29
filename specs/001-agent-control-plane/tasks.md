@@ -13,7 +13,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - **Lease Coordinator Agent**: owns `src/gh_address_cr/core/leases.py`, lease state transitions, conflict detection, and lease tests.
 - **GitHub Evidence Agent**: owns `src/gh_address_cr/github/`, `src/gh_address_cr/evidence/`, side-effect idempotency, retry records, and GitHub IO tests.
 - **Gate Agent**: owns `src/gh_address_cr/core/gate.py`, final-gate behavior, and gate tests.
-- **Skill Adapter Agent**: owns `gh-address-cr/SKILL.md`, `gh-address-cr/scripts/cli.py`, `gh-address-cr/runtime-requirements.json`, `gh-address-cr/agents/`, `gh-address-cr/references/`, and skill boundary docs/tests.
+- **Skill Adapter Agent**: owns `skill/SKILL.md`, `skill/scripts/cli.py`, `skill/runtime-requirements.json`, `skill/agents/`, `skill/references/`, and skill boundary docs/tests.
 - **Verification Agent**: owns test orchestration, task/spec coverage checks, and final validation commands in `tests/` and `specs/001-agent-control-plane/quickstart.md`.
 
 ## Parallel Execution Policy
@@ -39,7 +39,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - [X] T002 Owner: Runtime CLI Agent - Add minimal package markers in `src/gh_address_cr/__init__.py`, `src/gh_address_cr/agent/__init__.py`, `src/gh_address_cr/core/__init__.py`, `src/gh_address_cr/github/__init__.py`, `src/gh_address_cr/intake/__init__.py`, and `src/gh_address_cr/evidence/__init__.py`.
 - [X] T003 Owner: Runtime CLI Agent - Update `pyproject.toml` with runtime package metadata, Python `>=3.10`, setuptools package discovery from `src`, and console script `gh-address-cr = "gh_address_cr.cli:main"`.
 - [X] T004 Owner: Runtime CLI Agent - Add module entrypoint `src/gh_address_cr/__main__.py` that invokes `gh_address_cr.cli.main`.
-- [X] T005 Owner: Skill Adapter Agent - Add `gh-address-cr/runtime-requirements.json` declaring required runtime package name, minimum runtime version, supported protocol version range, and required public entrypoints.
+- [X] T005 Owner: Skill Adapter Agent - Add `skill/runtime-requirements.json` declaring required runtime package name, minimum runtime version, supported protocol version range, and required public entrypoints.
 - [X] T006 Owner: Verification Agent - Add shared test helpers for repo root, skill root, runtime source root, command execution, and environment-path overrides in `tests/helpers.py`.
 - [X] T007 Owner: Verification Agent - Document the multi-agent ownership lanes in `specs/001-agent-control-plane/quickstart.md`.
 - [X] T008 Owner: Verification Agent - Run `python3 -m unittest discover -s tests` and record the expected setup-only failures in `specs/001-agent-control-plane/quickstart.md`.
@@ -49,7 +49,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 **Purpose**: Establish fail-fast contracts, schema validation, tool preflight, and minimal runtime wiring required by every story.
 
 - [X] T009 [P] Owner: Verification Agent - Add a failing console entrypoint test for `gh-address-cr --help` and `python3 -m gh_address_cr --help` in `tests/test_runtime_packaging.py`.
-- [X] T010 [P] Owner: Skill Adapter Agent - Add a failing shim delegation test that proves `python3 gh-address-cr/scripts/cli.py --help` exits non-zero with a clear runtime-missing error when the runtime is absent in `tests/test_skill_runtime_shim.py`.
+- [X] T010 [P] Owner: Skill Adapter Agent - Add a failing shim delegation test that proves `python3 skill/scripts/cli.py --help` exits non-zero with a clear runtime-missing error when the runtime is absent in `tests/test_skill_runtime_shim.py`.
 - [X] T011 [P] Owner: Protocol Agent - Add failing ActionRequest schema tests for required fields, `item_id`, `role`, `allowed_actions`, and `required_evidence` in `tests/test_agent_protocol.py`.
 - [X] T012 [P] Owner: Protocol Agent - Add failing ActionResponse schema tests for `fix`, `clarify`, `defer`, and `reject` outcomes with exact evidence assertions in `tests/test_agent_protocol.py`.
 - [X] T013 [P] Owner: Lease Coordinator Agent - Add failing lease lifecycle tests for `active`, `released`, `expired`, and `rejected` transitions in `tests/test_claim_leases.py`.
@@ -75,18 +75,18 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 
 **Independent Test**: Installing the runtime exposes `gh-address-cr` and `python3 -m gh_address_cr`; invoking the skill shim delegates to that runtime or fails loudly before mutating session state.
 
-- [X] T029 [P] [US6] Owner: Runtime CLI Agent - Add failing packaging test that imports `gh_address_cr.cli` from `src/gh_address_cr/cli.py` and rejects importing runtime code from `gh-address-cr/` in `tests/test_runtime_packaging.py`.
-- [X] T030 [P] [US6] Owner: Skill Adapter Agent - Add failing test that scans `gh-address-cr/` and rejects copied runtime modules outside approved shim/reference paths in `tests/test_skill_runtime_shim.py`.
+- [X] T029 [P] [US6] Owner: Runtime CLI Agent - Add failing packaging test that imports `gh_address_cr.cli` from `src/gh_address_cr/cli.py` and rejects importing runtime code from `skill/` in `tests/test_runtime_packaging.py`.
+- [X] T030 [P] [US6] Owner: Skill Adapter Agent - Add failing test that scans `skill/` and rejects copied runtime modules outside approved shim/reference paths in `tests/test_skill_runtime_shim.py`.
 - [X] T031 [P] [US6] Owner: Skill Adapter Agent - Add failing compatibility preflight tests for missing runtime, too-old runtime version, unsupported protocol version, and missing entrypoints in `tests/test_skill_runtime_shim.py`.
 - [X] T032 [US6] Owner: Runtime CLI Agent - Implement package version and protocol version exports in `src/gh_address_cr/__init__.py`.
 - [X] T033 [US6] Owner: Runtime CLI Agent - Implement runtime compatibility reporting in `src/gh_address_cr/cli.py` for `gh-address-cr adapter check-runtime`.
-- [X] T034 [US6] Owner: Verification Agent - Run the public command parity tests from `tests/test_runtime_packaging.py` before replacing `gh-address-cr/scripts/cli.py`.
-- [X] T035 [US6] Owner: Skill Adapter Agent - Replace `gh-address-cr/scripts/cli.py` with a compatibility shim that loads the installed runtime entrypoint or exits with a clear remediation message before session mutation.
-- [X] T036 [US6] Owner: Skill Adapter Agent - Update `gh-address-cr/SKILL.md` to describe the packaged skill as a thin adapter and point all stateful work to the runtime CLI.
-- [X] T037 [US6] Owner: Skill Adapter Agent - Update `gh-address-cr/references/` docs to remove any claim that the skill owns runtime state machines or GitHub side effects.
+- [X] T034 [US6] Owner: Verification Agent - Run the public command parity tests from `tests/test_runtime_packaging.py` before replacing `skill/scripts/cli.py`.
+- [X] T035 [US6] Owner: Skill Adapter Agent - Replace `skill/scripts/cli.py` with a compatibility shim that loads the installed runtime entrypoint or exits with a clear remediation message before session mutation.
+- [X] T036 [US6] Owner: Skill Adapter Agent - Update `skill/SKILL.md` to describe the packaged skill as a thin adapter and point all stateful work to the runtime CLI.
+- [X] T037 [US6] Owner: Skill Adapter Agent - Update `skill/references/` docs to remove any claim that the skill owns runtime state machines or GitHub side effects.
 - [X] T038 [US6] Owner: Verification Agent - Update `README.md` to document separate runtime installation, packaged skill installation, and compatibility shim behavior.
-- [X] T039 [US6] Owner: Verification Agent - Run `python3 gh-address-cr/scripts/cli.py --help` and assert the output either delegates to runtime help or fails loudly with no session mutation.
-- [X] T040 [US6] Owner: Verification Agent - Run `python3 -m unittest tests.test_runtime_packaging tests.test_skill_runtime_shim` and verify `gh-address-cr/` contains no runtime package copy via `tests/test_skill_runtime_shim.py`.
+- [X] T039 [US6] Owner: Verification Agent - Run `python3 skill/scripts/cli.py --help` and assert the output either delegates to runtime help or fails loudly with no session mutation.
+- [X] T040 [US6] Owner: Verification Agent - Run `python3 -m unittest tests.test_runtime_packaging tests.test_skill_runtime_shim` and verify `skill/` contains no runtime package copy via `tests/test_skill_runtime_shim.py`.
 
 ## Phase 4: User Story 1 - Review Initialization And Inspection (Priority: P1)
 
@@ -121,8 +121,8 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - [X] T058 [US2] Owner: Runtime CLI Agent - Implement `agent submit` command in `src/gh_address_cr/cli.py`.
 - [X] T059 [US2] Owner: Runtime CLI Agent - Update `src/gh_address_cr/core/workflow.py` to apply accepted local ActionResponse results to session state.
 - [X] T060 [US2] Owner: Protocol Agent - Add machine-readable error codes for invalid ActionResponse submissions in `src/gh_address_cr/agent/responses.py`.
-- [X] T061 [US2] Owner: Skill Adapter Agent - Update `gh-address-cr/SKILL.md` with the ActionRequest/ActionResponse contract and the allowed `fix`, `clarify`, `defer`, and `reject` outcomes.
-- [X] T062 [US2] Owner: Skill Adapter Agent - Add assistant-specific protocol hints in `gh-address-cr/agents/openai.yaml`.
+- [X] T061 [US2] Owner: Skill Adapter Agent - Update `skill/SKILL.md` with the ActionRequest/ActionResponse contract and the allowed `fix`, `clarify`, `defer`, and `reject` outcomes.
+- [X] T062 [US2] Owner: Skill Adapter Agent - Add assistant-specific protocol hints in `skill/agents/openai.yaml`.
 - [X] T063 [US2] Owner: Verification Agent - Update `specs/001-agent-control-plane/contracts/agent-protocol.md` if implementation exposes stricter validation error names.
 - [X] T064 [US2] Owner: Verification Agent - Run `python3 -m unittest tests.test_agent_protocol tests.test_control_plane_workflow` and record exact evidence in `specs/001-agent-control-plane/quickstart.md`.
 
@@ -143,7 +143,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - [X] T073 [US5] Owner: Runtime CLI Agent - Implement `agent leases` and `agent reclaim` command routing in `src/gh_address_cr/cli.py`.
 - [X] T074 [US5] Owner: Runtime CLI Agent - Update `src/gh_address_cr/core/workflow.py` so accepted submissions require an active compatible lease.
 - [X] T075 [US5] Owner: GitHub Evidence Agent - Ensure lease events append evidence records through `src/gh_address_cr/evidence/ledger.py`.
-- [X] T076 [US5] Owner: Skill Adapter Agent - Update `gh-address-cr/SKILL.md` with coordinator, fix-agent, review-agent, verifier-agent, docs-agent, and release-agent responsibilities.
+- [X] T076 [US5] Owner: Skill Adapter Agent - Update `skill/SKILL.md` with coordinator, fix-agent, review-agent, verifier-agent, docs-agent, and release-agent responsibilities.
 - [X] T077 [US5] Owner: Verification Agent - Add multi-agent examples to `specs/001-agent-control-plane/quickstart.md` using separate `agent next` and `agent submit` commands for independent items.
 - [X] T078 [US5] Owner: Verification Agent - Run `python3 -m unittest tests.test_claim_leases tests.test_agent_protocol tests.test_control_plane_workflow` and record exact evidence in `specs/001-agent-control-plane/quickstart.md`.
 
@@ -162,7 +162,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - [X] T085 [US4] Owner: Runtime CLI Agent - Wire `final-gate` command output and non-zero failure behavior in `src/gh_address_cr/cli.py`.
 - [X] T086 [US4] Owner: GitHub Evidence Agent - Implement review-state provider interface in `src/gh_address_cr/github/reviews.py`.
 - [X] T087 [US4] Owner: GitHub Evidence Agent - Implement thread-state provider fields required by final-gate in `src/gh_address_cr/github/threads.py`.
-- [X] T088 [US4] Owner: Skill Adapter Agent - Update `gh-address-cr/SKILL.md` to forbid completion claims before `gh-address-cr final-gate` passes.
+- [X] T088 [US4] Owner: Skill Adapter Agent - Update `skill/SKILL.md` to forbid completion claims before `gh-address-cr final-gate` passes.
 - [X] T089 [US4] Owner: Verification Agent - Update `README.md` final-gate section with required summary fields and failure semantics.
 - [X] T090 [US4] Owner: Verification Agent - Run `python3 -m unittest tests.test_final_gate tests.test_control_plane_workflow` and record exact evidence in `specs/001-agent-control-plane/quickstart.md`.
 
@@ -183,7 +183,7 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 - [X] T099 [US3] Owner: Runtime CLI Agent - Wire publish-ready workflow transitions in `src/gh_address_cr/core/workflow.py`.
 - [X] T100 [US3] Owner: Runtime CLI Agent - Add an explicit resolve-only guard in `src/gh_address_cr/core/workflow.py` so resolve publication requires accepted evidence and reply-ready state before calling GitHub adapters.
 - [X] T101 [US3] Owner: Runtime CLI Agent - Add resume-token display and recovery command output in `src/gh_address_cr/cli.py`.
-- [X] T102 [US3] Owner: Skill Adapter Agent - Update `gh-address-cr/references/` to describe evidence-ledger audit expectations without exposing internal implementation APIs as agent-safe commands.
+- [X] T102 [US3] Owner: Skill Adapter Agent - Update `skill/references/` to describe evidence-ledger audit expectations without exposing internal implementation APIs as agent-safe commands.
 - [X] T103 [US3] Owner: Verification Agent - Run `python3 -m unittest tests.test_evidence_ledger tests.test_control_plane_workflow` and record exact evidence in `specs/001-agent-control-plane/quickstart.md`.
 
 ## Phase 9: Public Compatibility And Migration
@@ -191,11 +191,11 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 **Purpose**: Preserve existing public command semantics while moving runtime ownership outside the skill.
 
 - [X] T104 [P] Owner: Runtime CLI Agent - Add end-to-end compatibility tests for existing public commands `review`, `threads`, `findings`, `adapter`, `review-to-findings`, `final-gate`, and `cr-loop --help` in `tests/test_runtime_packaging.py`.
-- [X] T105 [P] Owner: Skill Adapter Agent - Add shim compatibility tests for legacy invocation `python3 gh-address-cr/scripts/cli.py <command>` in `tests/test_skill_runtime_shim.py`.
+- [X] T105 [P] Owner: Skill Adapter Agent - Add shim compatibility tests for legacy invocation `python3 skill/scripts/cli.py <command>` in `tests/test_skill_runtime_shim.py`.
 - [X] T106 Owner: Runtime CLI Agent - Preserve public command names and summary field names in `src/gh_address_cr/cli.py`.
-- [X] T107 Owner: Skill Adapter Agent - Preserve skill-root-relative path language in `gh-address-cr/SKILL.md` and repo-root path language in `README.md`.
+- [X] T107 Owner: Skill Adapter Agent - Preserve skill-root-relative path language in `skill/SKILL.md` and repo-root path language in `README.md`.
 - [X] T108 Owner: Verification Agent - Update `specs/001-agent-control-plane/contracts/cli-contract.md` if compatibility behavior becomes stricter during implementation.
-- [X] T109 Owner: Verification Agent - Run `python3 gh-address-cr/scripts/cli.py cr-loop --help` and record exact output expectation in `specs/001-agent-control-plane/quickstart.md`.
+- [X] T109 Owner: Verification Agent - Run `python3 skill/scripts/cli.py cr-loop --help` and record exact output expectation in `specs/001-agent-control-plane/quickstart.md`.
 
 ## Phase 10: Polish And Cross-Cutting Verification
 
@@ -203,13 +203,13 @@ Use these lanes when assigning work to parallel Codex agents. Each lane owns a d
 
 - [X] T110 [P] Owner: Verification Agent - Run `ruff check gh-address-cr src tests` and fix reported issues in the owning files.
 - [X] T111 [P] Owner: Verification Agent - Run `python3 -m unittest discover -s tests` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
-- [X] T112 [P] Owner: Verification Agent - Run `python3 gh-address-cr/scripts/cli.py --help` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
+- [X] T112 [P] Owner: Verification Agent - Run `python3 skill/scripts/cli.py --help` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
 - [X] T113 [P] Owner: Verification Agent - Run `python3 -m gh_address_cr --help` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
-- [X] T114 [P] Owner: Verification Agent - Run `python3 gh-address-cr/scripts/cli.py final-gate --help` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
+- [X] T114 [P] Owner: Verification Agent - Run `python3 skill/scripts/cli.py final-gate --help` and record exact pass/fail evidence in `specs/001-agent-control-plane/quickstart.md`.
 - [X] T115 Owner: Verification Agent - Check every FR in `specs/001-agent-control-plane/spec.md` has at least one task in `specs/001-agent-control-plane/tasks.md`.
 - [X] T116 Owner: Verification Agent - Check every public command in `specs/001-agent-control-plane/contracts/cli-contract.md` has a packaging or workflow test in `tests/`.
 - [X] T117 Owner: Verification Agent - Check every ActionRequest, ActionResponse, ClaimLease, CapabilityManifest, EvidenceRecord, SideEffectAttempt, RuntimeCompatibility, and LeasePolicy field in `specs/001-agent-control-plane/data-model.md` has validation coverage in `tests/`.
-- [X] T118 Owner: Verification Agent - Run `git diff --check` for whitespace validation across `specs/001-agent-control-plane/tasks.md`, `README.md`, `gh-address-cr/SKILL.md`, and `src/gh_address_cr/`.
+- [X] T118 Owner: Verification Agent - Run `git diff --check` for whitespace validation across `specs/001-agent-control-plane/tasks.md`, `README.md`, `skill/SKILL.md`, and `src/gh_address_cr/`.
 - [X] T119 Owner: Verification Agent - Prepare the implementation readiness note structure in `specs/001-agent-control-plane/quickstart.md` listing blocker categories, verification commands, and which agent lane owns each blocker.
 
 ## Phase 11: Analysis Remediation Gate
