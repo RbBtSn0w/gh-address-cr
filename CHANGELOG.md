@@ -1,3 +1,9 @@
+## [2.0.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.0...v2.0.1) (2026-04-29)
+
+### Bug Fixes
+
+* trigger PyPI release after trusted publisher migration ([9447fa6](https://github.com/RbBtSn0w/gh-address-cr/commit/9447fa6e5d78353ec77d66ea5dd75094a115335f))
+
 ## [2.0.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v1.5.1...v2.0.0) (2026-04-29)
 
 ### ⚠ BREAKING CHANGES
