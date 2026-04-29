@@ -13,7 +13,7 @@ from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestC
 
 
 PYPROJECT = ROOT / "pyproject.toml"
-RELEASE_CONFIG = ROOT / ".releaserc.json"
+RELEASE_CONFIG = ROOT / "release.config.cjs"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 README = ROOT / "README.md"
@@ -305,16 +305,17 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('__version__ = "1.2.3"', init_file.read_text(encoding="utf-8"))
 
     def test_semantic_release_prepares_python_package_version(self):
-        config = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))
-        plugin_names = [plugin[0] if isinstance(plugin, list) else plugin for plugin in config["plugins"]]
+        text = RELEASE_CONFIG.read_text(encoding="utf-8")
 
-        self.assertIn("@semantic-release/exec", plugin_names)
-        exec_plugin = next(plugin for plugin in config["plugins"] if isinstance(plugin, list) and plugin[0] == "@semantic-release/exec")
-        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", exec_plugin[1]["prepareCmd"])
-
-        git_plugin = next(plugin for plugin in config["plugins"] if isinstance(plugin, list) and plugin[0] == "@semantic-release/git")
-        self.assertIn("pyproject.toml", git_plugin[1]["assets"])
-        self.assertIn("src/gh_address_cr/__init__.py", git_plugin[1]["assets"])
+        self.assertIn("@semantic-release/exec", text)
+        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", text)
+        self.assertIn("@semantic-release/git", text)
+        self.assertIn('"pyproject.toml"', text)
+        self.assertIn('"src/gh_address_cr/__init__.py"', text)
+        self.assertIn("@semantic-release/commit-analyzer", text)
+        self.assertIn("@semantic-release/release-notes-generator", text)
+        self.assertIn("parserOpts: releaseParserOpts", text)
+        self.assertIn(r"(\\S.*)", text)
 
     def test_ci_workflow_has_build_install_and_installed_smoke_gates(self):
         text = CI_WORKFLOW.read_text(encoding="utf-8")
