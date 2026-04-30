@@ -236,6 +236,11 @@ gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/rep
 gh-address-cr final-gate owner/repo 123
 ```
 
+Classification and resolution are deliberately separate protocol phases:
+
+- `agent classify` records triage evidence on the item before a mutating fixer lease exists. If `agent next --role fixer` returns `MISSING_CLASSIFICATION`, run `agent classify ... --classification <fix|clarify|defer|reject> --note <why>` first.
+- `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`.
+
 Role split:
 
 - `coordinator`: deterministic runtime CLI
@@ -249,6 +254,7 @@ Role split:
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
 Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`.
+The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one commit covers them, submit a batch response, publish, then claim the next set.
 
 Minimal `BatchActionResponse` shape:
 
@@ -279,6 +285,22 @@ Minimal `BatchActionResponse` shape:
   ]
 }
 ```
+
+Manual helper path for an issued runtime `ActionRequest`:
+
+```bash
+python3 skill/scripts/submit_action.py <action-request.json> \
+  --agent-id codex-fixer-1 \
+  --resolution fix \
+  --note "Fixed the thread." \
+  --commit-hash abc123 \
+  --files src/example.py \
+  --validation-cmd "python3 -m unittest tests.test_example=passed"
+
+python3 -m gh_address_cr agent submit owner/repo 123 --input <generated-action-response.json>
+```
+
+The helper also accepts older loop-request artifacts with top-level `repo` and `pr_number`, but runtime `ActionRequest` files use `repository_context.repo` and `repository_context.pr_number`.
 
 Main entrypoint examples:
 
@@ -1057,6 +1079,7 @@ python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/r
 python3 skill/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 python3 skill/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
 python3 skill/scripts/cli.py submit-action <loop_request_path> --resolution fix --note "Fixed it" -- <resume_command>
+python3 skill/scripts/submit_action.py <action-request.json> --agent-id codex-fixer-1 --resolution fix --note "Fixed it" --files src/example.py --validation-cmd "python3 -m unittest tests.test_example=passed"
 python3 skill/scripts/cli.py final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
 

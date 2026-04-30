@@ -87,6 +87,8 @@ Use the runtime as the coordinator:
 
 - `gh-address-cr agent manifest`
   - discover supported roles, actions, formats, and protocol versions
+- `gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>`
+  - records triage classification evidence before a mutating fixer lease is issued
 - `gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>`
   - claims one eligible item and writes an `ActionRequest`
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
@@ -110,9 +112,25 @@ Role boundaries:
 - publisher: deterministic runtime side-effect role
 - gatekeeper: deterministic final-gate role
 
+Classification is triage-phase evidence. Resolution is response-phase evidence. Do not satisfy `MISSING_CLASSIFICATION` by adding a `resolution` field to a response file; run `agent classify` first. Do not satisfy `MISSING_RESOLUTION` by reclassifying the item; add `resolution` to the `ActionResponse` and rerun `agent submit`.
+
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
 Fix responses require changed files and validation evidence. Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. The default manifest exposes `max_parallel_claims: 2`, so claim the allowed leases, submit accepted batch evidence for those leased threads, publish, then claim the next set.
+
+If you receive an `ActionRequest` path and need a local response artifact, the helper accepts runtime request files with `repository_context.repo` and `repository_context.pr_number`:
+
+```bash
+python3 scripts/submit_action.py <action-request.json> \
+  --agent-id codex-fixer-1 \
+  --resolution fix \
+  --note "Fixed the thread." \
+  --commit-hash abc123 \
+  --files src/example.py \
+  --validation-cmd "python3 -m unittest tests.test_example=passed"
+```
+
+Then submit the generated `ActionResponse` with the runtime command printed by the helper.
 
 ## Advanced References
 
