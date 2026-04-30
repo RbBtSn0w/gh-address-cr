@@ -464,6 +464,67 @@ else:
         self.assertEqual(summary["waiting_on"], "local_findings")
         self.assertIn("normal review", summary["next_action"])
 
+    def test_cli_review_auto_simple_rejects_local_findings_without_switching_commands(self):
+        findings = Path(self.temp_dir.name) / "findings.json"
+        findings.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Local finding",
+                        "body": "This local finding makes simple address ineligible.",
+                        "path": "src/local.py",
+                        "line": 9,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.run_cmd([sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(findings)])
+        self.install_fake_gh_for_threads([])
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--auto-simple", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "AUTO_SIMPLE_NOT_ELIGIBLE")
+        self.assertEqual(summary["waiting_on"], "local_findings")
+        self.assertIn("rerun this command", summary["next_action"])
+        self.assertNotIn("rerun address", summary["next_action"])
+
+    def test_cli_address_does_not_emit_simple_request_for_local_gate_failures(self):
+        findings = Path(self.temp_dir.name) / "findings.json"
+        findings.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Local finding",
+                        "body": "Closed local finding is missing validation.",
+                        "path": "src/local.py",
+                        "line": 9,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.run_cmd([sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(findings)])
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = next(iter(session["items"].values()))
+        item["state"] = "fixed"
+        item["status"] = "CLOSED"
+        item["blocking"] = False
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.install_fake_gh_for_threads([])
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "AUTO_SIMPLE_NOT_ELIGIBLE")
+        self.assertEqual(summary["waiting_on"], "local_findings")
+        self.assertFalse(list(self.workspace_dir().glob("simple-address-request-*.json")))
+
     def test_cli_findings_help_mentions_source_required_for_sync(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "findings", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1098,12 +1159,13 @@ else:
                 str(adapter),
                 "--human",
                 "--machine",
+                "--auto-simple",
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "PASSED")
-        self.assertEqual(json.loads(seen_args.read_text(encoding="utf-8")), ["--human", "--machine"])
+        self.assertEqual(json.loads(seen_args.read_text(encoding="utf-8")), ["--human", "--machine", "--auto-simple"])
 
     def test_cli_review_fails_fast_when_gh_is_missing(self):
         self.env["PATH"] = str(self.bin_dir)

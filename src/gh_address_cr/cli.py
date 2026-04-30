@@ -819,6 +819,13 @@ def _first_blocking_item(session: dict) -> dict | None:
     return None
 
 
+def _first_local_item(session: dict) -> dict | None:
+    for item in session.get("items", {}).values():
+        if isinstance(item, dict) and item.get("item_kind") == "local_finding":
+            return item
+    return None
+
+
 def _native_summary(
     *,
     command: str,
@@ -896,6 +903,17 @@ def _blocking_local_items(session: dict) -> list[dict]:
     ]
 
 
+def _auto_simple_local_gate_failed(result: core_gate.GateResult) -> bool:
+    return any(
+        code
+        in {
+            core_gate.FINAL_GATE_BLOCKING_LOCAL_ITEMS,
+            core_gate.FINAL_GATE_MISSING_VALIDATION_EVIDENCE,
+        }
+        for code in result.failure_codes
+    )
+
+
 def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, command: str, run_id: str) -> Path:
     request_path = workspace_root(repo, pr_number) / f"simple-address-request-{run_id}-{uuid4().hex}.json"
     request = {
@@ -926,7 +944,8 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("adapter_cmd", nargs="*")
-    parser.add_argument("--auto-simple", action="store_true")
+    if command == "review":
+        parser.add_argument("--auto-simple", action="store_true")
     parser.add_argument("--input")
     parser.add_argument("--source")
     parser.add_argument("--sync", action="store_true")
@@ -940,6 +959,8 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
         parsed.adapter_cmd.extend(unknown)
     if parsed.adapter_cmd and parsed.adapter_cmd[0] == "--":
         parsed.adapter_cmd = parsed.adapter_cmd[1:]
+    if not hasattr(parsed, "auto_simple"):
+        parsed.auto_simple = False
     return parsed
 
 
@@ -997,7 +1018,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         if auto_simple and _blocking_local_items(session):
             next_action = (
                 "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
-                "to handle blocking local findings, then rerun address."
+                "to handle local findings, then rerun this command."
             )
             item = _blocking_local_items(session)[0]
             _set_loop_state(
@@ -1077,6 +1098,38 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         return 5
 
     if auto_simple and not result.passed:
+        if _auto_simple_local_gate_failed(result):
+            next_action = (
+                "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
+                "to handle local findings, then rerun this command."
+            )
+            item = _first_local_item(session) or _first_blocking_item(session)
+            _set_loop_state(
+                session,
+                run_id=run_id,
+                status="BLOCKED",
+                iteration=1,
+                max_iterations=parsed.max_iterations,
+                current_item_id=item.get("item_id") if item else None,
+                last_error=next_action,
+            )
+            _recalc_native_metrics(session)
+            session_store.save_session(repo, pr_number, session)
+            summary = _native_summary(
+                command=command,
+                repo=repo,
+                pr_number=pr_number,
+                status="BLOCKED",
+                reason_code="AUTO_SIMPLE_NOT_ELIGIBLE",
+                waiting_on="local_findings",
+                next_action=next_action,
+                exit_code=5,
+                session=session,
+                item=item,
+                include_threads=True,
+            )
+            _emit_native_summary(summary, human=human)
+            return 5
         item = _first_blocking_item(session)
         request_path = _write_simple_address_request(repo, pr_number, session, command=command, run_id=run_id)
         next_action = (
