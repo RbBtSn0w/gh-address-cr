@@ -1357,8 +1357,12 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
             return "MISSING_FILES"
         if not response.get("validation_commands"):
             return "MISSING_VALIDATION_COMMANDS"
-        if item.get("item_kind") == "github_thread" and not response.get("fix_reply"):
-            return "MISSING_FIX_REPLY"
+        if item.get("item_kind") == "github_thread":
+            fix_reply = response.get("fix_reply")
+            if not fix_reply:
+                return "MISSING_FIX_REPLY"
+            if not isinstance(fix_reply, dict):
+                return "INVALID_FIX_REPLY"
     else:
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
