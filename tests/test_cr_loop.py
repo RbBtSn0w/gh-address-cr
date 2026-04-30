@@ -513,6 +513,7 @@ else:
         self.assertIn("Severity: `P2`", captured["reply_body"])
         self.assertIn("What I changed:", captured["reply_body"])
         self.assertIn("- `src/template_fix.py`: updated per CR scope", captured["reply_body"])
+        self.assertNotIn("<fix summary>", captured["reply_body"])
         self.assertIn("Why this addresses the CR:", captured["reply_body"])
         self.assertIn("Validation:", captured["reply_body"])
         self.assertIn("`python3 -m unittest tests.test_cr_loop`", captured["reply_body"])

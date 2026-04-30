@@ -1,3 +1,9 @@
+## [2.3.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.0...v2.3.1) (2026-04-30)
+
+### Bug Fixes
+
+* restore GitHub reply template parity ([#31](https://github.com/RbBtSn0w/gh-address-cr/issues/31)) ([c3f9ed8](https://github.com/RbBtSn0w/gh-address-cr/commit/c3f9ed8b3aa98bcdce8dbe513a625f3389f05648))
+
 ## [2.3.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.2.1...v2.3.0) (2026-04-30)
 
 ### Features

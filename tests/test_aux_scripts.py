@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
+
 from tests.helpers import (
     BATCH_RESOLVE_PY,
     CLEAN_STATE_PY,
@@ -107,7 +109,38 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         body = output.read_text(encoding="utf-8")
         self.assertIn("Fixed in `abc123`.", body)
         self.assertIn("- `src/a.py`: updated per CR scope", body)
+        self.assertNotIn("<critical-path fix>", body)
         self.assertIn("- Fixed the root cause.", body)
+        self.assertIn("This should now be safe to merge from the original P1 perspective.", body)
+
+    def test_generate_reply_modes_match_runtime_renderer(self):
+        cases = [
+            (
+                ["--severity", "P2"],
+                ["abc123", "src/a.py", "pytest", "passed", "Fixed the root cause."],
+                fix_reply(
+                    "P2",
+                    ["abc123", "src/a.py", "pytest", "passed", "Fixed the root cause."],
+                    summary="updated per CR scope",
+                ),
+            ),
+            (
+                ["--mode", "clarify"],
+                ["The current lazy initialization is intentional."],
+                clarify_reply(["The current lazy initialization is intentional."]),
+            ),
+            (
+                ["--mode", "defer"],
+                ["This needs a broader cleanup outside this PR."],
+                defer_reply(["This needs a broader cleanup outside this PR."]),
+            ),
+        ]
+        for flags, args, expected in cases:
+            with self.subTest(flags=flags):
+                output = Path(self.temp_dir.name) / f"reply-{len(flags)}-{len(args)}.md"
+                result = self.run_cmd([sys.executable, str(GENERATE_REPLY_PY), *flags, str(output), *args])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(encoding="utf-8"), expected)
 
     def test_generate_reply_rejects_invalid_severity(self):
         output = Path(self.temp_dir.name) / "reply.md"

@@ -184,9 +184,18 @@ class NativeWorkflowTests(unittest.TestCase):
                 ]
                 self.assertEqual(result["status"], "PUBLISH_COMPLETE")
                 self.assertEqual(result["published_count"], 1)
-                self.assertEqual(
-                    client.replies[0], (repo, pr_number, "THREAD_1", "Can you confirm the intended behavior?")
+                expected_reply = (
+                    "Thanks for the review.\n"
+                    "\n"
+                    "Analysis & Rationale:\n"
+                    "- Can you confirm the intended behavior?\n"
+                    "\n"
+                    "Decision:\n"
+                    "- No code changes were made for this specific comment.\n"
+                    "\n"
+                    "If you feel this still needs an adjustment, let me know and I can follow up with a patch!\n"
                 )
+                self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", expected_reply))
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(updated["state"], "closed")
                 self.assertEqual(updated["status"], "CLOSED")
@@ -230,6 +239,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 "files": ["src/example.py"],
                 "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                 "fix_reply": {
+                    "summary": "Added the missing input guard.",
                     "commit_hash": "abc123",
                     "files": ["src/example.py"],
                     "why": "The input is now checked before use.",
@@ -295,6 +305,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 "files": ["src/example.py"],
                 "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                 "fix_reply": {
+                    "summary": "Added the missing input guard.",
                     "commit_hash": "abc123",
                     "files": ["src/example.py"],
                     "why": "The input is now checked before use.",
@@ -361,6 +372,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 "files": ["src/example.py"],
                 "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
                 "fix_reply": {
+                    "summary": "Added the missing input guard.",
                     "commit_hash": "abc123",
                     "files": ["src/example.py"],
                     "why": "The input is now checked before use.",
@@ -373,7 +385,7 @@ class NativeWorkflowTests(unittest.TestCase):
             "Severity: `P1`\n"
             "\n"
             "What I changed:\n"
-            "- `src/example.py`: updated per CR scope\n"
+            "- `src/example.py`: Added the missing input guard.\n"
             "\n"
             "Why this addresses the CR:\n"
             "- The input is now checked before use.\n"
@@ -383,7 +395,7 @@ class NativeWorkflowTests(unittest.TestCase):
             "- `python3 -m unittest tests.test_example`\n"
             "- Result: passed\n"
             "\n"
-            "If anything still looks off, I can follow up with a focused patch.\n"
+            "This should now be safe to merge from the original P1 perspective.\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -393,6 +405,62 @@ class NativeWorkflowTests(unittest.TestCase):
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertEqual(client.replies[0], expected)
+
+    def test_publish_github_thread_fix_uses_severity_specific_template_lines(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        expectations = {
+            "P1": "This should now be safe to merge from the original P1 perspective.",
+            "P2": "If you want, I can also run a broader suite before merge.",
+            "P3": "- Low-severity improvement validated for non-breaking behavior.",
+        }
+        for severity, expected_line in expectations.items():
+            with self.subTest(severity=severity):
+                repo = "owner/repo"
+                pr_number = "123"
+                item = {
+                    "item_id": "github-thread:THREAD_1",
+                    "item_kind": "github_thread",
+                    "source": "github",
+                    "thread_id": "THREAD_1",
+                    "severity": severity,
+                    "state": "publish_ready",
+                    "status": "OPEN",
+                    "blocking": True,
+                    "publish_resolution": "fix",
+                    "accepted_response": {
+                        "resolution": "fix",
+                        "note": "Fixed thread issue.",
+                        "files": ["src/example.py"],
+                        "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                        "fix_reply": {
+                            "summary": "Added the missing input guard.",
+                            "commit_hash": "abc123",
+                            "files": ["src/example.py"],
+                            "why": "The input is now checked before use.",
+                        },
+                    },
+                }
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        self.write_session(repo, pr_number, item)
+                        client = FakeGitHubClient()
+
+                        workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                        self.assertIn(f"Severity: `{severity}`", client.replies[0])
+                        self.assertIn(expected_line, client.replies[0])
 
     def test_publish_github_thread_fix_ignores_reply_markdown_when_fix_reply_exists(self):
         from gh_address_cr.core import workflow
@@ -442,6 +510,59 @@ class NativeWorkflowTests(unittest.TestCase):
 
                 self.assertIn("Fixed in `abc123`.", client.replies[0])
                 self.assertNotIn("Legacy handwritten reply", client.replies[0])
+
+    def test_publish_github_thread_defer_uses_documented_reply_template(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "defer",
+                "note": "Needs a follow-up.",
+                "reply_markdown": "This needs a broader cleanup outside this PR.",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+            },
+        }
+        expected = (
+            "Thanks, this is valid feedback.\n"
+            "\n"
+            "Decision:\n"
+            "- Marking as deferred (non-blocking for this PR) because: This needs a broader cleanup outside this PR.\n"
+            "\n"
+            "Follow-up plan:\n"
+            "1. Track in `<issue_or_followup_pr>`.\n"
+            "2. Scope: `<exact scope>`.\n"
+            "3. Risk before follow-up: `<low/medium/high + short reason>`.\n"
+            "\n"
+            "If you prefer, I can bring this into the current PR instead.\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+
+                workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(client.replies[0], expected)
 
     def test_publish_github_thread_response_fails_before_side_effect_without_reply_body(self):
         from gh_address_cr.core import workflow

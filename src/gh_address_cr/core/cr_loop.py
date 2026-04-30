@@ -12,7 +12,11 @@ from pathlib import Path
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session_engine as engine
-from gh_address_cr.core.reply_templates import fix_reply as render_fix_reply
+from gh_address_cr.core.reply_templates import (
+    clarify_reply as render_clarify_reply,
+    defer_reply as render_defer_reply,
+    fix_reply as render_fix_reply,
+)
 
 
 COMPAT_SCRIPT_DIR = Path(
@@ -576,6 +580,7 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
+            summary=str(fix_reply.get("summary") or "").strip() or None,
         )
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."
@@ -813,6 +818,11 @@ def handle_batch(
                 reply_markdown, error = build_github_fix_reply(action, item, validation_commands)
             else:
                 reply_markdown = action.get("reply_markdown")
+                if isinstance(reply_markdown, str) and reply_markdown.strip():
+                    if resolution == "clarify":
+                        reply_markdown = render_clarify_reply([reply_markdown.strip()])
+                    elif resolution == "defer":
+                        reply_markdown = render_defer_reply([reply_markdown.strip()])
                 error = ""
             if not reply_markdown:
                 error = error or "GitHub thread actions require reply_markdown."
