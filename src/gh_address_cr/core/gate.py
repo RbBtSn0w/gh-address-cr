@@ -292,7 +292,9 @@ def _session_with_remote_threads(
 
 
 def _has_publish_ready_evidence(item: Mapping[str, Any]) -> bool:
-    return str(item.get("state") or "").lower() == "publish_ready" and isinstance(item.get("accepted_response"), Mapping)
+    if isinstance(item.get("accepted_response"), Mapping):
+        return True
+    return _has_content(item.get("publish_resolution"))
 
 
 def _session_items(session: Mapping[str, Any]) -> list[Mapping[str, Any]]:

@@ -262,6 +262,73 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
 
+    def test_remote_refresh_recovers_publish_ready_from_accepted_evidence(self):
+        from gh_address_cr.core import gate, workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "open",
+            "status": "OPEN",
+            "blocking": True,
+            "publish_resolution": "fix",
+            "accepted_response": {
+                "resolution": "fix",
+                "note": "Fixed thread issue.",
+                "files": ["src/example.py"],
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                    "why": "The input is now checked before use.",
+                },
+            },
+        }
+        remote_threads = [
+            {
+                "id": "THREAD_1",
+                "isResolved": False,
+                "isOutdated": False,
+                "path": "src/example.py",
+                "line": 12,
+                "url": "https://github.test/thread",
+                "body": "Please validate this input.",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                refreshed = gate.session_with_remote_threads(manager.load(), remote_threads)
+                manager.save(refreshed)
+
+                self.assertEqual(refreshed["items"]["github-thread:THREAD_1"]["state"], "publish_ready")
+
+                client = FakeGitHubClient()
+                result = workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                session = manager.load()
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(client.replies[0][2], "THREAD_1")
+                self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
+                self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
+
     def test_publish_github_thread_fix_uses_documented_reply_template(self):
         from gh_address_cr.core import workflow
 
