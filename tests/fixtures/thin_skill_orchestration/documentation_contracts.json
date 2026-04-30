@@ -5,6 +5,7 @@
     "agent manifest",
     "agent next",
     "agent submit",
+    "agent submit-batch",
     "adapter check-runtime"
   ],
   "forbidden_script_exports": [

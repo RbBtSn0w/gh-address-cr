@@ -385,6 +385,7 @@ else:
         request = json.loads(request_path.read_text(encoding="utf-8"))
         self.assertEqual(request["mode"], "simple-address")
         self.assertEqual(request["threads"][0]["thread_id"], "THREAD_SIMPLE")
+        self.assertIn("submit-batch", request["commands"]["submit_batch"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
     def test_cli_address_matches_review_auto_simple_for_unresolved_threads(self):

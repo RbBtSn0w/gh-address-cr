@@ -282,42 +282,317 @@ def submit_action_response(
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
+    response = _load_response_json_object(
+        response_path,
+        status="ACTION_REJECTED",
+        missing_reason_code="RESPONSE_FILE_NOT_FOUND",
+        invalid_reason_code="INVALID_RESPONSE_JSON",
+        shape_reason_code="INVALID_RESPONSE_SHAPE",
+        shape_message="ActionResponse must be a JSON object.",
+        payload_name="ActionResponse",
+    )
+
+    try:
+        prepared = _prepare_action_response_submission(session, ledger, response)
+        record = _accept_action_response_submission(session, ledger, response, prepared, now=now)
+    except WorkflowError:
+        session_store.save_session(repo, pr_number, session)
+        raise
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "ACTION_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "lease_id": prepared["lease_id"],
+        "item_id": prepared["item_id"],
+        "evidence_record_id": record.record_id,
+        "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
+    }
+
+
+def submit_batch_action_response(
+    repo: str, pr_number: str, *, batch_path: str | Path, now: datetime | None = None
+) -> dict[str, Any]:
+    now = _coerce_now(now)
+    session = session_store.load_session(repo, pr_number)
+    ledger = _ledger(session)
+    batch = _load_response_json_object(
+        batch_path,
+        status="BATCH_ACTION_REJECTED",
+        missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
+        invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
+        shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
+        shape_message="BatchActionResponse must be a JSON object.",
+        payload_name="BatchActionResponse",
+        waiting_on="batch_action_response",
+    )
+    responses = _batch_action_responses(batch)
+    prepared_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    seen_leases: set[str] = set()
+    seen_items: set[str] = set()
+
+    try:
+        for response in responses:
+            lease_id = str(response.get("lease_id") or "")
+            if lease_id in seen_leases:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    "BATCH_DUPLICATE_LEASE",
+                    status="BATCH_ACTION_REJECTED",
+                )
+            seen_leases.add(lease_id)
+
+            prepared = _prepare_action_response_submission(
+                session,
+                ledger,
+                response,
+                rejected_status="BATCH_ACTION_REJECTED",
+            )
+            item_id = str(prepared["item_id"])
+            if item_id in seen_items:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    "BATCH_DUPLICATE_ITEM",
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            seen_items.add(item_id)
+
+            item = prepared["item"]
+            lease = prepared["lease"]
+            if item.get("item_kind") != "github_thread":
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    "BATCH_UNSUPPORTED_ITEM_KIND",
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            if str(lease.get("role")) != "fixer":
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    "BATCH_UNSUPPORTED_ROLE",
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            if str(response.get("resolution")) != "fix":
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    "BATCH_UNSUPPORTED_RESOLUTION",
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            _validate_batch_fix_contract(session, ledger, response, item_id=item_id, lease_id=lease_id)
+            lease_reason_code = _lease_submission_rejection_reason(response, prepared, now)
+            if lease_reason_code:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    lease_reason_code,
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            prepared_rows.append((response, prepared))
+
+        accepted = [
+            _batch_acceptance_payload(
+                response,
+                prepared,
+                _accept_action_response_submission(
+                    session,
+                    ledger,
+                    response,
+                    prepared,
+                    now=now,
+                    rejected_status="BATCH_ACTION_REJECTED",
+                ),
+            )
+            for response, prepared in prepared_rows
+        ]
+    except WorkflowError:
+        session_store.save_session(repo, pr_number, session)
+        raise
+
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "BATCH_ACTION_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "accepted_count": len(accepted),
+        "accepted": accepted,
+        "item_ids": [row["item_id"] for row in accepted],
+        "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
+    }
+
+
+def _load_response_json_object(
+    response_path: str | Path,
+    *,
+    status: str,
+    missing_reason_code: str,
+    invalid_reason_code: str,
+    shape_reason_code: str,
+    shape_message: str,
+    payload_name: str,
+    waiting_on: str = "action_response",
+) -> dict[str, Any]:
     path = Path(response_path)
     try:
-        response = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise WorkflowError(
-            status="ACTION_REJECTED",
-            reason_code="RESPONSE_FILE_NOT_FOUND",
-            waiting_on="action_response",
+            status=status,
+            reason_code=missing_reason_code,
+            waiting_on=waiting_on,
             exit_code=2,
-            message=f"ActionResponse file does not exist: {path}",
+            message=f"{payload_name} file does not exist: {path}",
         ) from exc
     except json.JSONDecodeError as exc:
         raise WorkflowError(
-            status="ACTION_REJECTED",
-            reason_code="INVALID_RESPONSE_JSON",
-            waiting_on="action_response",
+            status=status,
+            reason_code=invalid_reason_code,
+            waiting_on=waiting_on,
             exit_code=2,
-            message=f"Invalid ActionResponse JSON: {exc}",
+            message=f"Invalid {payload_name} JSON: {exc}",
         ) from exc
 
-    if not isinstance(response, dict):
+    if not isinstance(payload, dict):
         raise WorkflowError(
-            status="ACTION_REJECTED",
-            reason_code="INVALID_RESPONSE_SHAPE",
-            waiting_on="action_response",
+            status=status,
+            reason_code=shape_reason_code,
+            waiting_on=waiting_on,
             exit_code=2,
-            message="ActionResponse must be a JSON object.",
+            message=shape_message,
         )
+    return payload
 
-    lease_id = _required_response_field(response, "lease_id")
+
+def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
+    common = batch.get("common") or {}
+    if not isinstance(common, dict):
+        _raise_batch_schema_error("INVALID_BATCH_COMMON", "BatchActionResponse.common must be a JSON object.")
+
+    items = batch.get("items")
+    if not isinstance(items, list) or not items:
+        _raise_batch_schema_error("BATCH_ITEMS_REQUIRED", "BatchActionResponse requires a non-empty items list.")
+
+    agent_id = str(batch.get("agent_id") or common.get("agent_id") or "").strip()
+    if not agent_id:
+        _raise_batch_schema_error("MISSING_BATCH_AGENT_ID", "BatchActionResponse requires agent_id.")
+
+    resolution = str(batch.get("resolution") or common.get("resolution") or "fix").strip().lower()
+    if resolution != "fix":
+        _raise_batch_schema_error("BATCH_UNSUPPORTED_RESOLUTION", "BatchActionResponse only supports fix evidence.")
+
+    schema_version = str(batch.get("schema_version") or "1.0")
+    common_fix_reply = common.get("fix_reply") or {}
+    if not isinstance(common_fix_reply, dict):
+        _raise_batch_schema_error("INVALID_BATCH_FIX_REPLY", "BatchActionResponse.common.fix_reply must be an object.")
+
+    common_files = common.get("files") or common_fix_reply.get("files")
+    common_validation = common.get("validation_commands")
+    common_commit_hash = str(common.get("commit_hash") or common_fix_reply.get("commit_hash") or "").strip()
+
+    responses: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            _raise_batch_schema_error("INVALID_BATCH_ITEM", f"BatchActionResponse item {index} must be an object.")
+        item_fix_reply = item.get("fix_reply") or {}
+        if not isinstance(item_fix_reply, dict):
+            _raise_batch_schema_error(
+                "INVALID_BATCH_ITEM_FIX_REPLY",
+                f"BatchActionResponse item {index} fix_reply must be an object.",
+            )
+
+        item_resolution = str(item.get("resolution") or resolution).strip().lower()
+        if item_resolution != "fix":
+            _raise_batch_schema_error(
+                "BATCH_UNSUPPORTED_RESOLUTION",
+                f"BatchActionResponse item {index} only supports fix evidence.",
+            )
+
+        request_id = str(item.get("request_id") or "").strip()
+        lease_id = str(item.get("lease_id") or "").strip()
+        if not request_id:
+            _raise_batch_schema_error("MISSING_BATCH_ITEM_REQUEST_ID", f"BatchActionResponse item {index} needs request_id.")
+        if not lease_id:
+            _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
+
+        summary = str(item.get("summary") or item.get("note") or item_fix_reply.get("summary") or "").strip()
+        why = str(item.get("why") or item_fix_reply.get("why") or summary).strip()
+        note = str(item.get("note") or summary or why).strip()
+        if not note:
+            _raise_batch_schema_error("MISSING_BATCH_ITEM_NOTE", f"BatchActionResponse item {index} needs note or summary.")
+
+        files = _normalize_string_list(item.get("files") or item_fix_reply.get("files") or common_files)
+        validation_commands = item.get("validation_commands") or common_validation
+        fix_reply = dict(common_fix_reply)
+        fix_reply.update(item_fix_reply)
+        if common_commit_hash and not fix_reply.get("commit_hash"):
+            fix_reply["commit_hash"] = common_commit_hash
+        if files:
+            fix_reply["files"] = files
+        if summary and not fix_reply.get("summary"):
+            fix_reply["summary"] = summary
+        if why:
+            fix_reply["why"] = why
+
+        response = {
+            "schema_version": schema_version,
+            "request_id": request_id,
+            "lease_id": lease_id,
+            "agent_id": str(item.get("agent_id") or agent_id),
+            "resolution": "fix",
+            "note": note,
+            "files": files,
+            "validation_commands": validation_commands,
+            "fix_reply": fix_reply,
+        }
+        if item.get("item_id"):
+            response["item_id"] = str(item["item_id"])
+        responses.append(response)
+
+    return responses
+
+
+def _raise_batch_schema_error(reason_code: str, message: str) -> None:
+    raise WorkflowError(
+        status="BATCH_ACTION_REJECTED",
+        reason_code=reason_code,
+        waiting_on="batch_action_response",
+        exit_code=2,
+        message=message,
+    )
+
+
+def _prepare_action_response_submission(
+    session: dict[str, Any],
+    ledger: EvidenceLedger,
+    response: dict[str, Any],
+    *,
+    rejected_status: str = "ACTION_REJECTED",
+) -> dict[str, Any]:
+    lease_id = _required_response_field(response, "lease_id", status=rejected_status)
     lease = session.get("leases", {}).get(lease_id)
     if not isinstance(lease, dict):
         _record_response_rejected(session, ledger, response, "LEASE_NOT_FOUND")
-        session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=rejected_status,
             reason_code="LEASE_NOT_FOUND",
             waiting_on="lease",
             exit_code=5,
@@ -325,12 +600,23 @@ def submit_action_response(
         )
 
     item_id = str(lease["item_id"])
+    declared_item_id = response.get("item_id")
+    if declared_item_id and str(declared_item_id) != item_id:
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "ITEM_ID_MISMATCH",
+            status=rejected_status,
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+
     item = _items(session).get(item_id)
     if not isinstance(item, dict):
         _record_response_rejected(session, ledger, response, "ITEM_NOT_FOUND")
-        session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=rejected_status,
             reason_code="ITEM_NOT_FOUND",
             waiting_on="work_item",
             exit_code=5,
@@ -339,30 +625,50 @@ def submit_action_response(
 
     reason_code = _validate_response(response, item)
     if reason_code:
-        _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
-        session_store.save_session(repo, pr_number, session)
-        raise WorkflowError(
-            status="ACTION_REJECTED",
-            reason_code=reason_code,
-            waiting_on="action_response",
-            exit_code=5,
-            message=f"ActionResponse rejected: {reason_code}",
-            payload={"item_id": item_id, "lease_id": lease_id},
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            reason_code,
+            status=rejected_status,
+            item_id=item_id,
+            lease_id=lease_id,
         )
 
     expected_request_hash, context_reason_code = _expected_request_hash_for_response(response, lease)
     if context_reason_code:
-        _record_response_rejected(session, ledger, response, context_reason_code, item_id=item_id)
-        session_store.save_session(repo, pr_number, session)
-        raise WorkflowError(
-            status="ACTION_REJECTED",
-            reason_code=context_reason_code,
-            waiting_on="action_response",
-            exit_code=5,
-            message=f"ActionResponse rejected: {context_reason_code}",
-            payload={"item_id": item_id, "lease_id": lease_id},
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            context_reason_code,
+            status=rejected_status,
+            item_id=item_id,
+            lease_id=lease_id,
         )
 
+    return {
+        "lease_id": lease_id,
+        "lease": lease,
+        "item_id": item_id,
+        "item": item,
+        "expected_request_hash": expected_request_hash,
+    }
+
+
+def _accept_action_response_submission(
+    session: dict[str, Any],
+    ledger: EvidenceLedger,
+    response: dict[str, Any],
+    prepared: dict[str, Any],
+    *,
+    now: datetime,
+    rejected_status: str = "ACTION_REJECTED",
+) -> Any:
+    lease_id = str(prepared["lease_id"])
+    lease = prepared["lease"]
+    item_id = str(prepared["item_id"])
+    item = prepared["item"]
     try:
         submit_lease(
             session,
@@ -370,15 +676,14 @@ def submit_action_response(
             agent_id=str(response["agent_id"]),
             role=str(lease["role"]),
             item_id=item_id,
-            request_hash=str(expected_request_hash),
+            request_hash=str(prepared["expected_request_hash"]),
             now=now,
         )
-        accept_lease(session, lease_id)
+        accept_lease(session, lease_id, now=now)
     except LeaseSubmissionError as exc:
         _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
-        session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=rejected_status,
             reason_code=exc.reason_code,
             waiting_on="lease",
             exit_code=5,
@@ -399,7 +704,6 @@ def submit_action_response(
             event_type="verification_rejected",
             payload={"note": response["note"], "validation_commands": response.get("validation_commands", [])},
         )
-        session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
             status="VERIFICATION_REJECTED",
             reason_code="VERIFICATION_REJECTED",
@@ -410,7 +714,7 @@ def submit_action_response(
         )
 
     _apply_response_to_item(item, response)
-    record = ledger.append_event(
+    return ledger.append_event(
         session_id=str(session["session_id"]),
         item_id=item_id,
         lease_id=lease_id,
@@ -419,15 +723,139 @@ def submit_action_response(
         event_type="response_accepted",
         payload={"resolution": response["resolution"], "note": response["note"]},
     )
-    session_store.save_session(repo, pr_number, session)
+
+
+def _validate_batch_fix_contract(
+    session: dict[str, Any],
+    ledger: EvidenceLedger,
+    response: dict[str, Any],
+    *,
+    item_id: str,
+    lease_id: str,
+) -> None:
+    files = _normalize_string_list(response.get("files"))
+    if not files:
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "MISSING_BATCH_FILES",
+            status="BATCH_ACTION_REJECTED",
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+    validation_commands = response.get("validation_commands")
+    if not isinstance(validation_commands, list) or not validation_commands:
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "MISSING_BATCH_VALIDATION_COMMANDS",
+            status="BATCH_ACTION_REJECTED",
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+    for command in validation_commands:
+        if not isinstance(command, dict) or not command.get("command") or not command.get("result"):
+            _raise_response_rejected(
+                session,
+                ledger,
+                response,
+                "INVALID_BATCH_VALIDATION_COMMAND",
+                status="BATCH_ACTION_REJECTED",
+                item_id=item_id,
+                lease_id=lease_id,
+            )
+    fix_reply = response.get("fix_reply")
+    if not isinstance(fix_reply, dict):
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "MISSING_BATCH_FIX_REPLY",
+            status="BATCH_ACTION_REJECTED",
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+    if not str(fix_reply.get("commit_hash") or "").strip():
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "MISSING_BATCH_COMMIT_HASH",
+            status="BATCH_ACTION_REJECTED",
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+    if not str(fix_reply.get("why") or "").strip():
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            "MISSING_BATCH_ITEM_WHY",
+            status="BATCH_ACTION_REJECTED",
+            item_id=item_id,
+            lease_id=lease_id,
+        )
+
+
+def _lease_submission_rejection_reason(
+    response: dict[str, Any],
+    prepared: dict[str, Any],
+    now: datetime,
+) -> str | None:
+    lease = prepared["lease"]
+    status = str(_get(lease, "status") or "")
+    if status == "submitted":
+        return "DUPLICATE_SUBMISSION"
+    if status in {"accepted", "rejected", "expired", "released"}:
+        return "STALE_LEASE"
+    if status != "active":
+        return "STALE_LEASE"
+
+    expires_at = _get(lease, "expires_at")
+    if isinstance(expires_at, str):
+        expires_at = _coerce_now(expires_at)
+    if expires_at is not None and expires_at <= now:
+        return "EXPIRED_LEASE"
+    if str(_get(lease, "agent_id")) != str(response["agent_id"]):
+        return "WRONG_AGENT"
+    if str(_get(lease, "item_id")) != str(prepared["item_id"]):
+        return "WRONG_ITEM"
+    if str(_get(lease, "request_hash")) != str(prepared["expected_request_hash"]):
+        return "STALE_REQUEST_CONTEXT"
+    return None
+
+
+def _raise_response_rejected(
+    session: dict[str, Any],
+    ledger: EvidenceLedger,
+    response: dict[str, Any],
+    reason_code: str,
+    *,
+    status: str,
+    item_id: str | None = None,
+    lease_id: str | None = None,
+) -> None:
+    _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
+    is_batch = status == "BATCH_ACTION_REJECTED"
+    payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
+    raise WorkflowError(
+        status=status,
+        reason_code=reason_code,
+        waiting_on="batch_action_response" if is_batch else "action_response",
+        exit_code=5,
+        message=f"{payload_name} rejected: {reason_code}",
+        payload={"item_id": item_id, "lease_id": lease_id or response.get("lease_id")},
+    )
+
+
+def _batch_acceptance_payload(response: dict[str, Any], prepared: dict[str, Any], record: Any) -> dict[str, Any]:
     return {
-        "status": "ACTION_ACCEPTED",
-        "repo": repo,
-        "pr_number": str(pr_number),
-        "lease_id": lease_id,
-        "item_id": item_id,
+        "item_id": str(prepared["item_id"]),
+        "lease_id": str(prepared["lease_id"]),
+        "request_id": str(response["request_id"]),
         "evidence_record_id": record.record_id,
-        "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
 
 
@@ -1024,11 +1452,11 @@ def _ledger(session: dict[str, Any]) -> EvidenceLedger:
     )
 
 
-def _required_response_field(response: dict[str, Any], field: str) -> str:
+def _required_response_field(response: dict[str, Any], field: str, *, status: str = "ACTION_REJECTED") -> str:
     value = response.get(field)
     if not value:
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=status,
             reason_code=f"MISSING_{field.upper()}",
             waiting_on="action_response",
             exit_code=2,
