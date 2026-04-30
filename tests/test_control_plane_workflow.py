@@ -388,6 +388,59 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
 
+    def test_agent_submit_rejects_github_thread_fix_reply_missing_commit_hash(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    },
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        response_path = self.workspace_dir() / "no-commit-hash-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "lease_id": request["lease_id"],
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "note": "Fixed thread issue.",
+                    "files": ["src/example.py"],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                    "fix_reply": {
+                        "summary": "Fixed it.",
+                        "files": ["src/example.py"],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_FIX_REPLY_COMMIT_HASH")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
+        self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
+        self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
     def test_agent_submit_batch_accepts_common_evidence_for_github_threads(self):
         self.write_session(
             items=[

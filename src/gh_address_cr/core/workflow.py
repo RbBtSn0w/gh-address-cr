@@ -1363,6 +1363,9 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
                 return "MISSING_FIX_REPLY"
             if not isinstance(fix_reply, dict):
                 return "INVALID_FIX_REPLY"
+            _, publish_error = _publish_reply_body(item, response)
+            if publish_error:
+                return publish_error
     else:
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
