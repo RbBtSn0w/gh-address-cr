@@ -75,6 +75,7 @@ High-level commands emit structured JSON by default. Agents MUST consume these f
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+The `threads` command may also include a `threads` array with actionable GitHub thread context (`thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence).
 
 ## Multi-Agent Protocol
 
@@ -86,6 +87,7 @@ Use the runtime as the coordinator:
   - claims one eligible item and writes an `ActionRequest`
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - validates an `ActionResponse`, lease ownership, and required evidence
+  - when it returns `ACTION_ACCEPTED`, run the returned `next_action`; accepted GitHub-thread fixes publish through `agent publish`
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - inspects active and terminal claims
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`

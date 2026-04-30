@@ -203,6 +203,7 @@ Stable machine summary fields:
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+The `threads` command may also include a `threads` array with actionable thread context for agents: `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence.
 
 ## Multi-Agent Coordination
 
@@ -231,6 +232,7 @@ Role split:
 - `gatekeeper`: deterministic final-gate role
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
+After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
 
 Main entrypoint examples:
 

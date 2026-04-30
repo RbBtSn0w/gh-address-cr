@@ -705,6 +705,66 @@ else:
         self.assertEqual(summary["reason_code"], "PASSED")
         self.assertIsNone(summary["waiting_on"])
 
+    def test_cli_threads_machine_includes_actionable_thread_rows(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_ACTIONABLE',
+                            'isResolved': False,
+                            'isOutdated': False,
+                            'path': 'src/thread.py',
+                            'line': 12,
+                            'comments': {'nodes': [
+                                {'url': 'https://example.test/thread/actionable', 'body': 'Please fix this.', 'author': {'login': 'reviewer'}},
+                            ]},
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/actionable', 'body': 'Please fix this.'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/actionable', 'body': 'Please fix this.'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "threads", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["threads"][0]["item_id"], "github-thread:THREAD_ACTIONABLE")
+        self.assertEqual(summary["threads"][0]["thread_id"], "THREAD_ACTIONABLE")
+        self.assertEqual(summary["threads"][0]["path"], "src/thread.py")
+        self.assertEqual(summary["threads"][0]["line"], 12)
+        self.assertEqual(summary["threads"][0]["body"], "Please fix this.")
+        self.assertEqual(summary["threads"][0]["url"], "https://example.test/thread/actionable")
+        self.assertEqual(summary["threads"][0]["state"], "open")
+        self.assertEqual(summary["threads"][0]["status"], "OPEN")
+        self.assertFalse(summary["threads"][0]["is_resolved"])
+        self.assertFalse(summary["threads"][0]["is_outdated"])
+        self.assertFalse(summary["threads"][0]["accepted_response_present"])
+        self.assertIsNone(summary["threads"][0]["reply_evidence"])
+
     def test_cli_findings_defaults_to_structured_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
         payload_file.write_text(
@@ -2148,6 +2208,53 @@ else:
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("github_threads_missing_reply_count=1", result.stdout)
         self.assertIn("missing reply evidence", result.stderr)
+
+    def test_cli_final_gate_no_auto_clean_preserves_audit_report_artifacts(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "native-run", self.repo, self.pr])
+
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("No audit log found.", report.stdout)
+        self.assertNotIn("No trace log found.", report.stdout)
+        self.assertNotIn("No audit summary found.", report.stdout)
+        self.assertIn('"run_id": "native-run"', report.stdout)
+        self.assertIn("== Audit Summary SHA256 ==", report.stdout)
 
     def test_final_gate_python_fails_when_current_login_has_pending_reviews(self):
         gh = self.bin_dir / "gh"
