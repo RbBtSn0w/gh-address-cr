@@ -1,3 +1,9 @@
+## [2.0.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.2...v2.0.3) (2026-04-30)
+
+### Bug Fixes
+
+* preserve agent workflow publish contracts ([#25](https://github.com/RbBtSn0w/gh-address-cr/issues/25)) ([e56e1b1](https://github.com/RbBtSn0w/gh-address-cr/commit/e56e1b113f9f69c3a60fe1e412cbc703d5eddaa1))
+
 ## [2.0.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.1...v2.0.2) (2026-04-29)
 
 ### Bug Fixes
