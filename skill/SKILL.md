@@ -15,6 +15,7 @@ The runtime owns session state, intake routing, GitHub side effects, leases, and
 /gh-address-cr review <owner/repo> <pr_number>
 /gh-address-cr address <owner/repo> <pr_number>
 /gh-address-cr threads <owner/repo> <pr_number>
+/gh-address-cr version
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
