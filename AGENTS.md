@@ -84,5 +84,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read
-`specs/008-cli-version/plan.md`.
+`specs/009-action-request-friction/plan.md`.
 <!-- SPECKIT END -->

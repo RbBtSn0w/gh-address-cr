@@ -180,6 +180,12 @@ def issue_action_request(
         )
 
     if role in MUTATING_ROLES and not _has_classification_evidence(item):
+        next_action = (
+            f"Missing triage classification evidence for {item_id}. Run "
+            f"`gh-address-cr agent classify {repo} {pr_number} {item_id} "
+            "--classification <fix|clarify|defer|reject> --note <why>` "
+            "before requesting a fixer lease."
+        )
         ledger.append_event(
             session_id=str(session["session_id"]),
             item_id=item_id,
@@ -195,8 +201,8 @@ def issue_action_request(
             reason_code="MISSING_CLASSIFICATION",
             waiting_on="classification",
             exit_code=5,
-            message="Record classification evidence before issuing a mutating fixer request.",
-            payload={"item_id": item_id},
+            message=next_action,
+            payload={"item_id": item_id, "next_action": next_action},
         )
 
     lease_id = f"lease_{uuid4().hex}"
@@ -841,14 +847,30 @@ def _raise_response_rejected(
     _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
     is_batch = status == "BATCH_ACTION_REJECTED"
     payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
+    message = _response_rejection_message(
+        payload_name,
+        reason_code,
+        repo=str(session.get("repo") or ""),
+        pr_number=str(session.get("pr_number") or ""),
+    )
     raise WorkflowError(
         status=status,
         reason_code=reason_code,
         waiting_on="batch_action_response" if is_batch else "action_response",
         exit_code=5,
-        message=f"{payload_name} rejected: {reason_code}",
+        message=message,
         payload={"item_id": item_id, "lease_id": lease_id or response.get("lease_id")},
     )
+
+
+def _response_rejection_message(payload_name: str, reason_code: str, *, repo: str, pr_number: str) -> str:
+    if reason_code == "MISSING_RESOLUTION":
+        return (
+            f"{payload_name} rejected: missing fixer response field \"resolution\". "
+            "Add \"resolution\": \"fix|clarify|defer|reject\" to the ActionResponse JSON and rerun "
+            f"`gh-address-cr agent submit {repo} {pr_number} --input <response.json>`."
+        )
+    return f"{payload_name} rejected: {reason_code}"
 
 
 def _batch_acceptance_payload(response: dict[str, Any], prepared: dict[str, Any], record: Any) -> dict[str, Any]:

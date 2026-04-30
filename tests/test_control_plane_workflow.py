@@ -75,6 +75,8 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "REQUEST_REJECTED")
         self.assertEqual(payload["reason_code"], "MISSING_CLASSIFICATION")
+        self.assertIn("triage classification", payload["next_action"])
+        self.assertIn("gh-address-cr agent classify", payload["next_action"])
         session = self.load_session()
         self.assertEqual(session["leases"], {})
         self.assertEqual(session["items"]["local-finding:1"]["state"], "open")
@@ -233,6 +235,49 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_missing_resolution_guides_fixer_response_payload(self):
+        self.write_session(
+            items=[
+                open_item(
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    }
+                )
+            ]
+        )
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        response_path = self.workspace_dir() / "missing-resolution-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "lease_id": request["lease_id"],
+                    "agent_id": "codex-1",
+                    "note": "Fixed validation.",
+                    "files": ["src/example.py"],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_RESOLUTION")
+        self.assertIn("fixer response", payload["next_action"])
+        self.assertIn('"resolution"', payload["next_action"])
+        self.assertIn("gh-address-cr agent submit", payload["next_action"])
 
     def test_agent_submit_moves_github_thread_fix_to_publish_ready_without_side_effects(self):
         self.write_session(
@@ -455,6 +500,89 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_batch_rejects_mixed_invalid_item_without_partial_acceptance(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example_one.py",
+                    line=10,
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_1",
+                    },
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_2",
+                    }
+                ),
+            ]
+        )
+        first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
+        second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "mixed-invalid-batch-action-response.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/example_one.py", "src/example.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_examples", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "test_command": "python3 -m unittest tests.test_examples",
+                            "test_result": "passed",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": first_request["request_id"],
+                            "lease_id": first_request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "summary": "Fixed first thread.",
+                            "why": "The first thread now validates the input before use.",
+                        },
+                        {
+                            "request_id": second_request["request_id"],
+                            "lease_id": second_request["lease_id"],
+                            "item_id": "local-finding:1",
+                            "summary": "Fixed local finding.",
+                            "why": "The local finding should not be accepted in a batch.",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "BATCH_UNSUPPORTED_ITEM_KIND")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
+        self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
+        self.assertEqual(session["leases"][first_request["lease_id"]]["status"], "active")
+        self.assertEqual(session["leases"][second_request["lease_id"]]["status"], "active")
+        self.assertNotIn("response_accepted", [row["event_type"] for row in self.ledger_rows()])
 
     def test_agent_submit_batch_missing_file_reports_batch_waiting_on(self):
         self.write_session(items=[])
