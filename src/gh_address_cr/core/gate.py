@@ -117,7 +117,11 @@ class Gatekeeper:
         *,
         snapshot_path: str | Path | None = None,
     ) -> GateResult:
-        session = self._load_session(repo, pr_number)
+        manager = SessionManager(repo, str(pr_number))
+        try:
+            session = manager.load()
+        except SessionError:
+            session = manager.create(status="WAITING_FOR_GATE")
         current_login = self.github_client.viewer_login()
         remote_threads = (
             _load_thread_snapshot(snapshot_path)
@@ -126,20 +130,24 @@ class Gatekeeper:
         )
         pending_reviews = self.github_client.list_pending_reviews(repo, str(pr_number), current_login)
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
-        return evaluate_final_gate(
+        result = evaluate_final_gate(
             merged_session,
             remote_threads=remote_threads,
             pending_reviews=pending_reviews,
             current_login=current_login,
         )
-
-    @staticmethod
-    def _load_session(repo: str, pr_number: str) -> dict[str, Any]:
-        manager = SessionManager(repo, str(pr_number))
-        try:
-            return manager.load()
-        except SessionError:
-            return manager.create(status="WAITING_FOR_GATE")
+        metrics = dict(merged_session.get("metrics") or {})
+        metrics.update(
+            {
+                "blocking_items_count": result.counts["blocking_items_count"],
+                "unresolved_github_threads_count": result.counts["unresolved_github_threads_count"],
+                "github_threads_missing_reply_count": result.counts["github_threads_missing_reply_count"],
+                "pending_current_login_review_count": result.counts["pending_current_login_review_count"],
+            }
+        )
+        merged_session["metrics"] = metrics
+        manager.save(merged_session)
+        return result
 
 
 def evaluate_final_gate(
@@ -251,6 +259,7 @@ def _session_with_remote_threads(
         item["body"] = thread.get("body") or item.get("body")
         is_resolved = _thread_is_resolved(thread)
         is_outdated = bool(thread.get("isOutdated", thread.get("is_outdated", False)))
+        item["is_outdated"] = is_outdated
         if is_resolved:
             item["state"] = (
                 item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
@@ -258,6 +267,10 @@ def _session_with_remote_threads(
             item["status"] = "CLOSED"
             item["blocking"] = False
             item["handled"] = True
+        elif _has_publish_ready_evidence(item):
+            item["state"] = "publish_ready"
+            item["status"] = item.get("status") or "OPEN"
+            item["blocking"] = True
         elif is_outdated:
             item["state"] = "stale"
             item["status"] = "STALE"
@@ -276,6 +289,12 @@ def _session_with_remote_threads(
         items[item_id] = item
     merged["items"] = items
     return merged
+
+
+def _has_publish_ready_evidence(item: Mapping[str, Any]) -> bool:
+    if isinstance(item.get("accepted_response"), Mapping):
+        return True
+    return _has_content(item.get("publish_resolution"))
 
 
 def _session_items(session: Mapping[str, Any]) -> list[Mapping[str, Any]]:

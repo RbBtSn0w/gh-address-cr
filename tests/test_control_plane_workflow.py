@@ -281,6 +281,11 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["next_action"],
+            f"Run `gh-address-cr agent publish {self.repo} {self.pr}` to publish accepted evidence.",
+        )
         session = self.load_session()
         item = session["items"]["github-thread:abc"]
         self.assertEqual(item["state"], "publish_ready")

@@ -15,9 +15,11 @@ from gh_address_cr.core.leases import (
     accept_lease,
     claim_lease,
     expire_leases,
+    release_lease,
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
+from gh_address_cr.core.reply_templates import fix_reply as render_fix_reply
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
@@ -130,6 +132,15 @@ def record_classification(
     }
     item["decision"] = normalized
     item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
+    if released_lease_id:
+        item["state"] = "open"
+        item["status"] = "OPEN"
+        item["blocking"] = True
+        item["claimed_by"] = None
+        item["claimed_at"] = None
+        item["lease_expires_at"] = None
+        item.pop("active_lease_id", None)
     session_store.save_session(repo, pr_number, session)
     return {
         "status": "CLASSIFICATION_RECORDED",
@@ -138,6 +149,7 @@ def record_classification(
         "item_id": item_id,
         "classification": normalized,
         "evidence_record_id": record.record_id,
+        "released_lease_id": released_lease_id,
     }
 
 
@@ -415,7 +427,7 @@ def submit_action_response(
         "lease_id": lease_id,
         "item_id": item_id,
         "evidence_record_id": record.record_id,
-        "next_action": "Run review again to publish accepted evidence.",
+        "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
 
 
@@ -670,10 +682,11 @@ def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
 
 
 def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[str | None, str | None]:
+    resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
-    if isinstance(reply_markdown, str) and reply_markdown.strip():
+    if resolution != "fix" and isinstance(reply_markdown, str) and reply_markdown.strip():
         return reply_markdown, None
-    if str(response.get("resolution") or item.get("publish_resolution") or "") != "fix":
+    if resolution != "fix":
         return None, "MISSING_PUBLISH_REPLY"
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
@@ -691,20 +704,12 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
         return None, "MISSING_FIX_REPLY_TEST_COMMAND"
     if not test_result:
         return None, "MISSING_FIX_REPLY_TEST_RESULT"
-    summary = str(fix_reply.get("summary") or response.get("note") or "Addressed the review thread.").strip()
+    severity = _normalize_fix_reply_severity(fix_reply.get("severity") or item.get("severity") or "P2")
     why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
-    body = "\n".join(
-        [
-            summary,
-            "",
-            f"- Commit: `{commit_hash}`",
-            f"- Files: {', '.join(files)}",
-            f"- Validation: `{test_command}` ({test_result})",
-            "",
-            why,
-        ]
-    )
-    return body, None
+    try:
+        return render_fix_reply(severity, [commit_hash, ",".join(files), test_command, test_result, why]), None
+    except SystemExit as exc:
+        return None, str(exc) or "MISSING_PUBLISH_REPLY"
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -727,6 +732,35 @@ def _normalize_validation_commands(value: Any) -> list[str]:
         if command_text:
             commands.append(command_text)
     return commands
+
+
+def _normalize_fix_reply_severity(value: Any) -> str:
+    severity = str(value or "").strip().upper()
+    return severity if severity in {"P1", "P2", "P3"} else "P2"
+
+
+def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
+    for lease_id, lease in session.get("leases", {}).items():
+        if not isinstance(lease, dict):
+            continue
+        if lease.get("item_id") != item_id:
+            continue
+        if lease.get("role") != "triage":
+            continue
+        if lease.get("status") not in {"active", "submitted"}:
+            continue
+        release_lease(session, str(lease_id), reason="classification_recorded")
+        _ledger(session).append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=str(lease_id),
+            agent_id=agent_id,
+            role="triage",
+            event_type="classification_lease_released",
+            payload={"reason": "classification_recorded"},
+        )
+        return str(lease_id)
+    return None
 
 
 def _side_effect_key(session: dict[str, Any], item_id: str, side_effect_type: str) -> str:

@@ -7,6 +7,9 @@ This document maps the `gh-address-cr` runtime `status` fields to the next safe 
 If `status` is `WAITING_FOR_ACTION`:
 - **Action**: Inspect the `item_id` and `item_kind`. Use `gh-address-cr agent next` and `gh-address-cr agent submit` to claim the item and submit your work.
 
+If `status` is `ACTION_ACCEPTED`:
+- **Action**: Run the returned `next_action` exactly. For accepted GitHub-thread fixes, this publishes through `gh-address-cr agent publish`.
+
 If `status` is `BLOCKED`:
 - **Action**: Inspect the `reason_code` and `waiting_on`. Handle the blocked item by applying a resolution (`fix`, `clarify`, `defer`, `reject`).
 

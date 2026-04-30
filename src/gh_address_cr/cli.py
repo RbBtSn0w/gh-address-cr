@@ -816,7 +816,7 @@ def _native_summary(
     item: dict | None = None,
 ) -> dict:
     metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
-    return {
+    summary = {
         "status": status,
         "repo": repo,
         "pr_number": str(pr_number),
@@ -834,6 +834,38 @@ def _native_summary(
         "next_action": next_action,
         "exit_code": exit_code,
     }
+    if command == "threads":
+        summary["threads"] = _native_thread_rows(session)
+    return summary
+
+
+def _native_thread_rows(session: dict) -> list[dict]:
+    items = session.get("items") if isinstance(session.get("items"), dict) else {}
+    rows = []
+    for item_id, item in sorted(items.items()):
+        if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
+            continue
+        status = str(item.get("status") or "")
+        state = str(item.get("state") or "")
+        thread_id = item.get("thread_id") or item.get("origin_ref") or str(item_id).removeprefix("github-thread:")
+        reply_evidence = item.get("reply_evidence") if isinstance(item.get("reply_evidence"), dict) else None
+        rows.append(
+            {
+                "item_id": str(item.get("item_id") or item_id),
+                "thread_id": thread_id,
+                "path": item.get("path"),
+                "line": item.get("line"),
+                "body": item.get("body"),
+                "url": item.get("url"),
+                "state": state or None,
+                "status": status or None,
+                "is_resolved": status.upper() == "CLOSED" or state.lower() in {"closed", "resolved"},
+                "is_outdated": bool(item.get("is_outdated") or item.get("isOutdated") or status.upper() == "STALE"),
+                "reply_evidence": reply_evidence,
+                "accepted_response_present": isinstance(item.get("accepted_response"), dict),
+            }
+        )
+    return rows
 
 
 def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Namespace:
@@ -1314,6 +1346,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
         return 5
 
+    _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
     _emit_final_gate_result(result)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
@@ -1343,6 +1376,64 @@ def _emit_final_gate_result(result: core_gate.GateResult) -> None:
         print(f"{key}={result.counts[key]}")
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
+
+
+def _write_native_final_gate_artifacts(
+    repo: str,
+    pr_number: str,
+    audit_id: str,
+    result: core_gate.GateResult,
+) -> None:
+    workspace = session_store.workspace_dir(repo, pr_number)
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    run_id = audit_id or "final-gate"
+    summary_path = workspace / core_paths.audit_summary_file(repo, pr_number).name
+    audit_path = workspace / core_paths.audit_log_file(repo, pr_number).name
+    trace_path = workspace / "trace.jsonl"
+    status = "ok" if result.passed else "failed"
+    summary_lines = [
+        "# Audit Summary",
+        "",
+        f"- repo: {repo}",
+        f"- pr: {pr_number}",
+        f"- run_id: {run_id}",
+        f"- final_gate_status: {status}",
+        f"- reason_code: {result.reason_code or 'PASSED'}",
+    ]
+    summary_lines.extend(f"- {key}: {result.counts[key]}" for key in core_gate.COUNT_KEYS)
+    if result.failure_codes:
+        summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
+    summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    audit_entry = {
+        "ts": timestamp,
+        "run_id": run_id,
+        "audit_id": run_id,
+        "repo": repo,
+        "pr": str(pr_number),
+        "action": "final-gate",
+        "status": status,
+        "message": "Evaluated native final gate",
+        "details": {
+            "counts": dict(result.counts),
+            "failure_codes": list(result.failure_codes),
+            "summary_file": str(summary_path),
+            "summary_sha256": summary_sha256,
+        },
+    }
+    trace_entry = {
+        "ts": timestamp,
+        "run_id": run_id,
+        "repo": repo,
+        "pr": str(pr_number),
+        "event": "final_gate",
+        "status": status,
+        "reason_code": result.reason_code or "PASSED",
+        "counts": dict(result.counts),
+    }
+    for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
 def _final_gate_failure_message(result: core_gate.GateResult) -> str:
