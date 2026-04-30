@@ -1,3 +1,9 @@
+## [2.3.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.2.1...v2.3.0) (2026-04-30)
+
+### Features
+
+* implement CLI version query flags and subcommand ([#008](https://github.com/RbBtSn0w/gh-address-cr/issues/008)) ([#29](https://github.com/RbBtSn0w/gh-address-cr/issues/29)) ([068105b](https://github.com/RbBtSn0w/gh-address-cr/commit/068105b259a771e3c81eeac4f18d9852ad7e52c8))
+
 ## [2.2.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.2.0...v2.2.1) (2026-04-30)
 
 ### Bug Fixes
