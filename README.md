@@ -210,6 +210,15 @@ Stable machine summary fields:
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
 The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents: `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence.
 
+### Metadata Commands
+
+```bash
+# Display version
+gh-address-cr --version
+# or
+gh-address-cr version
+```
+
 ## Multi-Agent Coordination
 
 The runtime is the coordinator. AI agents consume structured requests and return structured evidence.

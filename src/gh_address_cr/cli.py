@@ -57,8 +57,8 @@ COMMAND_TO_SCRIPT = {
     "submit-action": "submit_action.py",
 }
 
-HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action"}
-NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter"}
+HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version"}
+NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
@@ -1773,14 +1773,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Emit human-oriented text instead of the default machine summary.",
     )
     parser.add_argument(
+        "--version",
+        "-v",
+        action="version",
+        version=f"gh-address-cr {__version__}",
+    )
+    parser.add_argument(
         "command",
-        metavar="{address,review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action}",
+        metavar="{address,review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  cli.py address owner/repo 123 [--human]\n"
             "  cli.py review owner/repo 123 [--human]\n"
             "  cli.py review --auto-simple owner/repo 123 [--human]\n"
             "  cli.py threads owner/repo 123 [--human]\n"
+            "  cli.py version\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
             "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
             "Notes:\n"
@@ -1821,6 +1828,10 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.command == "version":
+        sys.stdout.write(f"gh-address-cr {__version__}\n")
+        return 0
 
     if args.command == "agent":
         return handle_agent_command(args)
