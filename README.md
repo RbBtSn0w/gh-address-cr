@@ -576,6 +576,7 @@ If you omit the producer where it is required:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
   - for GitHub thread `fix`: `fix_reply`
+    - `summary`
     - `commit_hash`
     - `files`
     - optional `severity`, `why`, `test_command`, `test_result`

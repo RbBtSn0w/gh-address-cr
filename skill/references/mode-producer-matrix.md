@@ -157,6 +157,7 @@ External fixer commands must read a JSON payload from stdin and return a JSON ob
 - `resolution`: `fix`, `clarify`, or `defer`
 - `note`
 - for GitHub thread `fix`: `fix_reply`
+  - `summary`
   - `commit_hash`
   - `files`
   - optional `severity`, `why`, `test_command`, `test_result`

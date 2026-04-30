@@ -1,6 +1,8 @@
 import unittest
 import json
 
+from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
+
 from tests.helpers import ROOT
 
 
@@ -14,6 +16,7 @@ OTEL_WORKER_MJS = ROOT / "skill" / "references" / "otel-worker-better-stack" / "
 OTEL_WORKER_WRANGLER = ROOT / "skill" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
 OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
+REPLY_TEMPLATES_DIR = ROOT / "skill" / "assets" / "reply-templates"
 
 
 def load_documentation_contracts():
@@ -114,11 +117,62 @@ class SkillDocumentationContractTest(unittest.TestCase):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
+        self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
         self.assertIn("`files`", matrix_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
         self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
+        self.assertIn("`summary`", readme_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
+
+    def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
+        fix_cases = {
+            "fixed-p1.md": (
+                "P1",
+                [
+                    "<commit_hash>",
+                    "<file_path>",
+                    "<targeted_test_command>",
+                    "`<pass/fail + key signal>`",
+                    "`<root cause and correction>`",
+                ],
+                "`<critical-path fix>`",
+            ),
+            "fixed-p2.md": (
+                "P2",
+                [
+                    "<commit_hash>",
+                    "<file_path>",
+                    "<test_command>",
+                    "`<pass/fail + key signal>`",
+                    "`<behavioral correction>`",
+                ],
+                "`<fix summary>`",
+            ),
+            "fixed-p3.md": (
+                "P3",
+                [
+                    "<commit_hash>",
+                    "<file_path>",
+                    "<test_command>",
+                    "`<pass/fail + key signal>`",
+                    "`<clarity/consistency improvement>`",
+                ],
+                "`<small/non-breaking improvement>`",
+            ),
+        }
+        for filename, (severity, payload, summary) in fix_cases.items():
+            with self.subTest(filename=filename):
+                self.assertEqual((REPLY_TEMPLATES_DIR / filename).read_text(encoding="utf-8"), fix_reply(severity, payload, summary=summary))
+
+        self.assertEqual(
+            (REPLY_TEMPLATES_DIR / "clarify.md").read_text(encoding="utf-8"),
+            clarify_reply(["`<detailed explanation of why the current logic is correct or answers the question>`"]),
+        )
+        self.assertEqual(
+            (REPLY_TEMPLATES_DIR / "defer.md").read_text(encoding="utf-8"),
+            defer_reply(["`<reason>`"]),
+        )
 
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
