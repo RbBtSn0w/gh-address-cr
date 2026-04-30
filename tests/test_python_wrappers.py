@@ -1189,6 +1189,33 @@ else:
         self.assertEqual(summary["waiting_on"], "github_cli")
         self.assertIn("gh", result.stderr)
 
+    def test_cli_address_api_network_failure_includes_github_diagnostics(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/bin/sh",
+                    'if [ "$1" = "auth" ]; then exit 0; fi',
+                    'if [ "$1" = "api" ]; then echo "error connecting to api.github.com" >&2; exit 1; fi',
+                    "exit 1",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "GITHUB_NETWORK_FAILED")
+        self.assertEqual(summary["waiting_on"], "github_network")
+        self.assertEqual(summary["diagnostics"]["stderr_category"], "network")
+        self.assertEqual(summary["diagnostics"]["command"][:3], ["gh", "api", "graphql"])
+        self.assertIn("api.github.com", summary["diagnostics"]["stderr_excerpt"])
+
     def test_run_local_review_requires_explicit_source_for_sync(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")

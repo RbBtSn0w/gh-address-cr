@@ -1247,14 +1247,30 @@ def _record_publish_blocked(
 
 
 def _publish_error(repo: str, pr_number: str, item_id: str, exc: GitHubError) -> WorkflowError:
+    payload = {"item_id": item_id, "retryable": exc.retryable, "repo": repo, "pr_number": str(pr_number)}
+    if exc.diagnostics:
+        payload["diagnostics"] = exc.diagnostics
     return WorkflowError(
         status="PUBLISH_BLOCKED",
         reason_code=exc.reason_code,
-        waiting_on="github",
+        waiting_on=_github_waiting_on(exc),
         exit_code=5,
         message=f"GitHub publish failed for {item_id}: {exc}",
-        payload={"item_id": item_id, "retryable": exc.retryable, "repo": repo, "pr_number": str(pr_number)},
+        payload=payload,
     )
+
+
+def _github_waiting_on(exc: GitHubError) -> str:
+    category = exc.diagnostics.get("stderr_category") if isinstance(exc.diagnostics, dict) else None
+    if category == "auth":
+        return "github_auth"
+    if category == "network":
+        return "github_network"
+    if category in {"environment", "sandbox"}:
+        return "github_environment"
+    if category == "rate_limit":
+        return "github_rate_limit"
+    return "github"
 
 
 def _next_item(session: dict[str, Any], role: str) -> tuple[str, dict[str, Any] | None]:

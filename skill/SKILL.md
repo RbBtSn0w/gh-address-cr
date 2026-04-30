@@ -73,9 +73,11 @@ High-level commands emit structured JSON by default. Agents MUST consume these f
 - `waiting_on`
 - `next_action`
 - `exit_code`
+- `diagnostics` (optional, for GitHub CLI/API failures)
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded `stderr_excerpt`.
 The `threads` command and lightweight address states may also include a `threads` array with actionable GitHub thread context (`thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence).
 
 ## Multi-Agent Protocol

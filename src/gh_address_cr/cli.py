@@ -18,6 +18,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
 from gh_address_cr.intake.findings import (
@@ -454,8 +455,9 @@ def build_preflight_summary(
     waiting_on: str | None,
     next_action: str,
     artifact_path: str | None = None,
+    diagnostics: dict | None = None,
 ) -> dict:
-    return {
+    summary = {
         "status": status,
         "repo": repo,
         "pr_number": pr_number,
@@ -473,6 +475,9 @@ def build_preflight_summary(
         "next_action": next_action,
         "exit_code": exit_code,
     }
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
+    return summary
 
 
 def has_option(args: list[str], flag: str) -> bool:
@@ -514,6 +519,7 @@ def output_preflight_error(
     artifact_path: str | None = None,
     exit_code: int = 2,
     persist: bool = True,
+    diagnostics: dict | None = None,
 ) -> int:
     if not args.human:
         summary = build_preflight_summary(
@@ -526,6 +532,7 @@ def output_preflight_error(
             waiting_on=waiting_on,
             next_action=next_action,
             artifact_path=artifact_path,
+            diagnostics=diagnostics,
         )
         if persist:
             persist_machine_summary(repo, pr_number, summary)
@@ -539,8 +546,58 @@ def _gh_auth_fixture_is_unimplemented(result: subprocess.CompletedProcess[str]) 
     return "unhandled gh args" in combined and "auth" in combined and "status" in combined
 
 
+def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, str]:
+    category = diagnostics.get("stderr_category")
+    if category == "network":
+        return (
+            "GH_NETWORK_FAILED",
+            "github_network",
+            "Fix GitHub network connectivity or sandbox network access, then rerun the command.",
+            "GitHub CLI `gh` could not reach GitHub. Inspect `gh auth status` stderr and network/sandbox access before rerunning.",
+        )
+    if category in {"environment", "sandbox"}:
+        return (
+            "GH_ENVIRONMENT_FAILED",
+            "github_environment",
+            "Fix the local sandbox or permission issue for GitHub CLI, then rerun the command.",
+            "GitHub CLI `gh` failed due to a local environment or sandbox permission issue.",
+        )
+    if category == "rate_limit":
+        return (
+            "GH_RATE_LIMITED",
+            "github_rate_limit",
+            "Wait for GitHub rate limits to recover or use a token with sufficient quota, then rerun the command.",
+            "GitHub CLI `gh` is authenticated, but GitHub reported rate limiting.",
+        )
+    return (
+        "GH_AUTH_FAILED",
+        "github_auth",
+        "Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
+        "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
+    )
+
+
+def _github_waiting_on(exc: GitHubError) -> str:
+    category = exc.diagnostics.get("stderr_category") if isinstance(exc.diagnostics, dict) else None
+    if category == "auth":
+        return "github_auth"
+    if category == "network":
+        return "github_network"
+    if category in {"environment", "sandbox"}:
+        return "github_environment"
+    if category == "rate_limit":
+        return "github_rate_limit"
+    return "github"
+
+
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
     if shutil.which("gh") is None:
+        diagnostics = classify_github_failure(
+            "Missing GitHub CLI `gh` on PATH.",
+            "",
+            None,
+            ["gh"],
+        )
         return output_preflight_error(
             args,
             repo,
@@ -551,20 +608,25 @@ def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) ->
             next_action="Install GitHub CLI and ensure `gh` is available on PATH, then rerun the command.",
             exit_code=PR_IO_PREFLIGHT_EXIT,
             persist=False,
+            diagnostics=diagnostics,
         )
 
-    result = subprocess.run(["gh", "auth", "status"], text=True, capture_output=True)
+    auth_command = ["gh", "auth", "status"]
+    result = subprocess.run(auth_command, text=True, capture_output=True)
     if result.returncode != 0 and not _gh_auth_fixture_is_unimplemented(result):
+        diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, auth_command)
+        reason_code, waiting_on, next_action, message = _preflight_gh_failure_response(diagnostics)
         return output_preflight_error(
             args,
             repo,
             pr_number,
-            "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
-            reason_code="GH_AUTH_FAILED",
-            waiting_on="github_auth",
-            next_action="Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
+            message,
+            reason_code=reason_code,
+            waiting_on=waiting_on,
+            next_action=next_action,
             exit_code=PR_IO_PREFLIGHT_EXIT,
             persist=False,
+            diagnostics=diagnostics,
         )
     return None
 
@@ -840,6 +902,7 @@ def _native_summary(
     artifact_path: str | None = None,
     item: dict | None = None,
     include_threads: bool = False,
+    diagnostics: dict | None = None,
 ) -> dict:
     metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
     summary = {
@@ -860,6 +923,8 @@ def _native_summary(
         "next_action": next_action,
         "exit_code": exit_code,
     }
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
     if command == "threads" or include_threads:
         summary["threads"] = _native_thread_rows(session)
     return summary
@@ -1091,10 +1156,11 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             pr_number=pr_number,
             status="BLOCKED",
             reason_code=exc.reason_code,
-            waiting_on="github",
+            waiting_on=_github_waiting_on(exc),
             next_action=str(exc),
             exit_code=5,
             session=session,
+            diagnostics=exc.diagnostics,
         )
         _emit_native_summary(summary, human=human)
         return 5

@@ -6,9 +6,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.github.errors import (
     GitHubAuthError,
+    GitHubEnvironmentError,
     GitHubError,
+    GitHubNetworkError,
     GitHubNotFoundError,
     GitHubRateLimitError,
     GitHubTransientError,
@@ -20,6 +23,9 @@ Runner = Callable[[list[str]], subprocess.CompletedProcess]
 TRANSIENT_MARKERS = (
     "502",
     "503",
+    "api.github.com",
+    "error connecting",
+    "failed to connect",
     "temporary failure",
     "timeout",
     "timed out",
@@ -219,7 +225,7 @@ class GitHubClient:
     def _read_json(self, args: list[str], *, retries: int = 1) -> Any:
         result = self._run_gh(args, retries=retries)
         if result.returncode != 0:
-            _raise_classified_error(result.stderr, result.stdout, result.returncode)
+            _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
         try:
             payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError as exc:
@@ -227,7 +233,12 @@ class GitHubClient:
         if isinstance(payload, dict):
             errors = payload.get("errors")
             if errors:
-                _raise_classified_error(_format_graphql_errors(errors), result.stdout, result.returncode)
+                _raise_classified_error(
+                    _format_graphql_errors(errors),
+                    result.stdout,
+                    result.returncode,
+                    _completed_command(result),
+                )
         return payload
 
     def _run_gh(self, args: list[str], *, retries: int) -> subprocess.CompletedProcess:
@@ -237,7 +248,15 @@ class GitHubClient:
             try:
                 result = self._runner(cmd)
             except FileNotFoundError as exc:
-                raise GitHubError("GITHUB_CLI_MISSING", "Missing GitHub CLI `gh` on PATH.") from exc
+                raise GitHubEnvironmentError(
+                    "Missing GitHub CLI `gh` on PATH.",
+                    diagnostics=classify_github_failure(
+                        "Missing GitHub CLI `gh` on PATH.",
+                        "",
+                        None,
+                        cmd,
+                    ),
+                ) from exc
             if result.returncode == 0 or not _is_transient(result.stderr, result.stdout):
                 return result
             if attempt < attempts - 1:
@@ -321,18 +340,37 @@ def _format_graphql_errors(errors: Any) -> str:
     return "; ".join(message for message in messages if message) or "GraphQL request failed."
 
 
-def _raise_classified_error(stderr: str | None, stdout: str | None, returncode: int | None) -> None:
+def _raise_classified_error(
+    stderr: str | None,
+    stdout: str | None,
+    returncode: int | None,
+    command: list[str] | tuple[str, ...] | None = None,
+) -> None:
     detail = (stderr or stdout or "GitHub command failed.").strip()
-    text = detail.lower()
-    if "authentication" in text or "gh auth login" in text or "bad credentials" in text or "401" in text:
-        raise GitHubAuthError(detail)
-    if "rate limit" in text or "secondary rate" in text:
-        raise GitHubRateLimitError(detail)
-    if "not found" in text or "could not resolve to a node" in text or "404" in text:
-        raise GitHubNotFoundError(detail)
+    diagnostics = classify_github_failure(stderr, stdout, returncode, command)
+    category = diagnostics["stderr_category"]
+    if category == "auth":
+        raise GitHubAuthError(detail, diagnostics=diagnostics)
+    if category == "network":
+        raise GitHubNetworkError(detail, diagnostics=diagnostics)
+    if category in {"environment", "sandbox"}:
+        raise GitHubEnvironmentError(detail, diagnostics=diagnostics)
+    if category == "rate_limit":
+        raise GitHubRateLimitError(detail, diagnostics=diagnostics)
+    if category == "not_found":
+        raise GitHubNotFoundError(detail, diagnostics=diagnostics)
     if _is_transient(stderr, stdout):
-        raise GitHubTransientError(detail)
-    raise GitHubError("GITHUB_API_FAILED", detail, retryable=False)
+        raise GitHubTransientError(detail, diagnostics=diagnostics)
+    raise GitHubError("GITHUB_API_FAILED", detail, retryable=False, diagnostics=diagnostics)
+
+
+def _completed_command(result: subprocess.CompletedProcess) -> list[str]:
+    args = result.args
+    if isinstance(args, (list, tuple)):
+        return [str(part) for part in args]
+    if isinstance(args, str):
+        return [args]
+    return []
 
 
 def _is_transient(stderr: str | None, stdout: str | None) -> bool:

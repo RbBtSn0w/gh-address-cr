@@ -74,6 +74,31 @@ class NativeFoundationTests(unittest.TestCase):
         self.assertEqual(auth.reason_code, "GITHUB_AUTH_FAILED")
         self.assertFalse(auth.retryable)
 
+    def test_github_client_errors_include_command_and_stderr_category(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubNetworkError
+
+        def runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "error connecting to api.github.com",
+            )
+
+        client = GitHubClient(runner=runner)
+
+        with self.assertRaises(GitHubNetworkError) as caught:
+            client.viewer_login()
+
+        self.assertEqual(caught.exception.reason_code, "GITHUB_NETWORK_FAILED")
+        self.assertTrue(caught.exception.retryable)
+        self.assertEqual(caught.exception.diagnostics["stderr_category"], "network")
+        self.assertEqual(caught.exception.diagnostics["command"], ["gh", "api", "user"])
+        self.assertIn("api.github.com", caught.exception.diagnostics["stderr_excerpt"])
+
 
 if __name__ == "__main__":
     unittest.main()

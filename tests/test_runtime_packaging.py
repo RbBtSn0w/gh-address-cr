@@ -263,6 +263,34 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "GH_AUTH_FAILED")
         self.assertFalse(self.session_file().exists())
 
+    def test_network_gh_preflight_is_not_reported_as_auth_failure(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            '#!/bin/sh\nif [ "$1" = "auth" ]; then echo "error connecting to api.github.com" >&2; exit 1; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(SRC_ROOT)
+        env["PATH"] = f"{self.bin_dir}{os.pathsep}{env['PATH']}"
+
+        result = subprocess.run(
+            [sys.executable, "-m", "gh_address_cr", "review", self.repo, self.pr],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "GH_NETWORK_FAILED")
+        self.assertEqual(payload["waiting_on"], "github_network")
+        self.assertEqual(payload["diagnostics"]["stderr_category"], "network")
+        self.assertEqual(payload["diagnostics"]["command"], ["gh", "auth", "status"])
+        self.assertIn("api.github.com", payload["diagnostics"]["stderr_excerpt"])
+        self.assertFalse(self.session_file().exists())
+
     def test_runtime_compatibility_preflight(self):
         result = self.run_runtime_module("adapter", "check-runtime")
 
