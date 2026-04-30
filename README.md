@@ -137,13 +137,14 @@ Native runtime ownership is now split by responsibility:
 - `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
 
 The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
-Public high-level commands (`review`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
+Public high-level commands (`review`, `address`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
 
 ## Public Interface
 
-`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint:
+`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint plus a lightweight thread-only shortcut:
 
 - `review`
+- `address`
 
 Advanced/internal integration entrypoints:
 
@@ -183,6 +184,7 @@ Minimal invocation model:
 
 ```text
 /gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr address <owner/repo> <pr_number>
 ```
 
 Advanced/internal integrations are documented later in this README.
@@ -203,7 +205,7 @@ Stable machine summary fields:
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
-The `threads` command may also include a `threads` array with actionable thread context for agents: `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence.
+The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents: `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence.
 
 ## Multi-Agent Coordination
 
@@ -246,8 +248,13 @@ High-level entrypoints:
   - public main entrypoint
   - runs the full PR review workflow automatically
   - waits for external producer handoff when findings are absent
+  - supports `--auto-simple` for the lightweight GitHub thread-only path
   - handles both local findings and GitHub review threads in one run
   - emits a machine-readable JSON summary by default
+- `address`
+  - lightweight GitHub thread-only entrypoint for simple PRs
+  - does not wait for external review findings or ingest local findings
+  - emits `WAITING_FOR_SIMPLE_ADDRESS` with an actionable request artifact when threads need agent evidence
 - `threads`
   - advanced/internal: GitHub review threads only
   - emits a machine-readable JSON summary by default
@@ -462,6 +469,7 @@ For explicit automation or repository-root invocation, the main command is:
 
 ```bash
 python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
+python3 skill/scripts/cli.py address <owner/repo> <pr_number> [--human]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:
@@ -483,6 +491,8 @@ The converter writes the standardized findings JSON to the cache-backed PR works
 Advanced CLI examples:
 
 ```text
+$gh-address-cr address <PR_URL>
+$gh-address-cr review --auto-simple <PR_URL>
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync

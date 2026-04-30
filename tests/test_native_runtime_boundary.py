@@ -136,6 +136,22 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["reason_code"], "PASSED")
 
+    def test_address_command_runs_without_legacy_scripts(self):
+        bin_dir = self.install_fake_gh()
+
+        with patch.dict(os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}, clear=False):
+            rc, stdout, stderr = self.run_cli_without_legacy_scripts(
+                "address",
+                self.repo,
+                self.pr_number,
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Required gh-address-cr runtime script is missing", stderr)
+        summary = json.loads(stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["reason_code"], "PASSED")
+
     def test_adapter_command_runs_without_legacy_scripts(self):
         adapter = self.root / "adapter.py"
         adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
@@ -157,7 +173,7 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
         self.assertEqual(summary["reason_code"], "PASSED")
 
     def test_core_public_commands_are_not_legacy_script_mapped(self):
-        for command in ("review", "findings", "threads", "adapter"):
+        for command in ("review", "findings", "threads", "adapter", "address"):
             self.assertNotIn(command, cli.COMMAND_TO_SCRIPT)
 
 

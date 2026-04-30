@@ -171,6 +171,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("review", result.stdout)
+        self.assertIn("address", result.stdout)
         self.assertIn("threads", result.stdout)
         self.assertIn("findings", result.stdout)
         self.assertIn("final-gate", result.stdout)
@@ -183,6 +184,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_runtime_public_command_help_parity(self):
         commands = [
+            ("address", "--help"),
             ("review", "--help"),
             ("threads", "--help"),
             ("findings", "--help"),
@@ -204,6 +206,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "MANIFEST_READY")
+        self.assertIn("address", payload["public_commands"])
         validate_capability_manifest(payload)
         self.assertIn("coordinator", payload["roles"])
         self.assertIn("triage", payload["roles"])
