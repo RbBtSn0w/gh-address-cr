@@ -126,8 +126,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`summary`", readme_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
         # SKILL.md must document fix_reply as a JSON object with required and optional fields
-        self.assertIn("`fix_reply`", skill_text)
-        self.assertIn("JSON object", skill_text)
+        self.assertIn("`fix_reply` **must be a JSON object**", skill_text)
         self.assertIn("`commit_hash`", skill_text)
         self.assertIn("`files`", skill_text)
         self.assertIn("`test_command`", skill_text)
