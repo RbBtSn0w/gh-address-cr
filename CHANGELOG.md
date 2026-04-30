@@ -1,3 +1,9 @@
+## [2.1.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.3...v2.1.0) (2026-04-30)
+
+### Features
+
+* add lightweight address flow ([#26](https://github.com/RbBtSn0w/gh-address-cr/issues/26)) ([5e755f3](https://github.com/RbBtSn0w/gh-address-cr/commit/5e755f38e3c00c763c1cdee9e87f8298307f7b76))
+
 ## [2.0.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.2...v2.0.3) (2026-04-30)
 
 ### Bug Fixes
