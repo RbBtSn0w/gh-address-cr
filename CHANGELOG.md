@@ -1,3 +1,9 @@
+## [2.2.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.2.0...v2.2.1) (2026-04-30)
+
+### Bug Fixes
+
+* classify github environment diagnostics ([#28](https://github.com/RbBtSn0w/gh-address-cr/issues/28)) ([4904af9](https://github.com/RbBtSn0w/gh-address-cr/commit/4904af961b6fe5cbf7f4df1432164e4156278bb4))
+
 ## [2.2.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.1.0...v2.2.0) (2026-04-30)
 
 ### Features
