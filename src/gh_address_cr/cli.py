@@ -18,7 +18,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
-from gh_address_cr.github.diagnostics import classify_github_failure
+from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
 from gh_address_cr.intake.findings import (
@@ -575,19 +575,6 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
         "Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
         "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
     )
-
-
-def _github_waiting_on(exc: GitHubError) -> str:
-    category = exc.diagnostics.get("stderr_category") if isinstance(exc.diagnostics, dict) else None
-    if category == "auth":
-        return "github_auth"
-    if category == "network":
-        return "github_network"
-    if category in {"environment", "sandbox"}:
-        return "github_environment"
-    if category == "rate_limit":
-        return "github_rate_limit"
-    return "github"
 
 
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
@@ -1156,7 +1143,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             pr_number=pr_number,
             status="BLOCKED",
             reason_code=exc.reason_code,
-            waiting_on=_github_waiting_on(exc),
+            waiting_on=github_waiting_on(exc.diagnostics),
             next_action=str(exc),
             exit_code=5,
             session=session,

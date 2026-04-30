@@ -228,7 +228,16 @@ class GitHubClient:
         try:
             payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError as exc:
-            raise GitHubError("GITHUB_INVALID_JSON", f"GitHub response was not valid JSON: {exc}") from exc
+            raise GitHubError(
+                "GITHUB_INVALID_JSON",
+                f"GitHub response was not valid JSON: {exc}",
+                diagnostics=classify_github_failure(
+                    result.stderr,
+                    result.stdout,
+                    result.returncode,
+                    _completed_command(result),
+                ),
+            ) from exc
         if isinstance(payload, dict):
             errors = payload.get("errors")
             if errors:

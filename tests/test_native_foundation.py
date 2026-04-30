@@ -135,6 +135,41 @@ class NativeFoundationTests(unittest.TestCase):
         self.assertFalse(forbidden.exception.retryable)
         self.assertEqual(forbidden.exception.diagnostics["stderr_category"], "api")
 
+    def test_github_invalid_json_errors_include_redacted_diagnostics(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubError
+
+        def runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                "not-json token=ghp_abcdefghijklmnopqrstuvwxyz12 user=alice@example.com",
+                "",
+            )
+
+        with self.assertRaises(GitHubError) as caught:
+            GitHubClient(runner=runner).viewer_login()
+
+        diagnostics = caught.exception.diagnostics
+        self.assertEqual(caught.exception.reason_code, "GITHUB_INVALID_JSON")
+        self.assertEqual(diagnostics["command"], ["gh", "api", "user"])
+        self.assertEqual(diagnostics["returncode"], 0)
+        self.assertIn("[redacted-token]", diagnostics["stderr_excerpt"])
+        self.assertIn("[redacted]", diagnostics["stderr_excerpt"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", diagnostics["stderr_excerpt"])
+        self.assertNotIn("alice@example.com", diagnostics["stderr_excerpt"])
+
+    def test_github_waiting_on_uses_shared_diagnostic_mapping(self):
+        from gh_address_cr.github.diagnostics import github_waiting_on
+
+        self.assertEqual(github_waiting_on({"stderr_category": "auth"}), "github_auth")
+        self.assertEqual(github_waiting_on({"stderr_category": "network"}), "github_network")
+        self.assertEqual(github_waiting_on({"stderr_category": "sandbox"}), "github_environment")
+        self.assertEqual(github_waiting_on({"stderr_category": "rate_limit"}), "github_rate_limit")
+        self.assertEqual(github_waiting_on({"stderr_category": "unknown"}), "github")
+
 
 if __name__ == "__main__":
     unittest.main()

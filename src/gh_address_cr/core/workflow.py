@@ -22,6 +22,7 @@ from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.reply_templates import fix_reply as render_fix_reply
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
+from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
 
 
@@ -1253,24 +1254,11 @@ def _publish_error(repo: str, pr_number: str, item_id: str, exc: GitHubError) ->
     return WorkflowError(
         status="PUBLISH_BLOCKED",
         reason_code=exc.reason_code,
-        waiting_on=_github_waiting_on(exc),
+        waiting_on=github_waiting_on(exc.diagnostics),
         exit_code=5,
         message=f"GitHub publish failed for {item_id}: {exc}",
         payload=payload,
     )
-
-
-def _github_waiting_on(exc: GitHubError) -> str:
-    category = exc.diagnostics.get("stderr_category") if isinstance(exc.diagnostics, dict) else None
-    if category == "auth":
-        return "github_auth"
-    if category == "network":
-        return "github_network"
-    if category in {"environment", "sandbox"}:
-        return "github_environment"
-    if category == "rate_limit":
-        return "github_rate_limit"
-    return "github"
 
 
 def _next_item(session: dict[str, Any], role: str) -> tuple[str, dict[str, Any] | None]:
