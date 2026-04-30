@@ -11,6 +11,7 @@ Agents should expect the runtime to record:
 - `lease_created`, `lease_submitted`, `lease_accepted`, `lease_rejected`,
   `lease_expired`, and `lease_released` for lease lifecycle changes
 - `response_accepted` and `response_rejected` for `ActionResponse` handling
+- batch evidence submissions expand into per-item `response_accepted` or `response_rejected` records
 - `verification_rejected` when verifier evidence reopens a work item
 - `reply_posted`, `thread_resolved`, and side-effect attempt records for
   deterministic GitHub publishing

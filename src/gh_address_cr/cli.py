@@ -924,14 +924,16 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         "source_command": command,
         "threads": _native_thread_rows(session),
         "instructions": [
-            "Use existing per-thread ActionResponse evidence; do not submit a batch response.",
-            "For each actionable GitHub thread, run agent classify, agent next, agent submit, then agent publish.",
-            "Common commit, file, and validation evidence may be reused in each per-thread response when applicable.",
+            "Use per-thread ActionResponse evidence, or agent submit-batch when one commit/files/validation set addresses multiple threads.",
+            "For each actionable GitHub thread, run agent classify and agent next to acquire leases before submitting evidence.",
+            "When common commit, file, and validation evidence applies, submit one BatchActionResponse with per-thread summary/why entries.",
+            "After accepted evidence is present, run agent publish.",
         ],
         "commands": {
             "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
             "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
             "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+            "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
             "publish": f"gh-address-cr agent publish {repo} {pr_number}",
         },
     }
@@ -1280,6 +1282,7 @@ def build_agent_manifest() -> dict:
         ],
         "output_formats": [
             "action_response.v1",
+            "batch_action_response.v1",
             "evidence_record.v1",
             "gate_report.v1",
         ],
@@ -1293,7 +1296,7 @@ def build_agent_manifest() -> dict:
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,publish,leases,reclaim,orchestrate} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -1306,6 +1309,8 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_next(args.pr_number, args.args)
     if args.repo == "submit":
         return handle_agent_submit(args.pr_number, args.args)
+    if args.repo == "submit-batch":
+        return handle_agent_submit_batch(args.pr_number, args.args)
     if args.repo == "publish":
         return handle_agent_publish(args.pr_number, args.args)
     if args.repo == "leases":
@@ -1315,7 +1320,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, publish, leases, reclaim, orchestrate.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -1382,6 +1387,32 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
         payload = workflow.submit_action_response(parsed.repo, parsed.pr_number, response_path=parsed.input, now=now_dt)
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_submit_batch(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr agent submit-batch",
+        description="Submit a BatchActionResponse with common fix evidence for multiple GitHub review threads.",
+    )
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--input", required=True, help="Path to a BatchActionResponse JSON file.")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        payload = workflow.submit_batch_action_response(
+            parsed.repo,
+            parsed.pr_number,
+            batch_path=parsed.input,
+            now=now_dt,
+        )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -1709,6 +1740,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
             "Runtime commands:\n"
             "  gh-address-cr agent manifest\n"
+            "  gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json\n"
             "  gh-address-cr final-gate owner/repo 123\n"
         ),
     )

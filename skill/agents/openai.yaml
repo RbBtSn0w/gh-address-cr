@@ -6,7 +6,7 @@ interface:
     Use `SKILL.md` as the source of truth.
     1. Treat `python3 scripts/cli.py` as a compatibility shim. Stateful work belongs to the external `gh-address-cr` runtime.
     2. Start with `python3 scripts/cli.py review <owner/repo> <pr_number>` or `gh-address-cr review <owner/repo> <pr_number>`.
-    3. For multi-agent work, inspect `gh-address-cr agent manifest`, claim with `agent next`, submit evidence with `agent submit`, inspect with `agent leases`, and recover stale claims with `agent reclaim`.
+    3. For multi-agent work, inspect `gh-address-cr agent manifest`, claim with `agent next`, submit evidence with `agent submit` or GitHub-thread batch evidence with `agent submit-batch`, inspect with `agent leases`, and recover stale claims with `agent reclaim`.
     4. AI agents may classify, fix, clarify, defer, reject, or verify. They must not post GitHub replies or resolve threads directly.
     5. GitHub review threads require both reply and resolve, with durable reply evidence from the current authenticated login.
     6. Local findings require valid terminal notes and validation evidence.

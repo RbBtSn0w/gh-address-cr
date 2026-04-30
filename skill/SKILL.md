@@ -89,6 +89,9 @@ Use the runtime as the coordinator:
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - validates an `ActionResponse`, lease ownership, and required evidence
   - when it returns `ACTION_ACCEPTED`, run the returned `next_action`; accepted GitHub-thread fixes publish through `agent publish`
+- `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
+  - validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items
+  - shares common commit/files/validation evidence while keeping per-thread `summary`/`why`
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - inspects active and terminal claims
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
@@ -106,6 +109,7 @@ Role boundaries:
 
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
 Fix responses require changed files and validation evidence. Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings.
 
 ## Advanced References
 

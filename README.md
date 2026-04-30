@@ -156,6 +156,7 @@ Advanced/internal integration entrypoints:
 - `agent classify`
 - `agent next`
 - `agent submit`
+- `agent submit-batch`
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
@@ -216,6 +217,7 @@ gh-address-cr agent manifest
 gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
+gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
@@ -235,6 +237,37 @@ Role split:
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
+Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`.
+
+Minimal `BatchActionResponse` shape:
+
+```json
+{
+  "schema_version": "1.0",
+  "agent_id": "codex-fixer-1",
+  "resolution": "fix",
+  "common": {
+    "files": ["src/example.py", "tests/test_example.py"],
+    "validation_commands": [
+      {"command": "python3 -m unittest tests.test_example", "result": "passed"}
+    ],
+    "fix_reply": {
+      "commit_hash": "abc123",
+      "test_command": "python3 -m unittest tests.test_example",
+      "test_result": "passed"
+    }
+  },
+  "items": [
+    {
+      "request_id": "req_1",
+      "lease_id": "lease_1",
+      "item_id": "github-thread:THREAD_1",
+      "summary": "Fixed thread 1.",
+      "why": "The input is now validated before use."
+    }
+  ]
+}
+```
 
 Main entrypoint examples:
 

@@ -293,6 +293,167 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(item["publish_resolution"], "fix")
         self.assertNotIn("side_effect_attempt", [row["event_type"] for row in self.ledger_rows()])
 
+    def test_agent_submit_batch_accepts_common_evidence_for_github_threads(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example_one.py",
+                    line=10,
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_1",
+                    },
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example_two.py",
+                    line=20,
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_2",
+                    },
+                    thread_id="PRRT_def",
+                ),
+            ]
+        )
+        first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
+        second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "batch-action-response.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/example_one.py", "src/example_two.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_examples", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "test_command": "python3 -m unittest tests.test_examples",
+                            "test_result": "passed",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": first_request["request_id"],
+                            "lease_id": first_request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "summary": "Fixed first thread.",
+                            "why": "The first thread now validates the input before use.",
+                        },
+                        {
+                            "request_id": second_request["request_id"],
+                            "lease_id": second_request["lease_id"],
+                            "item_id": "github-thread:def",
+                            "summary": "Fixed second thread.",
+                            "why": "The second thread now shares the same guarded path.",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_ACCEPTED")
+        self.assertEqual(payload["accepted_count"], 2)
+        self.assertEqual(
+            payload["next_action"],
+            f"Run `gh-address-cr agent publish {self.repo} {self.pr}` to publish accepted evidence.",
+        )
+        session = self.load_session()
+        first_item = session["items"]["github-thread:abc"]
+        second_item = session["items"]["github-thread:def"]
+        self.assertEqual(first_item["state"], "publish_ready")
+        self.assertEqual(second_item["state"], "publish_ready")
+        self.assertEqual(first_item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
+        self.assertEqual(second_item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
+        self.assertEqual(
+            first_item["accepted_response"]["fix_reply"]["why"],
+            "The first thread now validates the input before use.",
+        )
+        self.assertEqual(
+            second_item["accepted_response"]["fix_reply"]["why"],
+            "The second thread now shares the same guarded path.",
+        )
+        self.assertEqual(session["leases"][first_request["lease_id"]]["status"], "accepted")
+        self.assertEqual(session["leases"][second_request["lease_id"]]["status"], "accepted")
+        self.assertEqual([row["event_type"] for row in self.ledger_rows()].count("response_accepted"), 2)
+
+    def test_agent_submit_batch_rejects_local_findings_without_mutation(self):
+        self.write_session(
+            items=[
+                open_item(
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    }
+                )
+            ]
+        )
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "local-batch-action-response.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/example.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_example", "result": "passed"}
+                        ],
+                        "fix_reply": {"commit_hash": "abc123"},
+                    },
+                    "items": [
+                        {
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "item_id": "local-finding:1",
+                            "summary": "Fixed validation.",
+                            "why": "The input is now validated.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "BATCH_UNSUPPORTED_ITEM_KIND")
+        session = self.load_session()
+        self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
+        self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
+        self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
     def test_agent_publish_reports_no_work_when_no_thread_is_publish_ready(self):
         self.write_session(items=[open_item()])
 
