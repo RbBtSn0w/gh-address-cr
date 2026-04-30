@@ -22,6 +22,7 @@ from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.reply_templates import fix_reply as render_fix_reply
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
+from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
 
 
@@ -1247,13 +1248,16 @@ def _record_publish_blocked(
 
 
 def _publish_error(repo: str, pr_number: str, item_id: str, exc: GitHubError) -> WorkflowError:
+    payload = {"item_id": item_id, "retryable": exc.retryable, "repo": repo, "pr_number": str(pr_number)}
+    if exc.diagnostics:
+        payload["diagnostics"] = exc.diagnostics
     return WorkflowError(
         status="PUBLISH_BLOCKED",
         reason_code=exc.reason_code,
-        waiting_on="github",
+        waiting_on=github_waiting_on(exc.diagnostics),
         exit_code=5,
         message=f"GitHub publish failed for {item_id}: {exc}",
-        payload={"item_id": item_id, "retryable": exc.retryable, "repo": repo, "pr_number": str(pr_number)},
+        payload=payload,
     )
 
 

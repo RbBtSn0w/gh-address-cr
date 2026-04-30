@@ -19,6 +19,12 @@ If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
 
+If `reason_code` is `GH_AUTH_FAILED` or `GITHUB_AUTH_FAILED`:
+- **Action**: Inspect `diagnostics.command` and `diagnostics.stderr_category`. Fix GitHub CLI authentication with `gh auth status` / `gh auth login`, then rerun the same command.
+
+If `reason_code` is `GH_NETWORK_FAILED`, `GITHUB_NETWORK_FAILED`, `GH_ENVIRONMENT_FAILED`, or `GITHUB_ENVIRONMENT_FAILED`:
+- **Action**: Inspect `diagnostics.command`, `diagnostics.stderr_category`, and `diagnostics.stderr_excerpt`. Fix network, sandbox, PATH, or local permission issues before retrying; do not treat these as code-review findings.
+
 ## External Interactions
 
 If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:

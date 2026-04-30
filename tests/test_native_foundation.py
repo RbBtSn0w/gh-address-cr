@@ -74,6 +74,102 @@ class NativeFoundationTests(unittest.TestCase):
         self.assertEqual(auth.reason_code, "GITHUB_AUTH_FAILED")
         self.assertFalse(auth.retryable)
 
+    def test_github_client_errors_include_command_and_stderr_category(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubNetworkError
+
+        def runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "error connecting to api.github.com",
+            )
+
+        client = GitHubClient(runner=runner)
+
+        with self.assertRaises(GitHubNetworkError) as caught:
+            client.viewer_login()
+
+        self.assertEqual(caught.exception.reason_code, "GITHUB_NETWORK_FAILED")
+        self.assertTrue(caught.exception.retryable)
+        self.assertEqual(caught.exception.diagnostics["stderr_category"], "network")
+        self.assertEqual(caught.exception.diagnostics["command"], ["gh", "api", "user"])
+        self.assertIn("api.github.com", caught.exception.diagnostics["stderr_excerpt"])
+
+    def test_github_api_urls_do_not_make_http_errors_network_failures(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubError, GitHubNotFoundError
+
+        def not_found_runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "HTTP 404: Not Found (https://api.github.com/repos/owner/repo)",
+            )
+
+        with self.assertRaises(GitHubNotFoundError) as not_found:
+            GitHubClient(runner=not_found_runner).viewer_login()
+
+        self.assertEqual(not_found.exception.reason_code, "GITHUB_NOT_FOUND")
+        self.assertFalse(not_found.exception.retryable)
+        self.assertEqual(not_found.exception.diagnostics["stderr_category"], "not_found")
+
+        def forbidden_runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)",
+            )
+
+        with self.assertRaises(GitHubError) as forbidden:
+            GitHubClient(runner=forbidden_runner).viewer_login()
+
+        self.assertEqual(forbidden.exception.reason_code, "GITHUB_API_FAILED")
+        self.assertFalse(forbidden.exception.retryable)
+        self.assertEqual(forbidden.exception.diagnostics["stderr_category"], "api")
+
+    def test_github_invalid_json_errors_include_redacted_diagnostics(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubError
+
+        def runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                "not-json token=ghp_abcdefghijklmnopqrstuvwxyz12 user=alice@example.com",
+                "",
+            )
+
+        with self.assertRaises(GitHubError) as caught:
+            GitHubClient(runner=runner).viewer_login()
+
+        diagnostics = caught.exception.diagnostics
+        self.assertEqual(caught.exception.reason_code, "GITHUB_INVALID_JSON")
+        self.assertEqual(diagnostics["command"], ["gh", "api", "user"])
+        self.assertEqual(diagnostics["returncode"], 0)
+        self.assertIn("[redacted-token]", diagnostics["stderr_excerpt"])
+        self.assertIn("[redacted]", diagnostics["stderr_excerpt"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", diagnostics["stderr_excerpt"])
+        self.assertNotIn("alice@example.com", diagnostics["stderr_excerpt"])
+
+    def test_github_waiting_on_uses_shared_diagnostic_mapping(self):
+        from gh_address_cr.github.diagnostics import github_waiting_on
+
+        self.assertEqual(github_waiting_on({"stderr_category": "auth"}), "github_auth")
+        self.assertEqual(github_waiting_on({"stderr_category": "network"}), "github_network")
+        self.assertEqual(github_waiting_on({"stderr_category": "sandbox"}), "github_environment")
+        self.assertEqual(github_waiting_on({"stderr_category": "rate_limit"}), "github_rate_limit")
+        self.assertEqual(github_waiting_on({"stderr_category": "unknown"}), "github")
+
 
 if __name__ == "__main__":
     unittest.main()
