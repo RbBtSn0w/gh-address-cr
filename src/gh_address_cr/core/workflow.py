@@ -19,7 +19,11 @@ from gh_address_cr.core.leases import (
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
-from gh_address_cr.core.reply_templates import fix_reply as render_fix_reply
+from gh_address_cr.core.reply_templates import (
+    clarify_reply as render_clarify_reply,
+    defer_reply as render_defer_reply,
+    fix_reply as render_fix_reply,
+)
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -1113,10 +1117,14 @@ def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
 def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[str | None, str | None]:
     resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
-    if resolution != "fix" and isinstance(reply_markdown, str) and reply_markdown.strip():
-        return reply_markdown, None
     if resolution != "fix":
-        return None, "MISSING_PUBLISH_REPLY"
+        if not isinstance(reply_markdown, str) or not reply_markdown.strip():
+            return None, "MISSING_PUBLISH_REPLY"
+        if resolution == "clarify":
+            return render_clarify_reply([reply_markdown.strip()]), None
+        if resolution == "defer":
+            return render_defer_reply([reply_markdown.strip()]), None
+        return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
         return None, "MISSING_PUBLISH_REPLY"
@@ -1135,8 +1143,13 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
         return None, "MISSING_FIX_REPLY_TEST_RESULT"
     severity = _normalize_fix_reply_severity(fix_reply.get("severity") or item.get("severity") or "P2")
     why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
+    summary = str(fix_reply.get("summary") or "").strip() or None
     try:
-        return render_fix_reply(severity, [commit_hash, ",".join(files), test_command, test_result, why]), None
+        return render_fix_reply(
+            severity,
+            [commit_hash, ",".join(files), test_command, test_result, why],
+            summary=summary,
+        ), None
     except SystemExit as exc:
         return None, str(exc) or "MISSING_PUBLISH_REPLY"
 
