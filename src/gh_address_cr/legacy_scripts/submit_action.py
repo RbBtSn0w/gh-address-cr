@@ -70,7 +70,7 @@ def require_request_context(req: dict) -> tuple[str, str, dict] | None:
     repo, pr_number = repository_context(req)
     item = request_item(req)
     if not repo or not pr_number:
-        error("request missing repository_context.repo or repository_context.pr_number")
+        error("request missing repo/pr_number (either top-level repo/pr_number or repository_context.repo/pr_number)")
         return None
     if not item:
         error("request missing item")

@@ -224,7 +224,8 @@ class SubmitActionHelperTest(PythonScriptTestCase):
                 result = self.run_helper(script, str(request_path), "--resolution", "fix", "--note", "Fixed.")
 
                 self.assertEqual(result.returncode, 2)
-                self.assertIn("repository_context.repo", result.stderr)
+                self.assertIn("top-level repo/pr_number", result.stderr)
+                self.assertIn("repository_context.repo/pr_number", result.stderr)
                 self.assertFalse((self.workspace_dir() / "action-response-github-thread_abc.json").exists())
 
     def test_runtime_action_request_missing_identity_fails_loudly_without_artifact(self):
