@@ -1,3 +1,9 @@
+## [2.3.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.1...v2.3.2) (2026-04-30)
+
+### Bug Fixes
+
+* repair action request helper protocol friction ([#32](https://github.com/RbBtSn0w/gh-address-cr/issues/32)) ([9dbd797](https://github.com/RbBtSn0w/gh-address-cr/commit/9dbd797f3f39a33f1659691ddbfdc624e806be33))
+
 ## [2.3.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.0...v2.3.1) (2026-04-30)
 
 ### Bug Fixes
