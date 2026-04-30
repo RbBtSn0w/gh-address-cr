@@ -12,7 +12,6 @@ AUTH_MARKERS = (
     "401",
 )
 NETWORK_MARKERS = (
-    "api.github.com",
     "could not resolve host",
     "failed to connect",
     "error connecting",

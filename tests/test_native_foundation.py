@@ -99,6 +99,42 @@ class NativeFoundationTests(unittest.TestCase):
         self.assertEqual(caught.exception.diagnostics["command"], ["gh", "api", "user"])
         self.assertIn("api.github.com", caught.exception.diagnostics["stderr_excerpt"])
 
+    def test_github_api_urls_do_not_make_http_errors_network_failures(self):
+        import subprocess
+
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubError, GitHubNotFoundError
+
+        def not_found_runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "HTTP 404: Not Found (https://api.github.com/repos/owner/repo)",
+            )
+
+        with self.assertRaises(GitHubNotFoundError) as not_found:
+            GitHubClient(runner=not_found_runner).viewer_login()
+
+        self.assertEqual(not_found.exception.reason_code, "GITHUB_NOT_FOUND")
+        self.assertFalse(not_found.exception.retryable)
+        self.assertEqual(not_found.exception.diagnostics["stderr_category"], "not_found")
+
+        def forbidden_runner(cmd):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)",
+            )
+
+        with self.assertRaises(GitHubError) as forbidden:
+            GitHubClient(runner=forbidden_runner).viewer_login()
+
+        self.assertEqual(forbidden.exception.reason_code, "GITHUB_API_FAILED")
+        self.assertFalse(forbidden.exception.retryable)
+        self.assertEqual(forbidden.exception.diagnostics["stderr_category"], "api")
+
 
 if __name__ == "__main__":
     unittest.main()

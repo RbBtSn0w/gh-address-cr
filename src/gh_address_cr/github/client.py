@@ -23,7 +23,6 @@ Runner = Callable[[list[str]], subprocess.CompletedProcess]
 TRANSIENT_MARKERS = (
     "502",
     "503",
-    "api.github.com",
     "error connecting",
     "failed to connect",
     "temporary failure",
