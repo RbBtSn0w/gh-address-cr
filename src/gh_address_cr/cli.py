@@ -56,10 +56,10 @@ COMMAND_TO_SCRIPT = {
     "submit-action": "submit_action.py",
 }
 
-HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter", "submit-action"}
-NATIVE_HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
+HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action"}
+NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter"}
 OUTPUT_FLAGS = {"--machine", "--human"}
-HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
+HIGH_LEVEL_GH_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
@@ -181,12 +181,22 @@ def rewrite_alias_args(
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
+            "usage: cli.py review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
             "This command waits for external review findings when they are absent,\n"
             "then tells you to re-run the same review command once handoff artifacts are filled.\n"
             "You may still provide findings JSON explicitly via --input <path> or --input -.\n"
+            "Use --auto-simple for a lightweight GitHub thread-only path that does not wait for external review findings.\n"
+            "Default output is a structured JSON summary. Use --human for narrative text.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
+        )
+    if command == "address":
+        return (
+            "usage: cli.py address <owner/repo> <pr_number> [--human|--machine]\n\n"
+            "Lightweight GitHub thread-only entrypoint.\n\n"
+            "Use for simple PRs where only GitHub review threads need addressing.\n"
+            "This command does not wait for external review findings and does not ingest local findings.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -486,6 +496,11 @@ def normalize_high_level_target_args(args: argparse.Namespace) -> None:
     args.args = [repo, pr_number, *args.args[1:]]
 
 
+def normalize_leading_high_level_options(args: argparse.Namespace) -> None:
+    if args.command == "review" and args.args and args.args[0] == "--auto-simple":
+        args.args = [*args.args[1:], "--auto-simple"]
+
+
 def output_preflight_error(
     args: argparse.Namespace,
     repo: str,
@@ -573,6 +588,9 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
         gh_preflight = preflight_github_cli(args, repo, pr_number)
         if gh_preflight is not None:
             return gh_preflight
+
+    if args.command == "review" and has_option(args.args, "--auto-simple"):
+        return None
 
     if args.command == "review" and not has_option(args.args, "--input"):
         normalized_input, handoff_sha256, error = normalize_review_handoff(repo, pr_number)
@@ -814,6 +832,7 @@ def _native_summary(
     session: dict,
     artifact_path: str | None = None,
     item: dict | None = None,
+    include_threads: bool = False,
 ) -> dict:
     metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
     summary = {
@@ -834,7 +853,7 @@ def _native_summary(
         "next_action": next_action,
         "exit_code": exit_code,
     }
-    if command == "threads":
+    if command == "threads" or include_threads:
         summary["threads"] = _native_thread_rows(session)
     return summary
 
@@ -868,11 +887,46 @@ def _native_thread_rows(session: dict) -> list[dict]:
     return rows
 
 
+def _blocking_local_items(session: dict) -> list[dict]:
+    items = session.get("items") if isinstance(session.get("items"), dict) else {}
+    return [
+        item
+        for item in items.values()
+        if isinstance(item, dict) and item.get("item_kind") == "local_finding" and bool(item.get("blocking"))
+    ]
+
+
+def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, command: str, run_id: str) -> Path:
+    request_path = workspace_root(repo, pr_number) / f"simple-address-request-{run_id}-{uuid4().hex}.json"
+    request = {
+        "mode": "simple-address",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "run_id": run_id,
+        "source_command": command,
+        "threads": _native_thread_rows(session),
+        "instructions": [
+            "Use existing per-thread ActionResponse evidence; do not submit a batch response.",
+            "For each actionable GitHub thread, run agent classify, agent next, agent submit, then agent publish.",
+            "Common commit, file, and validation evidence may be reused in each per-thread response when applicable.",
+        ],
+        "commands": {
+            "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
+            "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
+            "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+            "publish": f"gh-address-cr agent publish {repo} {pr_number}",
+        },
+    }
+    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return request_path
+
+
 def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog=f"gh-address-cr {command}", add_help=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("adapter_cmd", nargs="*")
+    parser.add_argument("--auto-simple", action="store_true")
     parser.add_argument("--input")
     parser.add_argument("--source")
     parser.add_argument("--sync", action="store_true")
@@ -903,6 +957,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     repo = parsed.repo
     pr_number = str(parsed.pr_number)
     run_id = parsed.audit_id or f"native-{_utc_now()}"
+    auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
     session = _load_or_create_session(repo, pr_number)
     _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
@@ -934,11 +989,43 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             )
 
         remote_threads: list[dict] = []
-        if command in {"review", "threads", "adapter"}:
+        if command in {"address", "review", "threads", "adapter"}:
             client = GitHubClient()
             remote_threads = client.list_threads(repo, pr_number)
             session = core_gate.session_with_remote_threads(session, remote_threads)
         _recalc_native_metrics(session)
+        if auto_simple and _blocking_local_items(session):
+            next_action = (
+                "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
+                "to handle blocking local findings, then rerun address."
+            )
+            item = _blocking_local_items(session)[0]
+            _set_loop_state(
+                session,
+                run_id=run_id,
+                status="BLOCKED",
+                iteration=1,
+                max_iterations=parsed.max_iterations,
+                current_item_id=item.get("item_id"),
+                last_error=next_action,
+            )
+            _recalc_native_metrics(session)
+            session_store.save_session(repo, pr_number, session)
+            summary = _native_summary(
+                command=command,
+                repo=repo,
+                pr_number=pr_number,
+                status="BLOCKED",
+                reason_code="AUTO_SIMPLE_NOT_ELIGIBLE",
+                waiting_on="local_findings",
+                next_action=next_action,
+                exit_code=5,
+                session=session,
+                item=item,
+                include_threads=True,
+            )
+            _emit_native_summary(summary, human=human)
+            return 5
         result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
     except (FindingsFormatError, OSError) as exc:
         _set_loop_state(
@@ -985,6 +1072,41 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             next_action=str(exc),
             exit_code=5,
             session=session,
+        )
+        _emit_native_summary(summary, human=human)
+        return 5
+
+    if auto_simple and not result.passed:
+        item = _first_blocking_item(session)
+        request_path = _write_simple_address_request(repo, pr_number, session, command=command, run_id=run_id)
+        next_action = (
+            "Address GitHub review threads with per-thread agent evidence, then run "
+            f"`gh-address-cr agent publish {repo} {pr_number}` and rerun this command."
+        )
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=parsed.max_iterations,
+            current_item_id=item.get("item_id") if item else None,
+            last_error=next_action,
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code="WAITING_FOR_SIMPLE_ADDRESS",
+            waiting_on="agent_fix",
+            next_action=next_action,
+            exit_code=5,
+            session=session,
+            artifact_path=str(request_path),
+            item=item,
+            include_threads=True,
         )
         _emit_native_summary(summary, human=human)
         return 5
@@ -1045,6 +1167,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         next_action="No action required.",
         exit_code=0,
         session=session,
+        include_threads=auto_simple,
     )
     _emit_native_summary(summary, human=human)
     return 0
@@ -1110,7 +1233,7 @@ def build_agent_manifest() -> dict:
         "constraints": {
             "max_parallel_claims": 2,
         },
-        "public_commands": sorted(["review", "threads", "findings", "adapter", "submit-action", "final-gate"]),
+        "public_commands": sorted(["address", "review", "threads", "findings", "adapter", "submit-action", "final-gate"]),
     }
 
 
@@ -1514,10 +1637,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action}",
+        metavar="{address,review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action}",
         help=(
             "High-level commands:\n"
+            "  cli.py address owner/repo 123 [--human]\n"
             "  cli.py review owner/repo 123 [--human]\n"
+            "  cli.py review --auto-simple owner/repo 123 [--human]\n"
             "  cli.py threads owner/repo 123 [--human]\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
             "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
@@ -1611,6 +1736,7 @@ def main(argv: list[str] | None = None) -> int:
         supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "agent"]))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
+    normalize_leading_high_level_options(args)
     if not normalize_output_args(args):
         return 2
     normalize_high_level_target_args(args)

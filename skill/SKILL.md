@@ -1,7 +1,7 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request needs review-thread reply and resolve handling, findings ingestion, and a mandatory final gate in one PR-scoped session.
-argument-hint: "<review|threads|findings|adapter> ..."
+argument-hint: "<review|address|threads|findings|adapter> ..."
 ---
 
 # gh-address-cr
@@ -13,6 +13,7 @@ The runtime owns session state, intake routing, GitHub side effects, leases, and
 
 ```text
 /gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr address <owner/repo> <pr_number>
 /gh-address-cr threads <owner/repo> <pr_number>
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
@@ -44,7 +45,7 @@ If the runtime is missing or incompatible, the shim must fail loudly before sess
 
 Read this skill in this order when you are an AI agent:
 
-1. Start from the public main entrypoint: `review <owner/repo> <pr_number>`.
+1. Start from the public main entrypoint: `review <owner/repo> <pr_number>`, or `address <owner/repo> <pr_number>` for simple GitHub-thread-only PRs.
 2. Inspect the JSON machine summary output from the runtime.
 3. Consult `references/status-action-map.md` to map the runtime `status`, `reason_code`, and `next_action` to your next safe step. You MUST branch your execution strictly based on these structured fields. Never parse or infer state from human prose or logs.
 4. For multi-agent execution, use `agent orchestrate start`, `agent orchestrate step`, `agent orchestrate submit`, `agent orchestrate status`, and `agent orchestrate stop` through the runtime CLI.
@@ -52,7 +53,7 @@ Read this skill in this order when you are an AI agent:
 
 Fail-fast rules:
 
-- `review` is the only public main entrypoint.
+- `review` is the full public main entrypoint; `address` is the lightweight GitHub-thread-only shortcut.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format. This converter rejects plain narrative Markdown review output.
 - AI agents must not post GitHub replies or resolve threads directly; the runtime records evidence and performs deterministic side effects.
 - If a command outputs a `reason_code` or `next_action`, your next step MUST be determined solely by that code, ignoring all other prose in the `message` field.
@@ -75,7 +76,7 @@ High-level commands emit structured JSON by default. Agents MUST consume these f
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
-The `threads` command may also include a `threads` array with actionable GitHub thread context (`thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence).
+The `threads` command and lightweight address states may also include a `threads` array with actionable GitHub thread context (`thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence).
 
 ## Multi-Agent Protocol
 
@@ -122,6 +123,7 @@ Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
   - `python3 scripts/cli.py review <owner/repo> <pr_number>`
+  - `python3 scripts/cli.py address <owner/repo> <pr_number>`
   - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
   - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync]`
   - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
@@ -133,6 +135,7 @@ Treat `SKILL.md` as the source of truth for using this skill.
 These high-level paths are fully operational now:
 
 - `review`
+- `address`
 - `threads`
 - `findings`
 - `adapter`
@@ -292,6 +295,8 @@ Examples:
 
 ```text
 $gh-address-cr review <PR_URL>
+$gh-address-cr address <PR_URL>
+$gh-address-cr review --auto-simple <PR_URL>
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync

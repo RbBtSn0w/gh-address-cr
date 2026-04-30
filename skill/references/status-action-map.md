@@ -13,6 +13,12 @@ If `status` is `ACTION_ACCEPTED`:
 If `status` is `BLOCKED`:
 - **Action**: Inspect the `reason_code` and `waiting_on`. Handle the blocked item by applying a resolution (`fix`, `clarify`, `defer`, `reject`).
 
+If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
+- **Action**: Inspect the `artifact_path` and `threads` array. Use per-thread `agent classify`, `agent next`, `agent submit`, and `agent publish`; do not invent a batch response.
+
+If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
+- **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
+
 ## External Interactions
 
 If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:

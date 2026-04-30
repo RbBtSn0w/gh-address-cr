@@ -23,11 +23,53 @@ from tests.helpers import (
 
 
 class PythonWrapperCLITest(PythonScriptTestCase):
+    def install_fake_gh_for_threads(self, nodes):
+        payload = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": nodes,
+                        }
+                    }
+                }
+            }
+        }
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['auth', 'status']:",
+                    "    raise SystemExit(0)",
+                    "if args[:2] == ['api', 'graphql']:",
+                    f"    print(json.dumps({payload!r}))",
+                    "    raise SystemExit(0)",
+                    "if args[:2] == ['api', 'user']:",
+                    "    print(json.dumps({'login': 'agent-login'}))",
+                    "    raise SystemExit(0)",
+                    "if args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:",
+                    "    print('[]')",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        return gh
+
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--machine", result.stdout)
         self.assertIn("--human", result.stdout)
+        self.assertIn("address", result.stdout)
         self.assertIn("review", result.stdout)
         self.assertIn("threads", result.stdout)
         self.assertIn("findings", result.stdout)
@@ -46,10 +88,19 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("waits for external review findings", result.stdout)
         self.assertIn("re-run the same review command", result.stdout)
         self.assertIn("Default output is a structured JSON summary.", result.stdout)
+        self.assertIn("--auto-simple", result.stdout)
         self.assertIn("--human", result.stdout)
         self.assertIn("--machine", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("{ingest,local,mixed,remote}", result.stdout)
+
+    def test_cli_address_help_uses_lightweight_alias_text(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: cli.py address", result.stdout)
+        self.assertIn("Lightweight GitHub thread-only entrypoint.", result.stdout)
+        self.assertIn("does not wait for external review findings", result.stdout)
+        self.assertIn("Default output is a structured JSON summary.", result.stdout)
 
     def test_cli_adapter_help_matches_orchestration_behavior(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "adapter", "--help"])
@@ -291,6 +342,127 @@ else:
         persisted = json.loads(summary_path.read_text(encoding="utf-8"))
         self.assertEqual(persisted["status"], "WAITING_FOR_EXTERNAL_REVIEW")
         self.assertEqual(persisted["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+
+    def test_cli_review_auto_simple_waits_for_simple_address_without_external_handoff(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_SIMPLE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/simple.py",
+                    "line": 7,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "url": "https://example.test/thread/simple",
+                                "body": "Please fix this thread.",
+                                "author": {"login": "reviewer"},
+                            }
+                        ]
+                    },
+                    "firstComment": {
+                        "nodes": [{"url": "https://example.test/thread/simple", "body": "Please fix this thread."}]
+                    },
+                    "latestComment": {
+                        "nodes": [{"url": "https://example.test/thread/simple", "body": "Please fix this thread."}]
+                    },
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--auto-simple", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_SIMPLE_ADDRESS")
+        self.assertEqual(summary["waiting_on"], "agent_fix")
+        self.assertEqual(summary["threads"][0]["thread_id"], "THREAD_SIMPLE")
+        request_path = Path(summary["artifact_path"])
+        self.assertTrue(request_path.exists())
+        self.assertTrue(request_path.name.startswith("simple-address-request-"))
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        self.assertEqual(request["mode"], "simple-address")
+        self.assertEqual(request["threads"][0]["thread_id"], "THREAD_SIMPLE")
+        self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
+
+    def test_cli_address_matches_review_auto_simple_for_unresolved_threads(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_ADDRESS",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/address.py",
+                    "line": 14,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "url": "https://example.test/thread/address",
+                                "body": "Please fix address path.",
+                                "author": {"login": "reviewer"},
+                            }
+                        ]
+                    },
+                    "firstComment": {
+                        "nodes": [{"url": "https://example.test/thread/address", "body": "Please fix address path."}]
+                    },
+                    "latestComment": {
+                        "nodes": [{"url": "https://example.test/thread/address", "body": "Please fix address path."}]
+                    },
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_SIMPLE_ADDRESS")
+        self.assertEqual(summary["waiting_on"], "agent_fix")
+        self.assertEqual(summary["threads"][0]["thread_id"], "THREAD_ADDRESS")
+        self.assertTrue(Path(summary["artifact_path"]).exists())
+
+    def test_cli_address_accepts_pr_url_target(self):
+        self.install_fake_gh_for_threads([])
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", f"https://github.com/{self.repo}/pull/{self.pr}"])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["reason_code"], "PASSED")
+
+    def test_cli_address_rejects_existing_blocking_local_findings(self):
+        findings = Path(self.temp_dir.name) / "findings.json"
+        findings.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Local finding",
+                        "body": "This local finding makes simple address ineligible.",
+                        "path": "src/local.py",
+                        "line": 9,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.run_cmd([sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(findings)])
+        self.install_fake_gh_for_threads([])
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "AUTO_SIMPLE_NOT_ELIGIBLE")
+        self.assertEqual(summary["waiting_on"], "local_findings")
+        self.assertIn("normal review", summary["next_action"])
 
     def test_cli_findings_help_mentions_source_required_for_sync(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "findings", "--help"])
