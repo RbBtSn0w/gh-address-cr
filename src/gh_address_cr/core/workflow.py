@@ -324,6 +324,7 @@ def submit_batch_action_response(
         shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
         shape_message="BatchActionResponse must be a JSON object.",
         payload_name="BatchActionResponse",
+        waiting_on="batch_action_response",
     )
     responses = _batch_action_responses(batch)
     prepared_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -448,6 +449,7 @@ def _load_response_json_object(
     shape_reason_code: str,
     shape_message: str,
     payload_name: str,
+    waiting_on: str = "action_response",
 ) -> dict[str, Any]:
     path = Path(response_path)
     try:
@@ -456,7 +458,7 @@ def _load_response_json_object(
         raise WorkflowError(
             status=status,
             reason_code=missing_reason_code,
-            waiting_on="action_response",
+            waiting_on=waiting_on,
             exit_code=2,
             message=f"{payload_name} file does not exist: {path}",
         ) from exc
@@ -464,7 +466,7 @@ def _load_response_json_object(
         raise WorkflowError(
             status=status,
             reason_code=invalid_reason_code,
-            waiting_on="action_response",
+            waiting_on=waiting_on,
             exit_code=2,
             message=f"Invalid {payload_name} JSON: {exc}",
         ) from exc
@@ -473,7 +475,7 @@ def _load_response_json_object(
         raise WorkflowError(
             status=status,
             reason_code=shape_reason_code,
-            waiting_on="action_response",
+            waiting_on=waiting_on,
             exit_code=2,
             message=shape_message,
         )
@@ -836,12 +838,14 @@ def _raise_response_rejected(
     lease_id: str | None = None,
 ) -> None:
     _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
+    is_batch = status == "BATCH_ACTION_REJECTED"
+    payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
     raise WorkflowError(
         status=status,
         reason_code=reason_code,
-        waiting_on="action_response",
+        waiting_on="batch_action_response" if is_batch else "action_response",
         exit_code=5,
-        message=f"ActionResponse rejected: {reason_code}",
+        message=f"{payload_name} rejected: {reason_code}",
         payload={"item_id": item_id, "lease_id": lease_id or response.get("lease_id")},
     )
 

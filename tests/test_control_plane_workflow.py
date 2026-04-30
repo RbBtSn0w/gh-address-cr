@@ -449,10 +449,25 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
         self.assertEqual(payload["reason_code"], "BATCH_UNSUPPORTED_ITEM_KIND")
+        self.assertEqual(payload["waiting_on"], "batch_action_response")
+        self.assertIn("BatchActionResponse rejected", payload["next_action"])
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_batch_missing_file_reports_batch_waiting_on(self):
+        self.write_session(items=[])
+        missing_path = self.workspace_dir() / "missing-batch-action-response.json"
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(missing_path))
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "BATCH_RESPONSE_FILE_NOT_FOUND")
+        self.assertEqual(payload["waiting_on"], "batch_action_response")
+        self.assertIn("BatchActionResponse file does not exist", payload["next_action"])
 
     def test_agent_submit_batch_rejects_expired_later_lease_without_partial_acceptance(self):
         self.write_session(
