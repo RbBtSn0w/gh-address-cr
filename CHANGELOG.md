@@ -1,3 +1,9 @@
+## [2.2.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.1.0...v2.2.0) (2026-04-30)
+
+### Features
+
+* add batch evidence submission ([#27](https://github.com/RbBtSn0w/gh-address-cr/issues/27)) ([3db65c7](https://github.com/RbBtSn0w/gh-address-cr/commit/3db65c742220297272732945eb2a5a275581b269))
+
 ## [2.1.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.0.3...v2.1.0) (2026-04-30)
 
 ### Features
