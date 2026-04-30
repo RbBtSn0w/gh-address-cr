@@ -142,6 +142,17 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(output.read_text(encoding="utf-8"), expected)
 
+    def test_clarify_reply_indents_multiline_rationale(self):
+        content = clarify_reply(["First line\nsecond line\nthird line"])
+        self.assertIn("Analysis & Rationale:\n- First line\n  second line\n  third line", content)
+
+    def test_defer_reply_indents_multiline_reason(self):
+        content = defer_reply(["first detail\nsecond detail"])
+        self.assertIn(
+            "Decision:\n- Marking as deferred (non-blocking for this PR) because: first detail\n  second detail.",
+            content,
+        )
+
     def test_generate_reply_rejects_invalid_severity(self):
         output = Path(self.temp_dir.name) / "reply.md"
         result = self.run_cmd(

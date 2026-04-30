@@ -16,8 +16,7 @@ SEVERITY_CLOSING_LINES = {
 
 
 def _normalize_severity(severity: str) -> str:
-    normalized = str(severity or "P2").upper()
-    return normalized if normalized in SEVERITY_RISK_NOTES else "P2"
+    return str(severity or "").upper()
 
 
 def _sentence_with_period(value: str) -> str:
@@ -27,6 +26,15 @@ def _sentence_with_period(value: str) -> str:
     return text if text.endswith((".", "!", "?")) else f"{text}."
 
 
+def _bullet_item(text: str) -> str:
+    rows = str(text or "").splitlines() or [""]
+    first = rows[0].strip()
+    if len(rows) == 1:
+        return f"- {first}"
+    continuation = "\n".join(f"  {row.strip()}" if row.strip() else "  " for row in rows[1:])
+    return f"- {first}\n{continuation}"
+
+
 def fix_reply(severity: str, payload: list[str], *, summary: str | None = None) -> str:
     if len(payload) < 4:
         raise SystemExit(
@@ -34,7 +42,7 @@ def fix_reply(severity: str, payload: list[str], *, summary: str | None = None) 
             "<commit_hash> <files_csv> <test_command> <test_result> [why]"
         )
     normalized_severity = _normalize_severity(severity)
-    if str(severity or "").upper() not in SEVERITY_RISK_NOTES:
+    if normalized_severity not in SEVERITY_RISK_NOTES:
         raise SystemExit(f"Invalid severity: {severity} (expected P1/P2/P3)")
 
     commit_hash, files_csv, test_command, test_result, *rest = payload
@@ -74,7 +82,7 @@ def clarify_reply(payload: list[str]) -> str:
             "Thanks for the review.",
             "",
             "Analysis & Rationale:",
-            f"- {rationale}",
+            _bullet_item(rationale),
             "",
             "Decision:",
             "- No code changes were made for this specific comment.",
@@ -92,7 +100,7 @@ def defer_reply(payload: list[str]) -> str:
             "Thanks, this is valid feedback.",
             "",
             "Decision:",
-            f"- Marking as deferred (non-blocking for this PR) because: {_sentence_with_period(reason)}",
+            _bullet_item(f"Marking as deferred (non-blocking for this PR) because: {_sentence_with_period(reason)}"),
             "",
             "Follow-up plan:",
             "1. Track in `<issue_or_followup_pr>`.",
