@@ -395,6 +395,17 @@ def submit_batch_action_response(
                     lease_id=lease_id,
                 )
             _validate_batch_fix_contract(session, ledger, response, item_id=item_id, lease_id=lease_id)
+            lease_reason_code = _lease_submission_rejection_reason(response, prepared, now)
+            if lease_reason_code:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    lease_reason_code,
+                    status="BATCH_ACTION_REJECTED",
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
             prepared_rows.append((response, prepared))
 
         accepted = [
@@ -784,6 +795,34 @@ def _validate_batch_fix_contract(
             item_id=item_id,
             lease_id=lease_id,
         )
+
+
+def _lease_submission_rejection_reason(
+    response: dict[str, Any],
+    prepared: dict[str, Any],
+    now: datetime,
+) -> str | None:
+    lease = prepared["lease"]
+    status = str(_get(lease, "status") or "")
+    if status == "submitted":
+        return "DUPLICATE_SUBMISSION"
+    if status in {"accepted", "rejected", "expired", "released"}:
+        return "STALE_LEASE"
+    if status != "active":
+        return "STALE_LEASE"
+
+    expires_at = _get(lease, "expires_at")
+    if isinstance(expires_at, str):
+        expires_at = _coerce_now(expires_at)
+    if expires_at is not None and expires_at <= now:
+        return "EXPIRED_LEASE"
+    if str(_get(lease, "agent_id")) != str(response["agent_id"]):
+        return "WRONG_AGENT"
+    if str(_get(lease, "item_id")) != str(prepared["item_id"]):
+        return "WRONG_ITEM"
+    if str(_get(lease, "request_hash")) != str(prepared["expected_request_hash"]):
+        return "STALE_REQUEST_CONTEXT"
+    return None
 
 
 def _raise_response_rejected(

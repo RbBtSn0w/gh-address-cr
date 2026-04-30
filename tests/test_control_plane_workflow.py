@@ -454,6 +454,106 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
 
+    def test_agent_submit_batch_rejects_expired_later_lease_without_partial_acceptance(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example_one.py",
+                    line=10,
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_1",
+                    },
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example_two.py",
+                    line=20,
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified_2",
+                    },
+                    thread_id="PRRT_def",
+                ),
+            ]
+        )
+        first = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1", "--now", NOW.isoformat()
+        )
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1", "--now", NOW.isoformat()
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
+        second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
+        session = self.load_session()
+        session["leases"][second_request["lease_id"]]["expires_at"] = (NOW - timedelta(seconds=1)).isoformat()
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        batch_path = self.workspace_dir() / "expired-batch-action-response.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/example_one.py", "src/example_two.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_examples", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "test_command": "python3 -m unittest tests.test_examples",
+                            "test_result": "passed",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": first_request["request_id"],
+                            "lease_id": first_request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "summary": "Fixed first thread.",
+                            "why": "The first thread now validates the input before use.",
+                        },
+                        {
+                            "request_id": second_request["request_id"],
+                            "lease_id": second_request["lease_id"],
+                            "item_id": "github-thread:def",
+                            "summary": "Fixed second thread.",
+                            "why": "The second thread now shares the same guarded path.",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path), "--now", NOW.isoformat()
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "EXPIRED_LEASE")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+        self.assertEqual(session["leases"][first_request["lease_id"]]["status"], "active")
+        self.assertEqual(session["leases"][second_request["lease_id"]]["status"], "active")
+        event_types = [row["event_type"] for row in self.ledger_rows()]
+        self.assertNotIn("response_accepted", event_types)
+        self.assertIn("response_rejected", event_types)
+
     def test_agent_publish_reports_no_work_when_no_thread_is_publish_ready(self):
         self.write_session(items=[open_item()])
 
