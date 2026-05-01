@@ -1,3 +1,9 @@
+## [2.3.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.3...v2.3.4) (2026-05-01)
+
+### Bug Fixes
+
+* document fix_reply object schema in SKILL.md to prevent MISSING_PUBLISH_REPLY block ([#37](https://github.com/RbBtSn0w/gh-address-cr/issues/37)) ([aa6a2fd](https://github.com/RbBtSn0w/gh-address-cr/commit/aa6a2fdea7d30b364bb96250a0dfb687667b88de))
+
 ## [2.3.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.2...v2.3.3) (2026-05-01)
 
 ### Bug Fixes
