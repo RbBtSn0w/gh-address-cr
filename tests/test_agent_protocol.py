@@ -258,6 +258,13 @@ class ActionResponseSchemaTests(ActionProtocolTestCase):
                     validate_action_response(payload, item_kind="github_thread")
                 self.assertEqual(caught.exception.code, code)
 
+    def test_fix_response_with_string_fix_reply_is_rejected(self):
+        payload = self.response_payload("fix")
+        payload["fix_reply"] = "This is a plain string, not a dict."
+        with self.assertRaises(ResponseValidationError) as caught:
+            validate_action_response(payload, item_kind="github_thread")
+        self.assertEqual(caught.exception.code, "invalid_fix_reply")
+
     def test_clarify_defer_reject_require_reply_markdown_and_validation_evidence(self):
         for resolution in ("clarify", "defer", "reject"):
             with self.subTest(resolution=resolution):
