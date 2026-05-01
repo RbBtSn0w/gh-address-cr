@@ -116,6 +116,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
         self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
@@ -124,6 +125,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
         self.assertIn("`summary`", readme_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
+        # SKILL.md must document fix_reply as a JSON object with required and optional fields
+        self.assertIn("`fix_reply` **must be a JSON object**", skill_text)
+        self.assertIn("`commit_hash`", skill_text)
+        self.assertIn("`files`", skill_text)
+        self.assertIn("`test_command`", skill_text)
+        self.assertIn("`test_result`", skill_text)
+        self.assertIn("MISSING_PUBLISH_REPLY", skill_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
