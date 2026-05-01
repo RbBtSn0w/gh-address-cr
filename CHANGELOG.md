@@ -1,3 +1,9 @@
+## [2.3.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.2...v2.3.3) (2026-05-01)
+
+### Bug Fixes
+
+* enforce full fix_reply contract at submit time to prevent unrecoverable publish deadlock ([#36](https://github.com/RbBtSn0w/gh-address-cr/issues/36)) ([d141b00](https://github.com/RbBtSn0w/gh-address-cr/commit/d141b00ccb3aefe8bd6e574288f0f340ab4f5d6f))
+
 ## [2.3.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.1...v2.3.2) (2026-04-30)
 
 ### Bug Fixes
