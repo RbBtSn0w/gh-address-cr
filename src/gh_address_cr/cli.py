@@ -244,6 +244,14 @@ def alias_help(command: str) -> str:
             "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
             "If resume_cmd is omitted, it prints instructions for resuming.\n"
         )
+    if command == "doctor":
+        return (
+            "usage: cli.py doctor [<owner/repo> [<pr_number>]] [--human|--machine]\n\n"
+            "Runtime diagnostics entrypoint.\n\n"
+            "Checks GitHub CLI availability/authentication, optional repository access, and writable state directories.\n"
+            "Default output is a structured JSON summary with stable checks, reason_code, and diagnostics fields.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
+        )
     return ""
 
 
@@ -1961,6 +1969,9 @@ def main(argv: list[str] | None = None) -> int:
         return handle_agent_command(args)
 
     if args.command == "doctor":
+        if args.pr_number is None and (args.repo in {"-h", "--help"} or args.args[:1] in (["-h"], ["--help"])):
+            print(alias_help(args.command), end="")
+            return 0
         return handle_doctor_command(args)
 
     if args.command == "superpowers":

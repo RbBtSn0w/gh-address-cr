@@ -13,6 +13,7 @@ from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_CLAIMABLE_STATES,
     is_claimable_github_thread,
     is_github_thread_item,
+    is_stale_github_thread_item,
     returned_claimable_state,
 )
 from gh_address_cr.core.leases import (
@@ -146,7 +147,7 @@ def record_classification(
     released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
     if released_lease_id:
         _return_item_to_claimable_state(item)
-        if not _is_stale_github_thread_item(item):
+        if not is_stale_github_thread_item(item):
             item["blocking"] = True
         item["claimed_by"] = None
         item["claimed_at"] = None
@@ -1506,10 +1507,6 @@ def _return_item_to_claimable_state(item: dict[str, Any]) -> None:
     state, status = returned_claimable_state(item)
     item["state"] = state
     item["status"] = status
-
-
-def _is_stale_github_thread_item(item: dict[str, Any]) -> bool:
-    return is_github_thread_item(item) and returned_claimable_state(item) == ("stale", "STALE")
 
 
 def _ledger(session: dict[str, Any]) -> EvidenceLedger:

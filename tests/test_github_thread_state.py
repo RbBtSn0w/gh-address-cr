@@ -6,6 +6,7 @@ class GitHubThreadStateTests(unittest.TestCase):
         from gh_address_cr.core.github_thread_state import (
             GITHUB_THREAD_TERMINAL_STATES,
             is_claimable_github_thread,
+            is_stale_github_thread_item,
             is_terminal_github_thread,
         )
 
@@ -20,6 +21,7 @@ class GitHubThreadStateTests(unittest.TestCase):
         self.assertNotIn("stale", GITHUB_THREAD_TERMINAL_STATES)
         self.assertTrue(is_claimable_github_thread(item))
         self.assertFalse(is_terminal_github_thread(item))
+        self.assertTrue(is_stale_github_thread_item(item))
 
     def test_resolved_thread_is_not_claimable_and_is_terminal(self):
         from gh_address_cr.core.github_thread_state import is_claimable_github_thread, is_terminal_github_thread

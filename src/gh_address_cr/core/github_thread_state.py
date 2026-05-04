@@ -49,6 +49,10 @@ def is_stale_or_outdated_github_thread(row: Mapping[str, Any]) -> bool:
     return state == "stale" or status == "STALE" or bool(row.get("is_outdated") or row.get("isOutdated"))
 
 
+def is_stale_github_thread_item(row: Mapping[str, Any]) -> bool:
+    return is_github_thread_item(row) and is_stale_or_outdated_github_thread(row)
+
+
 def is_terminal_github_thread(row: Mapping[str, Any]) -> bool:
     return normalized_thread_state(row) in GITHUB_THREAD_TERMINAL_STATES
 

@@ -505,6 +505,14 @@ else:
         self.assertEqual(summary["pr_number"], self.pr)
         self.assertEqual({check["name"] for check in summary["checks"]}, {"gh_available", "gh_auth", "gh_viewer", "repo_access", "state_dir", "workspace_dir"})
 
+    def test_cli_doctor_help_prints_usage_without_running_checks(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "doctor", "--help"])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: cli.py doctor", result.stdout)
+        self.assertIn("Runtime diagnostics entrypoint.", result.stdout)
+        self.assertEqual(result.stderr, "")
+
     def test_cli_address_accepts_pr_url_target(self):
         self.install_fake_gh_for_threads([])
 

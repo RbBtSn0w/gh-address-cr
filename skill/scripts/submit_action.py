@@ -32,6 +32,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-command")
     parser.add_argument("--test-result")
     parser.add_argument("--validation-cmd", action="append", default=[])
+    parser.add_argument(
+        "--output-dir",
+        help="Directory for generated ActionResponse and helper script artifacts. Defaults to the request file directory.",
+    )
     parser.add_argument("--human", action="store_true", help="Emit human-oriented text instead of machine summary.")
     parser.add_argument("--machine", action="store_true", help="Compatibility alias.")
     args = parser.parse_args(argv)
@@ -231,11 +235,13 @@ def main(argv: list[str] | None = None) -> int:
     item_id = safe_item_id(item)
     action = build_runtime_response(req, args) if runtime else build_legacy_action(args)
     output_prefix = "action-response" if runtime else "fixer-payload"
-    output_path = req_path.parent / f"{output_prefix}-{item_id}.json"
+    output_dir = Path(args.output_dir) if args.output_dir else req_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{output_prefix}-{item_id}.json"
 
     output_path.write_text(json.dumps(action, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    script_path = req_path.parent / f"fixer-{item_id}.sh"
+    script_path = output_dir / f"fixer-{item_id}.sh"
     script_path.write_text(f"#!/bin/sh\ncat {shlex.quote(str(output_path))}\n", encoding="utf-8")
     os.chmod(script_path, 0o755)
 
