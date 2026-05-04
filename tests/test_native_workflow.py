@@ -606,5 +606,110 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "publish_ready")
 
 
+def stale_github_thread_item(item_id="github-thread:THREAD_STALE"):
+    return {
+        "item_id": item_id,
+        "item_kind": "github_thread",
+        "source": "github",
+        "thread_id": item_id.removeprefix("github-thread:"),
+        "title": "Stale review thread",
+        "body": "Please add a null check.",
+        "path": "src/example.py",
+        "line": 10,
+        "state": "stale",
+        "status": "STALE",
+        "blocking": True,
+        "is_outdated": True,
+        "allowed_actions": ["fix", "clarify", "defer", "reject"],
+    }
+
+
+class StaleThreadClaimabilityTests(unittest.TestCase):
+    def write_session(self, repo: str, pr_number: str, item: dict):
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(repo, pr_number)
+        session = manager.create(status="WAITING_FOR_CLASSIFICATION")
+        session["items"] = {item["item_id"]: item}
+        manager.save(session)
+        return manager
+
+    def test_stale_github_thread_is_claimable_by_triage_role(self):
+        from gh_address_cr.core import workflow
+
+        repo = "owner/repo"
+        pr_number = "500"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, stale_github_thread_item())
+
+                result = workflow.issue_action_request(repo, pr_number, role="triage", agent_id="triage-1")
+
+                self.assertEqual(result["status"], "ACTION_REQUESTED")
+                self.assertEqual(result["item_id"], "github-thread:THREAD_STALE")
+
+    def test_stale_github_thread_with_classification_is_claimable_by_fixer_role(self):
+        from gh_address_cr.core import workflow
+
+        repo = "owner/repo"
+        pr_number = "501"
+        item = stale_github_thread_item()
+        item["classification_evidence"] = {
+            "classification": "fix",
+            "event_type": "classification_recorded",
+            "note": "Fix the null check.",
+            "record_id": "rec-stale-1",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+
+                result = workflow.issue_action_request(repo, pr_number, role="fixer", agent_id="fixer-1")
+
+                self.assertEqual(result["status"], "ACTION_REQUESTED")
+                self.assertEqual(result["item_id"], "github-thread:THREAD_STALE")
+
+    def test_stale_thread_not_claimed_by_fixer_without_classification(self):
+        from gh_address_cr.core import workflow
+
+        repo = "owner/repo"
+        pr_number = "502"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, stale_github_thread_item())
+
+                with self.assertRaises(workflow.WorkflowError) as context:
+                    workflow.issue_action_request(repo, pr_number, role="fixer", agent_id="fixer-1")
+
+                self.assertIn(context.exception.reason_code, {"NO_ELIGIBLE_ITEM", "MISSING_CLASSIFICATION"})
+
+    def test_stale_thread_classify_then_fixer_claim(self):
+        from gh_address_cr.core import workflow
+
+        repo = "owner/repo"
+        pr_number = "503"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, stale_github_thread_item())
+
+                workflow.issue_action_request(repo, pr_number, role="triage", agent_id="triage-1")
+                classified = workflow.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_STALE",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect, needs null guard.",
+                )
+                fixer = workflow.issue_action_request(repo, pr_number, role="fixer", agent_id="fixer-1")
+
+                session = manager.load()
+                self.assertEqual(classified["status"], "CLASSIFICATION_RECORDED")
+                self.assertEqual(fixer["status"], "ACTION_REQUESTED")
+                self.assertEqual(fixer["item_id"], "github-thread:THREAD_STALE")
+                item = session["items"]["github-thread:THREAD_STALE"]
+                self.assertEqual(item["classification_evidence"]["classification"], "fix")
+
+
 if __name__ == "__main__":
     unittest.main()

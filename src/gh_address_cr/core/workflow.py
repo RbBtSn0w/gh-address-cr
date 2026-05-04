@@ -1324,7 +1324,7 @@ def _items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _item_is_open(item: dict[str, Any]) -> bool:
-    return str(item.get("state") or item.get("status") or "open").lower() in {"open", "blocked", "waiting_for_fix"}
+    return str(item.get("state") or item.get("status") or "open").lower() in {"open", "blocked", "waiting_for_fix", "stale"}
 
 
 def _has_classification_evidence(item: dict[str, Any]) -> bool:
