@@ -183,6 +183,36 @@ class SubmitActionHelperTest(PythonScriptTestCase):
 
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_runtime_action_request_can_write_to_explicit_output_dir(self):
+        for script in HELPER_SCRIPTS:
+            with self.subTest(script=script):
+                request_path = self.write_request("output-dir-action-request.json", runtime_request())
+                output_dir = self.workspace_dir() / f"output-{script.parent.name}"
+
+                result = self.run_helper(
+                    script,
+                    str(request_path),
+                    "--agent-id",
+                    "codex-1",
+                    "--resolution",
+                    "fix",
+                    "--note",
+                    "Fixed the thread.",
+                    "--commit-hash",
+                    "abc123",
+                    "--files",
+                    "src/example.py",
+                    "--validation-cmd",
+                    "python3 -m unittest tests.test_example=passed",
+                    "--output-dir",
+                    str(output_dir),
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((output_dir / "action-response-github-thread_abc.json").is_file())
+                self.assertTrue((output_dir / "fixer-github-thread_abc.sh").is_file())
+                self.assertFalse((self.workspace_dir() / "action-response-github-thread_abc.json").exists())
+
     def test_legacy_top_level_loop_request_still_generates_loop_action_payload(self):
         for script in HELPER_SCRIPTS:
             with self.subTest(script=script):

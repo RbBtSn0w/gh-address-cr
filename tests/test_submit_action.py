@@ -112,3 +112,48 @@ class TestSubmitAction(PythonScriptTestCase):
             ]
         )
         self.assertEqual(result.returncode, 0)
+
+    def test_submit_action_writes_response_to_explicit_output_dir(self):
+        tmp_dir = Path(self.temp_dir.name)
+        output_dir = tmp_dir / "writable-output"
+        loop_req_path = tmp_dir / "loop-request-runtime.json"
+        loop_req = {
+            "schema_version": "1.0",
+            "request_id": "req_1",
+            "lease_id": "lease_1",
+            "agent_role": "fixer",
+            "repository_context": {"repo": "owner/repo", "pr_number": "123"},
+            "item": {"item_id": "github-thread:1", "item_kind": "github_thread"},
+        }
+        loop_req_path.write_text(json.dumps(loop_req), encoding="utf-8")
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "submit-action",
+                "--resolution",
+                "fix",
+                "--note",
+                "fixed",
+                "--commit-hash",
+                "abc",
+                "--files",
+                "file.py",
+                "--validation-cmd",
+                "python3 -m unittest=passed",
+                "--output-dir",
+                str(output_dir),
+                str(loop_req_path),
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload_path = output_dir / "action-response-github-thread_1.json"
+        script_path = output_dir / "fixer-github-thread_1.sh"
+        self.assertTrue(payload_path.is_file())
+        self.assertTrue(script_path.is_file())
+        self.assertFalse((tmp_dir / "action-response-github-thread_1.json").exists())
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["request_id"], "req_1")
+        self.assertEqual(payload["lease_id"], "lease_1")

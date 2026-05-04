@@ -9,12 +9,6 @@ SEVERITY_RISK_NOTES = {
 
 DEFAULT_FILE_SUMMARY = "updated per CR scope"
 
-SEVERITY_CLOSING_LINES = {
-    "P1": "This should now be safe to merge from the original P1 perspective.",
-    "P2": "If you want, I can also run a broader suite before merge.",
-}
-
-
 def _normalize_severity(severity: str) -> str:
     normalized = str(severity or "P2").upper()
     return normalized if normalized in SEVERITY_RISK_NOTES else "P2"
@@ -61,9 +55,6 @@ def fix_reply(severity: str, payload: list[str], *, summary: str | None = None) 
             f"- Result: {test_result}",
         ]
     )
-    closing = SEVERITY_CLOSING_LINES.get(normalized_severity)
-    if closing:
-        lines.extend(["", closing])
     return "\n".join(lines) + "\n"
 
 

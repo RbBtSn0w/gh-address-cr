@@ -12,5 +12,3 @@ Why this addresses the CR:
 Validation:
 - `<targeted_test_command>`
 - Result: `<pass/fail + key signal>`
-
-This should now be safe to merge from the original P1 perspective.

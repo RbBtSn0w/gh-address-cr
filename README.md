@@ -233,6 +233,7 @@ gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
 gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/repo 123
+gh-address-cr doctor owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```
 
@@ -295,12 +296,13 @@ python3 skill/scripts/submit_action.py <action-request.json> \
   --note "Fixed the thread." \
   --commit-hash abc123 \
   --files src/example.py \
-  --validation-cmd "python3 -m unittest tests.test_example=passed"
+  --validation-cmd "python3 -m unittest tests.test_example=passed" \
+  --output-dir /tmp/gh-address-cr-response
 
 python3 -m gh_address_cr agent submit owner/repo 123 --input <generated-action-response.json>
 ```
 
-The helper also accepts older loop-request artifacts with top-level `repo` and `pr_number`, but runtime `ActionRequest` files use `repository_context.repo` and `repository_context.pr_number`.
+The helper also accepts older loop-request artifacts with top-level `repo` and `pr_number`, but runtime `ActionRequest` files use `repository_context.repo` and `repository_context.pr_number`. Use `--output-dir` when the runtime workspace is not writable from the current sandbox.
 
 Main entrypoint examples:
 
@@ -321,6 +323,10 @@ High-level entrypoints:
   - lightweight GitHub thread-only entrypoint for simple PRs
   - does not wait for external review findings or ingest local findings
   - emits `WAITING_FOR_SIMPLE_ADDRESS` with an actionable request artifact when threads need agent evidence
+  - the request artifact includes `claimable_item_ids`, thread rows, commands, and a `batch_response_skeleton` for leased thread evidence
+- `doctor`
+  - checks GitHub CLI availability/auth, viewer lookup, optional repository access, and runtime cache writeability
+  - use before retrying blocked workflows with auth, network, sandbox, or cache-permission symptoms
 - `threads`
   - advanced/internal: GitHub review threads only
   - emits a machine-readable JSON summary by default

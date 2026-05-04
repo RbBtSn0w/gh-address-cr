@@ -182,6 +182,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
             defer_reply(["`<reason>`"]),
         )
 
+    def test_fixed_reply_template_stays_evidence_focused_without_generic_offer(self):
+        rendered = fix_reply(
+            "P2",
+            ["abc123", "src/example.py", "python3 -m unittest", "passed", "Targeted stale-thread fix."],
+            summary="Updated stale thread handling.",
+        )
+
+        self.assertNotIn("If you want", rendered)
+        self.assertNotIn("I can also", rendered)
+
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertIn("run `python3 scripts/submit_feedback.py`", text)

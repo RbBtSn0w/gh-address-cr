@@ -111,7 +111,8 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("- `src/a.py`: updated per CR scope", body)
         self.assertNotIn("<critical-path fix>", body)
         self.assertIn("- Fixed the root cause.", body)
-        self.assertIn("This should now be safe to merge from the original P1 perspective.", body)
+        self.assertIn("- High-severity path validated with targeted regression checks.", body)
+        self.assertNotIn("safe to merge", body)
 
     def test_generate_reply_modes_match_runtime_renderer(self):
         cases = [

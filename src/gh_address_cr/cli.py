@@ -15,6 +15,11 @@ from uuid import uuid4
 
 from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
 from gh_address_cr.core import gate as core_gate
+from gh_address_cr.core.github_thread_state import (
+    is_claimable_github_thread,
+    is_resolved_github_thread,
+    is_stale_or_outdated_github_thread,
+)
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
@@ -238,6 +243,14 @@ def alias_help(command: str) -> str:
             "Use when the loop stops in WAITING_FOR_FIX and asks for a manual resolution.\n"
             "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
             "If resume_cmd is omitted, it prints instructions for resuming.\n"
+        )
+    if command == "doctor":
+        return (
+            "usage: cli.py doctor [<owner/repo> [<pr_number>]] [--human|--machine]\n\n"
+            "Runtime diagnostics entrypoint.\n\n"
+            "Checks GitHub CLI availability/authentication, optional repository access, and writable state directories.\n"
+            "Default output is a structured JSON summary with stable checks, reason_code, and diagnostics fields.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
         )
     return ""
 
@@ -575,6 +588,84 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
         "Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
         "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
     )
+
+
+def _doctor_check(name: str, passed: bool, *, detail: str | None = None, diagnostics: dict | None = None) -> dict:
+    row = {
+        "name": name,
+        "status": "passed" if passed else "failed",
+    }
+    if detail:
+        row["detail"] = detail
+    if diagnostics:
+        row["diagnostics"] = diagnostics
+    return row
+
+
+def _run_doctor_gh_check(name: str, command: list[str]) -> dict:
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode == 0:
+        detail = result.stdout.strip()
+        return _doctor_check(name, True, detail=detail or None)
+    diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
+    return _doctor_check(name, False, detail=result.stderr.strip() or result.stdout.strip() or None, diagnostics=diagnostics)
+
+
+def _doctor_writable_dir_check(name: str, path: Path) -> dict:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".gh-address-cr-doctor-write-test"
+        probe.write_text("ok\n", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        diagnostics = classify_github_failure(str(exc), "", None, [name, str(path)])
+        return _doctor_check(name, False, detail=str(path), diagnostics=diagnostics)
+    return _doctor_check(name, True, detail=str(path))
+
+
+def handle_doctor_command(args: argparse.Namespace) -> int:
+    repo = args.repo
+    pr_number = args.pr_number
+    checks: list[dict] = []
+
+    gh_path = shutil.which("gh")
+    checks.append(_doctor_check("gh_available", bool(gh_path), detail=gh_path or "GitHub CLI `gh` not found on PATH."))
+    if gh_path:
+        checks.append(_run_doctor_gh_check("gh_auth", ["gh", "auth", "status"]))
+        checks.append(_run_doctor_gh_check("gh_viewer", ["gh", "api", "user"]))
+        if repo:
+            checks.append(_run_doctor_gh_check("repo_access", ["gh", "repo", "view", repo, "--json", "nameWithOwner"]))
+    elif repo:
+        checks.append(
+            _doctor_check(
+                "repo_access",
+                False,
+                detail="Repository access check requires GitHub CLI `gh`.",
+            )
+        )
+
+    try:
+        checks.append(_doctor_writable_dir_check("state_dir", session_store.state_dir()))
+    except session_store.SessionError as exc:
+        checks.append(_doctor_check("state_dir", False, detail=str(exc)))
+    if repo and pr_number:
+        try:
+            checks.append(_doctor_writable_dir_check("workspace_dir", session_store.workspace_dir(repo, pr_number)))
+        except session_store.SessionError as exc:
+            checks.append(_doctor_check("workspace_dir", False, detail=str(exc)))
+
+    failed = [check for check in checks if check["status"] != "passed"]
+    summary = {
+        "status": "FAILED" if failed else "PASSED",
+        "reason_code": "DOCTOR_FAILED" if failed else "DOCTOR_PASSED",
+        "repo": repo,
+        "pr_number": str(pr_number) if pr_number else None,
+        "checks": checks,
+        "next_action": "Fix failed doctor checks, then rerun the original command." if failed else "Rerun the blocked gh-address-cr command.",
+        "exit_code": 5 if failed else 0,
+    }
+    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    return int(summary["exit_code"])
 
 
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
@@ -937,8 +1028,9 @@ def _native_thread_rows(session: dict) -> list[dict]:
                 "url": item.get("url"),
                 "state": state or None,
                 "status": status or None,
-                "is_resolved": status.upper() == "CLOSED" or state.lower() in {"closed", "resolved"},
-                "is_outdated": bool(item.get("is_outdated") or item.get("isOutdated") or status.upper() == "STALE"),
+                "item_kind": "github_thread",
+                "is_resolved": is_resolved_github_thread(item),
+                "is_outdated": is_stale_or_outdated_github_thread(item),
                 "reply_evidence": reply_evidence,
                 "accepted_response_present": isinstance(item.get("accepted_response"), dict),
             }
@@ -968,13 +1060,17 @@ def _auto_simple_local_gate_failed(result: core_gate.GateResult) -> bool:
 
 def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, command: str, run_id: str) -> Path:
     request_path = workspace_root(repo, pr_number) / f"simple-address-request-{run_id}-{uuid4().hex}.json"
+    threads = _native_thread_rows(session)
+    claimable_item_ids = _claimable_github_thread_item_ids(threads)
     request = {
         "mode": "simple-address",
         "repo": repo,
         "pr_number": str(pr_number),
         "run_id": run_id,
         "source_command": command,
-        "threads": _native_thread_rows(session),
+        "threads": threads,
+        "claimable_item_ids": claimable_item_ids,
+        "batch_response_skeleton": _batch_response_skeleton(claimable_item_ids),
         "instructions": [
             "Use per-thread ActionResponse evidence, or agent submit-batch when one commit/files/validation set addresses multiple threads.",
             "For each actionable GitHub thread, run agent classify and agent next to acquire leases before submitting evidence.",
@@ -991,6 +1087,41 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
     }
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return request_path
+
+
+def _claimable_github_thread_item_ids(threads: list[dict]) -> list[str]:
+    return [
+        str(row["item_id"])
+        for row in threads
+        if row.get("item_id") and is_claimable_github_thread(row)
+    ]
+
+
+def _batch_response_skeleton(item_ids: list[str]) -> dict:
+    return {
+        "schema_version": "1.0",
+        "agent_id": "<agent_id>",
+        "resolution": "fix",
+        "common": {
+            "files": ["<file_path>"],
+            "validation_commands": [{"command": "<test_command>", "result": "<passed|failed + key signal>"}],
+            "fix_reply": {
+                "commit_hash": "<commit_hash>",
+                "test_command": "<test_command>",
+                "test_result": "<passed|failed + key signal>",
+            },
+        },
+        "items": [
+            {
+                "item_id": item_id,
+                "request_id": "<request_id from agent next>",
+                "lease_id": "<lease_id from agent next>",
+                "summary": "<per-thread fix summary>",
+                "why": "<why this fixes this review thread>",
+            }
+            for item_id in item_ids
+        ],
+    }
 
 
 def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Namespace:
@@ -1342,7 +1473,7 @@ def build_agent_manifest() -> dict:
         "constraints": {
             "max_parallel_claims": 2,
         },
-        "public_commands": sorted(["address", "review", "threads", "findings", "adapter", "submit-action", "final-gate"]),
+        "public_commands": sorted(["address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]),
     }
 
 
@@ -1780,13 +1911,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{address,review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{address,review,threads,findings,adapter,doctor,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  cli.py address owner/repo 123 [--human]\n"
             "  cli.py review owner/repo 123 [--human]\n"
             "  cli.py review --auto-simple owner/repo 123 [--human]\n"
             "  cli.py threads owner/repo 123 [--human]\n"
+            "  cli.py doctor [owner/repo] [123]\n"
             "  cli.py version\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
             "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
@@ -1836,6 +1968,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "agent":
         return handle_agent_command(args)
 
+    if args.command == "doctor":
+        if args.pr_number is None and (args.repo in {"-h", "--help"} or args.args[:1] in (["-h"], ["--help"])):
+            print(alias_help(args.command), end="")
+            return 0
+        return handle_doctor_command(args)
+
     if args.command == "superpowers":
         return handle_superpowers_command(args)
 
@@ -1882,7 +2020,7 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode
 
     if args.command not in COMMAND_TO_SCRIPT and args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
-        supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "agent"]))
+        supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "agent", "doctor"]))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     normalize_leading_high_level_options(args)

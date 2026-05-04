@@ -109,6 +109,59 @@ class NativeGateTests(unittest.TestCase):
                 self.assertFalse(result.passed)
                 self.assertEqual(result.reason_code, FINAL_GATE_MISSING_REPLY_EVIDENCE)
 
+    def test_remote_stale_thread_refreshes_as_claimable_blocking_item(self):
+        from gh_address_cr.core import gate
+
+        session = {
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+        }
+
+        merged = gate.session_with_remote_threads(
+            session,
+            [
+                {
+                    "id": "THREAD_STALE",
+                    "isResolved": False,
+                    "isOutdated": True,
+                    "path": "src/stale.py",
+                    "line": 12,
+                }
+            ],
+        )
+
+        item = merged["items"]["github-thread:THREAD_STALE"]
+        self.assertEqual(item["state"], "stale")
+        self.assertEqual(item["status"], "STALE")
+        self.assertTrue(item["blocking"])
+
+    def test_stale_thread_without_remote_resolution_does_not_require_reply_evidence(self):
+        from gh_address_cr.core import gate
+
+        session = {
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {
+                "github-thread:THREAD_STALE": {
+                    "item_id": "github-thread:THREAD_STALE",
+                    "item_kind": "github_thread",
+                    "thread_id": "THREAD_STALE",
+                    "state": "stale",
+                    "status": "STALE",
+                    "blocking": True,
+                    "is_outdated": True,
+                }
+            },
+        }
+
+        result = gate.evaluate_final_gate(session)
+
+        self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
+        self.assertEqual(result.counts["blocking_items_count"], 1)
+        self.assertEqual(result.counts["blocking_github_items_count"], 1)
+        self.assertEqual(result.reason_code, gate.FINAL_GATE_BLOCKING_GITHUB_ITEMS)
+
     def test_cli_final_gate_uses_native_gate_without_legacy_script(self):
         from gh_address_cr import cli
         from gh_address_cr.core.session import SessionManager
