@@ -7,6 +7,12 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from gh_address_cr.core.github_thread_state import (
+    GITHUB_THREAD_TERMINAL_STATES,
+    is_resolved_github_thread,
+    is_stale_or_outdated_github_thread,
+    is_terminal_github_thread,
+)
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.github.client import GitHubClient
 
@@ -14,23 +20,14 @@ from gh_address_cr.github.client import GitHubClient
 FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"
 FINAL_GATE_MISSING_REPLY_EVIDENCE = "FINAL_GATE_MISSING_REPLY_EVIDENCE"
 FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW = "FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW"
+FINAL_GATE_BLOCKING_GITHUB_ITEMS = "FINAL_GATE_BLOCKING_GITHUB_ITEMS"
 FINAL_GATE_BLOCKING_LOCAL_ITEMS = "FINAL_GATE_BLOCKING_LOCAL_ITEMS"
 FINAL_GATE_MISSING_VALIDATION_EVIDENCE = "FINAL_GATE_MISSING_VALIDATION_EVIDENCE"
 
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5
 
-GITHUB_TERMINAL_STATES = {
-    "closed",
-    "fixed",
-    "clarified",
-    "deferred",
-    "rejected",
-    "resolved",
-    "stale",
-    "verified",
-    "published",
-}
+GITHUB_TERMINAL_STATES = GITHUB_THREAD_TERMINAL_STATES
 LOCAL_TERMINAL_STATES = {
     "closed",
     "fixed",
@@ -45,6 +42,7 @@ COUNT_KEYS = (
     "unresolved_github_threads_count",
     "pending_review_count",
     "blocking_items_count",
+    "blocking_github_items_count",
     "github_threads_missing_reply_count",
     "missing_validation_evidence_count",
     "blocking_local_items_count",
@@ -56,6 +54,7 @@ FAILURE_ORDER = (
     (FINAL_GATE_UNRESOLVED_REMOTE_THREADS, "unresolved_remote_threads_count", "remote_threads"),
     (FINAL_GATE_MISSING_REPLY_EVIDENCE, "github_threads_missing_reply_count", "reply_evidence"),
     (FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW, "pending_current_login_review_count", "pending_review"),
+    (FINAL_GATE_BLOCKING_GITHUB_ITEMS, "blocking_github_items_count", "github_items"),
     (FINAL_GATE_BLOCKING_LOCAL_ITEMS, "blocking_local_items_count", "local_items"),
     (FINAL_GATE_MISSING_VALIDATION_EVIDENCE, "missing_validation_evidence_count", "validation_evidence"),
 )
@@ -168,6 +167,7 @@ def evaluate_final_gate(
         review for review in pending_reviews if _is_current_login_pending_review(review, current_login)
     ]
     blocking_local_items = [item for item in local_items if _is_local_blocking(item)]
+    blocking_github_items = [item for item in github_items if _is_blocking_item(item)]
     blocking_items = [item for item in items if _is_blocking_item(item)]
     missing_reply_items = [
         item
@@ -182,6 +182,7 @@ def evaluate_final_gate(
         "unresolved_github_threads_count": len(unresolved_remote_threads),
         "pending_review_count": len(pending_current_login_reviews),
         "blocking_items_count": len(blocking_items),
+        "blocking_github_items_count": len(blocking_github_items),
         "github_threads_missing_reply_count": len(missing_reply_items),
         "missing_validation_evidence_count": len(missing_validation_items),
         "blocking_local_items_count": len(blocking_local_items),
@@ -258,7 +259,7 @@ def _session_with_remote_threads(
         item["url"] = thread.get("url") or item.get("url")
         item["body"] = thread.get("body") or item.get("body")
         is_resolved = _thread_is_resolved(thread)
-        is_outdated = bool(thread.get("isOutdated", thread.get("is_outdated", False)))
+        is_outdated = is_stale_or_outdated_github_thread(thread)
         item["is_outdated"] = is_outdated
         if is_resolved:
             item["state"] = (
@@ -274,7 +275,7 @@ def _session_with_remote_threads(
         elif is_outdated:
             item["state"] = "stale"
             item["status"] = "STALE"
-            item["blocking"] = False
+            item["blocking"] = True
         else:
             item["state"] = "open"
             item["status"] = "OPEN"
@@ -324,11 +325,7 @@ def _thread_identifier(row: Mapping[str, Any]) -> str | None:
 
 
 def _thread_is_resolved(thread: Mapping[str, Any]) -> bool:
-    if "isResolved" in thread:
-        return bool(thread["isResolved"])
-    if "is_resolved" in thread:
-        return bool(thread["is_resolved"])
-    return _state(thread) in GITHUB_TERMINAL_STATES
+    return is_resolved_github_thread(thread)
 
 
 def _github_thread_requires_reply_evidence(
@@ -338,7 +335,7 @@ def _github_thread_requires_reply_evidence(
     thread_id = _thread_identifier(item)
     if thread_id and thread_id in remote_by_id:
         return _thread_is_resolved(remote_by_id[thread_id])
-    return _state(item) in GITHUB_TERMINAL_STATES
+    return is_terminal_github_thread(item)
 
 
 def _has_reply_evidence(item: Mapping[str, Any], current_login: str | None) -> bool:
@@ -435,6 +432,8 @@ def _next_action(reason_code: str | None) -> str:
         return "Record durable reply evidence for terminal GitHub threads, then rerun final-gate."
     if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
         return "Submit or dismiss pending reviews for the current GitHub login, then rerun final-gate."
+    if reason_code == FINAL_GATE_BLOCKING_GITHUB_ITEMS:
+        return "Publish or resolve blocking GitHub review-thread items, then rerun final-gate."
     if reason_code == FINAL_GATE_BLOCKING_LOCAL_ITEMS:
         return "Close or explicitly defer blocking local items, then rerun final-gate."
     if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:

@@ -385,6 +385,9 @@ else:
         request = json.loads(request_path.read_text(encoding="utf-8"))
         self.assertEqual(request["mode"], "simple-address")
         self.assertEqual(request["threads"][0]["thread_id"], "THREAD_SIMPLE")
+        self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_SIMPLE"])
+        self.assertEqual(request["batch_response_skeleton"]["items"][0]["item_id"], "github-thread:THREAD_SIMPLE")
+        self.assertEqual(request["batch_response_skeleton"]["items"][0]["request_id"], "<request_id from agent next>")
         self.assertIn("submit-batch", request["commands"]["submit_batch"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
@@ -424,7 +427,83 @@ else:
         self.assertEqual(summary["reason_code"], "WAITING_FOR_SIMPLE_ADDRESS")
         self.assertEqual(summary["waiting_on"], "agent_fix")
         self.assertEqual(summary["threads"][0]["thread_id"], "THREAD_ADDRESS")
-        self.assertTrue(Path(summary["artifact_path"]).exists())
+        request_path = Path(summary["artifact_path"])
+        self.assertTrue(request_path.exists())
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_ADDRESS"])
+
+    def test_cli_address_simple_request_includes_stale_threads_as_claimable_items(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_STALE",
+                    "isResolved": False,
+                    "isOutdated": True,
+                    "path": "src/stale.py",
+                    "line": 21,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "url": "https://example.test/thread/stale",
+                                "body": "Please fix stale thread.",
+                                "author": {"login": "reviewer"},
+                            }
+                        ]
+                    },
+                    "firstComment": {
+                        "nodes": [{"url": "https://example.test/thread/stale", "body": "Please fix stale thread."}]
+                    },
+                    "latestComment": {
+                        "nodes": [{"url": "https://example.test/thread/stale", "body": "Please fix stale thread."}]
+                    },
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        request = json.loads(Path(summary["artifact_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_SIMPLE_ADDRESS")
+        self.assertEqual(summary["threads"][0]["state"], "stale")
+        self.assertEqual(summary["threads"][0]["status"], "STALE")
+        self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_STALE"])
+
+    def test_cli_doctor_reports_github_and_state_dir_checks(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['auth', 'status']:",
+                    "    raise SystemExit(0)",
+                    "if args[:2] == ['api', 'user']:",
+                    "    print(json.dumps({'login': 'agent-login'}))",
+                    "    raise SystemExit(0)",
+                    "if args[:2] == ['repo', 'view']:",
+                    "    print(json.dumps({'nameWithOwner': args[2]}))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "doctor", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["reason_code"], "DOCTOR_PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual({check["name"] for check in summary["checks"]}, {"gh_available", "gh_auth", "gh_viewer", "repo_access", "state_dir", "workspace_dir"})
 
     def test_cli_address_accepts_pr_url_target(self):
         self.install_fake_gh_for_threads([])

@@ -14,7 +14,7 @@ If `status` is `BLOCKED`:
 - **Action**: Inspect the `reason_code` and `waiting_on`. Handle the blocked item by applying a resolution (`fix`, `clarify`, `defer`, `reject`).
 
 If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
-- **Action**: Inspect the `artifact_path` and `threads` array. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent submit-batch` when one commit/files/validation set addresses multiple claimed GitHub threads, then run `agent publish`.
+- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent submit-batch` when one commit/files/validation set addresses multiple claimed GitHub threads, then run `agent publish`.
 
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
@@ -24,6 +24,9 @@ If `reason_code` is `GH_AUTH_FAILED` or `GITHUB_AUTH_FAILED`:
 
 If `reason_code` is `GH_NETWORK_FAILED`, `GITHUB_NETWORK_FAILED`, `GH_ENVIRONMENT_FAILED`, or `GITHUB_ENVIRONMENT_FAILED`:
 - **Action**: Inspect `diagnostics.command`, `diagnostics.stderr_category`, and `diagnostics.stderr_excerpt`. Fix network, sandbox, PATH, or local permission issues before retrying; do not treat these as code-review findings.
+
+If `reason_code` is `DOCTOR_FAILED`:
+- **Action**: Inspect each failed `checks[]` row. Fix GitHub CLI, auth, repository access, or state/cache writeability, then rerun `gh-address-cr doctor` before retrying the blocked command.
 
 ## External Interactions
 

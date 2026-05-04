@@ -9,6 +9,12 @@ from uuid import uuid4
 
 from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.github_thread_state import (
+    GITHUB_THREAD_CLAIMABLE_STATES,
+    is_claimable_github_thread,
+    is_github_thread_item,
+    returned_claimable_state,
+)
 from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
@@ -139,9 +145,9 @@ def record_classification(
     item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
     if released_lease_id:
-        item["state"] = "open"
-        item["status"] = "OPEN"
-        item["blocking"] = True
+        _return_item_to_claimable_state(item)
+        if not _is_stale_github_thread_item(item):
+            item["blocking"] = True
         item["claimed_by"] = None
         item["claimed_at"] = None
         item["lease_expires_at"] = None
@@ -1324,7 +1330,11 @@ def _items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _item_is_open(item: dict[str, Any]) -> bool:
-    return str(item.get("state") or item.get("status") or "open").lower() in {"open", "blocked", "waiting_for_fix", "stale"}
+    if is_github_thread_item(item):
+        return is_claimable_github_thread(item)
+    return str(item.get("state") or item.get("status") or "open").lower() in (
+        GITHUB_THREAD_CLAIMABLE_STATES - {"stale"}
+    )
 
 
 def _has_classification_evidence(item: dict[str, Any]) -> bool:
@@ -1488,8 +1498,18 @@ def _return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) -
     for lease in expired:
         item = items.get(str(_get(lease, "item_id")))
         if isinstance(item, dict) and str(item.get("state")).lower() == "claimed":
-            item["state"] = "open"
+            _return_item_to_claimable_state(item)
             item.pop("active_lease_id", None)
+
+
+def _return_item_to_claimable_state(item: dict[str, Any]) -> None:
+    state, status = returned_claimable_state(item)
+    item["state"] = state
+    item["status"] = status
+
+
+def _is_stale_github_thread_item(item: dict[str, Any]) -> bool:
+    return is_github_thread_item(item) and returned_claimable_state(item) == ("stale", "STALE")
 
 
 def _ledger(session: dict[str, Any]) -> EvidenceLedger:

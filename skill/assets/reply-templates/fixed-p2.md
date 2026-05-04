@@ -12,5 +12,3 @@ Why this addresses the CR:
 Validation:
 - `<test_command>`
 - Result: `<pass/fail + key signal>`
-
-If you want, I can also run a broader suite before merge.

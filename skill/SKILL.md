@@ -101,6 +101,8 @@ Use the runtime as the coordinator:
   - inspects active and terminal claims
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
   - expires stale leases without deleting accepted evidence
+- `gh-address-cr doctor [<owner/repo> <pr_number>]`
+  - checks GitHub CLI availability/auth, viewer lookup, optional repository access, and runtime cache writeability before retrying blocked workflows
 
 Role boundaries:
 
@@ -128,10 +130,11 @@ python3 scripts/submit_action.py <action-request.json> \
   --note "Fixed the thread." \
   --commit-hash abc123 \
   --files src/example.py \
-  --validation-cmd "python3 -m unittest tests.test_example=passed"
+  --validation-cmd "python3 -m unittest tests.test_example=passed" \
+  --output-dir /tmp/gh-address-cr-response
 ```
 
-Then submit the generated `ActionResponse` with the runtime command printed by the helper.
+Then submit the generated `ActionResponse` with the runtime command printed by the helper. Use `--output-dir` when the PR workspace or runtime cache is not writable from the current sandbox.
 
 ## Advanced References
 

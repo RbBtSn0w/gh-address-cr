@@ -76,6 +76,7 @@ class FinalGateTestCase(unittest.TestCase):
                 "unresolved_github_threads_count": 0,
                 "pending_review_count": 0,
                 "blocking_items_count": 0,
+                "blocking_github_items_count": 0,
                 "github_threads_missing_reply_count": 0,
                 "missing_validation_evidence_count": 0,
                 "blocking_local_items_count": 0,

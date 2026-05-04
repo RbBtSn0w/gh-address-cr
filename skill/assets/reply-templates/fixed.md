@@ -10,5 +10,3 @@ Why this addresses the CR:
 Validation:
 - `<test_command>`
 - Result: `<pass/fail + key output>`
-
-If anything still looks off, I can follow up with a focused patch.
