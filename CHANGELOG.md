@@ -1,3 +1,9 @@
+## [2.3.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.4...v2.3.5) (2026-05-04)
+
+### Bug Fixes
+
+* stale GitHub review threads claimable via agent next ([#39](https://github.com/RbBtSn0w/gh-address-cr/issues/39)) ([c4032b1](https://github.com/RbBtSn0w/gh-address-cr/commit/c4032b1d73356faadd3d1d06606650dbec2b1489))
+
 ## [2.3.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.3...v2.3.4) (2026-05-01)
 
 ### Bug Fixes
