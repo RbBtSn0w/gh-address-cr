@@ -1452,6 +1452,7 @@ def build_agent_manifest() -> dict:
             "triage",
             "classify",
             "fix",
+            "evidence",
             "clarify",
             "defer",
             "reject",
@@ -1463,11 +1464,13 @@ def build_agent_manifest() -> dict:
             "action_request.v1",
             "finding.v1",
             "github_thread.v1",
+            "evidence_profile.v1",
         ],
         "output_formats": [
             "action_response.v1",
             "batch_action_response.v1",
             "evidence_record.v1",
+            "evidence_profile.v1",
             "gate_report.v1",
         ],
         "constraints": {
@@ -1480,7 +1483,7 @@ def build_agent_manifest() -> dict:
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,publish,leases,reclaim,orchestrate} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -1495,6 +1498,10 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_submit(args.pr_number, args.args)
     if args.repo == "submit-batch":
         return handle_agent_submit_batch(args.pr_number, args.args)
+    if args.repo == "fix":
+        return handle_agent_fix(args.pr_number, args.args)
+    if args.repo == "evidence":
+        return handle_agent_evidence(args.pr_number, args.args)
     if args.repo == "publish":
         return handle_agent_publish(args.pr_number, args.args)
     if args.repo == "leases":
@@ -1504,7 +1511,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, publish, leases, reclaim, orchestrate.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, evidence, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -1540,6 +1547,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("pr_number")
     parser.add_argument("--role", required=True)
     parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--item-id")
     parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
@@ -1551,6 +1559,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
             parsed.pr_number,
             role=parsed.role,
             agent_id=parsed.agent_id,
+            item_id=parsed.item_id,
             now=now_dt,
         )
     except workflow.WorkflowError as exc:
@@ -1564,13 +1573,20 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--input", required=True)
+    parser.add_argument("--publish", action="store_true", help="Publish accepted GitHub-thread fix evidence immediately.")
     parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = workflow.submit_action_response(parsed.repo, parsed.pr_number, response_path=parsed.input, now=now_dt)
+        payload = workflow.submit_action_response(
+            parsed.repo,
+            parsed.pr_number,
+            response_path=parsed.input,
+            now=now_dt,
+            publish=parsed.publish,
+        )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -1597,6 +1613,122 @@ def handle_agent_submit_batch(repo: str | None, passthrough: list[str]) -> int:
             batch_path=parsed.input,
             now=now_dt,
         )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def _parse_agent_files(files: str | None, extra_files: list[str] | None = None) -> list[str]:
+    values: list[str] = []
+    if files:
+        values.extend(part.strip() for part in files.split(",") if part.strip())
+    for item in extra_files or []:
+        values.extend(part.strip() for part in item.split(",") if part.strip())
+    return values
+
+
+def _parse_agent_validation(values: list[str] | None) -> list[dict[str, str]]:
+    commands: list[dict[str, str]] = []
+    for raw in values or []:
+        command, separator, result = raw.rpartition("=")
+        if not separator:
+            command = raw
+            result = "passed"
+        command = command.strip()
+        result = result.strip()
+        if command and result:
+            commands.append({"command": command, "result": result})
+    return commands
+
+
+def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr agent fix",
+        description="Classify, claim, submit, and optionally publish one GitHub review-thread fix.",
+    )
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("item_id")
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--files")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--summary", required=True)
+    parser.add_argument("--why", required=True)
+    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        payload = workflow.fast_fix_item(
+            parsed.repo,
+            parsed.pr_number,
+            item_id=parsed.item_id,
+            agent_id=parsed.agent_id,
+            commit_hash=parsed.commit,
+            files=_parse_agent_files(parsed.files, parsed.file),
+            validation_commands=_parse_agent_validation(parsed.validation),
+            summary=parsed.summary,
+            why=parsed.why,
+            publish=parsed.publish,
+            now=now_dt,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent evidence")
+    parser.add_argument("subcommand", choices=["add", "list"])
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--name")
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--commit")
+    parser.add_argument("--files")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--summary")
+    parser.add_argument("--why")
+    parser.add_argument("--test-command")
+    parser.add_argument("--test-result")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        if parsed.subcommand == "list":
+            payload = workflow.list_evidence_profiles(parsed.repo, parsed.pr_number)
+        else:
+            if not parsed.name:
+                raise workflow.WorkflowError(
+                    status="EVIDENCE_PROFILE_REJECTED",
+                    reason_code="MISSING_EVIDENCE_PROFILE_NAME",
+                    waiting_on="evidence_profile",
+                    exit_code=2,
+                    message="agent evidence add requires --name.",
+                )
+            now_dt = None
+            if parsed.now:
+                now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+            payload = workflow.record_evidence_profile(
+                parsed.repo,
+                parsed.pr_number,
+                name=parsed.name,
+                agent_id=parsed.agent_id,
+                commit_hash=parsed.commit or "",
+                files=_parse_agent_files(parsed.files, parsed.file),
+                validation_commands=_parse_agent_validation(parsed.validation),
+                summary=parsed.summary,
+                why=parsed.why,
+                test_command=parsed.test_command,
+                test_result=parsed.test_result,
+                now=now_dt,
+            )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -1721,6 +1853,13 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     parser.set_defaults(auto_clean=True)
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("--snapshot", default="")
+    checks_group = parser.add_mutually_exclusive_group()
+    checks_group.add_argument("--require-checks", action="store_true", help="Require all PR checks to be green.")
+    checks_group.add_argument(
+        "--require-required-checks",
+        action="store_true",
+        help="Require required PR checks to be green.",
+    )
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parsed = parser.parse_args(_prepend_optional(repo, _prepend_optional(pr_number, passthrough)))
@@ -1729,6 +1868,8 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             parsed.repo,
             parsed.pr_number,
             snapshot_path=parsed.snapshot or None,
+            require_checks=parsed.require_checks,
+            require_required_checks=parsed.require_required_checks,
         )
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
@@ -1752,11 +1893,20 @@ def _emit_final_gate_result(result: core_gate.GateResult) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
     print(f"Pending review count: {result.counts['pending_current_login_review_count']}")
+    if result.check_requirement:
+        print(
+            "PR checks: "
+            f"{result.counts['pr_checks_failed_count']} failed, "
+            f"{result.counts['pr_checks_pending_count']} pending "
+            f"({result.check_requirement})"
+        )
     print()
     if result.passed:
         print("== Gate Result ==")
         print("Verified: 0 Unresolved Threads found")
         print("Verified: 0 Pending Reviews found")
+        if result.check_requirement:
+            print("Verified: 0 Non-green PR Checks found")
         print(f"Session blocking items: {result.counts['blocking_items_count']}")
     else:
         print("== Gate Result ==")
@@ -1790,6 +1940,7 @@ def _write_native_final_gate_artifacts(
         f"- run_id: {run_id}",
         f"- final_gate_status: {status}",
         f"- reason_code: {result.reason_code or 'PASSED'}",
+        f"- check_requirement: {result.check_requirement or 'none'}",
     ]
     summary_lines.extend(f"- {key}: {result.counts[key]}" for key in core_gate.COUNT_KEYS)
     if result.failure_codes:
@@ -1808,6 +1959,7 @@ def _write_native_final_gate_artifacts(
         "details": {
             "counts": dict(result.counts),
             "failure_codes": list(result.failure_codes),
+            "check_requirement": result.check_requirement,
             "summary_file": str(summary_path),
             "summary_sha256": summary_sha256,
         },
@@ -1821,6 +1973,7 @@ def _write_native_final_gate_artifacts(
         "status": status,
         "reason_code": result.reason_code or "PASSED",
         "counts": dict(result.counts),
+        "check_requirement": result.check_requirement,
     }
     for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
         with path.open("a", encoding="utf-8") as handle:
@@ -1841,6 +1994,8 @@ def _final_gate_failure_message(result: core_gate.GateResult) -> str:
         reasons.append(
             f"{result.counts['missing_validation_evidence_count']} local item(s) missing validation evidence"
         )
+    if result.counts["pr_checks_not_green_count"]:
+        reasons.append(f"{result.counts['pr_checks_not_green_count']} non-green PR check(s)")
     return " and ".join(reasons) or "gate checks reported failure"
 
 
@@ -2006,12 +2161,7 @@ def main(argv: list[str] | None = None) -> int:
             cmd.append("--machine")
         if args.human:
             cmd.append("--human")
-        passthrough = []
-        if args.repo:
-            passthrough.append(args.repo)
-        if args.pr_number:
-            passthrough.append(args.pr_number)
-        passthrough.extend(args.args)
+        passthrough = list(args.args)
         result = run_script("submit_action.py", [*cmd, *passthrough])
         if result.stdout:
             sys.stdout.write(result.stdout)

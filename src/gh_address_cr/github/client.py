@@ -185,6 +185,38 @@ class GitHubClient:
                 pending.append(review)
             page += 1
 
+    def list_pr_checks(self, repo: str, pr_number: str, *, required: bool = False) -> list[dict[str, Any]]:
+        cmd = [
+            "pr",
+            "checks",
+            str(pr_number),
+            "-R",
+            repo,
+            "--json",
+            "name,state,bucket,link,workflow",
+        ]
+        if required:
+            cmd.append("--required")
+        result = self._run_gh(cmd, retries=1)
+        if result.returncode not in {0, 1, 8} and not result.stdout.strip():
+            _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
+        try:
+            payload = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError as exc:
+            raise GitHubError(
+                "GITHUB_INVALID_JSON",
+                f"GitHub checks response was not valid JSON: {exc}",
+                diagnostics=classify_github_failure(
+                    result.stderr,
+                    result.stdout,
+                    result.returncode,
+                    _completed_command(result),
+                ),
+            ) from exc
+        if not isinstance(payload, list):
+            raise GitHubError("GITHUB_INCOMPLETE_RESPONSE", "GitHub checks response must be a JSON array.")
+        return [row for row in payload if isinstance(row, dict)]
+
     def viewer_login(self) -> str:
         payload = self._read_json(["api", "user"])
         login = payload.get("login")

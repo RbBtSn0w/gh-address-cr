@@ -23,6 +23,7 @@ FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW = "FINAL_GATE_PENDING_CURRENT_LOGIN_REVI
 FINAL_GATE_BLOCKING_GITHUB_ITEMS = "FINAL_GATE_BLOCKING_GITHUB_ITEMS"
 FINAL_GATE_BLOCKING_LOCAL_ITEMS = "FINAL_GATE_BLOCKING_LOCAL_ITEMS"
 FINAL_GATE_MISSING_VALIDATION_EVIDENCE = "FINAL_GATE_MISSING_VALIDATION_EVIDENCE"
+FINAL_GATE_PR_CHECKS_NOT_GREEN = "FINAL_GATE_PR_CHECKS_NOT_GREEN"
 
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5
@@ -48,6 +49,10 @@ COUNT_KEYS = (
     "blocking_local_items_count",
     "pending_current_login_review_count",
     "unresolved_remote_threads_count",
+    "pr_checks_count",
+    "pr_checks_failed_count",
+    "pr_checks_pending_count",
+    "pr_checks_not_green_count",
 )
 
 FAILURE_ORDER = (
@@ -57,6 +62,7 @@ FAILURE_ORDER = (
     (FINAL_GATE_BLOCKING_GITHUB_ITEMS, "blocking_github_items_count", "github_items"),
     (FINAL_GATE_BLOCKING_LOCAL_ITEMS, "blocking_local_items_count", "local_items"),
     (FINAL_GATE_MISSING_VALIDATION_EVIDENCE, "missing_validation_evidence_count", "validation_evidence"),
+    (FINAL_GATE_PR_CHECKS_NOT_GREEN, "pr_checks_not_green_count", "checks"),
 )
 
 
@@ -66,6 +72,7 @@ class GateResult:
     pr_number: str
     counts: dict[str, int]
     failure_codes: list[str]
+    check_requirement: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -102,6 +109,7 @@ class GateResult:
             "next_action": _next_action(self.reason_code),
             "exit_code": self.exit_code,
             "failure_codes": list(self.failure_codes),
+            "check_requirement": self.check_requirement,
         }
 
 
@@ -115,6 +123,8 @@ class Gatekeeper:
         pr_number: str,
         *,
         snapshot_path: str | Path | None = None,
+        require_checks: bool = False,
+        require_required_checks: bool = False,
     ) -> GateResult:
         manager = SessionManager(repo, str(pr_number))
         try:
@@ -128,12 +138,19 @@ class Gatekeeper:
             else self.github_client.list_threads(repo, str(pr_number))
         )
         pending_reviews = self.github_client.list_pending_reviews(repo, str(pr_number), current_login)
+        check_runs = (
+            self.github_client.list_pr_checks(repo, str(pr_number), required=require_required_checks)
+            if require_checks or require_required_checks
+            else []
+        )
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
         result = evaluate_final_gate(
             merged_session,
             remote_threads=remote_threads,
             pending_reviews=pending_reviews,
             current_login=current_login,
+            check_runs=check_runs,
+            check_requirement="required" if require_required_checks else ("all" if require_checks else None),
         )
         metrics = dict(merged_session.get("metrics") or {})
         metrics.update(
@@ -142,6 +159,8 @@ class Gatekeeper:
                 "unresolved_github_threads_count": result.counts["unresolved_github_threads_count"],
                 "github_threads_missing_reply_count": result.counts["github_threads_missing_reply_count"],
                 "pending_current_login_review_count": result.counts["pending_current_login_review_count"],
+                "pr_checks_failed_count": result.counts["pr_checks_failed_count"],
+                "pr_checks_pending_count": result.counts["pr_checks_pending_count"],
             }
         )
         merged_session["metrics"] = metrics
@@ -155,6 +174,8 @@ def evaluate_final_gate(
     remote_threads: Iterable[Mapping[str, Any]] = (),
     pending_reviews: Iterable[Mapping[str, Any]] = (),
     current_login: str | None = None,
+    check_runs: Iterable[Mapping[str, Any]] = (),
+    check_requirement: str | None = None,
 ) -> GateResult:
     items = _session_items(session)
     github_items = [item for item in items if _item_kind(item) == "github_thread"]
@@ -166,6 +187,9 @@ def evaluate_final_gate(
     pending_current_login_reviews = [
         review for review in pending_reviews if _is_current_login_pending_review(review, current_login)
     ]
+    check_rows = list(check_runs)
+    failed_checks = [check for check in check_rows if _check_bucket(check) in {"fail", "cancel", "unknown"}]
+    pending_checks = [check for check in check_rows if _check_bucket(check) == "pending"]
     blocking_local_items = [item for item in local_items if _is_local_blocking(item)]
     blocking_github_items = [item for item in github_items if _is_blocking_item(item)]
     blocking_items = [item for item in items if _is_blocking_item(item)]
@@ -188,6 +212,10 @@ def evaluate_final_gate(
         "blocking_local_items_count": len(blocking_local_items),
         "pending_current_login_review_count": len(pending_current_login_reviews),
         "unresolved_remote_threads_count": len(unresolved_remote_threads),
+        "pr_checks_count": len(check_rows),
+        "pr_checks_failed_count": len(failed_checks),
+        "pr_checks_pending_count": len(pending_checks),
+        "pr_checks_not_green_count": len(failed_checks) + len(pending_checks) if check_requirement else 0,
     }
     failure_codes = [code for code, count_key, _ in FAILURE_ORDER if counts[count_key] > 0]
 
@@ -196,6 +224,7 @@ def evaluate_final_gate(
         pr_number=str(session.get("pr_number") or ""),
         counts={key: counts[key] for key in COUNT_KEYS},
         failure_codes=failure_codes,
+        check_requirement=check_requirement,
     )
 
 
@@ -379,6 +408,24 @@ def _review_login(review: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _check_bucket(check: Mapping[str, Any]) -> str:
+    bucket = str(check.get("bucket") or "").strip().lower()
+    if bucket in {"pass", "pending", "fail", "skipping", "cancel"}:
+        return bucket
+    state = str(check.get("state") or "").strip().lower()
+    if state in {"success", "passed", "completed"}:
+        return "pass"
+    if state in {"queued", "pending", "in_progress", "requested", "waiting"}:
+        return "pending"
+    if state in {"failure", "failed", "error", "timed_out", "action_required"}:
+        return "fail"
+    if state in {"cancelled", "canceled", "neutral"}:
+        return "cancel"
+    if state in {"skipped", "skipping"}:
+        return "skipping"
+    return "unknown" if state or bucket else "pass"
+
+
 def _is_local_blocking(item: Mapping[str, Any]) -> bool:
     if "blocking" in item:
         return bool(item["blocking"])
@@ -438,4 +485,6 @@ def _next_action(reason_code: str | None) -> str:
         return "Close or explicitly defer blocking local items, then rerun final-gate."
     if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:
         return "Record validation evidence for terminal local findings, then rerun final-gate."
+    if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
+        return "Wait for PR checks to pass or fix failing checks, then rerun final-gate."
     return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."

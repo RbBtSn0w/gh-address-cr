@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from gh_address_cr.github.errors import GitHubError
 
 MUTATING_ROLES = {"fixer"}
 TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
+EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class WorkflowError(RuntimeError):
@@ -171,6 +173,7 @@ def issue_action_request(
     *,
     role: str,
     agent_id: str,
+    item_id: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
@@ -179,7 +182,7 @@ def issue_action_request(
     expired = expire_leases(session, now=current_time)
     _return_expired_items_to_open(session, expired)
 
-    item_id, item = _next_item(session, role)
+    item_id, item = _next_item(session, role, item_id=item_id)
     if item is None:
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
@@ -190,6 +193,8 @@ def issue_action_request(
             message=f"No eligible work item exists for role `{role}`.",
         )
 
+    if role in MUTATING_ROLES and not _has_classification_evidence(item):
+        _restore_classification_evidence_from_session(session, item_id, item)
     if role in MUTATING_ROLES and not _has_classification_evidence(item):
         next_action = (
             f"Missing triage classification evidence for {item_id}. Run "
@@ -244,6 +249,8 @@ def issue_action_request(
     }
     request_hash = ActionRequest.from_dict(request).stable_hash()
     request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
+    response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+    request["response_skeleton_path"] = str(response_skeleton_path)
     try:
         lease = claim_lease(
             session,
@@ -256,6 +263,9 @@ def issue_action_request(
             request_id=request_id,
             request_path=str(request_path),
             resume_token=f"resume:{request_id}",
+            allow_same_agent_github_thread_file_overlap=bool(
+                role == "fixer" and item.get("item_kind") == "github_thread"
+            ),
         )
     except LeaseConflictError as exc:
         session_store.save_session(repo, pr_number, session)
@@ -271,6 +281,8 @@ def issue_action_request(
     item["state"] = "claimed"
     item["active_lease_id"] = lease_id
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
+    response_skeleton_path.write_text(json.dumps(response_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     ledger.append_event(
         session_id=str(session["session_id"]),
@@ -279,7 +291,11 @@ def issue_action_request(
         agent_id=agent_id,
         role=role,
         event_type="request_issued",
-        payload={"request_id": request_id, "request_path": str(request_path)},
+        payload={
+            "request_id": request_id,
+            "request_path": str(request_path),
+            "response_skeleton_path": str(response_skeleton_path),
+        },
     )
     session_store.save_session(repo, pr_number, session)
     return {
@@ -287,15 +303,23 @@ def issue_action_request(
         "repo": repo,
         "pr_number": str(pr_number),
         "request_path": str(request_path),
+        "response_skeleton_path": str(response_skeleton_path),
         "lease_id": lease_id,
         "resume_token": _get(lease, "resume_token"),
         "item_id": item_id,
-        "next_action": f"Pass request_path to an agent with the {role} role.",
+        "next_action": f"Pass request_path to an agent with the {role} role, then fill response_skeleton_path.",
     }
 
 
 def submit_action_response(
-    repo: str, pr_number: str, *, response_path: str | Path, now: datetime | None = None
+    repo: str,
+    pr_number: str,
+    *,
+    response_path: str | Path,
+    now: datetime | None = None,
+    publish: bool = False,
+    github_client: Any | None = None,
+    publisher_agent_id: str = "gh-address-cr-publisher",
 ) -> dict[str, Any]:
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
@@ -311,13 +335,15 @@ def submit_action_response(
     )
 
     try:
+        if publish:
+            _validate_publish_shortcut_target(session, response)
         prepared = _prepare_action_response_submission(session, ledger, response)
         record = _accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
         session_store.save_session(repo, pr_number, session)
         raise
     session_store.save_session(repo, pr_number, session)
-    return {
+    payload = {
         "status": "ACTION_ACCEPTED",
         "repo": repo,
         "pr_number": str(pr_number),
@@ -326,6 +352,19 @@ def submit_action_response(
         "evidence_record_id": record.record_id,
         "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
+    if not publish:
+        return payload
+
+    published = publish_github_thread_responses(
+        repo,
+        pr_number,
+        github_client=github_client,
+        agent_id=publisher_agent_id,
+        now=now,
+    )
+    payload["publish"] = published
+    payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+    return payload
 
 
 def submit_batch_action_response(
@@ -458,6 +497,239 @@ def submit_batch_action_response(
     }
 
 
+def record_evidence_profile(
+    repo: str,
+    pr_number: str,
+    *,
+    name: str,
+    agent_id: str,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, str]],
+    summary: str | None = None,
+    why: str | None = None,
+    test_command: str | None = None,
+    test_result: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    profile_name = name.strip()
+    if not profile_name or not EVIDENCE_PROFILE_NAME_RE.match(profile_name):
+        raise WorkflowError(
+            status="EVIDENCE_PROFILE_REJECTED",
+            reason_code="INVALID_EVIDENCE_PROFILE_NAME",
+            waiting_on="evidence_profile",
+            exit_code=2,
+            message="Evidence profile names may contain only letters, numbers, dot, underscore, and dash.",
+        )
+    normalized_files = _normalize_string_list(files)
+    if not normalized_files:
+        raise WorkflowError(
+            status="EVIDENCE_PROFILE_REJECTED",
+            reason_code="MISSING_EVIDENCE_PROFILE_FILES",
+            waiting_on="evidence_profile",
+            exit_code=2,
+            message="Evidence profile requires at least one file.",
+        )
+    normalized_validation = _normalize_validation_command_records(validation_commands)
+    if not normalized_validation:
+        raise WorkflowError(
+            status="EVIDENCE_PROFILE_REJECTED",
+            reason_code="MISSING_EVIDENCE_PROFILE_VALIDATION",
+            waiting_on="evidence_profile",
+            exit_code=2,
+            message="Evidence profile requires at least one validation command.",
+        )
+    normalized_commit = commit_hash.strip()
+    if not normalized_commit:
+        raise WorkflowError(
+            status="EVIDENCE_PROFILE_REJECTED",
+            reason_code="MISSING_EVIDENCE_PROFILE_COMMIT",
+            waiting_on="evidence_profile",
+            exit_code=2,
+            message="Evidence profile requires a commit hash.",
+        )
+
+    session = session_store.load_session(repo, pr_number)
+    timestamp = _format_timestamp(_coerce_now(now))
+    fix_reply = {
+        "commit_hash": normalized_commit,
+        "files": normalized_files,
+    }
+    if summary and summary.strip():
+        fix_reply["summary"] = summary.strip()
+    if why and why.strip():
+        fix_reply["why"] = why.strip()
+    if test_command and test_command.strip():
+        fix_reply["test_command"] = test_command.strip()
+    if test_result and test_result.strip():
+        fix_reply["test_result"] = test_result.strip()
+
+    profile = {
+        "name": profile_name,
+        "commit_hash": normalized_commit,
+        "files": normalized_files,
+        "validation_commands": normalized_validation,
+        "fix_reply": fix_reply,
+        "created_at": timestamp,
+        "created_by": agent_id,
+    }
+    profiles = session.setdefault("evidence_profiles", {})
+    if not isinstance(profiles, dict):
+        raise WorkflowError(
+            status="INVALID_SESSION",
+            reason_code="INVALID_EVIDENCE_PROFILES_SHAPE",
+            waiting_on="session",
+            exit_code=5,
+            message="Session evidence_profiles must be a JSON object.",
+        )
+    profiles[profile_name] = profile
+    record = _ledger(session).append_event(
+        session_id=str(session["session_id"]),
+        item_id="",
+        lease_id=None,
+        agent_id=agent_id,
+        role="fixer",
+        event_type="evidence_profile_recorded",
+        payload={"name": profile_name, "commit_hash": normalized_commit, "files": normalized_files},
+        timestamp=timestamp,
+    )
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "EVIDENCE_PROFILE_RECORDED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "name": profile_name,
+        "evidence_record_id": record.record_id,
+        "profile": _json_ready(profile),
+    }
+
+
+def list_evidence_profiles(repo: str, pr_number: str) -> dict[str, Any]:
+    session = session_store.load_session(repo, pr_number)
+    profiles = session.get("evidence_profiles") if isinstance(session.get("evidence_profiles"), dict) else {}
+    return {
+        "status": "EVIDENCE_PROFILES_READY",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "profiles": [_json_ready(profile) for _, profile in sorted(profiles.items()) if isinstance(profile, dict)],
+    }
+
+
+def fast_fix_item(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, str]],
+    summary: str,
+    why: str,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    normalized_files = _normalize_string_list(files)
+    normalized_validation = _normalize_validation_command_records(validation_commands)
+    if not normalized_files:
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="MISSING_FILES",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix requires --files or --file.",
+            payload={"item_id": item_id},
+        )
+    if not normalized_validation:
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="MISSING_VALIDATION_COMMANDS",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix requires --validation.",
+            payload={"item_id": item_id},
+        )
+    if not commit_hash.strip():
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix requires --commit for GitHub thread replies.",
+            payload={"item_id": item_id},
+        )
+    if not summary.strip() or not why.strip():
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="MISSING_SUMMARY_OR_WHY",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix requires --summary and --why.",
+            payload={"item_id": item_id},
+        )
+
+    try:
+        classification = record_classification(
+            repo,
+            pr_number,
+            item_id=item_id,
+            classification="fix",
+            agent_id=agent_id,
+            note=why,
+        )
+        requested = issue_action_request(
+            repo,
+            pr_number,
+            role="fixer",
+            agent_id=agent_id,
+            item_id=item_id,
+            now=now,
+        )
+        request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+        response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
+        response = {
+            "schema_version": PROTOCOL_VERSION,
+            "request_id": request["request_id"],
+            "lease_id": request["lease_id"],
+            "agent_id": agent_id,
+            "item_id": item_id,
+            "resolution": "fix",
+            "note": summary,
+            "files": normalized_files,
+            "validation_commands": normalized_validation,
+            "fix_reply": {
+                "summary": summary,
+                "why": why,
+                "commit_hash": commit_hash.strip(),
+                "files": normalized_files,
+            },
+        }
+        response_path.write_text(json.dumps(response, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        submitted = submit_action_response(
+            repo,
+            pr_number,
+            response_path=response_path,
+            now=now,
+            publish=publish,
+            github_client=github_client,
+        )
+    except WorkflowError:
+        raise
+
+    return {
+        "status": "FAST_FIX_COMPLETE" if publish else "FAST_FIX_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": item_id,
+        "classification": classification,
+        "request_path": requested["request_path"],
+        "response_path": str(response_path),
+        "submit": submitted,
+        "next_action": submitted["next_action"],
+    }
+
+
 def _load_response_json_object(
     response_path: str | Path,
     *,
@@ -500,6 +772,154 @@ def _load_response_json_object(
     return payload
 
 
+def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, item: dict[str, Any]) -> dict[str, Any]:
+    resolution = _classified_resolution(item) or (
+        "fix" if "fix" in (request.get("allowed_actions") or []) else "<fix|clarify|defer|reject>"
+    )
+    skeleton: dict[str, Any] = {
+        "schema_version": str(request.get("schema_version") or PROTOCOL_VERSION),
+        "request_id": str(request["request_id"]),
+        "lease_id": str(request["lease_id"]),
+        "agent_id": agent_id,
+        "item_id": str(item.get("item_id") or ""),
+        "resolution": resolution,
+        "note": "<what changed or why this response resolves the item>",
+        "validation_commands": [{"command": "<test_command>", "result": "<passed|failed + key signal>"}],
+    }
+    if resolution == "fix":
+        skeleton["files"] = ["<file_path>"]
+    if item.get("item_kind") == "github_thread":
+        if resolution == "fix":
+            skeleton["fix_reply"] = {
+                "summary": "<reply summary>",
+                "commit_hash": "<commit_hash>",
+                "files": ["<file_path>"],
+                "why": "<why this resolves the review thread>",
+                "test_command": "<test_command>",
+                "test_result": "<passed|failed + key signal>",
+            }
+            skeleton["evidence_ref"] = "<optional reusable evidence profile name>"
+        else:
+            skeleton["reply_markdown"] = "<reply body for clarify/defer/reject>"
+    elif resolution != "fix":
+        skeleton["reply_markdown"] = "<reply body for clarify/defer/reject>"
+    return skeleton
+
+
+def _classified_resolution(item: dict[str, Any]) -> str | None:
+    evidence = item.get("classification_evidence")
+    if isinstance(evidence, dict) and evidence.get("classification") in TERMINAL_RESOLUTIONS:
+        return str(evidence["classification"])
+    decision = str(item.get("decision") or "").strip().lower()
+    if decision in TERMINAL_RESOLUTIONS:
+        return decision
+    return None
+
+
+def _restore_classification_evidence_from_session(
+    session: dict[str, Any], item_id: str, item: dict[str, Any]
+) -> None:
+    decision = str(item.get("decision") or "").strip().lower()
+    if decision in TERMINAL_RESOLUTIONS:
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": decision,
+            "note": str(item.get("classification_note") or item.get("resolution_note") or "Restored from item decision."),
+            "record_id": str(item.get("classification_record_id") or "session-decision"),
+        }
+        return
+
+    try:
+        records = _ledger(session).load(event_type="classification_recorded")
+    except ValueError:
+        return
+    for record in reversed(records):
+        if record.item_id != item_id:
+            continue
+        classification = str(record.payload.get("classification") or "").strip().lower()
+        if classification not in TERMINAL_RESOLUTIONS:
+            continue
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": classification,
+            "note": str(record.payload.get("note") or "Restored from evidence ledger."),
+            "record_id": record.record_id,
+        }
+        item["decision"] = classification
+        return
+
+
+def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> str | None:
+    evidence_ref = str(response.get("evidence_ref") or "").strip()
+    if not evidence_ref:
+        return None
+    profiles = session.get("evidence_profiles")
+    if not isinstance(profiles, dict):
+        return "EVIDENCE_PROFILE_NOT_FOUND"
+    profile = profiles.get(evidence_ref)
+    if not isinstance(profile, dict):
+        return "EVIDENCE_PROFILE_NOT_FOUND"
+
+    profile_files = _normalize_string_list(profile.get("files"))
+    response_files = _normalize_string_list(response.get("files"))
+    if not response_files and profile_files:
+        response["files"] = profile_files
+        response_files = profile_files
+
+    profile_validation = _normalize_validation_command_records(profile.get("validation_commands"))
+    if not response.get("validation_commands") and profile_validation:
+        response["validation_commands"] = profile_validation
+
+    profile_fix_reply = profile.get("fix_reply") if isinstance(profile.get("fix_reply"), dict) else {}
+    if "fix_reply" in response and response.get("fix_reply") is not None and not isinstance(response.get("fix_reply"), dict):
+        return "INVALID_FIX_REPLY"
+    response_fix_reply = response.get("fix_reply") if isinstance(response.get("fix_reply"), dict) else {}
+    merged_fix_reply = dict(profile_fix_reply)
+    merged_fix_reply.update(response_fix_reply)
+    if profile.get("commit_hash") and not merged_fix_reply.get("commit_hash"):
+        merged_fix_reply["commit_hash"] = profile["commit_hash"]
+    if response_files and not merged_fix_reply.get("files"):
+        merged_fix_reply["files"] = response_files
+    if str(response.get("resolution") or "") == "fix" and merged_fix_reply:
+        response["fix_reply"] = merged_fix_reply
+    return None
+
+
+def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[str, Any]) -> None:
+    lease_id = str(response.get("lease_id") or "")
+    lease = session.get("leases", {}).get(lease_id)
+    item_id = str(lease.get("item_id") or "") if isinstance(lease, dict) else ""
+    item = _items(session).get(item_id) if item_id else None
+    if not isinstance(item, dict):
+        raise WorkflowError(
+            status="ACTION_REJECTED",
+            reason_code="PUBLISH_TARGET_NOT_FOUND",
+            waiting_on="action_response",
+            exit_code=5,
+            message="--publish requires an ActionResponse for an existing GitHub review-thread item.",
+            payload={"lease_id": lease_id or None},
+        )
+    if item.get("item_kind") != "github_thread":
+        raise WorkflowError(
+            status="ACTION_REJECTED",
+            reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
+            waiting_on="action_response",
+            exit_code=5,
+            message="--publish is only supported for GitHub review-thread responses.",
+            payload={"item_id": item_id, "lease_id": lease_id},
+        )
+    resolution = str(response.get("resolution") or "")
+    if resolution and resolution != "fix":
+        raise WorkflowError(
+            status="ACTION_REJECTED",
+            reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
+            waiting_on="action_response",
+            exit_code=5,
+            message="--publish is only supported for GitHub review-thread fix responses.",
+            payload={"item_id": item_id, "lease_id": lease_id},
+        )
+
+
 def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
     common = batch.get("common") or {}
     if not isinstance(common, dict):
@@ -525,6 +945,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
     common_files = common.get("files") or common_fix_reply.get("files")
     common_validation = common.get("validation_commands")
     common_commit_hash = str(common.get("commit_hash") or common_fix_reply.get("commit_hash") or "").strip()
+    common_evidence_ref = str(common.get("evidence_ref") or batch.get("evidence_ref") or "").strip()
 
     responses: list[dict[str, Any]] = []
     for index, item in enumerate(items):
@@ -581,6 +1002,9 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
             "validation_commands": validation_commands,
             "fix_reply": fix_reply,
         }
+        evidence_ref = str(item.get("evidence_ref") or common_evidence_ref).strip()
+        if evidence_ref:
+            response["evidence_ref"] = evidence_ref
         if item.get("item_id"):
             response["item_id"] = str(item["item_id"])
         responses.append(response)
@@ -639,6 +1063,18 @@ def _prepare_action_response_submission(
             waiting_on="work_item",
             exit_code=5,
             message=f"Work item not found: {item_id}",
+        )
+
+    evidence_ref_reason = _expand_evidence_ref(session, response)
+    if evidence_ref_reason:
+        _raise_response_rejected(
+            session,
+            ledger,
+            response,
+            evidence_ref_reason,
+            status=rejected_status,
+            item_id=item_id,
+            lease_id=lease_id,
         )
 
     reason_code = _validate_response(response, item)
@@ -1205,6 +1641,33 @@ def _normalize_validation_commands(value: Any) -> list[str]:
     return commands
 
 
+def _normalize_validation_command_records(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    commands: list[dict[str, str]] = []
+    for entry in value:
+        if isinstance(entry, dict):
+            command = str(entry.get("command") or "").strip()
+            result = str(entry.get("result") or "").strip()
+            summary = str(entry.get("summary") or "").strip()
+        else:
+            raw = str(entry or "").strip()
+            command, separator, result = raw.rpartition("=")
+            if not separator:
+                command = raw
+                result = "passed"
+            command = command.strip()
+            result = result.strip()
+            summary = ""
+        if not command or not result:
+            continue
+        row = {"command": command, "result": result}
+        if summary:
+            row["summary"] = summary
+        commands.append(row)
+    return commands
+
+
 def _normalize_fix_reply_severity(value: Any) -> str:
     severity = str(value or "").strip().upper()
     return severity if severity in {"P1", "P2", "P3"} else "P2"
@@ -1303,12 +1766,17 @@ def _publish_error(repo: str, pr_number: str, item_id: str, exc: GitHubError) ->
     )
 
 
-def _next_item(session: dict[str, Any], role: str) -> tuple[str, dict[str, Any] | None]:
+def _next_item(session: dict[str, Any], role: str, *, item_id: str | None = None) -> tuple[str, dict[str, Any] | None]:
     active_item_ids = {
         str(lease.get("item_id"))
         for lease in session.get("leases", {}).values()
         if isinstance(lease, dict) and lease.get("status") in {"active", "submitted"}
     }
+    if item_id:
+        item = _items(session).get(item_id)
+        if item_id in active_item_ids or not isinstance(item, dict) or not _item_is_open(item):
+            return item_id, None
+        return item_id, item
     for item_id, item in _items(session).items():
         if item_id in active_item_ids:
             continue
@@ -1429,6 +1897,8 @@ def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> N
             "reply_markdown": response.get("reply_markdown"),
             "fix_reply": response.get("fix_reply"),
         }
+        if response.get("evidence_ref"):
+            item["accepted_response"]["evidence_ref"] = response["evidence_ref"]
         return
     item["state"] = "fixed" if resolution == "fix" else resolution
     item["status"] = _legacy_local_status_for_resolution(resolution)
@@ -1446,6 +1916,8 @@ def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> N
         item["reply_markdown"] = response["reply_markdown"]
     if response.get("fix_reply"):
         item["fix_reply"] = response["fix_reply"]
+    if response.get("evidence_ref"):
+        item["evidence_ref"] = response["evidence_ref"]
 
 
 def _legacy_local_status_for_resolution(resolution: str) -> str:

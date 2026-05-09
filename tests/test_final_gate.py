@@ -70,6 +70,7 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(summary["exit_code"], 0)
         self.assertEqual(summary["next_action"], "Completion may be claimed.")
         self.assertEqual(summary["failure_codes"], [])
+        self.assertIsNone(summary["check_requirement"])
         self.assertEqual(
             summary["counts"],
             {
@@ -82,6 +83,10 @@ class FinalGateTestCase(unittest.TestCase):
                 "blocking_local_items_count": 0,
                 "pending_current_login_review_count": 0,
                 "unresolved_remote_threads_count": 0,
+                "pr_checks_count": 0,
+                "pr_checks_failed_count": 0,
+                "pr_checks_pending_count": 0,
+                "pr_checks_not_green_count": 0,
             },
         )
 

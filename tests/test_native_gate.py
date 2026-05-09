@@ -9,9 +9,10 @@ from unittest.mock import patch
 
 
 class FakeGitHubClient:
-    def __init__(self, *, threads=None, pending_reviews=None, login="agent-login"):
+    def __init__(self, *, threads=None, pending_reviews=None, checks=None, login="agent-login"):
         self.threads = threads or []
         self.pending_reviews = pending_reviews or []
+        self.checks = checks or []
         self.login = login
 
     def list_threads(self, repo, pr_number):
@@ -28,6 +29,9 @@ class FakeGitHubClient:
             for review in self.pending_reviews
             if (review.get("user") or {}).get("login") == login or review.get("author_login") == login
         ]
+
+    def list_pr_checks(self, repo, pr_number, *, required=False):
+        return [check for check in self.checks if not required or check.get("required")]
 
 
 class NativeGateTests(unittest.TestCase):
@@ -108,6 +112,51 @@ class NativeGateTests(unittest.TestCase):
 
                 self.assertFalse(result.passed)
                 self.assertEqual(result.reason_code, FINAL_GATE_MISSING_REPLY_EVIDENCE)
+
+    def test_gatekeeper_require_checks_fails_non_green_pr_checks(self):
+        from gh_address_cr.core.gate import FINAL_GATE_PR_CHECKS_NOT_GREEN, Gatekeeper
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, {})
+
+                result = Gatekeeper(
+                    github_client=FakeGitHubClient(
+                        checks=[
+                            {"name": "unit", "bucket": "pass"},
+                            {"name": "integration", "bucket": "pending"},
+                        ],
+                    )
+                ).run(repo, pr_number, require_checks=True)
+
+                self.assertFalse(result.passed)
+                self.assertEqual(result.reason_code, FINAL_GATE_PR_CHECKS_NOT_GREEN)
+                self.assertEqual(result.counts["pr_checks_count"], 2)
+                self.assertEqual(result.counts["pr_checks_pending_count"], 1)
+
+    def test_gatekeeper_required_checks_filters_optional_checks(self):
+        from gh_address_cr.core.gate import Gatekeeper
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, {})
+
+                result = Gatekeeper(
+                    github_client=FakeGitHubClient(
+                        checks=[
+                            {"name": "required-unit", "bucket": "pass", "required": True},
+                            {"name": "optional-flaky", "bucket": "fail", "required": False},
+                        ],
+                    )
+                ).run(repo, pr_number, require_required_checks=True)
+
+                self.assertTrue(result.passed)
+                self.assertEqual(result.counts["pr_checks_count"], 1)
+                self.assertEqual(result.check_requirement, "required")
 
     def test_remote_stale_thread_refreshes_as_claimable_blocking_item(self):
         from gh_address_cr.core import gate
@@ -227,6 +276,60 @@ else:
 
                 self.assertEqual(rc, 0, stderr.getvalue())
                 self.assertIn("Verified: 0 Unresolved Threads found", stdout.getvalue())
+
+    def test_cli_final_gate_require_checks_reports_non_green_checks(self):
+        from gh_address_cr import cli
+        from gh_address_cr.core.session import SessionManager
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(
+                """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif args[:2] == ['api', 'repos/owner/repo/pulls/123/reviews?per_page=100&page=1']:
+    print('[]')
+elif args[:2] == ['pr', 'checks']:
+    print(json.dumps([{'name': 'unit', 'bucket': 'fail', 'state': 'failure'}]))
+    raise SystemExit(1)
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+                encoding="utf-8",
+            )
+            gh.chmod(0o755)
+            snapshot = Path(tmp) / "threads.jsonl"
+            snapshot.write_text("", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "GH_ADDRESS_CR_STATE_DIR": str(state_dir),
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                },
+                clear=False,
+            ):
+                SessionManager(repo, pr_number).create(status="WAITING_FOR_GATE")
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    rc = cli.main(
+                        ["final-gate", "--no-auto-clean", "--require-checks", "--snapshot", str(snapshot), repo, pr_number]
+                    )
+
+                self.assertEqual(rc, 5)
+                self.assertIn("pr_checks_failed_count=1", stdout.getvalue())
+                self.assertIn("non-green PR check", stderr.getvalue())
 
 
 if __name__ == "__main__":

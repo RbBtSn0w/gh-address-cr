@@ -94,9 +94,14 @@ Use the runtime as the coordinator:
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - validates an `ActionResponse`, lease ownership, and required evidence
   - when it returns `ACTION_ACCEPTED`, run the returned `next_action`; accepted GitHub-thread fixes publish through `agent publish`
+  - use `--publish` only when an accepted GitHub-thread fix should be posted and resolved immediately
 - `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
   - validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items
   - shares common commit/files/validation evidence while keeping per-thread `summary`/`why`
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>`
+  - records reusable commit/files/validation evidence for later `evidence_ref` use in responses
+- `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--publish]`
+  - classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - inspects active and terminal claims
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
@@ -119,7 +124,9 @@ Classification is triage-phase evidence. Resolution is response-phase evidence. 
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
 Fix responses require changed files and validation evidence. For GitHub thread `fix` resolutions, `fix_reply` **must be a JSON object**, not a string — submitting a plain string passes `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as the default validation evidence. See `references/mode-producer-matrix.md` for the complete field reference.
 Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. The default manifest exposes `max_parallel_claims: 2`, so claim the allowed leases, submit accepted batch evidence for those leased threads, publish, then claim the next set.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. The default manifest exposes `max_parallel_claims: 2`, so claim the allowed leases, submit accepted batch evidence for those leased threads, publish, then claim the next set. The same agent may claim multiple GitHub-thread fixer leases that overlap only by file path when one commit covers same-file comments; thread reply/resolve side effects remain item-scoped.
+
+`agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. If several responses share the same commit, files, and validation commands, record an evidence profile with `agent evidence add` and reference it with `"evidence_ref": "<profile>"` while keeping per-item `note`, `summary`, and `why`.
 
 If you receive an `ActionRequest` path and need a local response artifact, the helper accepts runtime request files with `repository_context.repo` and `repository_context.pr_number`:
 
@@ -178,7 +185,7 @@ Advanced producer and dispatch details live in:
 
 ## Non-Negotiable Rule
 
-`python3 scripts/cli.py final-gate` pass is mandatory before any completion statement.
+`python3 scripts/cli.py final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
 
 - Never output "done", "all resolved", "completed", or equivalent unless:
   - `python3 scripts/cli.py final-gate <owner/repo> <pr_number>` has just passed, and

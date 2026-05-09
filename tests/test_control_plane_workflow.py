@@ -107,6 +107,15 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["classification_evidence"]["classification"], "fix")
         self.assertIn("classification_recorded", [row["event_type"] for row in self.ledger_rows()])
 
+    def test_agent_next_restores_recorded_decision_as_classification_evidence(self):
+        self.write_session(items=[open_item("github-thread:abc", item_kind="github_thread", decision="fix")])
+
+        requested = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer")
+
+        self.assertEqual(requested.returncode, 0, requested.stderr)
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["classification_evidence"]["classification"], "fix")
+
     def test_agent_next_issues_request_and_claim_lease_for_classified_item(self):
         self.write_session(
             items=[
@@ -130,9 +139,16 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["item_id"], "local-finding:1")
         self.assertTrue(payload["resume_token"].startswith("resume:"))
         request_path = payload["request_path"]
+        skeleton_path = payload["response_skeleton_path"]
         request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+        skeleton = json.loads(Path(skeleton_path).read_text(encoding="utf-8"))
         self.assertEqual(request["lease_id"], payload["lease_id"])
         self.assertEqual(request["agent_role"], "fixer")
+        self.assertEqual(request["response_skeleton_path"], skeleton_path)
+        self.assertEqual(skeleton["request_id"], request["request_id"])
+        self.assertEqual(skeleton["lease_id"], request["lease_id"])
+        self.assertEqual(skeleton["agent_id"], "codex-1")
+        self.assertEqual(skeleton["validation_commands"][0]["command"], "<test_command>")
         self.assertIn("post_github_reply", request["forbidden_actions"])
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
@@ -545,6 +561,144 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["leases"][first_request["lease_id"]]["status"], "accepted")
         self.assertEqual(session["leases"][second_request["lease_id"]]["status"], "accepted")
         self.assertEqual([row["event_type"] for row in self.ledger_rows()].count("response_accepted"), 2)
+
+    def test_agent_next_allows_same_agent_same_file_github_thread_leases_for_batch(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    classification_evidence={"classification": "fix", "record_id": "ev_1"},
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    classification_evidence={"classification": "fix", "record_id": "ev_2"},
+                    thread_id="PRRT_def",
+                ),
+            ]
+        )
+
+        first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(json.loads(first.stdout)["item_id"], "github-thread:abc")
+        self.assertEqual(json.loads(second.stdout)["item_id"], "github-thread:def")
+
+    def test_agent_submit_expands_reusable_evidence_profile(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example.py",
+                    classification_evidence={"classification": "fix", "record_id": "ev_classified"},
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+        added = self.run_runtime_module(
+            "agent",
+            "evidence",
+            "add",
+            self.repo,
+            self.pr,
+            "--name",
+            "local-verified",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py,tests/test_example.py",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+            "--test-command",
+            "python3 -m unittest tests.test_example",
+            "--test-result",
+            "passed",
+        )
+        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        response_path = self.workspace_dir() / "profile-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "lease_id": request["lease_id"],
+                    "agent_id": "codex-1",
+                    "item_id": "github-thread:abc",
+                    "resolution": "fix",
+                    "note": "Fixed via shared evidence.",
+                    "evidence_ref": "local-verified",
+                    "fix_reply": {
+                        "summary": "Fixed via shared evidence.",
+                        "why": "The verified change covers this review thread.",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = self.load_session()
+        accepted = session["items"]["github-thread:abc"]["accepted_response"]
+        self.assertEqual(accepted["evidence_ref"], "local-verified")
+        self.assertEqual(accepted["fix_reply"]["commit_hash"], "abc123")
+        self.assertEqual(accepted["files"], ["src/example.py", "tests/test_example.py"])
+
+    def test_agent_fix_fast_path_classifies_claims_and_accepts_single_thread(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example.py",
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix",
+            self.repo,
+            self.pr,
+            "github-thread:abc",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py",
+            "--summary",
+            "Added the guard.",
+            "--why",
+            "The guarded path now covers the review case.",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ACCEPTED")
+        session = self.load_session()
+        item = session["items"]["github-thread:abc"]
+        self.assertEqual(item["classification_evidence"]["classification"], "fix")
+        self.assertEqual(item["state"], "publish_ready")
+        self.assertEqual(item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
 
     def test_agent_submit_batch_rejects_local_findings_without_mutation(self):
         self.write_session(

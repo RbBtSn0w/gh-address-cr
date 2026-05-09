@@ -68,6 +68,7 @@ def claim_lease(
     request_id: str | None = None,
     request_path: str | None = None,
     conflict_keys: tuple[str, ...] | list[str] | None = None,
+    allow_same_agent_github_thread_file_overlap: bool = False,
 ) -> Any:
     now = _coerce_now(now)
     expire_leases(session, now=now)
@@ -82,7 +83,17 @@ def claim_lease(
         if _get(existing, "item_id") == item_id:
             raise LeaseConflictError("ITEM_ALREADY_LEASED", item_id)
         overlap = set(keys).intersection(_conflict_keys(existing))
-        if overlap and not (is_read_only_role(role) and is_read_only_role(_get(existing, "role"))):
+        if (
+            overlap
+            and not (is_read_only_role(role) and is_read_only_role(_get(existing, "role")))
+            and not _same_agent_github_thread_file_overlap_allowed(
+                existing,
+                agent_id=agent_id,
+                role=role,
+                overlap=overlap,
+                allow=allow_same_agent_github_thread_file_overlap,
+            )
+        ):
             raise LeaseConflictError("CONFLICT_KEYS_OVERLAP", ", ".join(sorted(overlap)))
 
     lease = _make_lease(
@@ -257,6 +268,28 @@ def calculate_conflict_keys(item: Any) -> tuple[str, ...]:
 
 def is_read_only_role(role: str | None) -> bool:
     return role in READ_ONLY_ROLES
+
+
+def _same_agent_github_thread_file_overlap_allowed(
+    existing: Any,
+    *,
+    agent_id: str,
+    role: str,
+    overlap: set[str],
+    allow: bool,
+) -> bool:
+    if not allow:
+        return False
+    if role != "fixer" or _get(existing, "role") != role:
+        return False
+    if _get(existing, "agent_id") != agent_id:
+        return False
+    if not overlap or any(not key.startswith("file:") for key in overlap):
+        return False
+    existing_keys = set(_conflict_keys(existing))
+    return any(key.startswith("github_reply:") for key in existing_keys) and any(
+        key.startswith("github_resolve:") for key in existing_keys
+    )
 
 
 def _make_lease(**kwargs: Any) -> Any:

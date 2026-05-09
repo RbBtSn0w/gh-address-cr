@@ -77,6 +77,33 @@ class TestSubmitAction(PythonScriptTestCase):
         self.assertIn("--fixer-cmd", result.stdout)
         self.assertIn("fixer-test-item_1.sh", result.stdout)
 
+    def test_submit_action_accepts_documented_path_first_form(self):
+        tmp_dir = Path(self.temp_dir.name)
+        loop_req_path = tmp_dir / "loop-request.json"
+        loop_req = {
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "item": {"item_id": "test-item:1", "item_kind": "local_finding"},
+        }
+        loop_req_path.write_text(json.dumps(loop_req), encoding="utf-8")
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "submit-action",
+                str(loop_req_path),
+                "--resolution",
+                "fix",
+                "--note",
+                "Fixed it",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload_path = tmp_dir / "fixer-payload-test-item_1.json"
+        self.assertTrue(payload_path.is_file())
+
     def test_submit_action_validation_github_thread(self):
         tmp_dir = Path(self.temp_dir.name)
         loop_req_path = tmp_dir / "loop-request-gh.json"
