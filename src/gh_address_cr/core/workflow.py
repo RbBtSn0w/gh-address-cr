@@ -773,9 +773,9 @@ def _load_response_json_object(
 
 
 def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, item: dict[str, Any]) -> dict[str, Any]:
-    resolution = _classified_resolution(item) or (
-        "fix" if "fix" in (request.get("allowed_actions") or []) else "<fix|clarify|defer|reject>"
-    )
+    role = str(request.get("agent_role") or "")
+    resolution = _classified_resolution(item) if role == "fixer" else None
+    resolution = resolution or "<fix|clarify|defer|reject>"
     skeleton: dict[str, Any] = {
         "schema_version": str(request.get("schema_version") or PROTOCOL_VERSION),
         "request_id": str(request["request_id"]),
@@ -786,10 +786,10 @@ def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, it
         "note": "<what changed or why this response resolves the item>",
         "validation_commands": [{"command": "<test_command>", "result": "<passed|failed + key signal>"}],
     }
-    if resolution == "fix":
+    if role == "fixer" and resolution == "fix":
         skeleton["files"] = ["<file_path>"]
     if item.get("item_kind") == "github_thread":
-        if resolution == "fix":
+        if role == "fixer" and resolution == "fix":
             skeleton["fix_reply"] = {
                 "summary": "<reply summary>",
                 "commit_hash": "<commit_hash>",

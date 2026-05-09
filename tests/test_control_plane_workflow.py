@@ -158,6 +158,19 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             session["leases"][payload["lease_id"]]["request_hash"], ActionRequest.from_dict(request).stable_hash()
         )
 
+    def test_agent_next_response_skeleton_matches_non_fixer_role_shape(self):
+        self.write_session(items=[open_item("github-thread:abc", item_kind="github_thread", source="github")])
+
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "triage", "--agent-id", "triage-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        skeleton = json.loads(Path(payload["response_skeleton_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(skeleton["resolution"], "<fix|clarify|defer|reject>")
+        self.assertIn("reply_markdown", skeleton)
+        self.assertNotIn("fix_reply", skeleton)
+        self.assertNotIn("files", skeleton)
+
     def test_agent_submit_accepts_fix_response_with_active_lease(self):
         self.write_session(
             items=[
