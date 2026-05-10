@@ -2128,8 +2128,7 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
     previous_pythonpath = os.environ.get("PYTHONPATH")
     try:
         script_dir = str(SCRIPT_DIR)
-        if script_dir not in sys.path:
-            sys.path.insert(0, script_dir)
+        sys.path.insert(0, script_dir)
         runtime_import_root = str(Path(__file__).resolve().parents[1])
         pythonpath_parts = [part for part in (previous_pythonpath or "").split(os.pathsep) if part]
         if runtime_import_root not in pythonpath_parts:
@@ -2149,7 +2148,7 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
                 code = script_main()
             except SystemExit as exc:
                 code = exc.code
-    except BaseException:
+    except Exception:
         traceback.print_exc(file=stderr)
         return subprocess.CompletedProcess(command, 1, stdout.getvalue(), stderr.getvalue())
     finally:

@@ -94,14 +94,20 @@ class RuntimePackagingTest(PythonScriptTestCase):
             @staticmethod
             def main():
                 captured["pythonpath"] = os.environ.get("PYTHONPATH", "")
+                captured["sys_path"] = list(sys.path)
                 return 0
 
         previous_pythonpath = os.environ.pop("PYTHONPATH", None)
+        original_sys_path = list(sys.path)
         try:
+            script_dir = str(Path(cli.__file__).resolve().parent / "legacy_scripts")
+            sys.path.append(script_dir)
             with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
                 result = cli.run_script("control_plane.py", [])
             restored_pythonpath = os.environ.get("PYTHONPATH")
+            restored_sys_path = list(sys.path)
         finally:
+            sys.path[:] = original_sys_path
             if previous_pythonpath is None:
                 os.environ.pop("PYTHONPATH", None)
             else:
@@ -109,7 +115,21 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(str(Path(cli.__file__).resolve().parents[1]), captured["pythonpath"].split(os.pathsep))
+        self.assertEqual(captured["sys_path"][0], script_dir)
         self.assertEqual(restored_pythonpath, previous_pythonpath)
+        self.assertEqual(restored_sys_path, original_sys_path + [script_dir])
+
+    def test_runtime_dispatcher_does_not_swallow_keyboard_interrupt(self):
+        import gh_address_cr.cli as cli
+
+        class FakeLegacyModule:
+            @staticmethod
+            def main():
+                raise KeyboardInterrupt
+
+        with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
+            with self.assertRaises(KeyboardInterrupt):
+                cli.run_script("control_plane.py", [])
 
     def test_packaged_skill_payload_carries_required_helper_scripts(self):
         install_root = Path(self.temp_dir.name) / "installed-skill" / "gh-address-cr"
