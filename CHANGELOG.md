@@ -1,3 +1,9 @@
+## [2.3.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.5...v2.3.6) (2026-05-10)
+
+### Bug Fixes
+
+* Streamline review-thread evidence workflow ([#48](https://github.com/RbBtSn0w/gh-address-cr/issues/48)) ([900289d](https://github.com/RbBtSn0w/gh-address-cr/commit/900289daf84e94896d339c8c28eda210f391433c))
+
 ## [2.3.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.4...v2.3.5) (2026-05-04)
 
 ### Bug Fixes
