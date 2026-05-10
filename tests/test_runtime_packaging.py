@@ -85,6 +85,32 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "remote expects: <owner/repo> <pr_number>\n")
 
+    def test_runtime_dispatcher_exposes_runtime_import_root_to_nested_python_processes(self):
+        import gh_address_cr.cli as cli
+
+        captured = {}
+
+        class FakeLegacyModule:
+            @staticmethod
+            def main():
+                captured["pythonpath"] = os.environ.get("PYTHONPATH", "")
+                return 0
+
+        previous_pythonpath = os.environ.pop("PYTHONPATH", None)
+        try:
+            with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
+                result = cli.run_script("control_plane.py", [])
+            restored_pythonpath = os.environ.get("PYTHONPATH")
+        finally:
+            if previous_pythonpath is None:
+                os.environ.pop("PYTHONPATH", None)
+            else:
+                os.environ["PYTHONPATH"] = previous_pythonpath
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(Path(cli.__file__).resolve().parents[1]), captured["pythonpath"].split(os.pathsep))
+        self.assertEqual(restored_pythonpath, previous_pythonpath)
+
     def test_packaged_skill_payload_carries_required_helper_scripts(self):
         install_root = Path(self.temp_dir.name) / "installed-skill" / "gh-address-cr"
         shutil.copytree(SKILL_ROOT, install_root)

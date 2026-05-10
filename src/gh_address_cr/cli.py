@@ -2125,10 +2125,15 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
     stderr = io.StringIO()
     previous_argv = sys.argv
     previous_sys_path = list(sys.path)
+    previous_pythonpath = os.environ.get("PYTHONPATH")
     try:
         script_dir = str(SCRIPT_DIR)
         if script_dir not in sys.path:
             sys.path.insert(0, script_dir)
+        runtime_import_root = str(Path(__file__).resolve().parents[1])
+        pythonpath_parts = [part for part in (previous_pythonpath or "").split(os.pathsep) if part]
+        if runtime_import_root not in pythonpath_parts:
+            os.environ["PYTHONPATH"] = os.pathsep.join([runtime_import_root, *pythonpath_parts])
         module = importlib.import_module(module_name)
         script_main = getattr(module, "main", None)
         if not callable(script_main):
@@ -2150,6 +2155,10 @@ def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.Comp
     finally:
         sys.argv = previous_argv
         sys.path[:] = previous_sys_path
+        if previous_pythonpath is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = previous_pythonpath
     if code is None:
         returncode = 0
     elif isinstance(code, int):
