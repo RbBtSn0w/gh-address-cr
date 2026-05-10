@@ -1,3 +1,9 @@
+## [2.3.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.6...v2.3.7) (2026-05-10)
+
+### Bug Fixes
+
+* runtime path contract ([#50](https://github.com/RbBtSn0w/gh-address-cr/issues/50)) ([b6e11fa](https://github.com/RbBtSn0w/gh-address-cr/commit/b6e11fa223eca7af7e9e41637d2a11ed83cdc231))
+
 ## [2.3.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.5...v2.3.6) (2026-05-10)
 
 ### Bug Fixes
