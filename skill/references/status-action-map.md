@@ -36,7 +36,7 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 ## Stop Conditions
 
 If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
-- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `python3 scripts/cli.py final-gate` was executed and reported success.
+- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success.
 
 ## Error States
 

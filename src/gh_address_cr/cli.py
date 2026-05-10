@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import importlib
+import io
 import json
 import os
 import platform
@@ -9,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -187,7 +191,7 @@ def rewrite_alias_args(
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: cli.py review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
+            "usage: gh-address-cr review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
             "This command waits for external review findings when they are absent,\n"
@@ -199,7 +203,7 @@ def alias_help(command: str) -> str:
         )
     if command == "address":
         return (
-            "usage: cli.py address <owner/repo> <pr_number> [--human|--machine]\n\n"
+            "usage: gh-address-cr address <owner/repo> <pr_number> [--human|--machine]\n\n"
             "Lightweight GitHub thread-only entrypoint.\n\n"
             "Use for simple PRs where only GitHub review threads need addressing.\n"
             "This command does not wait for external review findings and does not ingest local findings.\n"
@@ -208,7 +212,7 @@ def alias_help(command: str) -> str:
         )
     if command == "threads":
         return (
-            "usage: cli.py threads <owner/repo> <pr_number> [--human|--machine]\n\n"
+            "usage: gh-address-cr threads <owner/repo> <pr_number> [--human|--machine]\n\n"
             "High-level GitHub review-thread entrypoint.\n\n"
             "Use when only GitHub review threads need processing.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
@@ -216,7 +220,7 @@ def alias_help(command: str) -> str:
         )
     if command == "findings":
         return (
-            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--source <producer_id>] [--sync] [--human|--machine]\n\n"
+            "usage: gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--source <producer_id>] [--sync] [--human|--machine]\n\n"
             "High-level local findings entrypoint.\n\n"
             "Use when findings already exist as JSON or are piped in through stdin.\n"
             "Missing --input fails immediately instead of waiting on stdin.\n"
@@ -226,7 +230,7 @@ def alias_help(command: str) -> str:
         )
     if command == "adapter":
         return (
-            "usage: cli.py [--human|--machine] adapter <owner/repo> <pr_number> <adapter_cmd...>\n\n"
+            "usage: gh-address-cr [--human|--machine] adapter <owner/repo> <pr_number> <adapter_cmd...>\n\n"
             "High-level adapter entrypoint.\n\n"
             "Use when an adapter command prints findings JSON and then runs PR orchestration,\n"
             "including GitHub thread handling.\n"
@@ -238,7 +242,7 @@ def alias_help(command: str) -> str:
 
     if command == "submit-action":
         return (
-            "usage: cli.py submit-action <loop_request_path> --resolution {fix,clarify,defer} --note <text> ... [resume_cmd...]\n\n"
+            "usage: gh-address-cr submit-action <loop_request_path> --resolution {fix,clarify,defer} --note <text> ... [resume_cmd...]\n\n"
             "High-level manual action entrypoint.\n\n"
             "Use when the loop stops in WAITING_FOR_FIX and asks for a manual resolution.\n"
             "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
@@ -246,7 +250,7 @@ def alias_help(command: str) -> str:
         )
     if command == "doctor":
         return (
-            "usage: cli.py doctor [<owner/repo> [<pr_number>]] [--human|--machine]\n\n"
+            "usage: gh-address-cr doctor [<owner/repo> [<pr_number>]] [--human|--machine]\n\n"
             "Runtime diagnostics entrypoint.\n\n"
             "Checks GitHub CLI availability/authentication, optional repository access, and writable state directories.\n"
             "Default output is a structured JSON summary with stable checks, reason_code, and diagnostics fields.\n"
@@ -261,7 +265,7 @@ def persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
 
 
 def external_review_command(repo: str, pr_number: str) -> str:
-    return f"python3 scripts/cli.py review {repo} {pr_number}"
+    return f"gh-address-cr review {repo} {pr_number}"
 
 
 def _write_if_missing(path: Path, content: str = "") -> None:
@@ -412,7 +416,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         waiting_on = "findings_input"
         next_action = (
             f"`{command}` does not generate findings. "
-            f"Provide findings JSON with `python3 scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
+            f"Provide findings JSON with `gh-address-cr {command} {repo} {pr_number} --input <path>|-`."
         )
     elif "Missing GitHub CLI" in combined_error or "gh executable" in combined_error:
         reason_code = "GH_NOT_FOUND"
@@ -427,7 +431,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     ):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
-        next_action = f"Address the finding by running: `python3 {sys.argv[0]} submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 {sys.argv[0]} {command} {repo} {pr_number}`"
+        next_action = f"Address the finding by running: `gh-address-cr submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- gh-address-cr {command} {repo} {pr_number}`"
     elif status == "BLOCKED":
         reason_code = "BLOCKED"
         waiting_on = "manual_intervention"
@@ -721,7 +725,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>.",
             reason_code="MISSING_ADAPTER_COMMAND",
             waiting_on="adapter_command",
-            next_action=f"Provide an adapter command after `python3 scripts/cli.py adapter {repo} {pr_number}`.",
+            next_action=f"Provide an adapter command after `gh-address-cr adapter {repo} {pr_number}`.",
         )
 
     if args.command in HIGH_LEVEL_GH_COMMANDS:
@@ -783,7 +787,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             f"{args.command} requires findings JSON. This command does not generate findings. Pass --input <path> or --input - and provide findings through stdin.",
             reason_code="MISSING_FINDINGS_INPUT",
             waiting_on="findings_input",
-            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
+            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `gh-address-cr {args.command} {repo} {pr_number} --input <path>|-`.",
         )
     return None
 
@@ -946,7 +950,7 @@ def _write_native_action_request(repo: str, pr_number: str, item: dict, *, comma
             "Inspect the selected item and decide one resolution: fix, clarify, defer, or reject.",
             "Submit structured evidence with `gh-address-cr agent submit` or rerun the originating command after recording the fix.",
         ],
-        "resume_command": f"python3 scripts/cli.py {command} {repo} {pr_number}",
+        "resume_command": f"gh-address-cr {command} {repo} {pr_number}",
     }
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return request_path
@@ -1363,8 +1367,8 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             waiting_on = "human_fix"
             next_action = (
                 "Address the finding by running: "
-                f"`python3 scripts/cli.py submit-action {request_path} --resolution <fix|clarify|defer> "
-                f"--note <note> -- python3 scripts/cli.py {command} {repo} {pr_number}`"
+                f"`gh-address-cr submit-action {request_path} --resolution <fix|clarify|defer> "
+                f"--note <note> -- gh-address-cr {command} {repo} {pr_number}`"
             )
         _set_loop_state(
             session,
@@ -2078,21 +2082,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="{address,review,threads,findings,adapter,doctor,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
-            "  cli.py address owner/repo 123 [--human]\n"
-            "  cli.py review owner/repo 123 [--human]\n"
-            "  cli.py review --auto-simple owner/repo 123 [--human]\n"
-            "  cli.py threads owner/repo 123 [--human]\n"
-            "  cli.py doctor [owner/repo] [123]\n"
-            "  cli.py version\n"
-            "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
-            "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
+            "  gh-address-cr address owner/repo 123 [--human]\n"
+            "  gh-address-cr review owner/repo 123 [--human]\n"
+            "  gh-address-cr review --auto-simple owner/repo 123 [--human]\n"
+            "  gh-address-cr threads owner/repo 123 [--human]\n"
+            "  gh-address-cr doctor [owner/repo] [123]\n"
+            "  gh-address-cr version\n"
+            "  gh-address-cr findings owner/repo 123 --input findings.json [--human]\n"
+            "  gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
             "Notes:\n"
             "  review waits for external review findings when they are absent.\n"
             "  High-level commands are the agent-safe public surface.\n"
             "  For `adapter`, flags after <adapter_cmd...> are passed through to the adapter command.\n"
             "Utility commands:\n"
-            "  cli.py review-to-findings owner/repo 123 --input finding-blocks.md\n"
-            "  cli.py submit-feedback --category workflow-gap --title ... --summary ... --expected ... --actual ...\n"
+            "  gh-address-cr review-to-findings owner/repo 123 --input finding-blocks.md\n"
+            "  gh-address-cr submit-feedback --category workflow-gap --title ... --summary ... --expected ... --actual ...\n"
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
             "Runtime commands:\n"
             "  gh-address-cr agent manifest\n"
@@ -2108,18 +2112,52 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.CompletedProcess[str]:
     target = SCRIPT_DIR / script_name
+    command = [sys.executable, str(target), *passthrough_args]
     if not target.is_file():
         return subprocess.CompletedProcess(
-            [sys.executable, str(target), *passthrough_args],
+            command,
             127,
             "",
             f"Required gh-address-cr runtime script is missing: {target}\n",
         )
-    env = os.environ.copy()
-    src_root = str(Path(__file__).resolve().parents[1])
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = src_root if not existing_pythonpath else f"{src_root}{os.pathsep}{existing_pythonpath}"
-    return subprocess.run([sys.executable, str(target), *passthrough_args], text=True, capture_output=True, env=env)
+    module_name = f"gh_address_cr.legacy_scripts.{Path(script_name).stem}"
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    previous_argv = sys.argv
+    previous_sys_path = list(sys.path)
+    try:
+        script_dir = str(SCRIPT_DIR)
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        module = importlib.import_module(module_name)
+        script_main = getattr(module, "main", None)
+        if not callable(script_main):
+            return subprocess.CompletedProcess(
+                command,
+                127,
+                "",
+                f"Required gh-address-cr runtime script does not expose main(): {module_name}\n",
+            )
+        sys.argv = [str(target), *passthrough_args]
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                code = script_main()
+            except SystemExit as exc:
+                code = exc.code
+    except BaseException:
+        traceback.print_exc(file=stderr)
+        return subprocess.CompletedProcess(command, 1, stdout.getvalue(), stderr.getvalue())
+    finally:
+        sys.argv = previous_argv
+        sys.path[:] = previous_sys_path
+    if code is None:
+        returncode = 0
+    elif isinstance(code, int):
+        returncode = code
+    else:
+        stderr.write(f"{code}\n")
+        returncode = 1
+    return subprocess.CompletedProcess(command, returncode, stdout.getvalue(), stderr.getvalue())
 
 
 def main(argv: list[str] | None = None) -> int:

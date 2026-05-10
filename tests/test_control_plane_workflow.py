@@ -77,6 +77,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "MISSING_CLASSIFICATION")
         self.assertIn("triage classification", payload["next_action"])
         self.assertIn("gh-address-cr agent classify", payload["next_action"])
+        self.assertNotIn("scripts/cli.py", payload["next_action"])
         session = self.load_session()
         self.assertEqual(session["leases"], {})
         self.assertEqual(session["items"]["local-finding:1"]["state"], "open")

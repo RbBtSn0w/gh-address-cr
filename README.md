@@ -96,7 +96,7 @@ After installing the skill, verify that a runtime CLI is available:
 
 ```bash
 gh-address-cr --help
-python3 skill/scripts/cli.py adapter check-runtime
+gh-address-cr adapter check-runtime
 ```
 
 ### Upgrade from skill-shim usage
@@ -124,7 +124,7 @@ Runtime install for local development:
 python3 -m pip install -e .
 gh-address-cr --help
 python3 -m gh_address_cr --help
-python3 skill/scripts/cli.py adapter check-runtime
+gh-address-cr adapter check-runtime
 ```
 
 Native runtime ownership is now split by responsibility:
@@ -310,7 +310,7 @@ Minimal `BatchActionResponse` shape:
 Manual helper path for an issued runtime `ActionRequest`:
 
 ```bash
-python3 skill/scripts/submit_action.py <action-request.json> \
+gh-address-cr submit-action <action-request.json> \
   --agent-id codex-fixer-1 \
   --resolution fix \
   --note "Fixed the thread." \
@@ -319,7 +319,7 @@ python3 skill/scripts/submit_action.py <action-request.json> \
   --validation-cmd "python3 -m unittest tests.test_example=passed" \
   --output-dir /tmp/gh-address-cr-response
 
-python3 -m gh_address_cr agent submit owner/repo 123 --input <generated-action-response.json>
+gh-address-cr agent submit owner/repo 123 --input <generated-action-response.json>
 ```
 
 The helper also accepts older loop-request artifacts with top-level `repo` and `pr_number`, but runtime `ActionRequest` files use `repository_context.repo` and `repository_context.pr_number`. Use `--output-dir` when the runtime workspace is not writable from the current sandbox.
@@ -406,10 +406,10 @@ $gh-address-cr review <PR_URL>
 // then rerun the same review command
 
 // Adapter wrapper output flag comes before `adapter`
-python3 skill/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py
+gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py
 
 // Flags after the adapter command belong to the adapter itself
-python3 skill/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
+gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
 ```
 
 Minimal valid `review-to-findings` input:
@@ -500,14 +500,14 @@ When the skill itself blocks progress, file a feedback issue in this repository 
 - Repository-root helper command:
 
 ```bash
-python3 skill/scripts/submit_feedback.py \
+gh-address-cr submit-feedback \
   --category workflow-gap \
   --title "blocked without a recovery step" \
   --summary "review stopped in a blocked state without enough operator guidance." \
   --expected "the skill should identify the next command or artifact to inspect." \
   --actual "the workflow stopped and the next action was ambiguous." \
-  --source-command "python3 skill/scripts/cli.py review owner/repo 123" \
-  --failing-command "python3 skill/scripts/cli.py final-gate owner/repo 123" \
+  --source-command "gh-address-cr review owner/repo 123" \
+  --failing-command "gh-address-cr final-gate owner/repo 123" \
   --exit-code 5 \
   --status BLOCKED \
   --reason-code WAITING_FOR_FIX \
@@ -522,7 +522,7 @@ python3 skill/scripts/submit_feedback.py \
 - Unified CLI passthrough:
 
 ```bash
-python3 skill/scripts/cli.py submit-feedback --category workflow-gap --title "..." --summary "..." --expected "..." --actual "..."
+gh-address-cr submit-feedback --category workflow-gap --title "..." --summary "..." --expected "..." --actual "..."
 ```
 
 ## Choosing Fixes
@@ -560,14 +560,14 @@ The following commands remain available for explicit integrations, repository-ro
 For explicit automation or repository-root invocation, the main command is:
 
 ```bash
-python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
-python3 skill/scripts/cli.py address <owner/repo> <pr_number> [--human]
+gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
+gh-address-cr address <owner/repo> <pr_number> [--human]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:
 
 ```bash
-python3 skill/scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>
+gh-address-cr prepare-code-review <local|mixed> <owner/repo> <pr_number>
 ```
 
 This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
@@ -575,7 +575,7 @@ This does not run another skill by itself. It emits the exact findings contract 
 If the upstream review output is Markdown review blocks, convert it first with:
 
 ```bash
-python3 skill/scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -
+gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
 
 The converter writes the standardized findings JSON to the cache-backed PR workspace by default and also prints the JSON to stdout.
@@ -641,7 +641,7 @@ If you omit the producer where it is required:
 Advanced external-fixer example:
 
 ```bash
-python3 skill/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py
+gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py
 ```
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
@@ -706,7 +706,7 @@ The exact dispatch behavior for each supported `mode + producer` combination is 
 The preferred automation entrypoint is now:
 
 ```bash
-python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
+gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 ```
 
 ## Core Workflow
@@ -716,7 +716,7 @@ python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] 
                    |
                    v
 +-------------------------------------+      (Fetch PR threads, exclude handled)
-|          1. python3 skill/scripts/cli.py run-once             | <-----------------------------------------+
+|          1. gh-address-cr run-once             | <-----------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
                    v [Generates Snapshot, Syncs Session, Lists Work]              |
@@ -748,15 +748,15 @@ python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] 
                    v [Generates reply markdown in the PR workspace]               |
                    |                                                              |
 +------------------+------------------+      (GitHub API: Reply)                  |
-|         5. python3 skill/scripts/cli.py post-reply            |                                           |
+|         5. gh-address-cr post-reply            |                                           |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (MANDATORY for all paths)            |
-|       6. python3 skill/scripts/cli.py resolve-thread          |      (Local state marked 'Handled')       |
+|       6. gh-address-cr resolve-thread          |      (Local state marked 'Handled')       |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (HARD GATE: Re-fetch GitHub state)   |
-|         7. python3 skill/scripts/cli.py final-gate            |-------------------------------------------+
+|         7. gh-address-cr final-gate            |-------------------------------------------+
 +------------------+------------------+      [ Failed: Unresolved > 0 (Loop back) ]
                    |
                    | [ Passed: Unresolved == 0 ]
@@ -771,19 +771,19 @@ python3 skill/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] 
 
 ## PR Session Architecture
 
-`gh-address-cr` now ships a session engine at `skill/scripts/session_engine.py`.
+`gh-address-cr` now ships the session engine through the runtime package and exposes it through `gh-address-cr session-engine ...`.
 
 The implementation model is now:
 
 - Python owns the stateful logic and GitHub/local-review orchestration.
-- `python3 skill/scripts/cli.py` is the only automation entrypoint; internal commands use the Python CLI directly.
-- `skill/scripts/cli.py` is the unified Python dispatcher for the main command set.
+- `gh-address-cr` is the only stable automation entrypoint for runtime work.
+- `skill/scripts/cli.py` remains a compatibility shim for installed skill payloads.
 - Tests are organized around Python behavior first, then CLI syntax compatibility.
 
 - `github_thread` items are synced from GraphQL thread snapshots.
 - `local_finding` items are ingested from a local review adapter.
-- local findings can now be explicitly closed in-session with `session_engine.py close-item`.
-- `python3 skill/scripts/cli.py final-gate` evaluates both:
+- local findings can now be explicitly closed in-session with `gh-address-cr session-engine close-item`.
+- `gh-address-cr final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count
   - terminal GitHub thread reply-evidence count
@@ -804,14 +804,14 @@ The session state is stored in a PR-scoped workspace under the user cache direct
 - loop requests: `loop-request-*.json`
 - validation records: `validation-*.json`
 
-If `python3 skill/scripts/cli.py final-gate --auto-clean` passes, the current PR workspace is archived before deletion under:
+If `gh-address-cr final-gate --auto-clean` passes, the current PR workspace is archived before deletion under:
 
 - archive root: `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
 
 To inspect one run after the fact, use:
 
 ```bash
-python3 skill/scripts/audit_report.py --run-id <run_id> <owner/repo> <pr_number>
+gh-address-cr audit-report --run-id <run_id> <owner/repo> <pr_number>
 ```
 
 The session also tracks loop-safety metadata per item:
@@ -866,10 +866,10 @@ Notes:
 
 ## Local AI Review Ingestion
 
-Use `python3 skill/scripts/cli.py run-local-review` to feed local AI findings into the PR session:
+Use `gh-address-cr run-local-review` to feed local AI findings into the PR session:
 
 ```bash
-python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
 ```
 
 Adapter contract:
@@ -883,8 +883,8 @@ This path does not auto-post to GitHub. It creates local session items that can 
 If the producer is a local `code-review` run, use the built-in adapter backend:
 
 ```bash
-python3 skill/scripts/cli.py prepare-code-review mixed owner/repo 123
-cat findings.json | python3 skill/scripts/cli.py review owner/repo 123 --input -
+gh-address-cr prepare-code-review mixed owner/repo 123
+cat findings.json | gh-address-cr review owner/repo 123 --input -
 ```
 
 Input rule:
@@ -903,10 +903,10 @@ Input rule:
 
 Use that cache-backed findings path instead of creating review artifacts in the project workspace.
 
-If your review tool already produces findings JSON, you do not need a custom adapter command. Use `python3 skill/scripts/cli.py ingest-findings` instead:
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr ingest-findings` instead:
 
 ```bash
-cat findings.json | python3 skill/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123
+cat findings.json | gh-address-cr ingest-findings --source local-agent:code-review owner/repo 123
 ```
 
 Accepted input shapes:
@@ -940,59 +940,49 @@ This is the long-term integration path for any local code-review tool. If it can
 To publish a local finding back to GitHub as a review comment:
 
 ```bash
-python3 skill/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
+gh-address-cr publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
 ```
 
 To reclaim expired item claims inside a PR session:
 
 ```bash
-python3 skill/scripts/session_engine.py reclaim-stale-claims owner/repo 123
+gh-address-cr session-engine reclaim-stale-claims owner/repo 123
 ```
 
 To apply a terminal local finding resolution atomically, use:
 
 ```bash
-python3 skill/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
-python3 skill/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
-python3 skill/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
+gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
+gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
+gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
 ```
 
-## Python-First Script Layout
+## Runtime Package Layout
 
-The main logic now lives in Python under `skill/scripts/`:
+The main logic lives in the Python runtime package under `src/gh_address_cr/`.
 
-- `cli.py`
-- `cr_loop.py`
-- `code_review_adapter.py`
-- `session_engine.py`
-- `python_common.py`
-- `run_once.py`
-- `final_gate.py`
-- `list_threads.py`
-- `post_reply.py`
-- `resolve_thread.py`
-- `run_local_review.py`
-- `publish_finding.py`
-- `mark_handled.py`
-- `audit_report.py`
-- `generate_reply.py`
-- `batch_resolve.py`
-- `clean_state.py`
+- `cli.py`: console entrypoint and runtime command dispatch
+- `core/`: session state, workflow transitions, final-gate, and orchestration helpers
+- `github/`: GitHub CLI IO and failure diagnostics
+- `intake/`: findings parsing and normalization
+- `legacy_scripts/`: compatibility surfaces for older direct script invocations
 
-These Python entrypoints require Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
+The packaged `skill/scripts/` folder remains in the installed skill payload for compatibility checks and helper shims. New automation should use `gh-address-cr`, not direct `python3 skill/scripts/*.py` paths.
 
-The Python CLI is the stable automation surface; all internal commands use the Python CLI directly.
+The runtime package requires Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
+
+The `gh-address-cr` console script is the stable automation surface. The packaged `skill/scripts/cli.py` path is compatibility-only.
 
 Unified CLI examples:
 
 ```bash
-python3 skill/scripts/cli.py run-once owner/repo 123
-python3 skill/scripts/cli.py final-gate --no-auto-clean owner/repo 123
-python3 skill/scripts/cli.py session-engine gate owner/repo 123
-python3 skill/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
-python3 skill/scripts/cli.py review owner/repo 123 --input -
-python3 skill/scripts/cli.py findings owner/repo 123 --input -
-python3 skill/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
+gh-address-cr run-once owner/repo 123
+gh-address-cr final-gate --no-auto-clean owner/repo 123
+gh-address-cr session-engine gate owner/repo 123
+gh-address-cr ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
+gh-address-cr review owner/repo 123 --input -
+gh-address-cr findings owner/repo 123 --input -
+gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 
 ## Testing
@@ -1001,8 +991,8 @@ Run the current automated checks with:
 
 ```bash
 python3 -m unittest discover -s tests
-python3 skill/scripts/cli.py --help
-python3 skill/scripts/cli.py cr-loop --help
+gh-address-cr --help
+gh-address-cr cr-loop --help
 ```
 
 Current test layout:
@@ -1024,11 +1014,11 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 
 ## Breaking changes (2026-04-09)
 
-- `python3 skill/scripts/cli.py batch-resolve` now requires an approved list format:
+- `gh-address-cr batch-resolve` now requires an approved list format:
   - one thread per line: `APPROVED <thread_id>`
   - empty lines and `#` comments are allowed
   - raw thread-id lines now fail fast
-- `python3 skill/scripts/cli.py list-threads` now uses the latest thread comment as primary context and emits:
+- `gh-address-cr list-threads` now uses the latest thread comment as primary context and emits:
   - `comment_source` (`latest|first|none`)
   - `first_url`, `latest_url`
   - `url`/`body` remain available, now latest-first with fallback
@@ -1066,7 +1056,7 @@ npx skills update
 - PR-scoped session state for GitHub threads and local findings
 - Strict per-item CR handling workflow
 - Required evidence format (commit/files/test result)
-- Mandatory final gate (`python3 skill/scripts/cli.py final-gate`) before completion
+- Mandatory final gate (`gh-address-cr final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
 - Audit log + trace log + audit summary + summary hash output
 - Audit summaries and `final-gate` output preserve machine-readable gate counts and summary hashes for evidence
@@ -1083,7 +1073,7 @@ This git repository is the development and release wrapper around one shipped sk
 
 Path convention:
 
-- Repo-level docs and commands that are executed from repository root use paths like `skill/scripts/cli.py`
+- Repo-level docs and commands that execute runtime workflows use `gh-address-cr`
 - Skill-owned docs inside `skill/` use paths relative to the skill root, such as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`
 
 If a rule or instruction must ship with the installed skill, it must live inside `skill/`, not only at repository root.
@@ -1094,20 +1084,20 @@ If a rule or instruction must ship with the installed skill, it must live inside
   - `SKILL.md`
   - `agents/openai.yaml`
   - `scripts/*.py`
-  - `python3 skill/scripts/cli.py` (compat entrypoint)
+  - `scripts/cli.py` (compatibility shim)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
 
 ## Quick usage after installation
 
 ```bash
-python3 skill/scripts/cli.py run-once --audit-id run-YYYYMMDD owner/repo 123
-python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
-python3 skill/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-python3 skill/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
-python3 skill/scripts/cli.py submit-action <loop_request_path> --resolution fix --note "Fixed it" -- <resume_command>
-python3 skill/scripts/submit_action.py <action-request.json> --agent-id codex-fixer-1 --resolution fix --note "Fixed it" --files src/example.py --validation-cmd "python3 -m unittest tests.test_example=passed"
-python3 skill/scripts/cli.py final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
+gh-address-cr run-once --audit-id run-YYYYMMDD owner/repo 123
+gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
+gh-address-cr submit-action <loop_request_path> --resolution fix --note "Fixed it" -- <resume_command>
+gh-address-cr submit-action <action-request.json> --agent-id codex-fixer-1 --resolution fix --note "Fixed it" --files src/example.py --validation-cmd "python3 -m unittest tests.test_example=passed"
+gh-address-cr final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
 
 ## Operating Modes
@@ -1121,22 +1111,22 @@ Use this when the PR already has remote review threads and there is no local AI 
 Example:
 
 ```bash
-python3 skill/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+gh-address-cr run-once --audit-id run-20260412 owner/repo 123
 
 # inspect one unresolved GitHub thread
-python3 skill/scripts/cli.py generate-reply --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
-python3 skill/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-python3 skill/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr generate-reply --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
+gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 
-python3 skill/scripts/cli.py final-gate --auto-clean --audit-id run-20260412 owner/repo 123
+gh-address-cr final-gate --auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
 
-- GitHub thread items require both `python3 skill/scripts/cli.py post-reply` and `python3 skill/scripts/cli.py resolve-thread`
-- `python3 skill/scripts/cli.py resolve-thread` rejects silent resolve attempts when reply evidence is missing
+- GitHub thread items require both `gh-address-cr post-reply` and `gh-address-cr resolve-thread`
+- `gh-address-cr resolve-thread` rejects silent resolve attempts when reply evidence is missing
 - outdated / `STALE` GitHub threads still count as unresolved until explicitly handled
-- `python3 skill/scripts/cli.py final-gate` must pass before completion and now fails if a terminal GitHub thread has no reply evidence
+- `gh-address-cr final-gate` must pass before completion and now fails if a terminal GitHub thread has no reply evidence
 
 ### Mode 2: GitHub Thread Clarify / Defer
 
@@ -1145,17 +1135,17 @@ Use this when the review comment is not accepted as a code change and you need t
 Clarify example:
 
 ```bash
-python3 skill/scripts/cli.py generate-reply --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
-python3 skill/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-python3 skill/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr generate-reply --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
+gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 
 Defer example:
 
 ```bash
-python3 skill/scripts/cli.py generate-reply --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
-python3 skill/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-python3 skill/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr generate-reply --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
+gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 
 Rules:
@@ -1171,15 +1161,15 @@ Use this when you want to run local AI review without waiting for GitHub or Copi
 Example:
 
 ```bash
-python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 
-python3 skill/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
-python3 skill/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
-python3 skill/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
-python3 skill/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
-python3 skill/scripts/session_engine.py close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
+gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding --status OPEN
+gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
+gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
+gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
+gh-address-cr session-engine close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
 
-python3 skill/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
+gh-address-cr final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
@@ -1195,13 +1185,13 @@ Use this when the PR has both remote GitHub threads and local AI findings.
 Example:
 
 ```bash
-python3 skill/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
-python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+gh-address-cr run-once --audit-id run-20260412 owner/repo 123
+gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 
 # process GitHub items with reply + resolve
-# process local items through session_engine.py transitions
+# process local items through gh-address-cr session-engine transitions
 
-python3 skill/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
+gh-address-cr final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
@@ -1217,11 +1207,11 @@ Use this when a locally discovered issue should become visible in the GitHub PR 
 Example:
 
 ```bash
-python3 skill/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
-python3 skill/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
+gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding --status OPEN
 
-python3 skill/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:FINGERPRINT
-python3 skill/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+gh-address-cr publish-finding --repo owner/repo --pr 123 local-finding:FINGERPRINT
+gh-address-cr run-once --audit-id run-20260412 owner/repo 123
 ```
 
 What happens:
@@ -1237,26 +1227,26 @@ Use this when you need low-level session control or when integrating the skill i
 Examples:
 
 ```bash
-python3 skill/scripts/cli.py run-once owner/repo 123
-python3 skill/scripts/cli.py final-gate --no-auto-clean owner/repo 123
-python3 skill/scripts/cli.py session-engine list-items owner/repo 123 --item-kind local_finding
-python3 skill/scripts/cli.py session-engine reclaim-stale-claims owner/repo 123
+gh-address-cr run-once owner/repo 123
+gh-address-cr final-gate --no-auto-clean owner/repo 123
+gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding
+gh-address-cr session-engine reclaim-stale-claims owner/repo 123
 ```
 
 Rules:
 
-- `cli.py` is the preferred Python entrypoint for automation
-- `python3 skill/scripts/cli.py` remains the stable automation surface for skill users
+- `gh-address-cr` is the preferred and stable automation entrypoint
+- `skill/scripts/cli.py` remains compatibility-only for installed skill payloads
 - low-level resolve helpers are stricter than before: `resolve-thread` and batch resolve flows refuse resolve-only handling when reply evidence is absent
 
 ## Troubleshooting final gate failure
 
-If `python3 skill/scripts/cli.py final-gate` fails:
+If `gh-address-cr final-gate` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending or invalid terminal thread, verify both operations were completed: `python3 skill/scripts/cli.py post-reply` and `python3 skill/scripts/cli.py resolve-thread`.
-3. Re-run `python3 skill/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
-4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `python3 skill/scripts/cli.py final-gate`.
+2. For each pending or invalid terminal thread, verify both operations were completed: `gh-address-cr post-reply` and `gh-address-cr resolve-thread`.
+3. Re-run `gh-address-cr run-once --show-all ...` to compare unresolved vs handled state.
+4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `gh-address-cr final-gate`.
 
 ## Troubleshooting installation and release
 

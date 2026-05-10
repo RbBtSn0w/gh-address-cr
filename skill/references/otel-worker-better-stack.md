@@ -93,7 +93,7 @@ The CLI should never receive the Better Stack source token in this deployment mo
 3. Run any command that writes audit/trace events, for example:
 
 ```bash
-python3 scripts/cli.py final-gate owner/repo 123
+gh-address-cr final-gate owner/repo 123
 ```
 
 4. Confirm:

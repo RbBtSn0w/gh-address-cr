@@ -75,6 +75,8 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("findings", result.stdout)
         self.assertIn("adapter", result.stdout)
         self.assertIn("review-to-findings", result.stdout)
+        self.assertIn("gh-address-cr review", result.stdout)
+        self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("control-plane", result.stdout)
         self.assertNotIn("run-once", result.stdout)
@@ -83,7 +85,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_review_help_uses_high_level_alias_text(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py review", result.stdout)
+        self.assertIn("usage: gh-address-cr review", result.stdout)
         self.assertIn("High-level PR review entrypoint.", result.stdout)
         self.assertIn("waits for external review findings", result.stdout)
         self.assertIn("re-run the same review command", result.stdout)
@@ -97,7 +99,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_address_help_uses_lightweight_alias_text(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py address", result.stdout)
+        self.assertIn("usage: gh-address-cr address", result.stdout)
         self.assertIn("Lightweight GitHub thread-only entrypoint.", result.stdout)
         self.assertIn("does not wait for external review findings", result.stdout)
         self.assertIn("Default output is a structured JSON summary.", result.stdout)
@@ -105,7 +107,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_adapter_help_matches_orchestration_behavior(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "adapter", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py [--human|--machine] adapter", result.stdout)
+        self.assertIn("usage: gh-address-cr [--human|--machine] adapter", result.stdout)
         self.assertIn("High-level adapter entrypoint.", result.stdout)
         self.assertIn("prints findings JSON and then runs PR orchestration", result.stdout)
         self.assertIn("including GitHub thread handling", result.stdout)
@@ -388,6 +390,17 @@ else:
         self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_SIMPLE"])
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["item_id"], "github-thread:THREAD_SIMPLE")
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["request_id"], "<request_id from agent next>")
+        self.assertEqual(
+            request["commands"],
+            {
+                "classify": f"gh-address-cr agent classify {self.repo} {self.pr} <item_id> --classification fix --note <note>",
+                "next": f"gh-address-cr agent next {self.repo} {self.pr} --role fixer --agent-id <agent_id>",
+                "submit": f"gh-address-cr agent submit {self.repo} {self.pr} --input response.json",
+                "submit_batch": f"gh-address-cr agent submit-batch {self.repo} {self.pr} --input batch-response.json",
+                "publish": f"gh-address-cr agent publish {self.repo} {self.pr}",
+            },
+        )
+        self.assertNotIn("scripts/cli.py", json.dumps(request))
         self.assertIn("submit-batch", request["commands"]["submit_batch"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
@@ -509,7 +522,7 @@ else:
         result = self.run_cmd([sys.executable, str(CLI_PY), "doctor", "--help"])
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py doctor", result.stdout)
+        self.assertIn("usage: gh-address-cr doctor", result.stdout)
         self.assertIn("Runtime diagnostics entrypoint.", result.stdout)
         self.assertEqual(result.stderr, "")
 
@@ -616,7 +629,7 @@ else:
     def test_cli_findings_help_mentions_source_required_for_sync(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "findings", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py findings", result.stdout)
+        self.assertIn("usage: gh-address-cr findings", result.stdout)
         self.assertIn("--source <producer_id>", result.stdout)
         self.assertIn("--sync", result.stdout)
         self.assertIn("requires --source", result.stdout)
@@ -779,6 +792,10 @@ body: Potential null dereference.
         self.assertEqual(summary["status"], "BLOCKED")
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["item_kind"], "local_finding")
+        self.assertNotIn("scripts/cli.py", summary["next_action"])
+        request = json.loads(Path(summary["artifact_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(request["resume_command"], f"gh-address-cr review {self.repo} {self.pr}")
+        self.assertNotIn("scripts/cli.py", json.dumps(request))
 
     def test_cli_review_rerun_does_not_reingest_consumed_handoff(self):
         gh = self.bin_dir / "gh"
@@ -933,6 +950,10 @@ else:
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("loop-request-", summary["artifact_path"])
         self.assertIn("Address the finding by running", summary["next_action"])
+        self.assertNotIn("scripts/cli.py", summary["next_action"])
+        request = json.loads(Path(summary["artifact_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(request["resume_command"], f"gh-address-cr findings {self.repo} {self.pr}")
+        self.assertNotIn("scripts/cli.py", json.dumps(request))
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 
@@ -1122,6 +1143,10 @@ else:
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("Address the finding by running", summary["next_action"])
+        self.assertNotIn("scripts/cli.py", summary["next_action"])
+        request = json.loads(Path(summary["artifact_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(request["resume_command"], f"gh-address-cr findings {self.repo} {self.pr}")
+        self.assertNotIn("scripts/cli.py", json.dumps(request))
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 
@@ -1134,6 +1159,7 @@ else:
         self.assertEqual(summary["waiting_on"], "findings_input")
         self.assertIn("--input", summary["next_action"])
         self.assertIn("does not generate findings", summary["next_action"])
+        self.assertNotIn("scripts/cli.py", summary["next_action"])
 
     def test_cli_adapter_defaults_to_structured_summary(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
@@ -1869,9 +1895,12 @@ else:
         self.assertIn("code-review-adapter", payload["adapter_backend"])
         self.assertIn("review-to-findings", payload["review_to_findings_command"])
         self.assertIn("control-plane mixed code-review", payload["ingest_command"])
-        self.assertIn("python3 scripts/cli.py", payload["adapter_backend"])
-        self.assertIn("python3 scripts/cli.py", payload["review_to_findings_command"])
-        self.assertIn("python3 scripts/cli.py", payload["ingest_command"])
+        self.assertIn("gh-address-cr", payload["adapter_backend"])
+        self.assertIn("gh-address-cr", payload["review_to_findings_command"])
+        self.assertIn("gh-address-cr", payload["ingest_command"])
+        self.assertNotIn("scripts/cli.py", payload["adapter_backend"])
+        self.assertNotIn("scripts/cli.py", payload["review_to_findings_command"])
+        self.assertNotIn("scripts/cli.py", payload["ingest_command"])
         self.assertNotIn("skill/scripts/cli.py", payload["adapter_backend"])
         self.assertNotIn("skill/scripts/cli.py", payload["review_to_findings_command"])
         self.assertNotIn("skill/scripts/cli.py", payload["ingest_command"])

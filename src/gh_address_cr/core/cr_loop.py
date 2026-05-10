@@ -1153,8 +1153,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("cr-loop PAUSED: Interaction Required")
                 print("------------------------------------")
                 print(f"Artifact to Address: {error}")
+                resume_command = shlex.join(["gh-address-cr", "cr-loop", *sys.argv[1:]])
                 print(
-                    f"Next Step: Address the finding by running: `python3 {sys.argv[0]} submit-action {error} --resolution <fix|clarify|defer> --note <note> ... -- {shlex.join([sys.executable, *sys.argv])}`"
+                    f"Next Step: Address the finding by running: `gh-address-cr submit-action {error} --resolution <fix|clarify|defer> --note <note> ... -- {resume_command}`"
                 )
                 print(f"cr-loop INTERNAL_FIXER_REQUIRED artifact={error}")
                 return BLOCKED_EXIT

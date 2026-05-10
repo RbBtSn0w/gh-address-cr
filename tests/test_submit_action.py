@@ -13,7 +13,7 @@ class TestSubmitAction(PythonScriptTestCase):
     def test_submit_action_help(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "submit-action", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: cli.py submit-action", result.stdout)
+        self.assertIn("usage: gh-address-cr submit-action", result.stdout)
         self.assertIn("High-level manual action entrypoint.", result.stdout)
 
     def test_submit_action_workflow(self):
