@@ -84,7 +84,7 @@ class ActionProtocolTestCase(unittest.TestCase):
             "required_evidence": ["note", "files", "validation_commands"],
             "repository_context": {"repo": "octo/example", "pr_number": "42"},
             "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
-            "resume_command": "python3 -m gh_address_cr agent submit octo/example 42 --input response.json",
+            "resume_command": "gh-address-cr agent submit octo/example 42 --input response.json",
         }
         payload.update(overrides)
         return payload
@@ -174,7 +174,7 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
             allowed_actions=["fix", "clarify", "defer", "reject"],
             required_evidence=["note", "files", "validation_commands", "fix_reply"],
             repository_context={"repo": "octo/example", "pr_number": "42"},
-            resume_command="python3 -m gh_address_cr agent submit octo/example 42 --input response.json",
+            resume_command="gh-address-cr agent submit octo/example 42 --input response.json",
             manifest=self.manifest(),
             active_claims_for_agent=1,
         )
@@ -195,7 +195,7 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
             allowed_actions=["clarify", "defer", "reject"],
             required_evidence=["note", "reply_markdown"],
             repository_context={"repo": "octo/example", "pr_number": "42"},
-            resume_command="python3 -m gh_address_cr agent submit octo/example 42 --input response.json",
+            resume_command="gh-address-cr agent submit octo/example 42 --input response.json",
             manifest=self.manifest(roles=["triage"], actions=["clarify", "defer", "reject"]),
         )
 
@@ -214,7 +214,7 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
                 allowed_actions=["fix"],
                 required_evidence=["note", "files", "validation_commands"],
                 repository_context={"repo": "octo/example", "pr_number": "42"},
-                resume_command="python3 -m gh_address_cr agent submit octo/example 42 --input response.json",
+                resume_command="gh-address-cr agent submit octo/example 42 --input response.json",
                 manifest=self.manifest(roles=["triage"], actions=["fix"]),
             )
 
@@ -335,7 +335,7 @@ class PreFixClassificationGateTests(ActionProtocolTestCase):
                 allowed_actions=["fix"],
                 required_evidence=["note", "files", "validation_commands"],
                 repository_context={"repo": "octo/example", "pr_number": "42"},
-                resume_command="python3 -m gh_address_cr agent submit octo/example 42 --input response.json",
+                resume_command="gh-address-cr agent submit octo/example 42 --input response.json",
                 manifest=self.manifest(),
                 evidence_sink=session.append_evidence,
             )

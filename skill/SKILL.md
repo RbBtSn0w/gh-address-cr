@@ -133,7 +133,7 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 If you receive an `ActionRequest` path and need a local response artifact, the helper accepts runtime request files with `repository_context.repo` and `repository_context.pr_number`:
 
 ```bash
-python3 scripts/submit_action.py <action-request.json> \
+gh-address-cr submit-action <action-request.json> \
   --agent-id codex-fixer-1 \
   --resolution fix \
   --note "Fixed the thread." \
@@ -159,12 +159,12 @@ Examples that require advanced dispatch details live in the reference docs inste
 
 Treat `SKILL.md` as the source of truth for using this skill.
 
-- Start from the high-level dispatcher:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py address <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync]`
-  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
+- Start from the runtime dispatcher:
+  - `gh-address-cr review <owner/repo> <pr_number>`
+  - `gh-address-cr address <owner/repo> <pr_number>`
+  - `gh-address-cr threads <owner/repo> <pr_number>`
+  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync]`
+  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
@@ -187,10 +187,10 @@ Advanced producer and dispatch details live in:
 
 ## Non-Negotiable Rule
 
-`python3 scripts/cli.py final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
+`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
 
 - Never output "done", "all resolved", "completed", or equivalent unless:
-  - `python3 scripts/cli.py final-gate <owner/repo> <pr_number>` has just passed, and
+  - `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed, and
   - output includes `Verified: 0 Unresolved Threads found`, and
   - output includes `Verified: 0 Pending Reviews found`, and
   - session blocking item count is zero.
@@ -200,10 +200,10 @@ Advanced producer and dispatch details live in:
 ## Core Rules
 
 1. Use the high-level task entrypoints first:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
-  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
-  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
+  - `gh-address-cr review <owner/repo> <pr_number>`
+  - `gh-address-cr threads <owner/repo> <pr_number>`
+  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|-`
+  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
 2. Use the internal low-level dispatch only when the high-level entrypoints do not fit.
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
@@ -211,7 +211,7 @@ Advanced producer and dispatch details live in:
 6. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
 7. For local findings, terminal handling must include a note.
 8. `producer=code-review` must emit findings JSON before session handling starts.
-9. Never declare completion before `python3 scripts/cli.py final-gate` passes.
+9. Never declare completion before `gh-address-cr final-gate` passes.
 10. Low-level resolve flows must refuse resolve-only handling when reply evidence is absent.
 
 
@@ -283,7 +283,7 @@ Do not use this skill as the review engine itself.
 - For PR-scoped feedback, always provide `--using-repo` and `--using-pr` so the issue body names the repository and pull request under review. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred.
 - When `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
 - Repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
-- Use `python3 scripts/submit_feedback.py` with explicit fields so the body matches the repository issue format:
+- Use `gh-address-cr submit-feedback` with explicit fields so the body matches the repository issue format:
   - `--category`
   - `--title`
   - `--summary`
@@ -291,8 +291,7 @@ Do not use this skill as the review engine itself.
   - `--actual`
   - optional `--source-command`, `--failing-command`, `--exit-code`, `--status`, `--reason-code`, `--waiting-on`, `--run-id`, `--skill-version`, `--using-repo`, `--using-pr`, `--artifact`, and `--notes`
 - Example:
-  - `python3 scripts/submit_feedback.py --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous." --source-command "python3 scripts/cli.py review owner/repo 123" --failing-command "python3 scripts/cli.py final-gate owner/repo 123" --exit-code 5 --status BLOCKED --reason-code WAITING_FOR_FIX --waiting-on human_fix --run-id cr-loop-20260417T120000Z --skill-version 1.2.0 --using-repo owner/repo --using-pr 123 --artifact /tmp/loop-request.json`
-  - `python3 scripts/cli.py submit-feedback --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous."`
+  - `gh-address-cr submit-feedback --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous." --source-command "gh-address-cr review owner/repo 123" --failing-command "gh-address-cr final-gate owner/repo 123" --exit-code 5 --status BLOCKED --reason-code WAITING_FOR_FIX --waiting-on human_fix --run-id cr-loop-20260417T120000Z --skill-version 1.2.0 --using-repo owner/repo --using-pr 123 --artifact /tmp/loop-request.json`
 
 
 ## Completion Contract
@@ -308,8 +307,8 @@ Final output must include:
 
 For run-scoped diagnostics, use:
 
-- `python3 scripts/audit_report.py --run-id <run_id> <owner/repo> <pr_number>`
-- successful `python3 scripts/cli.py final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
+- `gh-address-cr audit-report --run-id <run_id> <owner/repo> <pr_number>`
+- successful `gh-address-cr final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
 
 
 ## Why CR Appears Later (Use This Exact Logic)
@@ -322,12 +321,12 @@ For run-scoped diagnostics, use:
 
 - dispatch matrix: `references/mode-producer-matrix.md`
 - checklist: `references/cr-triage-checklist.md`
-- stable operator surface: `python3 scripts/cli.py`
-- preferred automation surface: `python3 scripts/cli.py ...`
-- AI agent feedback helper: `python3 scripts/submit_feedback.py`
-- code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
-- Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`
-- code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`
+- stable operator surface: `gh-address-cr`
+- preferred automation surface: `gh-address-cr ...`
+- AI agent feedback helper: `gh-address-cr submit-feedback`
+- code-review bridge prompt: `gh-address-cr prepare-code-review <local|mixed> <owner/repo> <pr_number>`
+- Markdown-to-findings converter: `gh-address-cr review-to-findings <owner/repo> <pr_number> --input -`
+- code-review adapter backend: `gh-address-cr code-review-adapter --input -`
 
 Examples:
 

@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
 
-from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
+from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SKILL_ROOT, SRC_ROOT, PythonScriptTestCase
 
 
 PYPROJECT = ROOT / "pyproject.toml"
@@ -65,6 +66,88 @@ class RuntimePackagingTest(PythonScriptTestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], "0")
         self.assertIn("usage:", result.stdout)
+
+    def test_runtime_dispatcher_invokes_legacy_command_in_process(self):
+        import gh_address_cr.cli as cli
+
+        with mock.patch("gh_address_cr.cli.subprocess.run", side_effect=AssertionError("subprocess dispatch forbidden")):
+            result = cli.run_script("review_to_findings.py", ["--help"])
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("usage:", result.stdout)
+
+    def test_runtime_dispatcher_preserves_system_exit_string_errors(self):
+        import gh_address_cr.cli as cli
+
+        result = cli.run_script("control_plane.py", ["remote"])
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "remote expects: <owner/repo> <pr_number>\n")
+
+    def test_runtime_dispatcher_exposes_runtime_import_root_to_nested_python_processes(self):
+        import gh_address_cr.cli as cli
+
+        captured = {}
+
+        class FakeLegacyModule:
+            @staticmethod
+            def main():
+                captured["pythonpath"] = os.environ.get("PYTHONPATH", "")
+                captured["sys_path"] = list(sys.path)
+                return 0
+
+        previous_pythonpath = os.environ.pop("PYTHONPATH", None)
+        original_sys_path = list(sys.path)
+        try:
+            script_dir = str(Path(cli.__file__).resolve().parent / "legacy_scripts")
+            sys.path.append(script_dir)
+            with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
+                result = cli.run_script("control_plane.py", [])
+            restored_pythonpath = os.environ.get("PYTHONPATH")
+            restored_sys_path = list(sys.path)
+        finally:
+            sys.path[:] = original_sys_path
+            if previous_pythonpath is None:
+                os.environ.pop("PYTHONPATH", None)
+            else:
+                os.environ["PYTHONPATH"] = previous_pythonpath
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(Path(cli.__file__).resolve().parents[1]), captured["pythonpath"].split(os.pathsep))
+        self.assertEqual(captured["sys_path"][0], script_dir)
+        self.assertEqual(restored_pythonpath, previous_pythonpath)
+        self.assertEqual(restored_sys_path, original_sys_path + [script_dir])
+
+    def test_runtime_dispatcher_does_not_swallow_keyboard_interrupt(self):
+        import gh_address_cr.cli as cli
+
+        class FakeLegacyModule:
+            @staticmethod
+            def main():
+                raise KeyboardInterrupt
+
+        with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
+            with self.assertRaises(KeyboardInterrupt):
+                cli.run_script("control_plane.py", [])
+
+    def test_packaged_skill_payload_carries_required_helper_scripts(self):
+        install_root = Path(self.temp_dir.name) / "installed-skill" / "gh-address-cr"
+        shutil.copytree(SKILL_ROOT, install_root)
+
+        for script_name in ("cli.py", "submit_action.py"):
+            with self.subTest(script=script_name):
+                script = install_root / "scripts" / script_name
+                self.assertTrue(script.is_file(), msg=str(script))
+                result = subprocess.run(
+                    [sys.executable, str(script), "--help"],
+                    text=True,
+                    capture_output=True,
+                    cwd=self.cwd,
+                    env={**self.env, "PYTHONPATH": str(SRC_ROOT)},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage:", result.stdout)
 
     def test_session_engine_legacy_script_is_thin_native_delegate(self):
         legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "session_engine.py"

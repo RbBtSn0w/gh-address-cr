@@ -79,9 +79,18 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("skill/scripts/", text)
         self.assertNotIn("skill/references/", text)
-        self.assertIn("python3 scripts/cli.py review <owner/repo> <pr_number>", text)
-        self.assertIn("python3 scripts/cli.py final-gate <owner/repo> <pr_number>", text)
+        self.assertIn("gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("gh-address-cr final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
+
+    def test_skill_prefers_runtime_cli_over_skill_shim_for_agent_execution(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("Runtime public entrypoint: `gh-address-cr`", text)
+        self.assertIn("Compatibility shim: `python3 scripts/cli.py`", text)
+        self.assertNotIn("preferred automation surface: `python3 scripts/cli.py", text)
+        self.assertNotIn("stable operator surface: `python3 scripts/cli.py", text)
+        self.assertNotIn("Start from the high-level dispatcher:\n  - `python3 scripts/cli.py", text)
+        self.assertIn("Start from the runtime dispatcher:\n  - `gh-address-cr review", text)
 
     def test_skill_completion_contract_does_not_require_current_run_summary(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -99,6 +108,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("thin adapter", text.lower())
         self.assertNotIn("direct side effect", text.lower())
 
+    def test_openai_hint_prefers_runtime_cli_for_agent_execution(self):
+        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertIn("Start with `gh-address-cr review <owner/repo> <pr_number>`", text)
+        self.assertIn("run `gh-address-cr final-gate ...`", text)
+        self.assertNotIn("Start with `python3 scripts/cli.py review", text)
+        self.assertNotIn("run `python3 scripts/cli.py final-gate", text)
+
     def test_openai_hint_does_not_require_natural_language_current_run_counts(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertNotIn("summarize the current-run queue counts in natural language", text)
@@ -106,7 +122,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_documents_agent_feedback_command_and_trigger(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("python3 scripts/submit_feedback.py", text)
+        self.assertIn("gh-address-cr submit-feedback", text)
         self.assertIn("When the skill itself blocks progress", text)
         self.assertIn("`RbBtSn0w/gh-address-cr`", text)
         self.assertIn("`--using-repo` and `--using-pr`", text)
@@ -194,7 +210,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
-        self.assertIn("run `python3 scripts/submit_feedback.py`", text)
+        self.assertIn("run `gh-address-cr submit-feedback`", text)
         self.assertIn("`RbBtSn0w/gh-address-cr`", text)
         self.assertIn("contradictory instructions", text)
         self.assertIn("missing automation", text)
@@ -216,11 +232,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
 
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
-        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
+        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("skill/scripts/", text, msg=str(path))
             self.assertNotIn("skill/references/", text, msg=str(path))
-            self.assertIn("scripts/cli.py", text, msg=str(path))
+            self.assertIn("gh-address-cr", text, msg=str(path))
+            self.assertNotIn("python3 scripts/cli.py", text, msg=str(path))
+        hint_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertNotIn("skill/scripts/", hint_text)
+        self.assertNotIn("skill/references/", hint_text)
+        self.assertIn("gh-address-cr review", hint_text)
 
     def test_referenced_skill_owned_docs_exist(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
@@ -311,12 +332,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
         self.assertIn(
-            "python3 skill/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text
+            "gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py", text
         )
         self.assertIn(
-            "python3 skill/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
+            "gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
             text,
         )
+
+    def test_readme_prefers_runtime_cli_over_skill_shim_for_automation(self):
+        text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("`gh-address-cr` is the preferred and stable automation entrypoint", text)
+        self.assertIn("`skill/scripts/cli.py` remains compatibility-only", text)
+        self.assertNotIn("`python3 skill/scripts/cli.py` is the only automation entrypoint", text)
+        self.assertNotIn("`python3 skill/scripts/cli.py` remains the stable automation surface", text)
+        self.assertNotIn("`cli.py` is the preferred Python entrypoint for automation", text)
 
     def test_readme_documents_external_review_handoff_contract(self):
         readme_text = README_MD.read_text(encoding="utf-8")
