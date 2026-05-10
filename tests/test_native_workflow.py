@@ -145,6 +145,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.replies = []
                 self.resolved = []
 
+            def viewer_login(self):
+                return "agent-login"
+
             def post_reply(self, repo, pr_number, thread_id, body):
                 self.replies.append((repo, pr_number, thread_id, body))
                 return "https://github.test/reply"
@@ -203,9 +206,105 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertFalse(updated["blocking"])
                 self.assertTrue(updated["handled"])
                 self.assertEqual(updated["reply_url"], "https://github.test/reply")
+                self.assertEqual(updated["reply_evidence"]["author_login"], "agent-login")
                 self.assertIn("reply_posted", event_types)
                 self.assertIn("thread_resolved", event_types)
                 self.assertIn("response_published", event_types)
+
+    def test_submit_action_response_with_publish_posts_and_resolves_thread(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "open",
+            "status": "OPEN",
+            "blocking": True,
+            "classification_evidence": {"classification": "fix", "record_id": "ev_classified"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                request_info = workflow.issue_action_request(repo, pr_number, role="fixer", agent_id="codex-1")
+                request = json.loads(Path(request_info["request_path"]).read_text(encoding="utf-8"))
+                response_path = Path(tmp) / "action-response.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "agent_id": "codex-1",
+                            "resolution": "fix",
+                            "note": "Fixed thread issue.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [
+                                {"command": "python3 -m unittest tests.test_example", "result": "passed"}
+                            ],
+                            "fix_reply": {
+                                "summary": "Fixed thread issue.",
+                                "commit_hash": "abc123",
+                                "files": ["src/example.py"],
+                                "why": "The guarded path now covers the review case.",
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                client = FakeGitHubClient()
+
+                result = workflow.submit_action_response(
+                    repo,
+                    pr_number,
+                    response_path=response_path,
+                    publish=True,
+                    github_client=client,
+                )
+
+                session = manager.load()
+                self.assertEqual(result["status"], "ACTION_ACCEPTED")
+                self.assertEqual(result["publish"]["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(client.replies[0][2], "THREAD_1")
+                self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
+                self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
+                self.assertEqual(session["items"]["github-thread:THREAD_1"]["reply_evidence"]["author_login"], "agent-login")
+
+    def test_publish_with_no_ready_items_does_not_require_viewer_login(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def viewer_login(self):
+                raise AssertionError("viewer_login should not be called without publish-ready work")
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, open_item())
+
+                result = workflow.publish_github_thread_responses(repo, pr_number, github_client=FakeGitHubClient())
+
+                self.assertEqual(result["status"], "NO_PUBLISH_READY_ITEMS")
 
     def test_publish_ready_thread_survives_remote_refresh_before_publish(self):
         from gh_address_cr.core import gate, workflow

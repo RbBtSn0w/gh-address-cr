@@ -101,15 +101,24 @@ def parse_validation_commands(values: list[str], *, legacy: bool) -> list[dict[s
         return values
     commands: list[dict[str, str]] = []
     for value in values:
-        command, separator, result = value.rpartition("=")
-        if not separator:
-            command = value
-            result = "passed"
-        command = command.strip()
-        result = result.strip()
+        command, result = split_validation_command(value)
         if command and result:
             commands.append({"command": command, "result": result})
     return commands
+
+
+def split_validation_command(value: str) -> tuple[str, str]:
+    command, separator, result = value.rpartition("=")
+    if not separator or not looks_like_validation_result(result):
+        return value.strip(), "passed"
+    return command.strip(), result.strip()
+
+
+def looks_like_validation_result(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized or any(char.isspace() for char in normalized):
+        return False
+    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
 def build_fix_reply(args: argparse.Namespace, files: list[str]) -> dict:

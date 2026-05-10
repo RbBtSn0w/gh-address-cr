@@ -157,6 +157,8 @@ Advanced/internal integration entrypoints:
 - `agent next`
 - `agent submit`
 - `agent submit-batch`
+- `agent fix`
+- `agent evidence`
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
@@ -228,7 +230,10 @@ gh-address-cr agent manifest
 gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
+gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
+gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed"
+gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" --publish
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
@@ -240,7 +245,7 @@ gh-address-cr final-gate owner/repo 123
 Classification and resolution are deliberately separate protocol phases:
 
 - `agent classify` records triage evidence on the item before a mutating fixer lease exists. If `agent next --role fixer` returns `MISSING_CLASSIFICATION`, run `agent classify ... --classification <fix|clarify|defer|reject> --note <why>` first.
-- `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`.
+- `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`. Use `--publish` only for accepted GitHub review-thread fix responses when the runtime should post the reply and resolve the thread in the same command.
 
 Role split:
 
@@ -255,7 +260,22 @@ Role split:
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
 Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`.
-The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one commit covers them, submit a batch response, publish, then claim the next set.
+The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file commit can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one commit covers them, submit a batch response, publish, then claim the next set.
+
+Reusable evidence profiles reduce repeated commit/files/validation text across responses:
+
+```bash
+gh-address-cr agent evidence add owner/repo 123 \
+  --name local-verified \
+  --commit abc123 \
+  --files src/example.py,tests/test_example.py \
+  --validation "python3 -m unittest tests.test_example=passed"
+```
+
+Later `ActionResponse` or `BatchActionResponse.common` payloads may include `"evidence_ref": "local-verified"` and still provide per-item `note`, `summary`, and `why`.
+When `--validation` is provided without an explicit `=result` suffix, the entire value is treated as the command and the result defaults to `passed`; this keeps commands with environment assignments such as `PYENV_VERSION=3.10.19 python -m unittest` intact.
+
+`agent next` writes both `request_path` and `response_skeleton_path`. Fill the response skeleton when you need a local artifact with the correct `schema_version`, `request_id`, `lease_id`, `agent_id`, `item_id`, `resolution`, `validation_commands`, and GitHub-thread `fix_reply` shape. Required user-supplied fields are intentionally empty in the skeleton so an unedited template is rejected instead of published.
 
 Minimal `BatchActionResponse` shape:
 
@@ -768,6 +788,7 @@ The implementation model is now:
   - unresolved GitHub thread count
   - terminal GitHub thread reply-evidence count
   - current-login pending review count
+  - optional PR checks when `--require-checks` or `--require-required-checks` is supplied
 
 The session state is stored in a PR-scoped workspace under the user cache directory:
 
