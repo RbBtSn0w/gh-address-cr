@@ -96,6 +96,36 @@ class SubmitActionHelperTest(PythonScriptTestCase):
                 self.assertEqual(response["fix_reply"]["commit_hash"], "abc123")
                 self.assertIn("gh-address-cr agent submit octo/example 77 --input", result.stdout)
 
+    def test_runtime_action_request_preserves_env_validation_without_result_suffix(self):
+        for script in HELPER_SCRIPTS:
+            with self.subTest(script=script):
+                request_path = self.write_request("env-validation-action-request.json", runtime_request())
+
+                result = self.run_helper(
+                    script,
+                    str(request_path),
+                    "--agent-id",
+                    "codex-1",
+                    "--resolution",
+                    "fix",
+                    "--note",
+                    "Fixed the thread.",
+                    "--commit-hash",
+                    "abc123",
+                    "--files",
+                    "src/example.py",
+                    "--validation-cmd",
+                    "PYENV_VERSION=3.10.19 python -m unittest tests.test_example",
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                response_path = self.workspace_dir() / "action-response-github-thread_abc.json"
+                response = json.loads(response_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    response["validation_commands"],
+                    [{"command": "PYENV_VERSION=3.10.19 python -m unittest tests.test_example", "result": "passed"}],
+                )
+
     def test_runtime_action_request_reject_generates_reply_response(self):
         for script in HELPER_SCRIPTS:
             with self.subTest(script=script):

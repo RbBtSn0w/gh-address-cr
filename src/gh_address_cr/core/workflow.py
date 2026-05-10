@@ -783,26 +783,25 @@ def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, it
         "agent_id": agent_id,
         "item_id": str(item.get("item_id") or ""),
         "resolution": resolution,
-        "note": "<what changed or why this response resolves the item>",
-        "validation_commands": [{"command": "<test_command>", "result": "<passed|failed + key signal>"}],
+        "note": "",
+        "validation_commands": [{"command": "", "result": ""}],
     }
     if role == "fixer" and resolution == "fix":
-        skeleton["files"] = ["<file_path>"]
+        skeleton["files"] = []
     if item.get("item_kind") == "github_thread":
         if role == "fixer" and resolution == "fix":
             skeleton["fix_reply"] = {
-                "summary": "<reply summary>",
-                "commit_hash": "<commit_hash>",
-                "files": ["<file_path>"],
-                "why": "<why this resolves the review thread>",
-                "test_command": "<test_command>",
-                "test_result": "<passed|failed + key signal>",
+                "summary": "",
+                "commit_hash": "",
+                "files": [],
+                "why": "",
+                "test_command": "",
+                "test_result": "",
             }
-            skeleton["evidence_ref"] = "<optional reusable evidence profile name>"
         else:
-            skeleton["reply_markdown"] = "<reply body for clarify/defer/reject>"
+            skeleton["reply_markdown"] = ""
     elif resolution != "fix":
-        skeleton["reply_markdown"] = "<reply body for clarify/defer/reject>"
+        skeleton["reply_markdown"] = ""
     return skeleton
 
 
@@ -1350,6 +1349,7 @@ def publish_github_thread_responses(
             "pr_number": str(pr_number),
             "published_count": 0,
         }
+    publisher_login = _publisher_login(client, fallback=agent_id)
 
     plans: list[dict[str, Any]] = []
     for item_id, item in publish_items:
@@ -1447,7 +1447,7 @@ def publish_github_thread_responses(
             )
         item["reply_posted"] = True
         item["reply_url"] = reply_url
-        item["reply_evidence"] = {"reply_url": reply_url, "author_login": agent_id}
+        item["reply_evidence"] = {"reply_url": reply_url, "author_login": publisher_login}
 
         existing_resolve = ledger.successful_side_effect_url(resolve_key, "github_resolve")
         if not existing_resolve and not item.get("thread_resolved"):
@@ -1569,6 +1569,18 @@ def _publish_ready_items(session: dict[str, Any]) -> list[tuple[str, dict[str, A
     return ready
 
 
+def _publisher_login(client: Any, *, fallback: str) -> str:
+    viewer_login = getattr(client, "viewer_login", None)
+    if callable(viewer_login):
+        try:
+            login = str(viewer_login() or "").strip()
+        except GitHubError:
+            login = ""
+        if login:
+            return login
+    return fallback
+
+
 def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
     for key in ("thread_id", "origin_ref"):
         value = item.get(key)
@@ -1652,12 +1664,7 @@ def _normalize_validation_command_records(value: Any) -> list[dict[str, str]]:
             summary = str(entry.get("summary") or "").strip()
         else:
             raw = str(entry or "").strip()
-            command, separator, result = raw.rpartition("=")
-            if not separator:
-                command = raw
-                result = "passed"
-            command = command.strip()
-            result = result.strip()
+            command, result = _split_validation_command_record(raw)
             summary = ""
         if not command or not result:
             continue
@@ -1666,6 +1673,20 @@ def _normalize_validation_command_records(value: Any) -> list[dict[str, str]]:
             row["summary"] = summary
         commands.append(row)
     return commands
+
+
+def _split_validation_command_record(raw: str) -> tuple[str, str]:
+    command, separator, result = raw.rpartition("=")
+    if not separator or not _looks_like_validation_result(result):
+        return raw.strip(), "passed"
+    return command.strip(), result.strip()
+
+
+def _looks_like_validation_result(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized or any(char.isspace() for char in normalized):
+        return False
+    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
 def _normalize_fix_reply_severity(value: Any) -> str:

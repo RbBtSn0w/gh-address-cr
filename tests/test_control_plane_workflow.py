@@ -148,7 +148,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(skeleton["request_id"], request["request_id"])
         self.assertEqual(skeleton["lease_id"], request["lease_id"])
         self.assertEqual(skeleton["agent_id"], "codex-1")
-        self.assertEqual(skeleton["validation_commands"][0]["command"], "<test_command>")
+        self.assertEqual(skeleton["validation_commands"][0]["command"], "")
         self.assertIn("post_github_reply", request["forbidden_actions"])
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
@@ -170,6 +170,30 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertIn("reply_markdown", skeleton)
         self.assertNotIn("fix_reply", skeleton)
         self.assertNotIn("files", skeleton)
+
+    def test_agent_next_response_skeleton_for_github_fix_uses_empty_required_fields(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    classification_evidence={"classification": "fix", "record_id": "ev_classified"},
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        skeleton = json.loads(Path(payload["response_skeleton_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(skeleton["files"], [])
+        self.assertEqual(skeleton["validation_commands"], [{"command": "", "result": ""}])
+        self.assertEqual(skeleton["fix_reply"]["commit_hash"], "")
+        self.assertEqual(skeleton["fix_reply"]["files"], [])
+        self.assertNotIn("evidence_ref", skeleton)
 
     def test_agent_submit_accepts_fix_response_with_active_lease(self):
         self.write_session(
@@ -670,6 +694,32 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(accepted["evidence_ref"], "local-verified")
         self.assertEqual(accepted["fix_reply"]["commit_hash"], "abc123")
         self.assertEqual(accepted["files"], ["src/example.py", "tests/test_example.py"])
+
+    def test_agent_evidence_validation_parser_preserves_env_assignment_without_result(self):
+        self.write_session(items=[open_item()])
+
+        result = self.run_runtime_module(
+            "agent",
+            "evidence",
+            "add",
+            self.repo,
+            self.pr,
+            "--name",
+            "env-validation",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py",
+            "--validation",
+            "PYENV_VERSION=3.10.19 python -m unittest tests.test_example",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        profile = json.loads(result.stdout)["profile"]
+        self.assertEqual(
+            profile["validation_commands"],
+            [{"command": "PYENV_VERSION=3.10.19 python -m unittest tests.test_example", "result": "passed"}],
+        )
 
     def test_agent_fix_fast_path_classifies_claims_and_accepts_single_thread(self):
         self.write_session(

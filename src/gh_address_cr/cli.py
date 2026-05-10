@@ -1631,15 +1631,24 @@ def _parse_agent_files(files: str | None, extra_files: list[str] | None = None) 
 def _parse_agent_validation(values: list[str] | None) -> list[dict[str, str]]:
     commands: list[dict[str, str]] = []
     for raw in values or []:
-        command, separator, result = raw.rpartition("=")
-        if not separator:
-            command = raw
-            result = "passed"
-        command = command.strip()
-        result = result.strip()
+        command, result = _split_agent_validation_record(raw.strip())
         if command and result:
             commands.append({"command": command, "result": result})
     return commands
+
+
+def _split_agent_validation_record(raw: str) -> tuple[str, str]:
+    command, separator, result = raw.rpartition("=")
+    if not separator or not _looks_like_agent_validation_result(result):
+        return raw.strip(), "passed"
+    return command.strip(), result.strip()
+
+
+def _looks_like_agent_validation_result(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized or any(char.isspace() for char in normalized):
+        return False
+    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
 def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:

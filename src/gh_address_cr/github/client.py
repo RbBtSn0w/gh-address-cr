@@ -198,7 +198,7 @@ class GitHubClient:
         if required:
             cmd.append("--required")
         result = self._run_gh(cmd, retries=1)
-        if result.returncode not in {0, 1, 8} and not result.stdout.strip():
+        if result.returncode not in {0, 1, 8} or (result.returncode != 0 and not result.stdout.strip()):
             _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
         try:
             payload = json.loads(result.stdout or "[]")

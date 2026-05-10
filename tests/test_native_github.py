@@ -162,6 +162,24 @@ class NativeGitHubClientTests(unittest.TestCase):
                 )
             ).list_threads("owner/repo", "123")
 
+    def test_list_pr_checks_raises_when_lookup_fails_without_json(self):
+        from gh_address_cr.github.client import GitHubClient
+        from gh_address_cr.github.errors import GitHubError
+
+        runner = RecordingRunner([subprocess.CompletedProcess(["gh"], 1, stdout="", stderr="not found")])
+
+        with self.assertRaises(GitHubError):
+            GitHubClient(runner=runner).list_pr_checks("owner/repo", "123")
+
+    def test_list_pr_checks_accepts_failed_checks_json(self):
+        from gh_address_cr.github.client import GitHubClient
+
+        runner = RecordingRunner([completed(["gh"], [{"name": "unit", "bucket": "fail"}], returncode=1)])
+
+        checks = GitHubClient(runner=runner).list_pr_checks("owner/repo", "123")
+
+        self.assertEqual(checks, [{"name": "unit", "bucket": "fail"}])
+
 
 if __name__ == "__main__":
     unittest.main()

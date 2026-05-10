@@ -126,7 +126,9 @@ Fix responses require changed files and validation evidence. For GitHub thread `
 Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
 `BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. The default manifest exposes `max_parallel_claims: 2`, so claim the allowed leases, submit accepted batch evidence for those leased threads, publish, then claim the next set. The same agent may claim multiple GitHub-thread fixer leases that overlap only by file path when one commit covers same-file comments; thread reply/resolve side effects remain item-scoped.
 
-`agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. If several responses share the same commit, files, and validation commands, record an evidence profile with `agent evidence add` and reference it with `"evidence_ref": "<profile>"` while keeping per-item `note`, `summary`, and `why`.
+`agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published. If several responses share the same commit, files, and validation commands, record an evidence profile with `agent evidence add` and reference it with `"evidence_ref": "<profile>"` while keeping per-item `note`, `summary`, and `why`.
+
+For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved.
 
 If you receive an `ActionRequest` path and need a local response artifact, the helper accepts runtime request files with `repository_context.repo` and `repository_context.pr_number`:
 

@@ -136,6 +136,23 @@ class NativeGateTests(unittest.TestCase):
                 self.assertEqual(result.counts["pr_checks_count"], 2)
                 self.assertEqual(result.counts["pr_checks_pending_count"], 1)
 
+    def test_gatekeeper_require_checks_treats_missing_check_state_as_unknown(self):
+        from gh_address_cr.core.gate import FINAL_GATE_PR_CHECKS_NOT_GREEN, Gatekeeper
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, {})
+
+                result = Gatekeeper(github_client=FakeGitHubClient(checks=[{"name": "unit"}])).run(
+                    repo, pr_number, require_checks=True
+                )
+
+                self.assertFalse(result.passed)
+                self.assertEqual(result.reason_code, FINAL_GATE_PR_CHECKS_NOT_GREEN)
+                self.assertEqual(result.counts["pr_checks_failed_count"], 1)
+
     def test_gatekeeper_required_checks_filters_optional_checks(self):
         from gh_address_cr.core.gate import Gatekeeper
 

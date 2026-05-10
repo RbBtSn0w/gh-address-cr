@@ -423,7 +423,7 @@ def _check_bucket(check: Mapping[str, Any]) -> str:
         return "cancel"
     if state in {"skipped", "skipping"}:
         return "skipping"
-    return "unknown" if state or bucket else "pass"
+    return "unknown"
 
 
 def _is_local_blocking(item: Mapping[str, Any]) -> bool:

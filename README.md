@@ -273,8 +273,9 @@ gh-address-cr agent evidence add owner/repo 123 \
 ```
 
 Later `ActionResponse` or `BatchActionResponse.common` payloads may include `"evidence_ref": "local-verified"` and still provide per-item `note`, `summary`, and `why`.
+When `--validation` is provided without an explicit `=result` suffix, the entire value is treated as the command and the result defaults to `passed`; this keeps commands with environment assignments such as `PYENV_VERSION=3.10.19 python -m unittest` intact.
 
-`agent next` writes both `request_path` and `response_skeleton_path`. Fill the response skeleton when you need a local artifact with the correct `schema_version`, `request_id`, `lease_id`, `agent_id`, `item_id`, `resolution`, `validation_commands`, and GitHub-thread `fix_reply` shape.
+`agent next` writes both `request_path` and `response_skeleton_path`. Fill the response skeleton when you need a local artifact with the correct `schema_version`, `request_id`, `lease_id`, `agent_id`, `item_id`, `resolution`, `validation_commands`, and GitHub-thread `fix_reply` shape. Required user-supplied fields are intentionally empty in the skeleton so an unedited template is rejected instead of published.
 
 Minimal `BatchActionResponse` shape:
 

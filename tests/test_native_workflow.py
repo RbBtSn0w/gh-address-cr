@@ -145,6 +145,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.replies = []
                 self.resolved = []
 
+            def viewer_login(self):
+                return "agent-login"
+
             def post_reply(self, repo, pr_number, thread_id, body):
                 self.replies.append((repo, pr_number, thread_id, body))
                 return "https://github.test/reply"
@@ -203,6 +206,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertFalse(updated["blocking"])
                 self.assertTrue(updated["handled"])
                 self.assertEqual(updated["reply_url"], "https://github.test/reply")
+                self.assertEqual(updated["reply_evidence"]["author_login"], "agent-login")
                 self.assertIn("reply_posted", event_types)
                 self.assertIn("thread_resolved", event_types)
                 self.assertIn("response_published", event_types)
@@ -214,6 +218,9 @@ class NativeWorkflowTests(unittest.TestCase):
             def __init__(self):
                 self.replies = []
                 self.resolved = []
+
+            def viewer_login(self):
+                return "agent-login"
 
             def post_reply(self, repo, pr_number, thread_id, body):
                 self.replies.append((repo, pr_number, thread_id, body))
@@ -280,6 +287,24 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(client.replies[0][2], "THREAD_1")
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
+                self.assertEqual(session["items"]["github-thread:THREAD_1"]["reply_evidence"]["author_login"], "agent-login")
+
+    def test_publish_with_no_ready_items_does_not_require_viewer_login(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def viewer_login(self):
+                raise AssertionError("viewer_login should not be called without publish-ready work")
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, open_item())
+
+                result = workflow.publish_github_thread_responses(repo, pr_number, github_client=FakeGitHubClient())
+
+                self.assertEqual(result["status"], "NO_PUBLISH_READY_ITEMS")
 
     def test_publish_ready_thread_survives_remote_refresh_before_publish(self):
         from gh_address_cr.core import gate, workflow
