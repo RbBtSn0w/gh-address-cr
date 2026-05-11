@@ -12,6 +12,10 @@ AGENTS_MD = ROOT / "AGENTS.md"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
 OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
+AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
+COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
+FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
+STATUS_ACTION_MAP_MD = ROOT / "skill" / "references" / "status-action-map.md"
 OTEL_WORKER_MJS = ROOT / "skill" / "references" / "otel-worker-better-stack" / "worker.mjs"
 OTEL_WORKER_WRANGLER = ROOT / "skill" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
 OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
@@ -32,12 +36,34 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("All paths in this document are relative to the installed skill root.", text)
         self.assertIn("outside the packaged skill payload", text)
 
+    def test_skill_is_concise_first_read_entrypoint(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        word_count = len(text.split())
+        self.assertGreater(word_count, 100)
+        self.assertIn("## Primary Commands", text)
+        self.assertIn("## Common Mistakes", text)
+        self.assertNotIn("## Usage", text)
+        self.assertNotIn("## Multi-Agent Protocol", text)
+        self.assertNotIn("## Agent Feedback", text)
+
+    def test_skill_description_has_trigger_keywords_without_workflow_summary(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("description: Use when", text)
+        self.assertIn("unresolved review threads", text)
+        self.assertIn("pending reviews", text)
+        self.assertIn("stale/outdated threads", text)
+        self.assertNotIn("description: Use when", text.split("---", 2)[2])
+
     def test_skill_examples_use_review_as_main_entrypoint_without_required_input(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]", text)
+        self.assertIn("/gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]", text)
+        self.assertIn("/gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]", text)
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
         self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
+        self.assertIn("$gh-address-cr findings <PR_URL> --input - --sync --source <producer>", text)
+        self.assertNotIn("$gh-address-cr findings <PR_URL> --input - --sync\n", text)
         self.assertIn("If `review` returns `BLOCKED`, inspect the loop request artifact,", text)
         self.assertIn("then rerun the same `review` command.", text)
         self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
@@ -50,6 +76,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_documents_machine_summary_fields(self):
         text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        combined = text + "\n" + protocol_text
         for field in (
             "status",
             "repo",
@@ -64,18 +92,22 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "commands",
             "exit_code",
         ):
-            self.assertIn(f"`{field}`", text)
-        self.assertIn("Lean output keeps only", text)
-        self.assertIn("agent fix-all", text)
-        self.assertIn("agent resolve-stale", text)
+            self.assertIn(f"`{field}`", combined)
+        self.assertIn("Lean output keeps only", protocol_text)
+        self.assertIn("agent fix-all", protocol_text)
+        self.assertIn("agent resolve-stale", protocol_text)
 
     def test_skill_uses_references_for_advanced_dispatch_details(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
         self.assertIn("references/otel-worker-better-stack.md", text)
+        self.assertIn("references/agent-protocol.md", text)
+        self.assertIn("references/completion-contract.md", text)
+        self.assertIn("references/feedback.md", text)
+        self.assertIn("references/status-action-map.md", text)
         self.assertIn("public main entrypoint", text)
-        self.assertIn("advanced/internal", text)
+        self.assertIn("reference surface", text)
         self.assertNotIn("## Prompt Patterns", text)
         self.assertNotIn("README.md", text)
 
@@ -98,9 +130,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_completion_contract_does_not_require_current_run_summary(self):
         text = SKILL_MD.read_text(encoding="utf-8")
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        combined = text + "\n" + completion_text
         self.assertNotIn("readable current-run handling summary", text)
         self.assertNotIn("GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0", text)
         self.assertNotIn("prefer the human-readable `Current Run Snapshot` block", text)
+        self.assertIn("audit summary path + sha256", combined)
 
     def test_skill_identifies_as_thin_adapter(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -126,17 +161,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_documents_agent_feedback_command_and_trigger(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("gh-address-cr submit-feedback", text)
-        self.assertIn("When the skill itself blocks progress", text)
-        self.assertIn("`RbBtSn0w/gh-address-cr`", text)
-        self.assertIn("`--using-repo` and `--using-pr`", text)
-        self.assertIn("Do not file feedback issues for normal PR findings", text)
-        self.assertNotIn("- when the skill itself blocks progress", text)
+        feedback_text = FEEDBACK_MD.read_text(encoding="utf-8")
+        self.assertIn("references/feedback.md", text)
+        self.assertIn("gh-address-cr submit-feedback", feedback_text)
+        self.assertIn("When the skill itself blocks progress", feedback_text)
+        self.assertIn("`RbBtSn0w/gh-address-cr`", feedback_text)
+        self.assertIn("`--using-repo` and `--using-pr`", feedback_text)
+        self.assertIn("Do not file feedback issues for normal PR findings", feedback_text)
+        self.assertIn("--artifact <loop-request.json>", feedback_text)
+        self.assertNotIn("--artifact /tmp/loop-request.json", feedback_text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
-        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
         self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
@@ -145,13 +183,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
         self.assertIn("`summary`", readme_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
-        # SKILL.md must document fix_reply as a JSON object with required and optional fields
-        self.assertIn("`fix_reply` **must be a JSON object**", skill_text)
-        self.assertIn("`commit_hash`", skill_text)
-        self.assertIn("`files`", skill_text)
-        self.assertIn("`test_command`", skill_text)
-        self.assertIn("`test_result`", skill_text)
-        self.assertIn("MISSING_PUBLISH_REPLY", skill_text)
+        self.assertIn("`fix_reply` **must be a JSON object**", protocol_text)
+        self.assertIn("`commit_hash`", protocol_text)
+        self.assertIn("`files`", protocol_text)
+        self.assertIn("`test_command`", protocol_text)
+        self.assertIn("`test_result`", protocol_text)
+        self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
@@ -248,7 +285,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("gh-address-cr review", hint_text)
 
     def test_referenced_skill_owned_docs_exist(self):
-        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
+        for path in (
+            MODE_PRODUCER_MATRIX_MD,
+            LOCAL_REVIEW_ADAPTER_MD,
+            AGENT_PROTOCOL_MD,
+            COMPLETION_CONTRACT_MD,
+            FEEDBACK_MD,
+            STATUS_ACTION_MAP_MD,
+            OPENAI_HINT_YAML,
+        ):
             self.assertTrue(path.exists(), msg=str(path))
         for path in (OTEL_WORKER_BETTER_STACK_MD, OTEL_WORKER_MJS, OTEL_WORKER_WRANGLER):
             self.assertTrue(path.exists(), msg=str(path))
@@ -396,7 +441,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         )
 
     def test_completion_summary_final_gate_evidence(self):
-        text = SKILL_MD.read_text(encoding="utf-8")
+        text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        self.assertIn("`gh-address-cr final-gate <owner/repo> <pr_number>` command invocation", text)
+        self.assertNotIn("`final_gate` command used", text)
         self.assertIn("`Verified: 0 Unresolved Threads found`", text)
         self.assertIn("`Verified: 0 Pending Reviews found`", text)
         self.assertIn("unresolved GitHub threads = 0", text)

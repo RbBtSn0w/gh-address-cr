@@ -1,34 +1,45 @@
 ---
 name: gh-address-cr
-description: Use when a GitHub Pull Request needs review-thread reply and resolve handling, findings ingestion, and a mandatory final gate in one PR-scoped session.
+description: Use when a GitHub Pull Request has unresolved review threads, pending reviews, stale/outdated threads, local findings ingestion, or needs mandatory final-gate proof in one PR-scoped session.
 argument-hint: "<active-pr|review|address|threads|findings|adapter> ..."
 ---
 
 # gh-address-cr
 
-Use this skill as the thin adapter for the `gh-address-cr` runtime CLI.
-The runtime owns session state, intake routing, GitHub side effects, leases, and the final gate.
+Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runtime owns session state, intake routing, GitHub side effects, leases, reply/resolve publication, and the final gate.
 
-## Usage
+## Primary Commands
 
 ```text
 /gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]
-/gh-address-cr review <owner/repo> <pr_number>
+/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]
 /gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]
 /gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]
-/gh-address-cr version
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
+/gh-address-cr version
+```
+
+Examples:
+
+```text
+$gh-address-cr review <PR_URL>
+$gh-address-cr address <PR_URL> --lean
+$gh-address-cr review --auto-simple <PR_URL>
+$gh-address-cr threads <PR_URL> --lean
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync --source <producer>
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
 
 ## Packaging Scope
 
-This file is part of the packaged `gh-address-cr` skill.
-All paths in this document are relative to the installed skill root.
+This file is part of the packaged `gh-address-cr` skill. All paths in this document are relative to the installed skill root.
 
-- `scripts/cli.py` is a compatibility shim that delegates to the external runtime CLI
-- `references/...` means skill-owned reference docs
-- `agents/openai.yaml` is an assistant-specific hint file inside the skill
+- `scripts/cli.py` is a compatibility shim that delegates to the external runtime CLI.
+- `references/...` means skill-owned reference docs.
+- `agents/openai.yaml` is an assistant-specific hint file inside the skill.
 
 A surrounding source repository may also contain repo-level tests, CI, and release metadata, but those are outside the packaged skill payload.
 
@@ -43,313 +54,50 @@ The packaged skill must not be treated as the implementation owner for workflow 
 
 If the runtime is missing or incompatible, the shim must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
 
-## Agent Execution Ladder
+## Execution Ladder
 
-Read this skill in this order when you are an AI agent:
-
-1. If the PR number is not known, run `active-pr [--repo <owner/repo>] [--head <branch>]`; it only returns OPEN PRs and fails loud for none or many.
+1. If the PR number is unknown, run `active-pr`; it only returns OPEN PRs and fails loud for none or many.
 2. Start from the public main entrypoint: `review <owner/repo> <pr_number>`, or `address <owner/repo> <pr_number> --lean` for simple GitHub-thread-only PRs.
-3. Inspect the JSON machine summary output from the runtime, preferring `--lean` / `--summary` on `address`, `threads`, and `review --auto-simple` when the thread list is large.
-4. Consult `references/status-action-map.md` to map the runtime `status`, `reason_code`, and `next_action` to your next safe step. You MUST branch your execution strictly based on these structured fields. Never parse or infer state from human prose or logs.
-5. For multi-agent execution, use `agent orchestrate start`, `agent orchestrate step`, `agent orchestrate submit`, `agent orchestrate status`, and `agent orchestrate stop` through the runtime CLI.
-6. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
+3. Inspect the JSON machine summary. Prefer `--lean` or `--summary` on `address`, `threads`, and `review --auto-simple` when thread lists are large.
+4. Consult `references/status-action-map.md` and branch strictly on `status`, `reason_code`, `waiting_on`, `next_action`, and `commands`.
+5. Start from the runtime dispatcher:
+  - `gh-address-cr review <owner/repo> <pr_number>`
+  - `gh-address-cr address <owner/repo> <pr_number> --lean`
+  - `gh-address-cr threads <owner/repo> <pr_number> --lean`
+  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync --source <producer>]`
+  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
 
-Fail-fast rules:
+If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-- `review` is the full public main entrypoint; `address` is the lightweight GitHub-thread-only shortcut.
-- `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format. This converter rejects plain narrative Markdown review output.
-- AI agents must not post GitHub replies or resolve threads directly; the runtime records evidence and performs deterministic side effects.
-- If a command outputs a `reason_code` or `next_action`, your next step MUST be determined solely by that code, ignoring all other prose in the `message` field.
+## Common Mistakes
 
-## Machine Summary Contract
+- Do not infer state from human prose or logs. Use only structured machine fields and the status-action map.
+- Do not post GitHub replies or resolve review threads directly. The runtime records evidence and performs deterministic side effects.
+- Do not treat `STALE` or outdated GitHub threads as clean. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
+- Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed.
+- Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.
+- Do not use this skill as the review engine itself; it manages intake, state, processing discipline, and gating.
+- Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 
-High-level commands emit structured JSON by default. Agents MUST consume these fields and MUST NOT parse human prose to determine system state:
+## Required Facts
 
-- `status`
-- `repo`
-- `pr_number`
-- `item_id`
-- `item_kind`
-- `counts`
-- `artifact_path`
-- `reason_code`
-- `waiting_on`
-- `next_action`
-- `commands`
-- `exit_code`
-- `diagnostics` (optional, for GitHub CLI/API failures)
+`review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format. This converter rejects plain narrative Markdown review output.
 
-`reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
-`counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
-When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
-`commands` contains executable command templates for the current PR. Prefer those templates over reconstructing commands manually.
-The `threads` command and lightweight address states may also include a `threads` array. Full output includes actionable GitHub thread context (`thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence). Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
+For GitHub review threads, reply and resolve are both mandatory. A GitHub thread is not terminally clean unless reply evidence exists with a concrete reply URL from the current authenticated GitHub login.
 
-## Multi-Agent Protocol
+`producer=code-review` must emit findings JSON before session handling starts. Local findings become terminal only with a note and required evidence.
 
-Use the runtime as the coordinator:
+## Reference Surface
 
-- `gh-address-cr agent manifest`
-  - discover supported roles, actions, formats, and protocol versions
-- `gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>`
-  - records triage classification evidence before a mutating fixer lease is issued
-- `gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>`
-  - claims one eligible item and writes an `ActionRequest`
-- `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
-  - validates an `ActionResponse`, lease ownership, and required evidence
-  - when it returns `ACTION_ACCEPTED`, run the returned `next_action`; accepted GitHub-thread fixes publish through `agent publish`
-  - use `--publish` only when an accepted GitHub-thread fix should be posted and resolved immediately
-- `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
-  - validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items
-  - shares common commit/files/validation evidence while keeping per-thread `summary`/`why`
-- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>`
-  - records reusable commit/files/validation evidence for later `evidence_ref` use in responses
-- `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--publish]`
-  - classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> [--publish] [--include-stale]`
-  - classifies, claims, and submits safe batches for matching GitHub-thread items already present in the runtime session
-- `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--publish]`
-  - handles only matching `STALE` GitHub-thread items through the same evidence, lease, publish, and final-gate path; it never marks stale threads resolved directly
-- `gh-address-cr agent leases <owner/repo> <pr_number>`
-  - inspects active and terminal claims
-- `gh-address-cr agent reclaim <owner/repo> <pr_number>`
-  - expires stale leases without deleting accepted evidence
-- `gh-address-cr doctor [<owner/repo> <pr_number>]`
-  - checks GitHub CLI availability/auth, viewer lookup, optional repository access, and runtime cache writeability before retrying blocked workflows
+The reference surface is intentionally split so this file stays a first-read entrypoint.
 
-Role boundaries:
-
-- coordinator: deterministic runtime CLI
-- review_producer: emits normalized findings
-- triage: classifies fix/clarify/defer/reject
-- fixer: changes files and returns evidence
-- verifier: checks submitted evidence
-- publisher: deterministic runtime side-effect role
-- gatekeeper: deterministic final-gate role
-
-Classification is triage-phase evidence. Resolution is response-phase evidence. Do not satisfy `MISSING_CLASSIFICATION` by adding a `resolution` field to a response file; run `agent classify` first. Do not satisfy `MISSING_RESOLUTION` by reclassifying the item; add `resolution` to the `ActionResponse` and rerun `agent submit`.
-
-Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
-Fix responses require changed files and validation evidence. For GitHub thread `fix` resolutions, `fix_reply` **must be a JSON object**, not a string — submitting a plain string passes `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as the default validation evidence. See `references/mode-producer-matrix.md` for the complete field reference.
-Clarify/defer/reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. The default manifest exposes `max_parallel_claims: 2`, so claim the allowed leases, submit accepted batch evidence for those leased threads, publish, then claim the next set. Prefer `agent fix-all` when one commit/files/validation set addresses multiple already-synced GitHub threads; it still uses per-item classification, leases, and batch evidence under that limit. The same agent may claim multiple GitHub-thread fixer leases that overlap only by file path when one commit covers same-file comments; thread reply/resolve side effects remain item-scoped.
-
-`agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published. If several responses share the same commit, files, and validation commands, record an evidence profile with `agent evidence add` and reference it with `"evidence_ref": "<profile>"` while keeping per-item `note`, `summary`, and `why`.
-
-For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved.
-
-If you receive an `ActionRequest` path and need a local response artifact, the helper accepts runtime request files with `repository_context.repo` and `repository_context.pr_number`:
-
-```bash
-gh-address-cr submit-action <action-request.json> \
-  --agent-id codex-fixer-1 \
-  --resolution fix \
-  --note "Fixed the thread." \
-  --commit-hash abc123 \
-  --files src/example.py \
-  --validation-cmd "python3 -m unittest tests.test_example=passed" \
-  --output-dir /tmp/gh-address-cr-response
-```
-
-Then submit the generated `ActionResponse` with the runtime command printed by the helper. Use `--output-dir` when the PR workspace or runtime cache is not writable from the current sandbox.
-
-## Advanced References
-
+- State machine index: `references/status-action-map.md`
+- Agent protocol details: `references/agent-protocol.md`
+- Completion contract: `references/completion-contract.md`
+- Feedback issue workflow: `references/feedback.md`
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
 - Evidence ledger expectations: `references/evidence-ledger.md`
 - Optional OTel -> Worker -> Better Stack logging: `references/otel-worker-better-stack.md`
-- Low-level scripts are implementation details, not the public agent surface.
 
-Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.
-
-## Entry Contract
-
-Treat `SKILL.md` as the source of truth for using this skill.
-
-- Start from the runtime dispatcher:
-  - `gh-address-cr review <owner/repo> <pr_number>`
-  - `gh-address-cr address <owner/repo> <pr_number> --lean`
-  - `gh-address-cr threads <owner/repo> <pr_number> --lean`
-  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync]`
-  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
-- Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
-- Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
-
-## Capability Status
-
-These high-level paths are fully operational now:
-
-- `review`
-- `address`
-- `threads`
-- `findings`
-- `adapter`
-
-The internal iteration and dispatch layers are implementation details and are not part of the public entrypoint surface.
-
-Advanced producer and dispatch details live in:
-
-- `references/mode-producer-matrix.md`
-- `references/cr-triage-checklist.md`
-
-## Non-Negotiable Rule
-
-`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
-
-- Never output "done", "all resolved", "completed", or equivalent unless:
-  - `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed, and
-  - output includes `Verified: 0 Unresolved Threads found`, and
-  - output includes `Verified: 0 Pending Reviews found`, and
-  - session blocking item count is zero.
-- Use `audit_summary.md` or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed.
-- If gate fails, continue iteration; completion summary is forbidden.
-
-## Core Rules
-
-1. Use the high-level task entrypoints first:
-  - `gh-address-cr review <owner/repo> <pr_number>`
-  - `gh-address-cr address <owner/repo> <pr_number> --lean`
-  - `gh-address-cr threads <owner/repo> <pr_number> --lean`
-  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|-`
-  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
-2. Use the internal low-level dispatch only when the high-level entrypoints do not fit.
-3. Process only unresolved GitHub threads and open local findings.
-4. For GitHub review threads, reply and resolve are both mandatory.
-5. A GitHub thread is not terminally clean unless reply evidence exists with a concrete reply URL from the current authenticated GitHub login.
-6. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled through runtime-mediated evidence, for example `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files`.
-7. For local findings, terminal handling must include a note.
-8. `producer=code-review` must emit findings JSON before session handling starts.
-9. Never declare completion before `gh-address-cr final-gate` passes.
-10. Low-level resolve flows must refuse resolve-only handling when reply evidence is absent.
-
-
-## Producer Contract
-
-`gh-address-cr` is the orchestrator. Producers are replaceable.
-
-- `code-review` is a producer, not the session owner.
-- `code-review` here means "review-style findings producer", not one mandatory skill name.
-- `code-review` now uses the built-in `code-review-adapter` backend for structured intake.
-- If the upstream review output is fixed-format `finding` blocks, normalize it with `review-to-findings` before ingestion.
-- `review-to-findings` does not accept arbitrary Markdown prose.
-- `gh-address-cr` only assumes the normalized finding contract:
-  - `title`
-  - `body`
-  - `path`
-  - `line`
-- Accepted findings input shapes:
-  - JSON array of finding objects
-  - JSON object with `findings`, `issues`, or `results`
-  - NDJSON, one finding object per line
-- Accepted field aliases:
-  - `path` or `file` or `filename`
-  - `line` or `start_line` or `position`
-  - `title` or `rule` or `check`
-  - `body` or `message` or `description`
-- Input path rule:
-  - use `--input <path>` only when a producer already emitted a real JSON file
-  - otherwise prefer `--input -` and pipe findings through `stdin`
-  - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
-- Refresh rule:
-  - use `--sync` when re-ingesting the same source and you want missing local findings to auto-close
-- Supported dispatch paths live in:
-  - `references/mode-producer-matrix.md`
-
-
-## Discovery Rules
-
-Use this skill when the task involves one or more of these needs:
-
-- handle GitHub PR review threads with explicit reply and resolve steps
-- ingest local review findings into a PR-scoped session
-- run a final gate before declaring review completion
-- keep remote threads and local findings under one auditable PR session
-
-Do not use this skill as the review engine itself.
-
-- It manages intake, state, processing discipline, and gating.
-- It does not own the reasoning logic of external review producers.
-
-## Decision Matrix
-
-- **Accept**: real bug or low-cost valid improvement; fix and provide evidence.
-- **Clarify**: reviewer misunderstood the code; explain without changing code.
-- **Defer**: non-blocking or high-cost preference; explain the tradeoff.
-- **Reject**: suggestion is technically incorrect, conflicts with the current contract, or would break an intentional compatibility guarantee.
-
-
-
-
-## Agent Feedback
-
-- When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
-- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
-- Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
-- Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
-- Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
-- Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
-- For PR-scoped feedback, always provide `--using-repo` and `--using-pr` so the issue body names the repository and pull request under review. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred.
-- When `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
-- Repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
-- Use `gh-address-cr submit-feedback` with explicit fields so the body matches the repository issue format:
-  - `--category`
-  - `--title`
-  - `--summary`
-  - `--expected`
-  - `--actual`
-  - optional `--source-command`, `--failing-command`, `--exit-code`, `--status`, `--reason-code`, `--waiting-on`, `--run-id`, `--skill-version`, `--using-repo`, `--using-pr`, `--artifact`, and `--notes`
-- Example:
-  - `gh-address-cr submit-feedback --category workflow-gap --title "blocked without a recovery step" --summary "review stopped in a blocked state without enough operator guidance." --expected "the skill should identify the next command or artifact to inspect." --actual "the workflow stopped and the next action was ambiguous." --source-command "gh-address-cr review owner/repo 123" --failing-command "gh-address-cr final-gate owner/repo 123" --exit-code 5 --status BLOCKED --reason-code WAITING_FOR_FIX --waiting-on human_fix --run-id cr-loop-20260417T120000Z --skill-version 1.2.0 --using-repo owner/repo --using-pr 123 --artifact /tmp/loop-request.json`
-
-
-## Completion Contract
-
-Final output must include:
-
-1. `final_gate` command used
-2. `Verified: 0 Unresolved Threads found`
-3. `Verified: 0 Pending Reviews found`
-4. unresolved GitHub threads = 0
-5. session blocking items = 0
-6. audit summary path + sha256
-
-For run-scoped diagnostics, use:
-
-- `gh-address-cr audit-report --run-id <run_id> <owner/repo> <pr_number>`
-- successful `gh-address-cr final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
-
-
-## Why CR Appears Later (Use This Exact Logic)
-
-- GitHub review bots run asynchronously.
-- New commits trigger re-analysis and can generate new comments.
-- Old threads can become outdated; new ones may appear on different lines.
-
-## References
-
-- dispatch matrix: `references/mode-producer-matrix.md`
-- checklist: `references/cr-triage-checklist.md`
-- stable operator surface: `gh-address-cr`
-- preferred automation surface: `gh-address-cr ...`
-- AI agent feedback helper: `gh-address-cr submit-feedback`
-- code-review bridge prompt: `gh-address-cr prepare-code-review <local|mixed> <owner/repo> <pr_number>`
-- Markdown-to-findings converter: `gh-address-cr review-to-findings <owner/repo> <pr_number> --input -`
-- code-review adapter backend: `gh-address-cr code-review-adapter --input -`
-
-Examples:
-
-```text
-$gh-address-cr review <PR_URL>
-$gh-address-cr address <PR_URL> --lean
-$gh-address-cr review --auto-simple <PR_URL>
-$gh-address-cr threads <PR_URL> --lean
-$gh-address-cr findings <PR_URL> --input findings.json
-$gh-address-cr findings <PR_URL> --input - --sync
-$gh-address-cr adapter <PR_URL> <adapter_cmd...>
-$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
-```
-
-If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, or `defer`, then rerun the same `review` command.
-
-Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
+Low-level scripts are implementation details, not the public agent surface.
