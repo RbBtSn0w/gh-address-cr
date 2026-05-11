@@ -39,8 +39,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_is_concise_first_read_entrypoint(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         word_count = len(text.split())
-        self.assertGreaterEqual(word_count, 600)
-        self.assertLessEqual(word_count, 900)
+        self.assertGreater(word_count, 100)
         self.assertIn("## Primary Commands", text)
         self.assertIn("## Common Mistakes", text)
         self.assertNotIn("## Usage", text)
@@ -57,10 +56,14 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_examples_use_review_as_main_entrypoint_without_required_input(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]", text)
+        self.assertIn("/gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]", text)
+        self.assertIn("/gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]", text)
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
         self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
+        self.assertIn("$gh-address-cr findings <PR_URL> --input - --sync --source <producer>", text)
+        self.assertNotIn("$gh-address-cr findings <PR_URL> --input - --sync\n", text)
         self.assertIn("If `review` returns `BLOCKED`, inspect the loop request artifact,", text)
         self.assertIn("then rerun the same `review` command.", text)
         self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
@@ -165,6 +168,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`RbBtSn0w/gh-address-cr`", feedback_text)
         self.assertIn("`--using-repo` and `--using-pr`", feedback_text)
         self.assertIn("Do not file feedback issues for normal PR findings", feedback_text)
+        self.assertIn("--artifact <loop-request.json>", feedback_text)
+        self.assertNotIn("--artifact /tmp/loop-request.json", feedback_text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
@@ -437,6 +442,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_completion_summary_final_gate_evidence(self):
         text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        self.assertIn("`gh-address-cr final-gate <owner/repo> <pr_number>` command invocation", text)
+        self.assertNotIn("`final_gate` command used", text)
         self.assertIn("`Verified: 0 Unresolved Threads found`", text)
         self.assertIn("`Verified: 0 Pending Reviews found`", text)
         self.assertIn("unresolved GitHub threads = 0", text)

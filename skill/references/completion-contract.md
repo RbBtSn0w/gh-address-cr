@@ -12,7 +12,7 @@ Never output "done", "all resolved", "completed", or equivalent unless:
 
 Final output must include:
 
-1. `final_gate` command used
+1. the explicit `gh-address-cr final-gate <owner/repo> <pr_number>` command invocation used
 2. `Verified: 0 Unresolved Threads found`
 3. `Verified: 0 Pending Reviews found`
 4. unresolved GitHub threads = 0

@@ -47,5 +47,5 @@ gh-address-cr submit-feedback \
   --skill-version 1.2.0 \
   --using-repo owner/repo \
   --using-pr 123 \
-  --artifact /tmp/loop-request.json
+  --artifact <loop-request.json>
 ```

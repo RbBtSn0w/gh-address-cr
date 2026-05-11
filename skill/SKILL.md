@@ -12,9 +12,9 @@ Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runt
 
 ```text
 /gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]
-/gh-address-cr review <owner/repo> <pr_number>
-/gh-address-cr address <owner/repo> <pr_number> --lean
-/gh-address-cr threads <owner/repo> <pr_number> --lean
+/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]
+/gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]
+/gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 /gh-address-cr version
@@ -28,7 +28,7 @@ $gh-address-cr address <PR_URL> --lean
 $gh-address-cr review --auto-simple <PR_URL>
 $gh-address-cr threads <PR_URL> --lean
 $gh-address-cr findings <PR_URL> --input findings.json
-$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr findings <PR_URL> --input - --sync --source <producer>
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
 $gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
@@ -64,7 +64,7 @@ If the runtime is missing or incompatible, the shim must fail loudly before sess
   - `gh-address-cr review <owner/repo> <pr_number>`
   - `gh-address-cr address <owner/repo> <pr_number> --lean`
   - `gh-address-cr threads <owner/repo> <pr_number> --lean`
-  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync]`
+  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync --source <producer>]`
   - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
