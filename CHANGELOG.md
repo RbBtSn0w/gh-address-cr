@@ -1,3 +1,9 @@
+## [2.4.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.0...v2.4.1) (2026-05-11)
+
+### Bug Fixes
+
+* **skill:** update SKILL.md and add reference documents ([#52](https://github.com/RbBtSn0w/gh-address-cr/issues/52)) ([db99dfa](https://github.com/RbBtSn0w/gh-address-cr/commit/db99dfadca1d3141b4ebc7b3fd20a238cde6b486))
+
 ## [2.4.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.7...v2.4.0) (2026-05-11)
 
 ### Features
