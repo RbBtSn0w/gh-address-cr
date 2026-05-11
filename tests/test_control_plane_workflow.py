@@ -764,6 +764,392 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(item["state"], "publish_ready")
         self.assertEqual(item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
 
+    def test_agent_fix_all_batches_matching_thread_files(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    thread_id="PRRT_def",
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_ACCEPTED")
+        self.assertEqual(payload["matched_count"], 2)
+        self.assertEqual(payload["accepted_count"], 2)
+        self.assertEqual(payload["batches"][0]["status"], "BATCH_ACTION_ACCEPTED")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "publish_ready")
+        self.assertEqual(session["items"]["github-thread:abc"]["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
+
+    def test_agent_fix_all_excludes_stale_without_opt_in(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:stale",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="stale",
+                    status="STALE",
+                    is_outdated=True,
+                    thread_id="PRRT_stale",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_NO_MATCH")
+        self.assertEqual(payload["reason_code"], "NO_MATCHING_GITHUB_THREADS")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:stale"]["state"], "stale")
+
+    def test_agent_fix_all_excludes_outdated_without_opt_in(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:outdated",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="open",
+                    status="OPEN",
+                    is_outdated=True,
+                    thread_id="PRRT_outdated",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_NO_MATCH")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:outdated"]["state"], "open")
+
+    def test_agent_resolve_stale_matches_only_stale_thread_files(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:stale",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="stale",
+                    status="STALE",
+                    is_outdated=True,
+                    thread_id="PRRT_stale",
+                ),
+                open_item(
+                    "github-thread:open",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    thread_id="PRRT_open",
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_ACCEPTED")
+        self.assertEqual(payload["matched_count"], 1)
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:stale"]["state"], "publish_ready")
+        self.assertEqual(session["items"]["github-thread:open"]["state"], "open")
+
+    def test_agent_resolve_stale_matches_legacy_outdated_thread_files(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:outdated",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="open",
+                    status="OPEN",
+                    is_outdated=True,
+                    thread_id="PRRT_outdated",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_ACCEPTED")
+        self.assertEqual(payload["matched_count"], 1)
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:outdated"]["state"], "publish_ready")
+
+    def test_agent_resolve_stale_skips_publish_ready_outdated_items(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:stale",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="publish_ready",
+                    status="OPEN",
+                    is_outdated=True,
+                    thread_id="PRRT_stale",
+                    accepted_response={
+                        "resolution": "fix",
+                        "fix_reply": {"commit_hash": "old123", "files": ["src/stale.py"]},
+                    },
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_NO_MATCH")
+        self.assertEqual(payload["reason_code"], "NO_MATCHING_GITHUB_THREADS")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:stale"]["state"], "publish_ready")
+        self.assertEqual(session["items"]["github-thread:stale"]["accepted_response"]["fix_reply"]["commit_hash"], "old123")
+
+    def test_agent_resolve_stale_missing_validation_uses_stale_status(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:stale",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="stale",
+                    status="STALE",
+                    is_outdated=True,
+                    thread_id="PRRT_stale",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_VALIDATION_COMMANDS")
+        self.assertEqual(payload["waiting_on"], "stale_resolution_input")
+
+    def test_agent_resolve_stale_missing_commit_files_uses_stale_status(self):
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "missingcommit123",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "COMMIT_FILES_UNAVAILABLE")
+
+    def test_agent_fix_all_reports_partial_when_one_matched_thread_is_leased(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/first.py",
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/second.py",
+                    thread_id="PRRT_def",
+                ),
+            ],
+            leases={
+                "lease-existing": {
+                    "lease_id": "lease-existing",
+                    "item_id": "github-thread:def",
+                    "agent_id": "other-agent",
+                    "role": "fixer",
+                    "status": "active",
+                    "created_at": NOW.isoformat(),
+                    "expires_at": (NOW + timedelta(hours=1)).isoformat(),
+                    "resume_token": "resume:req_existing",
+                    "request_hash": "existing-request-hash",
+                    "request_id": "req_existing",
+                    "conflict_keys": [],
+                }
+            },
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/first.py,src/second.py",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+            "--now",
+            NOW.isoformat(),
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_PARTIAL")
+        self.assertEqual(payload["accepted_count"], 1)
+        self.assertEqual(payload["failed_count"], 1)
+        self.assertEqual(payload["item_ids"], ["github-thread:abc"])
+        self.assertEqual(payload["failed"][0]["item_id"], "github-thread:def")
+        self.assertEqual(payload["failed"][0]["reason_code"], "NO_ELIGIBLE_ITEM")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+
+    def test_agent_fix_all_requires_validation(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_VALIDATION_COMMANDS")
+
     def test_agent_submit_batch_rejects_local_findings_without_mutation(self):
         self.write_session(
             items=[

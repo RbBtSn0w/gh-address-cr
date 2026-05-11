@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
+from gh_address_cr import (
+    MAX_PARALLEL_CLAIMS,
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    SUPPORTED_SKILL_CONTRACT_VERSIONS,
+    __version__,
+)
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
@@ -69,6 +75,7 @@ COMMAND_TO_SCRIPT = {
 HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version"}
 NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 OUTPUT_FLAGS = {"--machine", "--human"}
+LEAN_FLAGS = {"--lean", "--summary"}
 HIGH_LEVEL_GH_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
@@ -145,25 +152,43 @@ def inline_output_flags(command: str, passthrough_args: list[str]) -> set[str]:
     return {arg for arg in passthrough_args if arg in OUTPUT_FLAGS}
 
 
+def inline_lean_flags(command: str, passthrough_args: list[str]) -> set[str]:
+    if command not in {"address", "review", "threads"}:
+        return set()
+    return {arg for arg in passthrough_args if arg in LEAN_FLAGS}
+
+
 def normalize_output_args(args: argparse.Namespace) -> bool:
     inline_flags = inline_output_flags(args.command, args.args)
+    inline_lean = inline_lean_flags(args.command, args.args)
     requested_flags = set(inline_flags)
     if args.machine:
         requested_flags.add("--machine")
     if args.human:
         requested_flags.add("--human")
+    requested_lean = bool(inline_lean or getattr(args, "lean", False) or getattr(args, "summary", False))
     if requested_flags == {"--machine", "--human"}:
         print("--machine and --human are mutually exclusive.", file=sys.stderr)
+        return False
+    if requested_lean and "--human" in requested_flags:
+        print("--lean/--summary and --human are mutually exclusive.", file=sys.stderr)
         return False
     if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
         print(
             f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr
         )
         return False
+    if args.command not in {"address", "review", "threads"} and requested_lean:
+        print("--lean/--summary is only supported for address, review, and threads.", file=sys.stderr)
+        return False
     args.machine = "--machine" in requested_flags
     args.human = "--human" in requested_flags
+    args.lean = requested_lean
     if args.command != "adapter":
-        args.args = [arg for arg in args.args if arg not in OUTPUT_FLAGS]
+        stripped_flags = set(OUTPUT_FLAGS)
+        if args.command in {"address", "review", "threads"}:
+            stripped_flags.update(LEAN_FLAGS)
+        args.args = [arg for arg in args.args if arg not in stripped_flags]
     return True
 
 
@@ -191,30 +216,33 @@ def rewrite_alias_args(
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: gh-address-cr review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
+            "usage: gh-address-cr review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine|--lean|--summary]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
             "This command waits for external review findings when they are absent,\n"
             "then tells you to re-run the same review command once handoff artifacts are filled.\n"
             "You may still provide findings JSON explicitly via --input <path> or --input -.\n"
             "Use --auto-simple for a lightweight GitHub thread-only path that does not wait for external review findings.\n"
+            "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
     if command == "address":
         return (
-            "usage: gh-address-cr address <owner/repo> <pr_number> [--human|--machine]\n\n"
+            "usage: gh-address-cr address <owner/repo> <pr_number> [--human|--machine|--lean|--summary]\n\n"
             "Lightweight GitHub thread-only entrypoint.\n\n"
             "Use for simple PRs where only GitHub review threads need addressing.\n"
             "This command does not wait for external review findings and does not ingest local findings.\n"
+            "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
     if command == "threads":
         return (
-            "usage: gh-address-cr threads <owner/repo> <pr_number> [--human|--machine]\n\n"
+            "usage: gh-address-cr threads <owner/repo> <pr_number> [--human|--machine|--lean|--summary]\n\n"
             "High-level GitHub review-thread entrypoint.\n\n"
             "Use when only GitHub review threads need processing.\n"
+            "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -458,6 +486,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": result.returncode,
+        "commands": _summary_commands(repo, pr_number),
     }
 
 
@@ -491,6 +520,7 @@ def build_preflight_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
+        "commands": _summary_commands(repo, pr_number),
     }
     if diagnostics:
         summary["diagnostics"] = diagnostics
@@ -985,6 +1015,7 @@ def _native_summary(
     item: dict | None = None,
     include_threads: bool = False,
     diagnostics: dict | None = None,
+    lean: bool = False,
 ) -> dict:
     metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
     summary = {
@@ -1004,15 +1035,38 @@ def _native_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
+        "commands": _summary_commands(repo, pr_number),
     }
     if diagnostics:
         summary["diagnostics"] = diagnostics
     if command == "threads" or include_threads:
-        summary["threads"] = _native_thread_rows(session)
+        summary["threads"] = _native_thread_rows(session, lean=lean)
     return summary
 
 
-def _native_thread_rows(session: dict) -> list[dict]:
+def _summary_commands(repo: str, pr_number: str) -> dict[str, str]:
+    return {
+        "address": f"gh-address-cr address {repo} {pr_number} --lean",
+        "review_auto_simple": f"gh-address-cr review --auto-simple {repo} {pr_number} --lean",
+        "threads": f"gh-address-cr threads {repo} {pr_number} --lean",
+        "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
+        "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
+        "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+        "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
+        "fix_all": (
+            f"gh-address-cr agent fix-all {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed>"
+        ),
+        "resolve_stale": (
+            f"gh-address-cr agent resolve-stale {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
+        ),
+        "publish": f"gh-address-cr agent publish {repo} {pr_number}",
+        "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
+    }
+
+
+def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
     items = session.get("items") if isinstance(session.get("items"), dict) else {}
     rows = []
     for item_id, item in sorted(items.items()):
@@ -1022,23 +1076,31 @@ def _native_thread_rows(session: dict) -> list[dict]:
         state = str(item.get("state") or "")
         thread_id = item.get("thread_id") or item.get("origin_ref") or str(item_id).removeprefix("github-thread:")
         reply_evidence = item.get("reply_evidence") if isinstance(item.get("reply_evidence"), dict) else None
-        rows.append(
+        base = {
+            "item_id": str(item.get("item_id") or item_id),
+            "thread_id": thread_id,
+            "path": item.get("path"),
+            "line": item.get("line"),
+            "state": state or None,
+            "status": status or None,
+            "is_resolved": is_resolved_github_thread(item),
+            "is_outdated": is_stale_or_outdated_github_thread(item),
+            "accepted_response_present": isinstance(item.get("accepted_response"), dict),
+        }
+        if lean:
+            base["claimable"] = is_claimable_github_thread(item)
+            base["reply_evidence_present"] = bool(reply_evidence)
+            rows.append(base)
+            continue
+        base.update(
             {
-                "item_id": str(item.get("item_id") or item_id),
-                "thread_id": thread_id,
-                "path": item.get("path"),
-                "line": item.get("line"),
                 "body": item.get("body"),
                 "url": item.get("url"),
-                "state": state or None,
-                "status": status or None,
                 "item_kind": "github_thread",
-                "is_resolved": is_resolved_github_thread(item),
-                "is_outdated": is_stale_or_outdated_github_thread(item),
                 "reply_evidence": reply_evidence,
-                "accepted_response_present": isinstance(item.get("accepted_response"), dict),
             }
         )
+        rows.append(base)
     return rows
 
 
@@ -1081,13 +1143,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
             "When common commit, file, and validation evidence applies, submit one BatchActionResponse with per-thread summary/why entries.",
             "After accepted evidence is present, run agent publish.",
         ],
-        "commands": {
-            "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
-            "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
-            "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-            "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
-            "publish": f"gh-address-cr agent publish {repo} {pr_number}",
-        },
+        "commands": _summary_commands(repo, pr_number),
     }
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return request_path
@@ -1132,6 +1188,23 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
     parser = argparse.ArgumentParser(prog=f"gh-address-cr {command}", add_help=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
+    if command == "adapter":
+        parser.add_argument("adapter_cmd", nargs=argparse.REMAINDER)
+        parsed = parser.parse_args(args)
+        if parsed.adapter_cmd and parsed.adapter_cmd[0] == "--":
+            parsed.adapter_cmd = parsed.adapter_cmd[1:]
+        parsed.input = None
+        parsed.source = None
+        parsed.sync = False
+        parsed.handoff_sha256 = None
+        parsed.scan_id = None
+        parsed.audit_id = None
+        parsed.snapshot = None
+        parsed.max_iterations = 1
+        parsed.lean = False
+        parsed.summary = False
+        parsed.auto_simple = False
+        return parsed
     parser.add_argument("adapter_cmd", nargs="*")
     if command == "review":
         parser.add_argument("--auto-simple", action="store_true")
@@ -1143,6 +1216,8 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
     parser.add_argument("--audit-id")
     parser.add_argument("--snapshot")
     parser.add_argument("--max-iterations", type=int, default=1)
+    parser.add_argument("--lean", action="store_true")
+    parser.add_argument("--summary", action="store_true")
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
         parsed.adapter_cmd.extend(unknown)
@@ -1162,10 +1237,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     return result.stdout, None
 
 
-def handle_native_high_level(command: str, passthrough_args: list[str], *, human: bool) -> int:
+def handle_native_high_level(command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
     parsed = _parse_native_high_level_args(command, passthrough_args)
     repo = parsed.repo
     pr_number = str(parsed.pr_number)
+    lean = bool(lean or parsed.lean or parsed.summary)
     run_id = parsed.audit_id or f"native-{_utc_now()}"
     auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
     session = _load_or_create_session(repo, pr_number)
@@ -1233,6 +1309,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
                 session=session,
                 item=item,
                 include_threads=True,
+                lean=lean,
             )
             _emit_native_summary(summary, human=human)
             return 5
@@ -1258,6 +1335,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             next_action=str(exc),
             exit_code=2,
             session=session,
+            lean=lean,
         )
         _emit_native_summary(summary, human=human)
         return 2
@@ -1283,6 +1361,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             exit_code=5,
             session=session,
             diagnostics=exc.diagnostics,
+            lean=lean,
         )
         _emit_native_summary(summary, human=human)
         return 5
@@ -1317,6 +1396,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
                 session=session,
                 item=item,
                 include_threads=True,
+                lean=lean,
             )
             _emit_native_summary(summary, human=human)
             return 5
@@ -1350,6 +1430,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             artifact_path=str(request_path),
             item=item,
             include_threads=True,
+            lean=lean,
         )
         _emit_native_summary(summary, human=human)
         return 5
@@ -1393,6 +1474,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
             session=session,
             artifact_path=artifact_path,
             item=item,
+            lean=lean,
         )
         _emit_native_summary(summary, human=human)
         return 5
@@ -1411,6 +1493,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         exit_code=0,
         session=session,
         include_threads=auto_simple,
+        lean=lean,
     )
     _emit_native_summary(summary, human=human)
     return 0
@@ -1456,6 +1539,7 @@ def build_agent_manifest() -> dict:
             "triage",
             "classify",
             "fix",
+            "fix_all",
             "evidence",
             "clarify",
             "defer",
@@ -1463,6 +1547,7 @@ def build_agent_manifest() -> dict:
             "verify",
             "publish",
             "gate",
+            "resolve_stale",
         ],
         "input_formats": [
             "action_request.v1",
@@ -1478,16 +1563,18 @@ def build_agent_manifest() -> dict:
             "gate_report.v1",
         ],
         "constraints": {
-            "max_parallel_claims": 2,
+            "max_parallel_claims": MAX_PARALLEL_CLAIMS,
         },
-        "public_commands": sorted(["address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]),
+        "public_commands": sorted(
+            ["active-pr", "address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]
+        ),
     }
 
 
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,fix-all,resolve-stale,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -1504,6 +1591,10 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_submit_batch(args.pr_number, args.args)
     if args.repo == "fix":
         return handle_agent_fix(args.pr_number, args.args)
+    if args.repo == "fix-all":
+        return handle_agent_fix_all(args.pr_number, args.args)
+    if args.repo == "resolve-stale":
+        return handle_agent_resolve_stale(args.pr_number, args.args)
     if args.repo == "evidence":
         return handle_agent_evidence(args.pr_number, args.args)
     if args.repo == "publish":
@@ -1515,7 +1606,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, evidence, publish, leases, reclaim, orchestrate.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, fix-all, resolve-stale, evidence, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -1655,6 +1746,45 @@ def _looks_like_agent_validation_result(value: str) -> bool:
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
+def _changed_files_for_commit(
+    commit_hash: str,
+    *,
+    rejected_status: str = "FAST_FIX_ALL_REJECTED",
+    command_name: str = "agent fix-all",
+) -> list[str]:
+    commit = commit_hash.strip()
+    if not commit:
+        return []
+    if commit.startswith("-"):
+        raise workflow.WorkflowError(
+            status=rejected_status,
+            reason_code="INVALID_COMMIT_HASH",
+            waiting_on="git_commit",
+            exit_code=2,
+            message=f"{command_name} requires a commit-ish that does not start with '-'.",
+        )
+    commands = [
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit],
+        ["git", "show", "--format=", "--name-only", commit],
+    ]
+    last_error = ""
+    for command in commands:
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode != 0:
+            last_error = result.stderr.strip() or result.stdout.strip()
+            continue
+        files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if files:
+            return files
+    raise workflow.WorkflowError(
+        status=rejected_status,
+        reason_code="COMMIT_FILES_UNAVAILABLE",
+        waiting_on="git_commit",
+        exit_code=2,
+        message=last_error or f"Could not determine changed files for commit {commit}. Pass --files explicitly.",
+    )
+
+
 def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent fix",
@@ -1687,6 +1817,99 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
             validation_commands=_parse_agent_validation(parsed.validation),
             summary=parsed.summary,
             why=parsed.why,
+            publish=parsed.publish,
+            now=now_dt,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr agent fix-all",
+        description="Classify, claim, and submit shared fix evidence for matching GitHub review threads.",
+    )
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--files")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--include-stale", action="store_true")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        files = _parse_agent_files(parsed.files, parsed.file)
+        if not files:
+            files = _changed_files_for_commit(parsed.commit)
+        payload = workflow.fast_fix_matching_threads(
+            parsed.repo,
+            parsed.pr_number,
+            agent_id=parsed.agent_id,
+            commit_hash=parsed.commit,
+            files=files,
+            validation_commands=_parse_agent_validation(parsed.validation),
+            include_stale=parsed.include_stale,
+            publish=parsed.publish,
+            now=now_dt,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_resolve_stale(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr agent resolve-stale",
+        description="Submit runtime-mediated evidence for stale GitHub review threads matching changed files.",
+    )
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--files")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--match-files", action="store_true")
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--now")
+    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    try:
+        if not parsed.match_files:
+            raise workflow.WorkflowError(
+                status="STALE_RESOLUTION_REJECTED",
+                reason_code="MISSING_MATCH_FILES",
+                waiting_on="stale_resolution_input",
+                exit_code=2,
+                message="agent resolve-stale requires --match-files so stale synchronization stays file-scoped.",
+            )
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        files = _parse_agent_files(parsed.files, parsed.file)
+        if not files:
+            files = _changed_files_for_commit(
+                parsed.commit,
+                rejected_status="STALE_RESOLUTION_REJECTED",
+                command_name="agent resolve-stale",
+            )
+        payload = workflow.fast_fix_matching_threads(
+            parsed.repo,
+            parsed.pr_number,
+            agent_id=parsed.agent_id,
+            commit_hash=parsed.commit,
+            files=files,
+            validation_commands=_parse_agent_validation(parsed.validation),
+            include_stale=True,
+            stale_only=True,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -2055,6 +2278,188 @@ def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, mess
     return 5
 
 
+def _root_passthrough_args(args: argparse.Namespace) -> list[str]:
+    return [*([args.repo] if args.repo else []), *([args.pr_number] if args.pr_number else []), *args.args]
+
+
+def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    if stderr:
+        print(stderr, file=sys.stderr)
+    return int(payload["exit_code"])
+
+
+def _git_output(command: list[str]) -> str:
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"{' '.join(command)} failed.")
+    return result.stdout.strip()
+
+
+def _derive_current_branch() -> str:
+    branch = _git_output(["git", "branch", "--show-current"])
+    if not branch:
+        raise RuntimeError("Current git branch is detached or empty. Pass --head explicitly.")
+    return branch
+
+
+def _derive_current_repo() -> str:
+    remote_url = _git_output(["git", "config", "--get", "remote.origin.url"])
+    normalized = remote_url.strip().rstrip("/").removesuffix(".git")
+    patterns = (
+        r"^git@github\.com:(?P<repo>[^/]+/[^/]+)$",
+        r"^ssh://git@github\.com/(?P<repo>[^/]+/[^/]+)$",
+        r"^https?://github\.com/(?P<repo>[^/]+/[^/]+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, normalized)
+        if match:
+            return match.group("repo")
+    raise RuntimeError(f"Could not derive owner/repo from remote.origin.url: {remote_url}")
+
+
+def handle_active_pr_command(passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr active-pr")
+    parser.add_argument("--repo")
+    parser.add_argument("--head")
+    parsed = parser.parse_args(passthrough)
+    try:
+        repo = parsed.repo or _derive_current_repo()
+        head = parsed.head or _derive_current_branch()
+    except RuntimeError as exc:
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": parsed.repo,
+                "head": parsed.head,
+                "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
+                "waiting_on": "active_pr_target",
+                "next_action": f"{exc} Pass --repo <owner/repo> and --head <branch> explicitly.",
+                "exit_code": 2,
+            },
+            stderr=str(exc),
+        )
+
+    command = [
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--head",
+        head,
+        "--json",
+        "number,url,headRefName,state",
+    ]
+    if shutil.which("gh") is None:
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": repo,
+                "head": head,
+                "reason_code": "GH_NOT_FOUND",
+                "waiting_on": "github_cli",
+                "next_action": "Install GitHub CLI and ensure `gh` is available on PATH, then rerun active-pr.",
+                "exit_code": PR_IO_PREFLIGHT_EXIT,
+            },
+            stderr="Missing GitHub CLI `gh` on PATH.",
+        )
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode != 0:
+        diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": repo,
+                "head": head,
+                "reason_code": "ACTIVE_PR_QUERY_FAILED",
+                "waiting_on": github_waiting_on(diagnostics),
+                "next_action": "Fix the GitHub CLI query failure, then rerun `gh-address-cr active-pr`.",
+                "exit_code": PR_IO_PREFLIGHT_EXIT,
+                "diagnostics": diagnostics,
+            },
+            stderr=result.stderr.strip() or result.stdout.strip() or "GitHub active PR lookup failed.",
+        )
+    try:
+        pull_requests = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": repo,
+                "head": head,
+                "reason_code": "ACTIVE_PR_INVALID_JSON",
+                "waiting_on": "github_cli",
+                "next_action": "Inspect `gh pr list` output; it must be a JSON array.",
+                "exit_code": PR_IO_PREFLIGHT_EXIT,
+            },
+            stderr=f"GitHub active PR lookup returned invalid JSON: {exc}",
+        )
+    if not isinstance(pull_requests, list):
+        pull_requests = []
+
+    if not pull_requests:
+        return _emit_active_pr_payload(
+            {
+                "status": "NO_ACTIVE_PR",
+                "repo": repo,
+                "head": head,
+                "reason_code": "NO_ACTIVE_PR",
+                "waiting_on": "open_pr",
+                "next_action": f"Open a PR or run `gh pr list --repo {repo} --state open --head {head}` to inspect candidates.",
+                "pull_requests": [],
+                "exit_code": 4,
+            }
+        )
+    if len(pull_requests) > 1:
+        return _emit_active_pr_payload(
+            {
+                "status": "AMBIGUOUS_ACTIVE_PR",
+                "repo": repo,
+                "head": head,
+                "reason_code": "AMBIGUOUS_ACTIVE_PR",
+                "waiting_on": "open_pr",
+                "next_action": "Multiple OPEN PRs match this branch. Pass the intended PR number to review/address.",
+                "pull_requests": pull_requests,
+                "exit_code": 5,
+            },
+            stderr="Multiple OPEN PRs matched the active branch.",
+        )
+
+    pr = pull_requests[0] if isinstance(pull_requests[0], dict) else {}
+    pr_number = str(pr.get("number") or "").strip()
+    if not pr_number or not pr_number.isdigit():
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": repo,
+                "head": head,
+                "reason_code": "ACTIVE_PR_INVALID_RESPONSE",
+                "waiting_on": "github_cli",
+                "next_action": f"Inspect `gh pr list --repo {repo} --state open --head {head}` output; each row must include a PR number.",
+                "pull_requests": pull_requests,
+                "exit_code": PR_IO_PREFLIGHT_EXIT,
+            },
+            stderr="GitHub active PR lookup returned a row without a valid PR number.",
+        )
+    return _emit_active_pr_payload(
+        {
+            "status": "ACTIVE_PR_FOUND",
+            "repo": repo,
+            "head": head,
+            "pr_number": pr_number,
+            "url": pr.get("url"),
+            "state": pr.get("state"),
+            "reason_code": "ACTIVE_PR_FOUND",
+            "waiting_on": None,
+            "next_action": f"Run `gh-address-cr address {repo} {pr_number} --lean`.",
+            "exit_code": 0,
+        }
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -2079,13 +2484,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{address,review,threads,findings,adapter,doctor,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
-            "  gh-address-cr address owner/repo 123 [--human]\n"
+            "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
+            "  gh-address-cr address owner/repo 123 [--human|--lean|--summary]\n"
             "  gh-address-cr review owner/repo 123 [--human]\n"
-            "  gh-address-cr review --auto-simple owner/repo 123 [--human]\n"
-            "  gh-address-cr threads owner/repo 123 [--human]\n"
+            "  gh-address-cr review --auto-simple owner/repo 123 [--human|--lean|--summary]\n"
+            "  gh-address-cr threads owner/repo 123 [--human|--lean|--summary]\n"
             "  gh-address-cr doctor [owner/repo] [123]\n"
             "  gh-address-cr version\n"
             "  gh-address-cr findings owner/repo 123 --input findings.json [--human]\n"
@@ -2100,6 +2506,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
             "Runtime commands:\n"
             "  gh-address-cr agent manifest\n"
+            "  gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed>\n"
+            "  gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --match-files\n"
             "  gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json\n"
             "  gh-address-cr final-gate owner/repo 123\n"
         ),
@@ -2178,6 +2586,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "agent":
         return handle_agent_command(args)
 
+    if args.command == "active-pr":
+        return handle_active_pr_command(_root_passthrough_args(args))
+
     if args.command == "doctor":
         if args.pr_number is None and (args.repo in {"-h", "--help"} or args.args[:1] in (["-h"], ["--help"])):
             print(alias_help(args.command), end="")
@@ -2188,9 +2599,10 @@ def main(argv: list[str] | None = None) -> int:
         return handle_superpowers_command(args)
 
     if args.command == "final-gate":
-        if args.machine or args.human:
+        if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
             print(
-                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}. "
+                "--lean and --summary are only supported for address, review, and threads.",
                 file=sys.stderr,
             )
             return 2
@@ -2225,7 +2637,9 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode
 
     if args.command not in COMMAND_TO_SCRIPT and args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
-        supported_commands = ", ".join(sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "agent", "doctor"]))
+        supported_commands = ", ".join(
+            sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "active-pr", "agent", "doctor"])
+        )
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     normalize_leading_high_level_options(args)
@@ -2243,7 +2657,7 @@ def main(argv: list[str] | None = None) -> int:
         if preflight_rc is not None:
             return preflight_rc
     if args.command in NATIVE_HIGH_LEVEL_COMMANDS:
-        return handle_native_high_level(args.command, args.args, human=args.human)
+        return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
     rewritten_args = rewrite_alias_args(
         args.command,
         args.args,

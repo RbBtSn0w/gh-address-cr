@@ -137,12 +137,13 @@ Native runtime ownership is now split by responsibility:
 - `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
 
 The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
-Public high-level commands (`review`, `address`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
+Public high-level commands (`active-pr`, `review`, `address`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
 
 ## Public Interface
 
 `gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint plus a lightweight thread-only shortcut:
 
+- `active-pr`
 - `review`
 - `address`
 
@@ -158,6 +159,8 @@ Advanced/internal integration entrypoints:
 - `agent submit`
 - `agent submit-batch`
 - `agent fix`
+- `agent fix-all`
+- `agent resolve-stale`
 - `agent evidence`
 - `agent publish`
 - `agent leases`
@@ -181,13 +184,14 @@ Fail-fast contract:
 - consumes explicit findings input when `--input` is supplied, or
 - generates an external review handoff and waits for a producer-compatible result
 
-High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
+High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias. Use `--lean` or `--summary` with `address`, `threads`, and `review --auto-simple` when agents need low-token thread rows.
 
 Minimal invocation model:
 
 ```text
+/gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]
 /gh-address-cr review <owner/repo> <pr_number>
-/gh-address-cr address <owner/repo> <pr_number>
+/gh-address-cr address <owner/repo> <pr_number> --lean
 ```
 
 Advanced/internal integrations are documented later in this README.
@@ -204,13 +208,15 @@ Stable machine summary fields:
 - `reason_code`
 - `waiting_on`
 - `next_action`
+- `commands`
 - `exit_code`
 - `diagnostics` (optional, for GitHub CLI/API failures)
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
-The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents: `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence.
+`commands` contains executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
+The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Full output includes `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
 ### Metadata Commands
 
@@ -234,6 +240,8 @@ gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
 gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed"
 gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" --publish
+gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed"
+gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
@@ -259,7 +267,7 @@ Role split:
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
-Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`.
+Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Prefer `agent fix-all` when the session already contains matching GitHub thread items and a single commit/files/validation set covers them; it still classifies, claims, and submits through the existing lease and batch evidence path. Use `agent resolve-stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
 The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file commit can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one commit covers them, submit a batch response, publish, then claim the next set.
 
 Reusable evidence profiles reduce repeated commit/files/validation text across responses:
@@ -560,8 +568,9 @@ The following commands remain available for explicit integrations, repository-ro
 For explicit automation or repository-root invocation, the main command is:
 
 ```bash
+gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]
 gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
-gh-address-cr address <owner/repo> <pr_number> [--human]
+gh-address-cr address <owner/repo> <pr_number> [--human|--lean]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:
@@ -583,9 +592,9 @@ The converter writes the standardized findings JSON to the cache-backed PR works
 Advanced CLI examples:
 
 ```text
-$gh-address-cr address <PR_URL>
+$gh-address-cr address <PR_URL> --lean
 $gh-address-cr review --auto-simple <PR_URL>
-$gh-address-cr threads <PR_URL>
+$gh-address-cr threads <PR_URL> --lean
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
@@ -1244,9 +1253,10 @@ Rules:
 If `gh-address-cr final-gate` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending or invalid terminal thread, verify both operations were completed: `gh-address-cr post-reply` and `gh-address-cr resolve-thread`.
-3. Re-run `gh-address-cr run-once --show-all ...` to compare unresolved vs handled state.
-4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `gh-address-cr final-gate`.
+2. Prefer the returned `next_action` and `commands` templates; common recovery starts with `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr agent publish <owner/repo> <pr_number>`.
+3. For each pending or invalid terminal thread, verify both operations were completed through the runtime: reply evidence and thread resolve.
+4. For file-matched stale threads, use `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files`, then publish and rerun final-gate.
+5. If the summary reports missing reply evidence, publish the accepted evidence before re-running `gh-address-cr final-gate`.
 
 ## Troubleshooting installation and release
 

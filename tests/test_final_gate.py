@@ -101,7 +101,15 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
         self.assertEqual(result.failure_codes, ["FINAL_GATE_UNRESOLVED_REMOTE_THREADS"])
         self.assertEqual(result.counts["unresolved_remote_threads_count"], 1)
-        self.assertEqual(result.to_machine_summary()["waiting_on"], "remote_threads")
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["waiting_on"], "remote_threads")
+        self.assertIn("gh-address-cr address octo/example 77 --lean", summary["next_action"])
+        self.assertEqual(summary["commands"]["final_gate"], "gh-address-cr final-gate octo/example 77")
+
+    def test_unknown_next_action_fails_closed(self):
+        gate = load_gate_module()
+
+        self.assertEqual(gate._next_action(None), "Status unknown: pending check results.")
 
     def test_resolved_thread_without_reply_evidence_still_fails(self):
         session = self.passing_session()
@@ -116,7 +124,9 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_REPLY_EVIDENCE")
         self.assertEqual(result.failure_codes, ["FINAL_GATE_MISSING_REPLY_EVIDENCE"])
         self.assertEqual(result.counts["github_threads_missing_reply_count"], 1)
-        self.assertEqual(result.to_machine_summary()["waiting_on"], "reply_evidence")
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["waiting_on"], "reply_evidence")
+        self.assertIn("gh-address-cr agent publish octo/example 77", summary["next_action"])
 
     def test_pending_review_from_current_login_fails(self):
         result = self.evaluate(

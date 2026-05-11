@@ -267,6 +267,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_runtime_public_command_help_parity(self):
         commands = [
+            ("active-pr", "--help"),
             ("address", "--help"),
             ("review", "--help"),
             ("threads", "--help"),
