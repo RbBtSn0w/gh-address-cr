@@ -846,6 +846,41 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "stale")
 
+    def test_agent_fix_all_excludes_outdated_without_opt_in(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:outdated",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="open",
+                    status="OPEN",
+                    is_outdated=True,
+                    thread_id="PRRT_outdated",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_NO_MATCH")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:outdated"]["state"], "open")
+
     def test_agent_resolve_stale_matches_only_stale_thread_files(self):
         self.write_session(
             items=[
@@ -891,6 +926,43 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "publish_ready")
         self.assertEqual(session["items"]["github-thread:open"]["state"], "open")
 
+    def test_agent_resolve_stale_matches_legacy_outdated_thread_files(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:outdated",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="open",
+                    status="OPEN",
+                    is_outdated=True,
+                    thread_id="PRRT_outdated",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_ACCEPTED")
+        self.assertEqual(payload["matched_count"], 1)
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:outdated"]["state"], "publish_ready")
+
     def test_agent_resolve_stale_skips_publish_ready_outdated_items(self):
         self.write_session(
             items=[
@@ -932,6 +1004,58 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "publish_ready")
         self.assertEqual(session["items"]["github-thread:stale"]["accepted_response"]["fix_reply"]["commit_hash"], "old123")
+
+    def test_agent_resolve_stale_missing_validation_uses_stale_status(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:stale",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/stale.py",
+                    state="stale",
+                    status="STALE",
+                    is_outdated=True,
+                    thread_id="PRRT_stale",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_VALIDATION_COMMANDS")
+        self.assertEqual(payload["waiting_on"], "stale_resolution_input")
+
+    def test_agent_resolve_stale_missing_commit_files_uses_stale_status(self):
+        result = self.run_runtime_module(
+            "agent",
+            "resolve-stale",
+            self.repo,
+            self.pr,
+            "--commit",
+            "missingcommit123",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "COMMIT_FILES_UNAVAILABLE")
 
     def test_agent_fix_all_reports_partial_when_one_matched_thread_is_leased(self):
         self.write_session(

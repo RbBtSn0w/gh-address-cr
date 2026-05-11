@@ -106,6 +106,11 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("gh-address-cr address octo/example 77 --lean", summary["next_action"])
         self.assertEqual(summary["commands"]["final_gate"], "gh-address-cr final-gate octo/example 77")
 
+    def test_unknown_next_action_fails_closed(self):
+        gate = load_gate_module()
+
+        self.assertEqual(gate._next_action(None), "Status unknown: pending check results.")
+
     def test_resolved_thread_without_reply_evidence_still_fails(self):
         session = self.passing_session()
         session["items"]["github-thread:THREAD_DONE"].pop("reply_evidence")

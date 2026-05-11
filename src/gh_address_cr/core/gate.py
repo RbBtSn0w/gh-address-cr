@@ -106,7 +106,7 @@ class GateResult:
             "artifact_path": None,
             "reason_code": self.reason_code,
             "waiting_on": self.waiting_on,
-            "next_action": _next_action(self.reason_code, repo=self.repo, pr_number=self.pr_number),
+            "next_action": _next_action(self.reason_code, repo=self.repo, pr_number=self.pr_number, passed=self.passed),
             "exit_code": self.exit_code,
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
@@ -489,9 +489,11 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
     }
 
 
-def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "") -> str:
+def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "", passed: bool = False) -> str:
     if reason_code is None:
-        return "Completion may be claimed."
+        if passed:
+            return "Completion may be claimed."
+        return "Status unknown: pending check results."
     if repo and pr_number:
         final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
         if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:

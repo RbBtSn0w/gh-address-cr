@@ -69,6 +69,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--machine", result.stdout)
         self.assertIn("--human", result.stdout)
+        self.assertIn("[--human|--lean|--summary]", result.stdout)
         self.assertIn("address", result.stdout)
         self.assertIn("review", result.stdout)
         self.assertIn("threads", result.stdout)
@@ -590,6 +591,36 @@ else:
         self.assertEqual(payload["status"], "AMBIGUOUS_ACTIVE_PR")
         self.assertEqual(payload["reason_code"], "AMBIGUOUS_ACTIVE_PR")
         self.assertEqual(len(payload["pull_requests"]), 2)
+
+    def test_cli_active_pr_rejects_invalid_open_pr_response(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['pr', 'list']:",
+                    "    print(json.dumps([{'url': 'https://github.com/octo/example/pull/77', 'state': 'OPEN'}]))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "active-pr", "--repo", self.repo, "--head", "feature/agent"]
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTIVE_PR_LOOKUP_FAILED")
+        self.assertEqual(payload["reason_code"], "ACTIVE_PR_INVALID_RESPONSE")
+        self.assertIn("gh pr list", payload["next_action"])
 
     def test_cli_address_matches_review_auto_simple_for_unresolved_threads(self):
         self.install_fake_gh_for_threads(
@@ -1462,12 +1493,17 @@ else:
                 "--human",
                 "--machine",
                 "--auto-simple",
+                "--lean",
+                "--summary",
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "PASSED")
-        self.assertEqual(json.loads(seen_args.read_text(encoding="utf-8")), ["--human", "--machine", "--auto-simple"])
+        self.assertEqual(
+            json.loads(seen_args.read_text(encoding="utf-8")),
+            ["--human", "--machine", "--auto-simple", "--lean", "--summary"],
+        )
 
     def test_cli_review_fails_fast_when_gh_is_missing(self):
         self.env["PATH"] = str(self.bin_dir)

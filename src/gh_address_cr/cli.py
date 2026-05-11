@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
+from gh_address_cr import (
+    MAX_PARALLEL_CLAIMS,
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    SUPPORTED_SKILL_CONTRACT_VERSIONS,
+    __version__,
+)
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
@@ -1182,6 +1188,23 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
     parser = argparse.ArgumentParser(prog=f"gh-address-cr {command}", add_help=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
+    if command == "adapter":
+        parser.add_argument("adapter_cmd", nargs=argparse.REMAINDER)
+        parsed = parser.parse_args(args)
+        if parsed.adapter_cmd and parsed.adapter_cmd[0] == "--":
+            parsed.adapter_cmd = parsed.adapter_cmd[1:]
+        parsed.input = None
+        parsed.source = None
+        parsed.sync = False
+        parsed.handoff_sha256 = None
+        parsed.scan_id = None
+        parsed.audit_id = None
+        parsed.snapshot = None
+        parsed.max_iterations = 1
+        parsed.lean = False
+        parsed.summary = False
+        parsed.auto_simple = False
+        return parsed
     parser.add_argument("adapter_cmd", nargs="*")
     if command == "review":
         parser.add_argument("--auto-simple", action="store_true")
@@ -1540,7 +1563,7 @@ def build_agent_manifest() -> dict:
             "gate_report.v1",
         ],
         "constraints": {
-            "max_parallel_claims": 2,
+            "max_parallel_claims": MAX_PARALLEL_CLAIMS,
         },
         "public_commands": sorted(
             ["active-pr", "address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]
@@ -1723,10 +1746,23 @@ def _looks_like_agent_validation_result(value: str) -> bool:
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
-def _changed_files_for_commit(commit_hash: str) -> list[str]:
+def _changed_files_for_commit(
+    commit_hash: str,
+    *,
+    rejected_status: str = "FAST_FIX_ALL_REJECTED",
+    command_name: str = "agent fix-all",
+) -> list[str]:
     commit = commit_hash.strip()
     if not commit:
         return []
+    if commit.startswith("-"):
+        raise workflow.WorkflowError(
+            status=rejected_status,
+            reason_code="INVALID_COMMIT_HASH",
+            waiting_on="git_commit",
+            exit_code=2,
+            message=f"{command_name} requires a commit-ish that does not start with '-'.",
+        )
     commands = [
         ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit],
         ["git", "show", "--format=", "--name-only", commit],
@@ -1741,7 +1777,7 @@ def _changed_files_for_commit(commit_hash: str) -> list[str]:
         if files:
             return files
     raise workflow.WorkflowError(
-        status="FAST_FIX_ALL_REJECTED",
+        status=rejected_status,
         reason_code="COMMIT_FILES_UNAVAILABLE",
         waiting_on="git_commit",
         exit_code=2,
@@ -1860,7 +1896,11 @@ def handle_agent_resolve_stale(repo: str | None, passthrough: list[str]) -> int:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
         files = _parse_agent_files(parsed.files, parsed.file)
         if not files:
-            files = _changed_files_for_commit(parsed.commit)
+            files = _changed_files_for_commit(
+                parsed.commit,
+                rejected_status="STALE_RESOLUTION_REJECTED",
+                command_name="agent resolve-stale",
+            )
         payload = workflow.fast_fix_matching_threads(
             parsed.repo,
             parsed.pr_number,
@@ -2265,7 +2305,7 @@ def _derive_current_branch() -> str:
 
 def _derive_current_repo() -> str:
     remote_url = _git_output(["git", "config", "--get", "remote.origin.url"])
-    normalized = remote_url.strip().removesuffix(".git")
+    normalized = remote_url.strip().rstrip("/").removesuffix(".git")
     patterns = (
         r"^git@github\.com:(?P<repo>[^/]+/[^/]+)$",
         r"^ssh://git@github\.com/(?P<repo>[^/]+/[^/]+)$",
@@ -2389,7 +2429,21 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
         )
 
     pr = pull_requests[0] if isinstance(pull_requests[0], dict) else {}
-    pr_number = str(pr.get("number") or "")
+    pr_number = str(pr.get("number") or "").strip()
+    if not pr_number or not pr_number.isdigit():
+        return _emit_active_pr_payload(
+            {
+                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "repo": repo,
+                "head": head,
+                "reason_code": "ACTIVE_PR_INVALID_RESPONSE",
+                "waiting_on": "github_cli",
+                "next_action": f"Inspect `gh pr list --repo {repo} --state open --head {head}` output; each row must include a PR number.",
+                "pull_requests": pull_requests,
+                "exit_code": PR_IO_PREFLIGHT_EXIT,
+            },
+            stderr="GitHub active PR lookup returned a row without a valid PR number.",
+        )
     return _emit_active_pr_payload(
         {
             "status": "ACTIVE_PR_FOUND",
@@ -2434,10 +2488,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
-            "  gh-address-cr address owner/repo 123 [--human|--lean]\n"
+            "  gh-address-cr address owner/repo 123 [--human|--lean|--summary]\n"
             "  gh-address-cr review owner/repo 123 [--human]\n"
-            "  gh-address-cr review --auto-simple owner/repo 123 [--human|--lean]\n"
-            "  gh-address-cr threads owner/repo 123 [--human|--lean]\n"
+            "  gh-address-cr review --auto-simple owner/repo 123 [--human|--lean|--summary]\n"
+            "  gh-address-cr threads owner/repo 123 [--human|--lean|--summary]\n"
             "  gh-address-cr doctor [owner/repo] [123]\n"
             "  gh-address-cr version\n"
             "  gh-address-cr findings owner/repo 123 --input findings.json [--human]\n"

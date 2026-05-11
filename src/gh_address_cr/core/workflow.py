@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from gh_address_cr import __version__, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, SUPPORTED_SKILL_CONTRACT_VERSIONS
+from gh_address_cr import (
+    MAX_PARALLEL_CLAIMS,
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    SUPPORTED_SKILL_CONTRACT_VERSIONS,
+    __version__,
+)
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_CLAIMABLE_STATES,
@@ -41,7 +47,6 @@ from gh_address_cr.github.errors import GitHubError
 MUTATING_ROLES = {"fixer"}
 TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-DEFAULT_MAX_PARALLEL_CLAIMS = 2
 
 
 class WorkflowError(RuntimeError):
@@ -746,31 +751,35 @@ def fast_fix_matching_threads(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
+    status_prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
+    rejected_status = f"{status_prefix}_REJECTED"
+    input_waiting_on = "stale_resolution_input" if stale_only else "fast_fix_input"
+    command_name = "agent resolve-stale" if stale_only else "agent fix-all"
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
         raise WorkflowError(
-            status="FAST_FIX_ALL_REJECTED",
+            status=rejected_status,
             reason_code="MISSING_FILES",
-            waiting_on="fast_fix_input",
+            waiting_on=input_waiting_on,
             exit_code=2,
-            message="agent fix-all requires --files or a commit with changed files.",
+            message=f"{command_name} requires --files or a commit with changed files.",
         )
     if not normalized_validation:
         raise WorkflowError(
-            status="FAST_FIX_ALL_REJECTED",
+            status=rejected_status,
             reason_code="MISSING_VALIDATION_COMMANDS",
-            waiting_on="fast_fix_input",
+            waiting_on=input_waiting_on,
             exit_code=2,
-            message="agent fix-all requires --validation.",
+            message=f"{command_name} requires --validation.",
         )
     if not commit_hash.strip():
         raise WorkflowError(
-            status="FAST_FIX_ALL_REJECTED",
+            status=rejected_status,
             reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
-            waiting_on="fast_fix_input",
+            waiting_on=input_waiting_on,
             exit_code=2,
-            message="agent fix-all requires --commit.",
+            message=f"{command_name} requires --commit.",
         )
 
     session = session_store.load_session(repo, pr_number)
@@ -781,7 +790,7 @@ def fast_fix_matching_threads(
     ]
     if not github_items:
         raise WorkflowError(
-            status="FAST_FIX_ALL_NO_MATCH",
+            status=f"{status_prefix}_NO_MATCH",
             reason_code="SESSION_THREADS_REQUIRED",
             waiting_on="github_threads",
             exit_code=4,
@@ -795,9 +804,8 @@ def fast_fix_matching_threads(
         if _matches_fast_fix_thread(item, normalized_file_set, include_stale=include_stale, stale_only=stale_only)
     ]
     if not matches:
-        status = "STALE_RESOLUTION_NO_MATCH" if stale_only else "FAST_FIX_ALL_NO_MATCH"
         raise WorkflowError(
-            status=status,
+            status=f"{status_prefix}_NO_MATCH",
             reason_code="NO_MATCHING_GITHUB_THREADS",
             waiting_on="github_threads",
             exit_code=4,
@@ -809,7 +817,7 @@ def fast_fix_matching_threads(
     batches: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     item_ids: list[str] = []
-    for batch_items in _chunks(matches, DEFAULT_MAX_PARALLEL_CLAIMS):
+    for batch_items in _chunks(matches, MAX_PARALLEL_CLAIMS):
         batch_responses: list[dict[str, Any]] = []
         for item in batch_items:
             item_id = str(item["item_id"])
@@ -906,8 +914,7 @@ def fast_fix_matching_threads(
         ),
     }
     if failed:
-        prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
-        partial_status = f"{prefix}_PARTIAL" if accepted_count else f"{prefix}_NO_ACCEPTED"
+        partial_status = f"{status_prefix}_PARTIAL" if accepted_count else f"{status_prefix}_NO_ACCEPTED"
         next_action = (
             f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
             if accepted_count
@@ -938,19 +945,12 @@ def _matches_fast_fix_thread(
     item_path = str(item.get("path"))
     if item_path not in files:
         return False
-    stale = _is_explicit_stale_thread_state(item)
+    stale = is_stale_github_thread_item(item)
     if stale_only:
         return stale and is_claimable_github_thread(item)
     if stale and not include_stale:
         return False
     return is_claimable_github_thread(item)
-
-
-def _is_explicit_stale_thread_state(item: dict[str, Any]) -> bool:
-    state = str(item.get("state") or "").strip().lower()
-    status = str(item.get("status") or "").strip().upper()
-    return state == "stale" or status == "STALE"
-
 
 def _fast_fix_failed_row(item_id: str, exc: WorkflowError) -> dict[str, Any]:
     return {
