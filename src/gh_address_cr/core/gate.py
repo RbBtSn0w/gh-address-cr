@@ -106,10 +106,11 @@ class GateResult:
             "artifact_path": None,
             "reason_code": self.reason_code,
             "waiting_on": self.waiting_on,
-            "next_action": _next_action(self.reason_code),
+            "next_action": _next_action(self.reason_code, repo=self.repo, pr_number=self.pr_number),
             "exit_code": self.exit_code,
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
+            "commands": _final_gate_commands(self.repo, self.pr_number),
         }
 
 
@@ -470,9 +471,43 @@ def _has_content(value: Any) -> bool:
     return bool(value)
 
 
-def _next_action(reason_code: str | None) -> str:
+def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
+    if not repo or not pr_number:
+        return {}
+    return {
+        "address": f"gh-address-cr address {repo} {pr_number} --lean",
+        "publish": f"gh-address-cr agent publish {repo} {pr_number}",
+        "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
+        "fix_all": (
+            f"gh-address-cr agent fix-all {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed>"
+        ),
+        "resolve_stale": (
+            f"gh-address-cr agent resolve-stale {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
+        ),
+    }
+
+
+def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "") -> str:
     if reason_code is None:
         return "Completion may be claimed."
+    if repo and pr_number:
+        final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
+        if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
+            return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
+            return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
+            return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_BLOCKING_GITHUB_ITEMS:
+            return f"Run `gh-address-cr agent publish {repo} {pr_number}` or `gh-address-cr address {repo} {pr_number} --lean`, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_BLOCKING_LOCAL_ITEMS:
+            return f"Run `gh-address-cr review {repo} {pr_number}` or close/defer local items, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:
+            return f"Run `gh-address-cr agent evidence add {repo} {pr_number} ...`, then rerun {final_gate}."
+        if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
+            return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
     if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
         return "Resolve all remote GitHub review threads, then rerun final-gate."
     if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:

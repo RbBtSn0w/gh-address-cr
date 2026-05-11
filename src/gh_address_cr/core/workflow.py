@@ -41,6 +41,7 @@ from gh_address_cr.github.errors import GitHubError
 MUTATING_ROLES = {"fixer"}
 TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+DEFAULT_MAX_PARALLEL_CLAIMS = 2
 
 
 class WorkflowError(RuntimeError):
@@ -728,6 +729,249 @@ def fast_fix_item(
         "submit": submitted,
         "next_action": submitted["next_action"],
     }
+
+
+def fast_fix_matching_threads(
+    repo: str,
+    pr_number: str,
+    *,
+    agent_id: str,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, str]],
+    include_stale: bool = False,
+    stale_only: bool = False,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_time = _coerce_now(now)
+    normalized_files = _normalize_string_list(files)
+    normalized_validation = _normalize_validation_command_records(validation_commands)
+    if not normalized_files:
+        raise WorkflowError(
+            status="FAST_FIX_ALL_REJECTED",
+            reason_code="MISSING_FILES",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix-all requires --files or a commit with changed files.",
+        )
+    if not normalized_validation:
+        raise WorkflowError(
+            status="FAST_FIX_ALL_REJECTED",
+            reason_code="MISSING_VALIDATION_COMMANDS",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix-all requires --validation.",
+        )
+    if not commit_hash.strip():
+        raise WorkflowError(
+            status="FAST_FIX_ALL_REJECTED",
+            reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix-all requires --commit.",
+        )
+
+    session = session_store.load_session(repo, pr_number)
+    github_items = [
+        item
+        for item in _items(session).values()
+        if item.get("item_kind") == "github_thread"
+    ]
+    if not github_items:
+        raise WorkflowError(
+            status="FAST_FIX_ALL_NO_MATCH",
+            reason_code="SESSION_THREADS_REQUIRED",
+            waiting_on="github_threads",
+            exit_code=4,
+            message=f"Run `gh-address-cr address {repo} {pr_number} --lean` first to sync GitHub review threads.",
+        )
+
+    normalized_file_set = {path.strip() for path in normalized_files if path.strip()}
+    matches = [
+        item
+        for item in github_items
+        if _matches_fast_fix_thread(item, normalized_file_set, include_stale=include_stale, stale_only=stale_only)
+    ]
+    if not matches:
+        status = "STALE_RESOLUTION_NO_MATCH" if stale_only else "FAST_FIX_ALL_NO_MATCH"
+        raise WorkflowError(
+            status=status,
+            reason_code="NO_MATCHING_GITHUB_THREADS",
+            waiting_on="github_threads",
+            exit_code=4,
+            message="No matching claimable GitHub review threads were found for the supplied files.",
+            payload={"files": sorted(normalized_file_set)},
+        )
+
+    accepted_count = 0
+    batches: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    item_ids: list[str] = []
+    for batch_items in _chunks(matches, DEFAULT_MAX_PARALLEL_CLAIMS):
+        batch_responses: list[dict[str, Any]] = []
+        for item in batch_items:
+            item_id = str(item["item_id"])
+            why = _fast_fix_why(commit_hash, normalized_files, stale=bool(is_stale_github_thread_item(item)))
+            try:
+                record_classification(
+                    repo,
+                    pr_number,
+                    item_id=item_id,
+                    classification="fix",
+                    agent_id=agent_id,
+                    note=why,
+                )
+                requested = issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id=agent_id,
+                    item_id=item_id,
+                    now=current_time,
+                )
+            except WorkflowError as exc:
+                failed.append(_fast_fix_failed_row(item_id, exc))
+                continue
+            batch_responses.append(
+                {
+                    "item_id": item_id,
+                    "request_id": requested["resume_token"].removeprefix("resume:"),
+                    "lease_id": requested["lease_id"],
+                    "summary": f"Fixed {item_id} in {commit_hash.strip()}.",
+                    "why": why,
+                }
+            )
+        if not batch_responses:
+            continue
+        batch_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-all-batch-{uuid4().hex}.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "agent_id": agent_id,
+                    "resolution": "fix",
+                    "common": {
+                        "files": normalized_files,
+                        "validation_commands": normalized_validation,
+                        "fix_reply": {
+                            "commit_hash": commit_hash.strip(),
+                            "summary": f"Fixed related GitHub review threads in {commit_hash.strip()}.",
+                            "files": normalized_files,
+                        },
+                    },
+                    "items": batch_responses,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        batch_result = submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=current_time)
+        accepted_count += int(batch_result.get("accepted_count") or 0)
+        item_ids.extend(str(item_id) for item_id in batch_result.get("item_ids") or [])
+        batches.append(batch_result)
+
+    publish_result = None
+    if publish and accepted_count:
+        publish_result = publish_github_thread_responses(
+            repo,
+            pr_number,
+            github_client=github_client,
+            agent_id="gh-address-cr-publisher",
+            now=current_time,
+        )
+
+    status = "STALE_RESOLUTION_ACCEPTED" if stale_only else "FAST_FIX_ALL_ACCEPTED"
+    if publish:
+        status = "STALE_RESOLUTION_COMPLETE" if stale_only else "FAST_FIX_ALL_COMPLETE"
+    payload = {
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "commit_hash": commit_hash.strip(),
+        "files": normalized_files,
+        "matched_count": len(matches),
+        "accepted_count": accepted_count,
+        "failed_count": len(failed),
+        "item_ids": item_ids,
+        "failed": failed,
+        "batches": batches,
+        "publish": publish_result,
+        "next_action": (
+            "Accepted evidence was published. Rerun final-gate when all items are handled."
+            if publish
+            else f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence."
+        ),
+    }
+    if failed:
+        prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
+        partial_status = f"{prefix}_PARTIAL" if accepted_count else f"{prefix}_NO_ACCEPTED"
+        next_action = (
+            f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
+            if accepted_count
+            else "No matching items were accepted. Inspect failed rows, resolve lease/input blockers, then rerun."
+        )
+        payload["next_action"] = next_action
+        raise WorkflowError(
+            status=partial_status,
+            reason_code=partial_status,
+            waiting_on="lease" if any(row.get("waiting_on") == "lease" for row in failed) else "work_item",
+            exit_code=5,
+            message=next_action,
+            payload=payload,
+        )
+    payload["status"] = status
+    return payload
+
+
+def _matches_fast_fix_thread(
+    item: dict[str, Any],
+    files: set[str],
+    *,
+    include_stale: bool,
+    stale_only: bool,
+) -> bool:
+    if not item.get("item_id") or not item.get("path"):
+        return False
+    item_path = str(item.get("path"))
+    if item_path not in files:
+        return False
+    stale = _is_explicit_stale_thread_state(item)
+    if stale_only:
+        return stale and is_claimable_github_thread(item)
+    if stale and not include_stale:
+        return False
+    return is_claimable_github_thread(item)
+
+
+def _is_explicit_stale_thread_state(item: dict[str, Any]) -> bool:
+    state = str(item.get("state") or "").strip().lower()
+    status = str(item.get("status") or "").strip().upper()
+    return state == "stale" or status == "STALE"
+
+
+def _fast_fix_failed_row(item_id: str, exc: WorkflowError) -> dict[str, Any]:
+    return {
+        "item_id": item_id,
+        "status": exc.status,
+        "reason_code": exc.reason_code,
+        "waiting_on": exc.waiting_on,
+        "next_action": str(exc),
+        "exit_code": exc.exit_code,
+    }
+
+
+def _fast_fix_why(commit_hash: str, files: list[str], *, stale: bool) -> str:
+    file_list = ", ".join(files)
+    if stale:
+        return f"Commit {commit_hash.strip()} updates {file_list}, matching this stale review thread."
+    return f"Commit {commit_hash.strip()} updates {file_list}, matching this review thread."
+
+
+def _chunks(values: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 def _load_response_json_object(

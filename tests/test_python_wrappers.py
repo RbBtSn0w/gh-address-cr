@@ -195,6 +195,7 @@ else:
             set(summary),
             {
                 "artifact_path",
+                "commands",
                 "counts",
                 "exit_code",
                 "item_id",
@@ -216,6 +217,7 @@ else:
         self.assertEqual(summary["next_action"], "No action required.")
         self.assertEqual(summary["reason_code"], "PASSED")
         self.assertIsNone(summary["waiting_on"])
+        self.assertEqual(summary["commands"]["final_gate"], f"gh-address-cr final-gate {self.repo} {self.pr}")
 
     def test_cli_review_human_flag_keeps_human_text(self):
         gh = self.bin_dir / "gh"
@@ -381,6 +383,10 @@ else:
         self.assertEqual(summary["reason_code"], "WAITING_FOR_SIMPLE_ADDRESS")
         self.assertEqual(summary["waiting_on"], "agent_fix")
         self.assertEqual(summary["threads"][0]["thread_id"], "THREAD_SIMPLE")
+        self.assertIn("body", summary["threads"][0])
+        self.assertIn("url", summary["threads"][0])
+        self.assertIn("commands", summary)
+        self.assertEqual(summary["commands"]["publish"], f"gh-address-cr agent publish {self.repo} {self.pr}")
         request_path = Path(summary["artifact_path"])
         self.assertTrue(request_path.exists())
         self.assertTrue(request_path.name.startswith("simple-address-request-"))
@@ -393,16 +399,197 @@ else:
         self.assertEqual(
             request["commands"],
             {
+                "address": f"gh-address-cr address {self.repo} {self.pr} --lean",
+                "review_auto_simple": f"gh-address-cr review --auto-simple {self.repo} {self.pr} --lean",
+                "threads": f"gh-address-cr threads {self.repo} {self.pr} --lean",
                 "classify": f"gh-address-cr agent classify {self.repo} {self.pr} <item_id> --classification fix --note <note>",
                 "next": f"gh-address-cr agent next {self.repo} {self.pr} --role fixer --agent-id <agent_id>",
                 "submit": f"gh-address-cr agent submit {self.repo} {self.pr} --input response.json",
                 "submit_batch": f"gh-address-cr agent submit-batch {self.repo} {self.pr} --input batch-response.json",
+                "fix_all": (
+                    f"gh-address-cr agent fix-all {self.repo} {self.pr} "
+                    "--commit <sha> --files <paths> --validation <cmd=passed>"
+                ),
+                "resolve_stale": (
+                    f"gh-address-cr agent resolve-stale {self.repo} {self.pr} "
+                    "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
+                ),
                 "publish": f"gh-address-cr agent publish {self.repo} {self.pr}",
+                "final_gate": f"gh-address-cr final-gate {self.repo} {self.pr}",
             },
         )
         self.assertNotIn("scripts/cli.py", json.dumps(request))
         self.assertIn("submit-batch", request["commands"]["submit_batch"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
+
+    def test_cli_threads_lean_omits_verbose_thread_context(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_LEAN",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/lean.py",
+                    "line": 17,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "url": "https://example.test/thread/lean",
+                                "body": "Please fix this long thread body.",
+                                "author": {"login": "reviewer"},
+                            },
+                            {
+                                "url": "https://example.test/thread/lean/reply",
+                                "body": "Follow-up from agent.",
+                                "author": {"login": "agent-login"},
+                            },
+                        ]
+                    },
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "threads", self.repo, self.pr, "--lean"])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["reason_code"], "BLOCKING_ITEMS_REMAIN")
+        self.assertIn("commands", summary)
+        self.assertEqual(summary["commands"]["address"], f"gh-address-cr address {self.repo} {self.pr} --lean")
+        thread = summary["threads"][0]
+        self.assertEqual(thread["item_id"], "github-thread:THREAD_LEAN")
+        self.assertTrue(thread["claimable"])
+        self.assertTrue(thread["reply_evidence_present"])
+        self.assertNotIn("body", thread)
+        self.assertNotIn("url", thread)
+        self.assertNotIn("reply_evidence", thread)
+
+    def test_cli_address_summary_alias_matches_lean_thread_shape(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_SUMMARY",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/summary.py",
+                    "line": 18,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "url": "https://example.test/thread/summary",
+                                "body": "Please fix this body.",
+                                "author": {"login": "reviewer"},
+                            }
+                        ]
+                    },
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--summary"])
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        thread = summary["threads"][0]
+        self.assertEqual(thread["thread_id"], "THREAD_SUMMARY")
+        self.assertTrue(thread["claimable"])
+        self.assertFalse(thread["reply_evidence_present"])
+        self.assertIn("submit_batch", summary["commands"])
+        self.assertNotIn("body", thread)
+
+    def test_cli_active_pr_uses_open_pr_for_current_branch(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['pr', 'list']:",
+                    "    assert '--state' in args and args[args.index('--state') + 1] == 'open'",
+                    "    assert '--head' in args and args[args.index('--head') + 1] == 'feature/agent'",
+                    "    print(json.dumps([{'number': 77, 'url': 'https://github.com/octo/example/pull/77', 'headRefName': 'feature/agent', 'state': 'OPEN'}]))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "active-pr", "--repo", self.repo, "--head", "feature/agent"]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTIVE_PR_FOUND")
+        self.assertEqual(payload["repo"], self.repo)
+        self.assertEqual(payload["pr_number"], "77")
+        self.assertEqual(payload["state"], "OPEN")
+
+    def test_cli_active_pr_fails_loudly_without_open_pr(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['pr', 'list']:",
+                    "    print(json.dumps([]))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "active-pr", "--repo", self.repo, "--head", "feature/agent"]
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "NO_ACTIVE_PR")
+        self.assertEqual(payload["reason_code"], "NO_ACTIVE_PR")
+        self.assertIn("--state open", payload["next_action"])
+
+    def test_cli_active_pr_fails_loudly_for_ambiguous_open_prs(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "args = sys.argv[1:]",
+                    "if args[:2] == ['pr', 'list']:",
+                    "    assert '--state' in args and args[args.index('--state') + 1] == 'open'",
+                    "    print(json.dumps([{'number': 77, 'url': 'https://github.com/octo/example/pull/77', 'state': 'OPEN'}, {'number': 78, 'url': 'https://github.com/octo/example/pull/78', 'state': 'OPEN'}]))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "active-pr", "--repo", self.repo, "--head", "feature/agent"]
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "AMBIGUOUS_ACTIVE_PR")
+        self.assertEqual(payload["reason_code"], "AMBIGUOUS_ACTIVE_PR")
+        self.assertEqual(len(payload["pull_requests"]), 2)
 
     def test_cli_address_matches_review_auto_simple_for_unresolved_threads(self):
         self.install_fake_gh_for_threads(
@@ -929,6 +1116,7 @@ else:
             set(summary),
             {
                 "artifact_path",
+                "commands",
                 "counts",
                 "exit_code",
                 "item_id",

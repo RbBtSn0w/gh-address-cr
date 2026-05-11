@@ -12,9 +12,20 @@ If `status` is `ACTION_ACCEPTED`:
 
 If `status` is `BLOCKED`:
 - **Action**: Inspect the `reason_code` and `waiting_on`. Handle the blocked item by applying a resolution (`fix`, `clarify`, `defer`, `reject`).
+- **Command discipline**: If the machine summary includes `commands`, prefer those templates. They are the authoritative low-token route for agent recovery.
 
 If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
-- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent submit-batch` when one commit/files/validation set addresses multiple claimed GitHub threads, then run `agent publish`.
+- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent fix-all` / `agent submit-batch` when one commit/files/validation set addresses multiple matching GitHub threads, then run `agent publish`.
+- **Lean path**: Re-run `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr threads <owner/repo> <pr_number> --lean` when only item IDs, claimability, and evidence presence are needed.
+
+If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKING_GITHUB_ITEMS`:
+- **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent fix-all ...` or per-thread `agent fix`, followed by `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
+
+If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
+- **Action**: Run `gh-address-cr agent publish <owner/repo> <pr_number>` when accepted evidence is present, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
+
+If a GitHub thread has `state=stale` or `status=STALE`:
+- **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files`, then publish and rerun final-gate.
 
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
@@ -37,6 +48,12 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 
 If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
 - **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success.
+
+If `status` is `NO_ACTIVE_PR`:
+- **Action**: No OPEN PR matches the branch. Open a PR or pass an explicit PR number; do not fall back to MERGED/CLOSED PRs.
+
+If `status` is `AMBIGUOUS_ACTIVE_PR`:
+- **Action**: Choose the intended OPEN PR explicitly before running `review`, `address`, or `threads`.
 
 ## Error States
 

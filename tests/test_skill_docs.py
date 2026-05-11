@@ -61,9 +61,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "reason_code",
             "waiting_on",
             "next_action",
+            "commands",
             "exit_code",
         ):
             self.assertIn(f"`{field}`", text)
+        self.assertIn("Lean output keeps only", text)
+        self.assertIn("agent fix-all", text)
+        self.assertIn("agent resolve-stale", text)
 
     def test_skill_uses_references_for_advanced_dispatch_details(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -311,10 +315,22 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "reason_code",
             "waiting_on",
             "next_action",
+            "commands",
             "exit_code",
         ):
             self.assertIn(f"`{field}`", text)
         self.assertIn("current-login pending review count", text)
+        self.assertIn("Use `--lean` or `--summary`", text)
+        self.assertIn("agent resolve-stale --match-files", text)
+
+    def test_status_action_map_documents_agent_friction_recovery(self):
+        text = (ROOT / "skill" / "references" / "status-action-map.md").read_text(encoding="utf-8")
+        self.assertIn("commands", text)
+        self.assertIn("gh-address-cr address <owner/repo> <pr_number> --lean", text)
+        self.assertIn("gh-address-cr agent fix-all", text)
+        self.assertIn("gh-address-cr agent resolve-stale", text)
+        self.assertIn("NO_ACTIVE_PR", text)
+        self.assertIn("AMBIGUOUS_ACTIVE_PR", text)
 
     def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
         text = README_MD.read_text(encoding="utf-8")
