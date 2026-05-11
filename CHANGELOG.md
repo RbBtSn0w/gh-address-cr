@@ -1,3 +1,9 @@
+## [2.4.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.7...v2.4.0) (2026-05-11)
+
+### Features
+
+* reduce agent review-thread friction ([#51](https://github.com/RbBtSn0w/gh-address-cr/issues/51)) ([a005781](https://github.com/RbBtSn0w/gh-address-cr/commit/a0057813340992cbd524a844b02502349e12c178))
+
 ## [2.3.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.3.6...v2.3.7) (2026-05-10)
 
 ### Bug Fixes
