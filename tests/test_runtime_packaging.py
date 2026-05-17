@@ -548,6 +548,58 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
         self.assertNotIn("whl", formula)
 
+    def test_homebrew_formula_renderer_prefers_tar_gz_when_pypi_lists_multiple_sdists(self):
+        fixture = Path(self.temp_dir.name) / "multiple-sdists.json"
+        output = Path(self.temp_dir.name) / "gh-address-cr.rb"
+        fixture.write_text(
+            json.dumps(
+                {
+                    "info": {"name": "gh-address-cr", "version": "1.2.3"},
+                    "urls": [
+                        {
+                            "filename": "gh_address_cr-1.2.3.zip",
+                            "packagetype": "sdist",
+                            "url": "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.zip",
+                            "digests": {
+                                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            },
+                        },
+                        {
+                            "filename": "gh_address_cr-1.2.3.tar.gz",
+                            "packagetype": "sdist",
+                            "url": "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz",
+                            "digests": {
+                                "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                            },
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(HOMEBREW_FORMULA_RENDERER),
+                "--version",
+                "1.2.3",
+                "--pypi-json",
+                str(fixture),
+                "--output",
+                str(output),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=self.env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["url"].endswith(".tar.gz"))
+        self.assertEqual(payload["sha256"], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = README.read_text(encoding="utf-8")
 

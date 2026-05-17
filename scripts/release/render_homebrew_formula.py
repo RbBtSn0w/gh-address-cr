@@ -66,11 +66,11 @@ def fetch_pypi_json(package_name: str, version: str, base_url: str, retries: int
     for attempt in range(1, retries + 1):
         try:
             with urlopen(url, timeout=30) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = json.load(response)
             if not isinstance(payload, dict):
                 raise SystemExit("PyPI JSON must be an object")
             return payload
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
             last_error = exc
             if attempt < retries:
                 time.sleep(retry_delay)
@@ -89,10 +89,10 @@ def select_sdist_from_pypi(payload: dict, version: str) -> tuple[str, str]:
         raise SystemExit("PyPI metadata missing urls array")
 
     sdists = [item for item in urls if isinstance(item, dict) and item.get("packagetype") == "sdist"]
-    if len(sdists) != 1:
-        raise SystemExit(f"expected exactly one sdist for {version}, found {len(sdists)}")
+    if not sdists:
+        raise SystemExit(f"expected at least one sdist for {version}")
 
-    sdist = sdists[0]
+    sdist = next((item for item in sdists if str(item.get("url") or "").endswith(".tar.gz")), sdists[0])
     url = str(sdist.get("url") or "")
     sha256 = str((sdist.get("digests") or {}).get("sha256") or "")
     if not url:
@@ -103,7 +103,11 @@ def select_sdist_from_pypi(payload: dict, version: str) -> tuple[str, str]:
 def source_from_local_sdist(path: Path) -> tuple[str, str]:
     if not path.is_file():
         raise SystemExit(f"sdist does not exist: {path}")
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    sha256_hash = hashlib.sha256()
+    with path.open("rb") as handle:
+        for byte_block in iter(lambda: handle.read(1024 * 1024), b""):
+            sha256_hash.update(byte_block)
+    digest = sha256_hash.hexdigest()
     return path.resolve().as_uri(), digest
 
 
