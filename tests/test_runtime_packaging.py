@@ -549,7 +549,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
         self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
         self.assertIn("virtualenv_install_with_resources", formula)
-        self.assertIn('virtualenv_install_with_resources using: "python@3.14"', formula)
+        self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
         self.assertNotIn("whl", formula)
