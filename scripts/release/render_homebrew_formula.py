@@ -14,7 +14,14 @@ from urllib.request import urlopen
 
 DEFAULT_PACKAGE_NAME = "gh-address-cr"
 DEFAULT_PYPI_BASE_URL = "https://pypi.org/pypi/"
-DEFAULT_PYTHON_DEPENDENCY = "python@3.13"
+DEFAULT_PYTHON_DEPENDENCY = "python@3.14"
+DEFAULT_PYTHON_RESOURCES = (
+    {
+        "name": "packaging",
+        "url": "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz",
+        "sha256": "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661",
+    },
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -116,13 +123,27 @@ def formula_class_name(package_name: str) -> str:
     return "".join(part.capitalize() for part in parts if part)
 
 
+def render_resources(resources: tuple[dict[str, str], ...]) -> str:
+    blocks = []
+    for resource in resources:
+        blocks.append(
+            f'''  resource "{resource["name"]}" do
+    url "{resource["url"]}"
+    sha256 "{resource["sha256"]}"
+  end'''
+        )
+    return "\n\n".join(blocks)
+
+
 def render_formula(
     *,
     class_name: str,
     url: str,
     sha256: str,
     python_dependency: str,
+    resources: tuple[dict[str, str], ...] = DEFAULT_PYTHON_RESOURCES,
 ) -> str:
+    resource_blocks = render_resources(resources)
     return f'''class {class_name} < Formula
   include Language::Python::Virtualenv
 
@@ -133,6 +154,8 @@ def render_formula(
   license "MIT"
 
   depends_on "{python_dependency}"
+
+{resource_blocks}
 
   def install
     virtualenv_install_with_resources
@@ -194,6 +217,7 @@ def main() -> int:
                 "version": args.version,
                 "url": url,
                 "sha256": sha256,
+                "resources": [resource["name"] for resource in DEFAULT_PYTHON_RESOURCES],
                 "output": str(args.output),
             },
             sort_keys=True,
