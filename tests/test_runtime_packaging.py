@@ -544,7 +544,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("include Language::Python::Virtualenv", formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
-        self.assertIn('depends_on "python@3.13"', formula)
+        self.assertIn('depends_on "python@3.14"', formula)
         self.assertIn('resource "packaging" do', formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
         self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
