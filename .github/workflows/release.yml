@@ -254,6 +254,7 @@ jobs:
           cp homebrew-tap/Formula/gh-address-cr.rb "$tap_path/Formula/gh-address-cr.rb"
 
       - name: Update Python resources
+        continue-on-error: true
         env:
           PACKAGE_VERSION: ${{ needs.build-release-package.outputs.package_version }}
         run: brew update-python-resources --package-name gh-address-cr --version "$PACKAGE_VERSION" RbBtSn0w/tap/gh-address-cr
