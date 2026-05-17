@@ -1,3 +1,9 @@
+## [2.4.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.1...v2.4.2) (2026-05-17)
+
+### Bug Fixes
+
+* add Homebrew release publishing ([#53](https://github.com/RbBtSn0w/gh-address-cr/issues/53)) ([78fe85d](https://github.com/RbBtSn0w/gh-address-cr/commit/78fe85dbcd6134c0422781b2d70101ca5707c586))
+
 ## [2.4.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.0...v2.4.1) (2026-05-11)
 
 ### Bug Fixes
