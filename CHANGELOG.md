@@ -1,3 +1,9 @@
+## [2.4.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.4...v2.4.5) (2026-05-17)
+
+### Bug Fixes
+
+* use release bot app for Homebrew tap updates ([#56](https://github.com/RbBtSn0w/gh-address-cr/issues/56)) ([1b73923](https://github.com/RbBtSn0w/gh-address-cr/commit/1b73923ba6a760a674d4ece2e030eb6ab8357ab7))
+
 ## [2.4.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.3...v2.4.4) (2026-05-17)
 
 ### Bug Fixes
