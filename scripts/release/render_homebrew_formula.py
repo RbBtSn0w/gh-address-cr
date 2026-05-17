@@ -144,6 +144,7 @@ def render_formula(
     resources: tuple[dict[str, str], ...] = DEFAULT_PYTHON_RESOURCES,
 ) -> str:
     resource_blocks = render_resources(resources)
+    python_for_venv = python_dependency.replace("@", "")
     return f'''class {class_name} < Formula
   include Language::Python::Virtualenv
 
@@ -158,7 +159,7 @@ def render_formula(
 {resource_blocks}
 
   def install
-    virtualenv_install_with_resources
+    virtualenv_install_with_resources using: "{python_for_venv}"
   end
 
   test do
