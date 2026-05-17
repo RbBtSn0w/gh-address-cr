@@ -1,3 +1,9 @@
+## [2.4.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.3...v2.4.4) (2026-05-17)
+
+### Bug Fixes
+
+* pin python formula ([#55](https://github.com/RbBtSn0w/gh-address-cr/issues/55)) ([8aa8767](https://github.com/RbBtSn0w/gh-address-cr/commit/8aa876706000d5553cd0f73800a07b2508db9fcd))
+
 ## [2.4.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.2...v2.4.3) (2026-05-17)
 
 ### Bug Fixes
