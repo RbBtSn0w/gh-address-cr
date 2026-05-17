@@ -30,7 +30,7 @@ We welcome contributions! Please follow these guidelines:
     -   Python runtime package to PyPI through Trusted Publishing
     -   Homebrew tap update to `RbBtSn0w/homebrew-tap` after the PyPI sdist is available
 -   `workflow_dispatch` `dry-run` and `testpypi` targets validate package build and Homebrew formula rendering, but they do not push tap changes.
--   Production Homebrew publishing requires the `HOMEBREW_TAP_TOKEN` secret with `contents: write` access to `RbBtSn0w/homebrew-tap`.
+-   Production Homebrew publishing uses the shared release-bot GitHub App installed on `RbBtSn0w/homebrew-tap` with `Contents: Read and write`; the organization or account must expose `RELEASE_BOT_APP_ID` as an Actions variable and `RELEASE_BOT_PRIVATE_KEY` as an Actions secret to this repository.
 -   If `semantic-release` generates no new version, both PyPI and Homebrew publishing must skip explicitly instead of pretending to publish.
 
 ## Security
