@@ -14,7 +14,7 @@ from urllib.request import urlopen
 
 DEFAULT_PACKAGE_NAME = "gh-address-cr"
 DEFAULT_PYPI_BASE_URL = "https://pypi.org/pypi/"
-DEFAULT_PYTHON_DEPENDENCY = "python@3.13"
+DEFAULT_PYTHON_DEPENDENCY = "python@3.14"
 DEFAULT_PYTHON_RESOURCES = (
     {
         "name": "packaging",
