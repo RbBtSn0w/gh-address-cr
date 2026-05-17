@@ -19,7 +19,10 @@ RELEASE_CONFIG = ROOT / "release.config.cjs"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 README = ROOT / "README.md"
+CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 VERSION_SYNC_SCRIPT = ROOT / "scripts" / "set_package_version.py"
+HOMEBREW_FORMULA_RENDERER = ROOT / "scripts" / "release" / "render_homebrew_formula.py"
+PYPI_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "release" / "pypi_gh_address_cr_1_2_3.json"
 
 
 class RuntimePackagingTest(PythonScriptTestCase):
@@ -474,6 +477,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("python -m build", text)
         self.assertIn("twine check dist/*", text)
         self.assertIn("Verify package version", text)
+        self.assertIn("Render Homebrew formula from local sdist", text)
+        self.assertIn("scripts/release/render_homebrew_formula.py", text)
         self.assertIn("pypa/gh-action-pypi-publish", text)
         self.assertIn("repository-url: https://test.pypi.org/legacy/", text)
         self.assertNotIn("environment: pypi", text)
@@ -486,12 +491,74 @@ class RuntimePackagingTest(PythonScriptTestCase):
             ),
         )
 
+    def test_release_workflow_updates_homebrew_tap_after_pypi_publish(self):
+        text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("publish-homebrew:", text)
+        self.assertIn("needs: [build-release-package, publish-pypi]", text)
+        self.assertIn("needs.build-release-package.outputs.publish_target == 'pypi'", text)
+        self.assertIn("HOMEBREW_TAP_TOKEN", text)
+        self.assertIn("RbBtSn0w/homebrew-tap", text)
+        self.assertIn("Formula/gh-address-cr.rb", text)
+        self.assertIn('HOMEBREW_NO_INSTALL_FROM_API: "1"', text)
+        self.assertIn("Sync rendered Homebrew formula into tapped clone", text)
+        self.assertIn(
+            'brew update-python-resources --package-name gh-address-cr --version "$PACKAGE_VERSION" RbBtSn0w/tap/gh-address-cr',
+            text,
+        )
+        self.assertIn("brew audit --formula --strict RbBtSn0w/tap/gh-address-cr", text)
+        self.assertIn("brew install --build-from-source RbBtSn0w/tap/gh-address-cr", text)
+        self.assertIn("brew test RbBtSn0w/tap/gh-address-cr", text)
+        self.assertIn("git status --short -- Formula/gh-address-cr.rb", text)
+
+    def test_homebrew_formula_renderer_uses_pypi_sdist_contract(self):
+        output = Path(self.temp_dir.name) / "gh-address-cr.rb"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(HOMEBREW_FORMULA_RENDERER),
+                "--version",
+                "1.2.3",
+                "--pypi-json",
+                str(PYPI_JSON_FIXTURE),
+                "--output",
+                str(output),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=self.env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "RENDERED")
+        self.assertEqual(payload["version"], "1.2.3")
+        self.assertEqual(payload["sha256"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+
+        formula = output.read_text(encoding="utf-8")
+        self.assertIn("class GhAddressCr < Formula", formula)
+        self.assertIn("include Language::Python::Virtualenv", formula)
+        self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
+        self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
+        self.assertIn('depends_on "python@3.13"', formula)
+        self.assertIn("virtualenv_install_with_resources", formula)
+        self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
+        self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
+        self.assertNotIn("whl", formula)
+
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = README.read_text(encoding="utf-8")
 
         self.assertIn("Install the released runtime CLI", text)
         self.assertIn("pipx install gh-address-cr", text)
         self.assertIn("uv tool install gh-address-cr", text)
+        self.assertIn("Install with Homebrew", text)
+        self.assertIn("brew tap RbBtSn0w/tap", text)
+        self.assertIn("brew install gh-address-cr", text)
+        self.assertIn("brew upgrade gh-address-cr", text)
+        self.assertIn("brew test gh-address-cr", text)
         self.assertIn("GitHub-direct runtime validation install", text)
         self.assertIn("pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git", text)
         self.assertIn("Local editable development install", text)
@@ -502,6 +569,16 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("does not install the runtime CLI package", text)
         self.assertIn("Upgrade from skill-shim usage", text)
         self.assertIn("reinstall the runtime CLI with `pipx` or `uv tool`", text)
+        self.assertIn("Homebrew tap", text)
+
+    def test_contributing_documents_homebrew_release_policy(self):
+        text = CONTRIBUTING.read_text(encoding="utf-8")
+
+        self.assertIn("Homebrew tap update to `RbBtSn0w/homebrew-tap`", text)
+        self.assertIn("after the PyPI sdist is available", text)
+        self.assertIn("HOMEBREW_TAP_TOKEN", text)
+        self.assertIn("dry-run` and `testpypi` targets validate package build and Homebrew formula rendering", text)
+        self.assertIn("both PyPI and Homebrew publishing must skip explicitly", text)
 
 
 if __name__ == "__main__":
