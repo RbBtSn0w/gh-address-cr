@@ -1,3 +1,9 @@
+## [2.4.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.2...v2.4.3) (2026-05-17)
+
+### Bug Fixes
+
+* make Homebrew resource refresh non-blocking ([#54](https://github.com/RbBtSn0w/gh-address-cr/issues/54)) ([d6db38d](https://github.com/RbBtSn0w/gh-address-cr/commit/d6db38d8ceaa4ed0a3ddaa7b1bb64676a71441a2))
+
 ## [2.4.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.1...v2.4.2) (2026-05-17)
 
 ### Bug Fixes
