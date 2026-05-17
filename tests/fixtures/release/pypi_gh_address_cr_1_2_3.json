@@ -1,0 +1,24 @@
+{
+  "info": {
+    "name": "gh-address-cr",
+    "version": "1.2.3"
+  },
+  "urls": [
+    {
+      "filename": "gh_address_cr-1.2.3-py3-none-any.whl",
+      "packagetype": "bdist_wheel",
+      "url": "https://files.pythonhosted.org/packages/py3/g/gh-address-cr/gh_address_cr-1.2.3-py3-none-any.whl",
+      "digests": {
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    {
+      "filename": "gh_address_cr-1.2.3.tar.gz",
+      "packagetype": "sdist",
+      "url": "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz",
+      "digests": {
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  ]
+}

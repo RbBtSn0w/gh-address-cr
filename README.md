@@ -54,6 +54,26 @@ python -m gh_address_cr --help
 
 These commands install the Python runtime package. They do not install or update the packaged skill adapter under `skill/`.
 
+### Install with Homebrew
+
+Use this path when you want the stable `gh-address-cr` executable through Homebrew on macOS or Linuxbrew. Homebrew installs the same released runtime package from the PyPI sdist through the `RbBtSn0w/homebrew-tap` formula.
+
+```bash
+brew tap RbBtSn0w/tap
+brew install gh-address-cr
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+Upgrade and test the installed formula with:
+
+```bash
+brew upgrade gh-address-cr
+brew test gh-address-cr
+```
+
+The Homebrew tap installs the runtime CLI only. It does not install or update the packaged skill adapter under `skill/`.
+
 ### GitHub-direct runtime validation install
 
 Use this path only for pre-release validation of the current repository state before a PyPI release is available.
@@ -1263,7 +1283,9 @@ If `gh-address-cr final-gate` fails:
 - Unsupported Python: use Python 3.10 or newer through `pipx`, `uv tool`, or a local virtual environment.
 - Missing PyPI package: `gh-address-cr` may not have been published yet. Use the GitHub-direct runtime validation install for pre-release validation.
 - Missing Trusted Publishing: production PyPI publishing must use GitHub OIDC with the PyPI project `gh-address-cr`, repository `RbBtSn0w/gh-address-cr`, workflow `.github/workflows/release.yml`, no GitHub environment constraint, and `id-token: write`.
+- Missing Homebrew tap token: production Homebrew publishing requires `HOMEBREW_TAP_TOKEN`, a fine-grained GitHub token with `contents: write` access to `RbBtSn0w/homebrew-tap`.
 - Stale artifact version: release-built wheel and sdist metadata must match the semantic-release version. If a publish partially succeeds, inspect PyPI before retrying because uploaded files are immutable.
+- Homebrew tap update failure: inspect the `publish-homebrew` job after confirming PyPI upload succeeded. The job renders `Formula/gh-address-cr.rb` from the PyPI sdist, runs `brew update-python-resources`, `brew audit --formula --strict`, `brew install --build-from-source`, and `brew test` before pushing the tap update.
 - Installed smoke domain failure: `agent orchestrate status` may report a missing session and `final-gate` may report `Final gate failed to evaluate: error connecting to api.github.com` when GitHub state or network access is unavailable. These are acceptable smoke outcomes only when there is no traceback, missing import, or missing console entrypoint.
 - Skill install confusion: `npx skills add ... --skill skill` installs the packaged skill adapter only. It does not install the runtime CLI package.
 - Skill-shim migration confusion: if `python3 skill/scripts/cli.py` works from a checkout but `gh-address-cr` is unavailable, install or reinstall the runtime CLI with `pipx` or `uv tool`.
@@ -1276,10 +1298,13 @@ This repo includes a `semantic-release` workflow:
 - Input: Conventional Commits history
 - Output: semantic version tag (`vX.Y.Z`) + GitHub Release + `CHANGELOG.md`
 - Python package release: `pyproject.toml` and `src/gh_address_cr/__init__.py` are synchronized to the semantic-release version before wheel/sdist build.
-- Stable package registry: PyPI is the only documented stable runtime CLI package registry.
+- Stable Python package registry: PyPI remains the authoritative Python runtime package registry.
+- Homebrew tap: production PyPI releases update `RbBtSn0w/homebrew-tap` after the PyPI sdist is available. Homebrew is the documented macOS/Linuxbrew CLI installation channel.
 - GitHub Releases remain release-note, tag, source-archive, and optional provenance surfaces; they are not the primary Python package registry.
-- Dry-run/staging validation: use the `workflow_dispatch` `dry-run` or `testpypi` target before enabling production PyPI publishing.
+- Dry-run/staging validation: use the `workflow_dispatch` `dry-run` or `testpypi` target before enabling production PyPI publishing. These targets build the package and render a local-sdist Homebrew formula but do not write the tap.
 - Production PyPI publishing: requires PyPI Trusted Publishing and package-name ownership. It runs without a GitHub deployment environment approval gate; do not use long-lived PyPI API tokens unless a separate explicit release-policy change approves that fallback.
+- Production Homebrew publishing: requires `HOMEBREW_TAP_TOKEN` with write access to `RbBtSn0w/homebrew-tap`. The workflow validates the formula with `brew update-python-resources`, `brew audit --formula --strict`, source install, and `brew test` before pushing.
+- No-release runs: if semantic-release finds no qualifying commit and does not create a tag, PyPI and Homebrew publishing both skip explicitly.
 - Failed or partial publish recovery: inspect the PyPI project state and release artifacts before retrying; immutable package files may require a follow-up semantic-release version.
 
 Commit format examples:
