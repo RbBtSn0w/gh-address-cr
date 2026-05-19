@@ -101,6 +101,10 @@ jobs:
         if: steps.package-version.outputs.released == 'true'
         run: python -m pip install --upgrade pip build twine
 
+      - name: Plugin payload check
+        if: steps.package-version.outputs.released == 'true'
+        run: python scripts/build_plugin_payload.py --check
+
       - name: Package build
         if: steps.package-version.outputs.released == 'true'
         run: |

@@ -1,0 +1,22 @@
+{
+  "name": "gh-address-cr-community",
+  "interface": {
+    "displayName": "GH Address CR Community"
+  },
+  "plugins": [
+    {
+      "name": "gh-address-cr",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/RbBtSn0w/gh-address-cr.git",
+        "path": "./plugin/gh-address-cr",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
