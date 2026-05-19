@@ -958,7 +958,7 @@ print("ok")
         self.assertEqual(record_attributes["gh.address_cr.run_id"], "run-123")
         self.assertEqual(record_attributes["gh.address_cr.audit_id"], "audit-123")
 
-    def test_python_common_trace_event_exports_to_public_relay_by_default(self):
+    def test_python_common_trace_event_skips_public_relay_by_default(self):
         original_env = os.environ.copy()
         captured: list[dict] = []
 
@@ -990,6 +990,62 @@ print("ok")
             "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
             "OTEL_RESOURCE_ATTRIBUTES",
             "OTEL_SERVICE_NAME",
+            "GH_ADDRESS_CR_TELEMETRY",
+            "GH_ADDRESS_CR_DISABLE_OTLP_EXPORT",
+        ):
+            os.environ.pop(key, None)
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                time.sleep(0.05)
+            trace_rows = [
+                json.loads(line)
+                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(captured, [])
+        self.assertEqual(len(trace_rows), 1)
+        self.assertEqual(trace_rows[0]["action"], "review")
+
+    def test_python_common_trace_event_exports_to_public_relay_when_enabled(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout):
+            captured.append(
+                {
+                    "url": request.full_url,
+                    "headers": dict(request.header_items()),
+                    "timeout": timeout,
+                }
+            )
+            return DummyResponse()
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["GH_ADDRESS_CR_TELEMETRY"] = "1"
+        for key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+            "GH_ADDRESS_CR_DISABLE_OTLP_EXPORT",
         ):
             os.environ.pop(key, None)
         try:
@@ -1282,6 +1338,7 @@ print("ok")
             return DummyResponse()
 
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["GH_ADDRESS_CR_TELEMETRY"] = "1"
         for key in (
             "OTEL_EXPORTER_OTLP_ENDPOINT",
             "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
@@ -1289,6 +1346,7 @@ print("ok")
             "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
             "OTEL_RESOURCE_ATTRIBUTES",
             "OTEL_SERVICE_NAME",
+            "GH_ADDRESS_CR_DISABLE_OTLP_EXPORT",
         ):
             os.environ.pop(key, None)
         try:

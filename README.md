@@ -6,6 +6,63 @@ Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `skill/SKILL.md`; keep
 repo-root governance and packaged-skill instructions in their own scopes.
 
+## Community Quickstart
+
+`gh-address-cr` is a community-ready Codex skill plus deterministic CLI runtime
+for pull request review-resolution work. It is not a review engine: it
+coordinates GitHub review threads, local AI review findings, evidence, replies,
+resolves, and final-gate proof in one PR-scoped session.
+
+Install the runtime first:
+
+```bash
+pipx install gh-address-cr
+gh-address-cr --help
+gh-address-cr agent manifest
+```
+
+Install the packaged skill adapter:
+
+```bash
+npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
+npx skills check
+```
+
+For Codex Plugin testing, build and install the repo-local plugin payload from:
+
+```text
+plugin/gh-address-cr
+```
+
+Use it when:
+
+- a PR has unresolved GitHub review threads
+- an AI review producer emits normalized findings for the PR
+- stale or outdated review threads still need explicit evidence and handling
+- completion requires a fresh `gh-address-cr final-gate <owner/repo> <pr_number>` proof
+
+Do not use it as:
+
+- a replacement for a code-review producer
+- a generic GitHub issue bot
+- a ChatGPT Apps SDK app or MCP server
+- a direct shortcut for posting GitHub replies or resolving threads outside the runtime
+
+First PR walkthrough:
+
+```bash
+gh-address-cr active-pr --repo owner/repo
+gh-address-cr review owner/repo 123
+gh-address-cr address owner/repo 123 --lean
+gh-address-cr agent publish owner/repo 123
+gh-address-cr final-gate owner/repo 123
+```
+
+Completion means the latest final gate reports zero unresolved review threads,
+zero pending reviews for the authenticated login, no blocking session items, and
+an audit summary path with a sha256 hash. A zero unresolved-thread count alone is
+not sufficient.
+
 It now treats a Pull Request as the session root and can ingest both:
 
 - GitHub review threads
@@ -118,6 +175,41 @@ After installing the skill, verify that a runtime CLI is available:
 gh-address-cr --help
 gh-address-cr adapter check-runtime
 ```
+
+### Repo-local Codex Plugin package
+
+The repo-local plugin wrapper is generated from `skill/` and lives at
+`plugin/gh-address-cr/`. It packages the existing skill instructions for Codex
+Plugin installation surfaces and does not add MCP servers, ChatGPT UI, or runtime
+business logic.
+
+```bash
+python3 scripts/build_plugin_payload.py
+python3 scripts/build_plugin_payload.py --check
+```
+
+### Community Codex Marketplace install
+
+This repository includes a repo marketplace at `.agents/plugins/marketplace.json`.
+After the plugin payload is committed to `main`, developers can add the
+marketplace and install `gh-address-cr` from Codex:
+
+```bash
+codex plugin marketplace add RbBtSn0w/gh-address-cr --ref main
+codex plugin marketplace upgrade
+```
+
+For releases, prefer pinning a tag:
+
+```bash
+codex plugin marketplace add RbBtSn0w/gh-address-cr --ref v2.4.1
+```
+
+The OpenAI curated Plugin Directory is not a self-service publish target in this
+repository. Use this marketplace file as the community distribution path and
+prepare a curated-review packet with the repository URL, plugin path
+(`plugin/gh-address-cr`), privacy/terms/security links, screenshots, and current
+verification output.
 
 ### Upgrade from skill-shim usage
 
@@ -857,11 +949,19 @@ Local audit files remain the canonical repository contract:
 - `trace.jsonl`
 - `audit_summary.md`
 
-The distributed CLI now ships with a zero-config hosted relay endpoint:
+Telemetry network export is opt-in. By default, the CLI writes only local audit
+and trace files. To use the hosted relay, set:
+
+```bash
+export GH_ADDRESS_CR_TELEMETRY=1
+```
+
+The hosted relay endpoint is:
 
 - `https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs`
 
-By default, each audit/trace event is also emitted as an OTLP/HTTP JSON `logs` record to that Cloudflare Worker.
+When enabled, each audit/trace event is emitted as an OTLP/HTTP JSON `logs`
+record to that Cloudflare Worker.
 
 Recommended deployment shape:
 
@@ -869,7 +969,8 @@ Recommended deployment shape:
 - Cloudflare Worker as the security relay
 - Better Stack as the backend
 
-This keeps the Better Stack source token out of the CLI runtime while preserving local audit artifacts for `audit-report`, archive, and tests. End users do not need to set telemetry environment variables for the hosted path.
+This keeps the Better Stack source token out of the CLI runtime while preserving
+local audit artifacts for `audit-report`, archive, and tests.
 
 Repository-root reference docs:
 
@@ -877,7 +978,9 @@ Repository-root reference docs:
 - Worker example: `skill/references/otel-worker-better-stack/worker.mjs`
 - Wrangler example: `skill/references/otel-worker-better-stack/wrangler.example.jsonc`
 
-For self-hosting or explicit override, CLI-side OpenTelemetry configuration still supports standard env vars:
+For self-hosting or explicit override, CLI-side OpenTelemetry configuration still
+supports standard env vars. Setting an explicit OTLP endpoint also enables
+network export:
 
 ```bash
 export OTEL_SERVICE_NAME="gh-address-cr-cli"
@@ -1040,6 +1143,18 @@ Current test layout:
 ```bash
 npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 ```
+
+## Build the repo-local Codex Plugin
+
+```bash
+python3 scripts/build_plugin_payload.py
+python3 scripts/build_plugin_payload.py --check
+```
+
+The generated plugin package is `plugin/gh-address-cr/`. It contains
+`.codex-plugin/plugin.json`, one bundled skill at `skills/gh-address-cr/`, and
+presentation assets. It intentionally does not include `.app.json`, `.mcp.json`,
+or any ChatGPT Apps SDK server metadata.
 
 ## Breaking changes (2026-04-09)
 

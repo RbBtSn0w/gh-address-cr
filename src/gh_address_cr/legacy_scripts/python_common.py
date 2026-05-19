@@ -401,7 +401,14 @@ def _otlp_logs_endpoint() -> str | None:
         return _normalize_otlp_logs_endpoint(logs_endpoint, signal_specific=True)
     if base_endpoint:
         return _normalize_otlp_logs_endpoint(base_endpoint, signal_specific=False)
+    if not _public_otlp_export_enabled():
+        return None
     return _normalize_otlp_logs_endpoint(DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT, signal_specific=False)
+
+
+def _public_otlp_export_enabled() -> bool:
+    value = (os.environ.get("GH_ADDRESS_CR_TELEMETRY") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _otlp_export_disabled() -> bool:
