@@ -1,3 +1,9 @@
+## [2.5.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.0...v2.5.1) (2026-05-19)
+
+### Bug Fixes
+
+* sync plugin payload during release ([5fd7c67](https://github.com/RbBtSn0w/gh-address-cr/commit/5fd7c6722a56cb709c5c93678d79a526f8f9ec96))
+
 ## [2.5.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.5...v2.5.0) (2026-05-19)
 
 ### Features

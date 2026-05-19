@@ -1,6 +1,6 @@
 {
   "name": "gh-address-cr",
-  "version": "2.4.5",
+  "version": "2.5.1",
   "description": "Deterministic PR review-resolution control plane for AI coding agents.",
   "author": {
     "name": "rbbtsn0w",
