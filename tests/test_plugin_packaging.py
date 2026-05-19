@@ -94,7 +94,7 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertIn("not a ChatGPT Apps SDK app", terms)
         self.assertIn("Responsible Disclosure", security)
 
-    def test_repo_marketplace_exposes_plugin_as_git_subdir(self):
+    def test_repo_marketplace_exposes_plugin_as_local_path_in_git_marketplace(self):
         marketplace = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
 
         self.assertEqual(marketplace["name"], "gh-address-cr-community")
@@ -108,10 +108,8 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertEqual(plugin["policy"]["authentication"], "ON_INSTALL")
 
         source = plugin["source"]
-        self.assertEqual(source["source"], "git-subdir")
-        self.assertEqual(source["url"], "https://github.com/RbBtSn0w/gh-address-cr.git")
+        self.assertEqual(source["source"], "local")
         self.assertEqual(source["path"], "./plugin/gh-address-cr")
-        self.assertEqual(source["ref"], "main")
         self.assertTrue((ROOT / source["path"][2:] / ".codex-plugin" / "plugin.json").exists())
 
     def test_ci_and_release_gate_plugin_payload_check(self):

@@ -7,10 +7,8 @@
     {
       "name": "gh-address-cr",
       "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/RbBtSn0w/gh-address-cr.git",
-        "path": "./plugin/gh-address-cr",
-        "ref": "main"
+        "source": "local",
+        "path": "./plugin/gh-address-cr"
       },
       "policy": {
         "installation": "AVAILABLE",
