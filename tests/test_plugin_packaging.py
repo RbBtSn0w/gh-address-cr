@@ -18,6 +18,7 @@ MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 README = ROOT / "README.md"
+RELEASE_CONFIG = ROOT / "release.config.cjs"
 
 
 def _pyproject_version() -> str:
@@ -120,6 +121,16 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertIn("python scripts/build_plugin_payload.py --check", ci_text)
         self.assertIn("Plugin payload check", release_text)
         self.assertIn("python scripts/build_plugin_payload.py --check", release_text)
+
+    def test_release_version_prepare_regenerates_plugin_payload(self):
+        release_config = RELEASE_CONFIG.read_text(encoding="utf-8")
+        release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", release_config)
+        self.assertIn("scripts/build_plugin_payload.py", release_config)
+        self.assertIn("plugin/gh-address-cr/.codex-plugin/plugin.json", release_config)
+        self.assertIn("plugin/gh-address-cr/plugin.json", release_config)
+        self.assertIn("python3 scripts/build_plugin_payload.py", release_workflow)
 
     def test_readme_documents_codex_marketplace_install_path(self):
         readme = README.read_text(encoding="utf-8")

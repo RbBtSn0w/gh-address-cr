@@ -38,13 +38,20 @@ module.exports = {
     [
       "@semantic-release/exec",
       {
-        prepareCmd: "python3 scripts/set_package_version.py ${nextRelease.version}",
+        prepareCmd:
+          "python3 scripts/set_package_version.py ${nextRelease.version} && python3 scripts/build_plugin_payload.py",
       },
     ],
     [
       "@semantic-release/git",
       {
-        assets: ["CHANGELOG.md", "pyproject.toml", "src/gh_address_cr/__init__.py"],
+        assets: [
+          "CHANGELOG.md",
+          "pyproject.toml",
+          "src/gh_address_cr/__init__.py",
+          "plugin/gh-address-cr/.codex-plugin/plugin.json",
+          "plugin/gh-address-cr/plugin.json",
+        ],
         message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
       },
     ],
