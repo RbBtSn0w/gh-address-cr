@@ -1,3 +1,9 @@
+## [2.5.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.5...v2.5.0) (2026-05-19)
+
+### Features
+
+* package gh-address-cr for Codex marketplace ([6c712e6](https://github.com/RbBtSn0w/gh-address-cr/commit/6c712e677caff34108f08f4787f08a532ba24e28))
+
 ## [2.4.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.4...v2.4.5) (2026-05-17)
 
 ### Bug Fixes
