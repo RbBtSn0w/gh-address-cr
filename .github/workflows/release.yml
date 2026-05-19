@@ -72,7 +72,9 @@ jobs:
 
       - name: Prepare staging package version
         if: steps.publish-target.outputs.target != 'pypi'
-        run: python3 scripts/set_package_version.py --version "0.0.0.dev${GITHUB_RUN_NUMBER}"
+        run: |
+          python3 scripts/set_package_version.py --version "0.0.0.dev${GITHUB_RUN_NUMBER}"
+          python3 scripts/build_plugin_payload.py
 
       - name: Resolve package version
         id: package-version
