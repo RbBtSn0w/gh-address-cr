@@ -128,10 +128,9 @@ def build_payload(destination: Path) -> None:
     (destination / ".codex-plugin").mkdir(parents=True, exist_ok=True)
     copy_skill_payload(destination / "skills" / "gh-address-cr")
     write_assets(destination / "assets")
-    (destination / ".codex-plugin" / "plugin.json").write_text(
-        json.dumps(manifest(), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    manifest_text = json.dumps(manifest(), indent=2, ensure_ascii=False) + "\n"
+    (destination / "plugin.json").write_text(manifest_text, encoding="utf-8")
+    (destination / ".codex-plugin" / "plugin.json").write_text(manifest_text, encoding="utf-8")
 
 
 def iter_files(root: Path) -> list[Path]:

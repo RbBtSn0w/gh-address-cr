@@ -9,6 +9,7 @@ from tests.helpers import ROOT
 
 PLUGIN_ROOT = ROOT / "plugin" / "gh-address-cr"
 PLUGIN_MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
+PLUGIN_ROOT_MANIFEST = PLUGIN_ROOT / "plugin.json"
 PLUGIN_SKILLS_ROOT = PLUGIN_ROOT / "skills"
 PLUGIN_SKILL_ROOT = PLUGIN_SKILLS_ROOT / "gh-address-cr"
 PLUGIN_BUILDER = ROOT / "scripts" / "build_plugin_payload.py"
@@ -29,6 +30,9 @@ def _pyproject_version() -> str:
 class PluginPackagingTest(unittest.TestCase):
     def test_plugin_manifest_has_codex_plugin_contract(self):
         manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+        root_manifest = json.loads(PLUGIN_ROOT_MANIFEST.read_text(encoding="utf-8"))
+
+        self.assertEqual(root_manifest, manifest)
 
         self.assertEqual(manifest["name"], "gh-address-cr")
         self.assertEqual(manifest["version"], _pyproject_version())
