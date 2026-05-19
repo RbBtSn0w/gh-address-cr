@@ -1,3 +1,27 @@
+## [2.4.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.4...v2.4.5) (2026-05-17)
+
+### Bug Fixes
+
+* use release bot app for Homebrew tap updates ([#56](https://github.com/RbBtSn0w/gh-address-cr/issues/56)) ([1b73923](https://github.com/RbBtSn0w/gh-address-cr/commit/1b73923ba6a760a674d4ece2e030eb6ab8357ab7))
+
+## [2.4.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.3...v2.4.4) (2026-05-17)
+
+### Bug Fixes
+
+* pin python formula ([#55](https://github.com/RbBtSn0w/gh-address-cr/issues/55)) ([8aa8767](https://github.com/RbBtSn0w/gh-address-cr/commit/8aa876706000d5553cd0f73800a07b2508db9fcd))
+
+## [2.4.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.2...v2.4.3) (2026-05-17)
+
+### Bug Fixes
+
+* make Homebrew resource refresh non-blocking ([#54](https://github.com/RbBtSn0w/gh-address-cr/issues/54)) ([d6db38d](https://github.com/RbBtSn0w/gh-address-cr/commit/d6db38d8ceaa4ed0a3ddaa7b1bb64676a71441a2))
+
+## [2.4.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.1...v2.4.2) (2026-05-17)
+
+### Bug Fixes
+
+* add Homebrew release publishing ([#53](https://github.com/RbBtSn0w/gh-address-cr/issues/53)) ([78fe85d](https://github.com/RbBtSn0w/gh-address-cr/commit/78fe85dbcd6134c0422781b2d70101ca5707c586))
+
 ## [2.4.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.4.0...v2.4.1) (2026-05-11)
 
 ### Bug Fixes
