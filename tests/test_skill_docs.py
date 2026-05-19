@@ -8,6 +8,13 @@ from tests.helpers import ROOT
 
 SKILL_MD = ROOT / "skill" / "SKILL.md"
 README_MD = ROOT / "README.md"
+DOCS_DIR = ROOT / "docs"
+ARCHITECTURE_MD = DOCS_DIR / "architecture.md"
+CLI_REFERENCE_MD = DOCS_DIR / "cli-reference.md"
+DEVELOPMENT_MD = DOCS_DIR / "development.md"
+INSTALLATION_MD = DOCS_DIR / "installation.md"
+TROUBLESHOOTING_MD = DOCS_DIR / "troubleshooting.md"
+WORKFLOWS_MD = DOCS_DIR / "workflows.md"
 AGENTS_MD = ROOT / "AGENTS.md"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
@@ -27,6 +34,10 @@ def load_documentation_contracts():
     path = ROOT / "tests" / "fixtures" / "thin_skill_orchestration" / "documentation_contracts.json"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def read_repo_docs(*paths):
+    return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
@@ -173,16 +184,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
-        readme_text = README_MD.read_text(encoding="utf-8")
+        cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
         self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
         self.assertIn("`files`", matrix_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
-        self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
-        self.assertIn("`summary`", readme_text)
-        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
+        self.assertIn("for GitHub thread `fix`: `fix_reply`", cli_text)
+        self.assertIn("`summary`", cli_text)
+        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", cli_text)
         self.assertIn("`fix_reply` **must be a JSON object**", protocol_text)
         self.assertIn("`commit_hash`", protocol_text)
         self.assertIn("`files`", protocol_text)
@@ -300,7 +311,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
         self.assertIn("one public main entrypoint", text)
         self.assertIn("Advanced/internal integration entrypoints:", text)
         self.assertNotIn("with these agent-safe public entrypoints:", text)
@@ -309,7 +320,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("$gh-address-cr review <PR_URL>", text)
 
     def test_readme_documents_repo_root_vs_skill_root_layout(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, ARCHITECTURE_MD)
         self.assertIn("Published skill payload: the entire `skill/` directory", text)
         self.assertIn("Repo-level verification harness: `tests/`", text)
         self.assertIn(
@@ -324,7 +335,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("with `--skill skill`", text)
 
     def test_readme_and_skill_document_optional_otlp_worker_logging(self):
-        readme_text = README_MD.read_text(encoding="utf-8")
+        readme_text = read_repo_docs(README_MD, DEVELOPMENT_MD)
         skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("Cloudflare Worker as the security relay", readme_text)
         self.assertIn("gh-address-cr.hamiltonsnow.workers.dev", readme_text)
@@ -333,7 +344,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("references/otel-worker-better-stack.md", skill_text)
 
     def test_readme_matches_adapter_public_semantics(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
         self.assertIn("adapter-produced findings plus PR orchestration", text)
         self.assertNotIn("adapter command prints findings JSON", text)
         self.assertIn("wrapper `--human` and `--machine` belong before `adapter`", text)
@@ -342,12 +353,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("handles local findings only; it does not process GitHub review threads", text)
 
     def test_readme_documents_converter_input_contract(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
         self.assertIn("does not accept arbitrary Markdown", text)
         self.assertIn("fixed `finding` block format", text)
 
     def test_readme_documents_machine_summary_fields(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, CLI_REFERENCE_MD, ARCHITECTURE_MD, TROUBLESHOOTING_MD)
         self.assertNotIn("The exact machine summary fields are documented in `skill/SKILL.md`.", text)
         for field in (
             "status",
@@ -378,18 +389,18 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("AMBIGUOUS_ACTIVE_PR", text)
 
     def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         self.assertLess(text.index("## Public Interface"), text.index("## Automatic Review Workflow"))
         self.assertLess(text.index("## Automatic Review Workflow"), text.index("Advanced producer categories:"))
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         self.assertEqual(text.count("Minimal user prompt:"), 1)
         self.assertEqual(text.count("Ready-to-use prompt variants:"), 1)
         self.assertNotIn("## Prompt Templates", text)
 
     def test_readme_documents_executable_adapter_flag_examples(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
         self.assertIn(
@@ -401,7 +412,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         )
 
     def test_readme_prefers_runtime_cli_over_skill_shim_for_automation(self):
-        text = README_MD.read_text(encoding="utf-8")
+        text = read_repo_docs(README_MD, WORKFLOWS_MD, ARCHITECTURE_MD)
         self.assertIn("`gh-address-cr` is the preferred and stable automation entrypoint", text)
         self.assertIn("`skill/scripts/cli.py` remains compatibility-only", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` is the only automation entrypoint", text)
@@ -409,7 +420,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("`cli.py` is the preferred Python entrypoint for automation", text)
 
     def test_readme_documents_external_review_handoff_contract(self):
-        readme_text = README_MD.read_text(encoding="utf-8")
+        readme_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         self.assertIn("any external review producer may satisfy the handoff", readme_text)
         self.assertIn("producer-request.md", readme_text)
         self.assertIn("incoming-findings.json", readme_text)
@@ -423,12 +434,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Any external review producer:", readme_text)
 
     def test_readme_documents_feedback_target_repo_and_source_fields(self):
-        readme_text = README_MD.read_text(encoding="utf-8")
+        readme_text = DEVELOPMENT_MD.read_text(encoding="utf-8")
         self.assertIn("`RbBtSn0w/gh-address-cr`", readme_text)
         self.assertIn("`--using-repo` and `--using-pr`", readme_text)
 
     def test_readme_moves_input_and_producer_routing_to_advanced_section(self):
-        readme_text = README_MD.read_text(encoding="utf-8")
+        readme_text = read_repo_docs(README_MD, CLI_REFERENCE_MD, WORKFLOWS_MD)
         self.assertIn("## Advanced / Developer Integration", readme_text)
         self.assertIn(
             "The public user flow above does not require manual `--input`, producer selection, or mode routing.",
