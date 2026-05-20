@@ -312,10 +312,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
-        self.assertIn("one public main entrypoint", text)
+        self.assertIn("Primary commands:", text)
         self.assertIn("Advanced/internal integration entrypoints:", text)
         self.assertNotIn("with these agent-safe public entrypoints:", text)
         self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("`final-gate`", text)
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
 

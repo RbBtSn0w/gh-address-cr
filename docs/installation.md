@@ -113,7 +113,7 @@ codex plugin marketplace upgrade
 For releases, prefer pinning a tag:
 
 ```bash
-codex plugin marketplace add RbBtSn0w/gh-address-cr --ref v2.4.1
+codex plugin marketplace add RbBtSn0w/gh-address-cr --ref v2.5.1
 ```
 
 The OpenAI curated Plugin Directory is not a self-service publish target in this

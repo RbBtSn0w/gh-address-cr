@@ -2,11 +2,14 @@
 
 ## Public Interface
 
-`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint plus a lightweight thread-only shortcut:
+`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator.
+
+Primary commands:
 
 - `active-pr`
 - `review`
 - `address`
+- `final-gate`
 
 Advanced/internal integration entrypoints:
 
@@ -26,7 +29,6 @@ Advanced/internal integration entrypoints:
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
-- `final-gate`
 
 Fail-fast contract:
 
@@ -55,7 +57,7 @@ Minimal invocation model:
 /gh-address-cr address <owner/repo> <pr_number> --lean
 ```
 
-Advanced/internal integrations are documented later in this README.
+Advanced/internal integrations are documented later in this reference.
 
 Stable machine summary fields:
 
