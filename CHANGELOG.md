@@ -1,3 +1,9 @@
+## [2.5.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.1...v2.5.2) (2026-05-25)
+
+### Bug Fixes
+
+* preserve source-scoped producer handoff ([#63](https://github.com/RbBtSn0w/gh-address-cr/issues/63)) ([f35a775](https://github.com/RbBtSn0w/gh-address-cr/commit/f35a775b65a8c31565137e070c66da6d39a31d4a))
+
 ## [2.5.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.0...v2.5.1) (2026-05-19)
 
 ### Bug Fixes
