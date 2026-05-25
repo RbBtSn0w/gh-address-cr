@@ -1,3 +1,9 @@
+## [2.5.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.2...v2.5.3) (2026-05-25)
+
+### Bug Fixes
+
+* Preserve first-scene severity evidence ([#64](https://github.com/RbBtSn0w/gh-address-cr/issues/64)) ([364393d](https://github.com/RbBtSn0w/gh-address-cr/commit/364393da0f34b6969850d5b60df180d5a6d2fd17))
+
 ## [2.5.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.1...v2.5.2) (2026-05-25)
 
 ### Bug Fixes
