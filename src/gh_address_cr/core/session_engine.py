@@ -17,6 +17,7 @@ from gh_address_cr.core.severity import (
     apply_severity_evidence,
     extract_review_priority_evidence,
     extract_severity_evidence,
+    normalize_severity,
     severity_evidence,
 )
 from gh_address_cr.intake.findings import EMPTY_FINDINGS_INPUT_MESSAGE, normalize_finding
@@ -362,6 +363,13 @@ def history_event(event: str, note: str = "", actor: str = "system") -> dict:
     return {"ts": utc_now(), "event": event, "note": note, "actor": actor}
 
 
+def _valid_severity_evidence(item: dict) -> bool:
+    evidence = item.get("severity_evidence")
+    if not isinstance(evidence, dict):
+        return False
+    return bool(normalize_severity(evidence.get("value")))
+
+
 def clear_claim(item: dict):
     item["claimed_by"] = None
     item["claimed_at"] = None
@@ -417,7 +425,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     first_body = row.get("first_body")
     if first_body is None and row.get("comment_source") == "first":
         first_body = row.get("body")
-    first_url = row.get("first_url") or row.get("url")
+    first_url = row.get("first_url") or (row.get("url") if first_body is not None else None)
+    latest_url = row.get("latest_url") or (row.get("url") if row.get("latest_body") is not None else None)
     raw_severity = row.get("severity")
     detected_severity = severity_evidence(
         raw_severity,
@@ -459,8 +468,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "published": True,
         "published_ref": row.get("url"),
         "url": row.get("url"),
-        "first_url": row.get("first_url"),
-        "latest_url": row.get("latest_url"),
+        "first_url": first_url,
+        "latest_url": latest_url,
         "is_outdated": bool(row.get("isOutdated")),
         "scan_id": session.get("current_scan_id"),
         "introduced_in_sha": row.get("introduced_in_sha"),
@@ -484,15 +493,11 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     }
     if detected_severity:
         apply_severity_evidence(payload, detected_severity)
-    elif first_body is not None or raw_severity is not None:
+    elif existing and _valid_severity_evidence(existing):
+        payload["severity"] = normalize_severity(existing["severity_evidence"].get("value"))
+        payload["severity_evidence"] = dict(existing["severity_evidence"])
+    else:
         apply_severity_evidence(payload, None)
-    elif existing:
-        existing_severity = existing.get("severity")
-        existing_evidence = existing.get("severity_evidence")
-        if existing_severity:
-            payload["severity"] = existing_severity
-        if isinstance(existing_evidence, dict):
-            payload["severity_evidence"] = dict(existing_evidence)
     if priority_evidence:
         payload["review_priority_evidence"] = priority_evidence
     elif first_body is None and existing and isinstance(existing.get("review_priority_evidence"), dict):

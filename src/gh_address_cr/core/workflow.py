@@ -2052,7 +2052,7 @@ def _validate_severity_override_note(
         exit_code=2,
         message=(
             f"Explicit severity override {severity} conflicts with first-scene severity "
-            f"{first_scene_severity}; add --severity-note explaining the override."
+            f"{first_scene_severity}; add a severity note explaining the override."
         ),
         payload=payload or {},
     )
@@ -2092,7 +2092,7 @@ def _fix_reply_severity_for_publish(fix_reply: dict[str, Any], item: dict[str, A
         if conflict:
             return None, conflict
         return explicit_severity, None
-    return normalize_severity(item.get("severity")), None
+    return first_scene_item_severity(item), None
 
 
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:

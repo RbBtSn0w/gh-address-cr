@@ -18,6 +18,7 @@ from gh_address_cr.core.severity import (
     apply_severity_evidence,
     extract_review_priority_evidence,
     extract_severity_evidence,
+    first_scene_item_severity,
     severity_evidence,
 )
 from gh_address_cr.github.client import GitHubClient
@@ -313,7 +314,9 @@ def _session_with_remote_threads(
             )
         if detected_severity:
             apply_severity_evidence(item, detected_severity)
-        elif first_body is not None or raw_severity is not None:
+        elif first_scene_item_severity(item):
+            item["severity"] = first_scene_item_severity(item)
+        else:
             apply_severity_evidence(item, None)
         priority_evidence = (
             extract_review_priority_evidence(first_body, source="github_first_comment", observed_from=first_url)

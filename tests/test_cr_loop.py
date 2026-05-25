@@ -422,6 +422,12 @@ else:
                     "path": "src/template_fix.py",
                     "line": 21,
                     "severity": "P2",
+                    "severity_evidence": {
+                        "value": "P2",
+                        "source": "github_first_comment",
+                        "raw_marker": "P2",
+                        "observed_from": "https://example.test/thread/template-fix",
+                    },
                     "status": "OPEN",
                     "decision": None,
                     "blocking": True,

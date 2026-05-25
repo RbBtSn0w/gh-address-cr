@@ -17,7 +17,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import normalize_severity
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 
 
 COMPAT_SCRIPT_DIR = Path(
@@ -569,7 +569,7 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
 
     normalized_validation_commands = normalize_validation_commands(validation_commands)
     explicit_severity = "severity" in fix_reply
-    raw_severity = fix_reply.get("severity") if explicit_severity else item.get("severity")
+    raw_severity = fix_reply.get("severity") if explicit_severity else first_scene_item_severity(item)
     severity = normalize_fix_reply_severity(raw_severity)
     if explicit_severity and raw_severity not in (None, "") and severity is None:
         return None, "GitHub fix actions require fix_reply.severity to be P1, P2, or P3 when provided."

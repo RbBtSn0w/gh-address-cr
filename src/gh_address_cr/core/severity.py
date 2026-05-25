@@ -8,13 +8,20 @@ VALID_SEVERITIES = {"P1", "P2", "P3"}
 
 _EXPLICIT_P_SCALE_PATTERNS = (
     re.compile(r"(?i)\b(?:severity|priority)\s*[:=\-]?\s*`?\[?(P[123])\]?`?\b"),
-    re.compile(r"(?i)(?<![A-Z0-9])\[?(P[123])\]?(?:\s+badge)?(?![A-Z0-9])"),
+    re.compile(r"(?i)(?<![A-Z0-9])\[(P[123])\](?![A-Z0-9])"),
+    re.compile(r"(?i)(?<![A-Z0-9])(P[123])\s+badge\b"),
+    re.compile(r"(?i)\bbadge/(P[123])(?:[-_/?#&.]|$)"),
 )
-_REVIEW_PRIORITY_RE = re.compile(r"(?i)\b(high|medium|low)(?:[-_\s]+priority)?\b")
+_REVIEW_PRIORITY_PATTERNS = (
+    re.compile(r"(?i)\b(high|medium|low)[-_\s]+priority\b"),
+    re.compile(r"(?i)\bpriority\s*[:=\-]\s*(high|medium|low)\b"),
+)
 
 
 def normalize_severity(value: Any) -> str | None:
-    normalized = str(value or "").strip().upper()
+    if value is None:
+        return None
+    normalized = str(value).strip().upper()
     return normalized if normalized in VALID_SEVERITIES else None
 
 
@@ -65,10 +72,14 @@ def extract_review_priority_evidence(
     body = str(text or "")
     if not body.strip():
         return None
-    match = _REVIEW_PRIORITY_RE.search(body)
-    if not match:
+    priority = None
+    for pattern in _REVIEW_PRIORITY_PATTERNS:
+        match = pattern.search(body)
+        if match:
+            priority = match.group(1).lower()
+            break
+    if priority is None:
         return None
-    priority = match.group(1).lower()
     evidence = {
         "value": priority,
         "source": source,
@@ -93,4 +104,3 @@ def first_scene_item_severity(item: dict[str, Any]) -> str | None:
     if not isinstance(evidence, dict):
         return None
     return normalize_severity(evidence.get("value"))
-
