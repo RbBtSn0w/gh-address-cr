@@ -69,6 +69,8 @@ If the runtime is missing or incompatible, the shim must fail loudly before sess
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
+If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
+
 ## Common Mistakes
 
 - Do not infer state from human prose or logs. Use only structured machine fields and the status-action map.
@@ -86,6 +88,8 @@ If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `
 For GitHub review threads, reply and resolve are both mandatory. A GitHub thread is not terminally clean unless reply evidence exists with a concrete reply URL from the current authenticated GitHub login.
 
 `producer=code-review` must emit findings JSON before session handling starts. Local findings become terminal only with a note and required evidence.
+
+Source-scoped `findings` ingestion is a session handoff edge. After it succeeds, rerun `review <owner/repo> <pr_number>` to continue GitHub thread handling and final-gate work.
 
 ## Reference Surface
 

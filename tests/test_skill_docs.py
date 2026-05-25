@@ -427,6 +427,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("incoming-findings.json", readme_text)
         self.assertIn("incoming-findings.md", readme_text)
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)
+        self.assertIn("source-scoped producer result", readme_text)
+        self.assertIn("`[]` is a valid explicit producer result", readme_text)
         self.assertIn("如果你自己就是外部 review producer", readme_text)
         self.assertIn("不要只输出普通 Markdown 审查报告", readme_text)
         self.assertIn("Ready-to-use prompt variants:", readme_text)

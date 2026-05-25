@@ -44,11 +44,11 @@ Typical invocation:
 
 ```text
 <review-command> <PR_URL> --output findings.json
-$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source code-review
 
 # If the upstream tool only emits Markdown review blocks:
 <review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
-$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source code-review
 ```
 
 ### `local json`
@@ -96,6 +96,9 @@ $gh-address-cr review <PR_URL> --input findings.json
 # If findings are not available yet and you want the external handoff flow:
 $gh-address-cr review <PR_URL>
 # Populate incoming-findings.json or incoming-findings.md, then rerun the same command.
+# Or ingest source-scoped findings with:
+$gh-address-cr findings <owner/repo> <pr_number> --input - --sync --source code-review
+# `[]` is a valid explicit empty producer result; empty stdin is not.
 ```
 
 ### `mixed json`
@@ -112,7 +115,8 @@ $gh-address-cr review <PR_URL>
 Typical invocation:
 
 ```text
-$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync
+$gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source json
+$gh-address-cr review <owner/repo> <pr_number>
 ```
 
 ### `mixed adapter`

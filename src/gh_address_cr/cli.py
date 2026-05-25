@@ -343,6 +343,20 @@ def last_consumed_handoff_sha256(repo: str, pr_number: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def has_submitted_producer_result(repo: str, pr_number: str) -> bool:
+    session = load_session_payload(repo, pr_number)
+    handoff = session.get("handoff") if isinstance(session, dict) else None
+    if not isinstance(handoff, dict):
+        return False
+    producer_results = handoff.get("producer_results")
+    if not isinstance(producer_results, dict):
+        return False
+    return any(
+        isinstance(result, dict) and result.get("status") == "submitted"
+        for result in producer_results.values()
+    )
+
+
 def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None, str | None]:
     incoming_json = incoming_findings_json_file(repo, pr_number)
     incoming_md = incoming_findings_markdown_file(repo, pr_number)
@@ -789,6 +803,9 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             if handoff_sha256:
                 args.args.extend(["--handoff-sha256", handoff_sha256])
             return None
+        if has_submitted_producer_result(repo, pr_number):
+            args.review_continue_without_input = True
+            return None
         request_path = ensure_external_review_handoff(repo, pr_number)
         return output_preflight_error(
             args,
@@ -845,7 +862,7 @@ def _ensure_native_session_fields(session: dict) -> None:
     session.setdefault("items", {})
     session.setdefault("leases", {})
     session.setdefault("history", [])
-    session.setdefault("handoff", {"last_consumed_sha256": None})
+    _ensure_handoff_state(session)
     session.setdefault(
         "loop_state",
         {
@@ -860,6 +877,19 @@ def _ensure_native_session_fields(session: dict) -> None:
         },
     )
     session.setdefault("metrics", {})
+
+
+def _ensure_handoff_state(session: dict) -> dict:
+    handoff = session.get("handoff")
+    if not isinstance(handoff, dict):
+        handoff = {}
+        session["handoff"] = handoff
+    handoff.setdefault("last_consumed_sha256", None)
+    producer_results = handoff.get("producer_results")
+    if not isinstance(producer_results, dict):
+        producer_results = {}
+        handoff["producer_results"] = producer_results
+    return handoff
 
 
 def _set_loop_state(
@@ -962,8 +992,20 @@ def _ingest_native_findings(
                 item["handled"] = True
                 item["handled_at"] = now
                 item["updated_at"] = now
+    handoff = _ensure_handoff_state(session)
+    producer_results = handoff["producer_results"]
+    payload_sha256 = handoff_sha256 or hashlib.sha256(
+        canonical_findings_payload(findings).encode("utf-8")
+    ).hexdigest()
+    producer_results[source] = {
+        "status": "submitted",
+        "source": source,
+        "findings_count": len(findings),
+        "payload_sha256": payload_sha256,
+        "sync_enabled": bool(sync),
+        "submitted_at": now,
+    }
     if handoff_sha256:
-        handoff = session.setdefault("handoff", {})
         handoff["last_consumed_sha256"] = handoff_sha256
     return findings
 
@@ -1482,6 +1524,12 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     _set_loop_state(session, run_id=run_id, status="PASSED", iteration=1, max_iterations=parsed.max_iterations)
     _recalc_native_metrics(session)
     session_store.save_session(repo, pr_number, session)
+    next_action = "No action required."
+    if command == "findings":
+        next_action = (
+            f"Run `gh-address-cr review {repo} {pr_number}` to continue PR orchestration, "
+            "including GitHub thread handling and final-gate checks."
+        )
     summary = _native_summary(
         command=command,
         repo=repo,
@@ -1489,7 +1537,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         status="PASSED",
         reason_code="PASSED",
         waiting_on=None,
-        next_action="No action required.",
+        next_action=next_action,
         exit_code=0,
         session=session,
         include_threads=auto_simple,

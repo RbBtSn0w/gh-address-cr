@@ -962,6 +962,93 @@ else:
         self.assertEqual(summary["reason_code"], "PASSED")
         self.assertIsNone(summary["waiting_on"])
 
+    def test_cli_review_continues_after_empty_synced_findings_result(self):
+        self.install_fake_gh_for_threads([])
+
+        first = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(first.returncode, 6)
+        first_summary = json.loads(first.stdout)
+        self.assertEqual(first_summary["status"], "WAITING_FOR_EXTERNAL_REVIEW")
+
+        synced = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "findings",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+                "--sync",
+                "--source",
+                "code-review",
+            ],
+            stdin="[]\n",
+        )
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        synced_summary = json.loads(synced.stdout)
+        self.assertIn(f"gh-address-cr review {self.repo} {self.pr}", synced_summary["next_action"])
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        producer_result = session["handoff"]["producer_results"]["code-review"]
+        self.assertEqual(producer_result["status"], "submitted")
+        self.assertEqual(producer_result["findings_count"], 0)
+        self.assertTrue(producer_result["sync_enabled"])
+
+        second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_summary = json.loads(second.stdout)
+        self.assertEqual(second_summary["status"], "PASSED")
+        self.assertEqual(second_summary["reason_code"], "PASSED")
+        self.assertNotEqual(second_summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+
+    def test_cli_review_continues_after_non_empty_synced_findings_result(self):
+        self.install_fake_gh_for_threads([])
+
+        first = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(first.returncode, 6)
+
+        synced = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "findings",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+                "--sync",
+                "--source",
+                "code-review",
+            ],
+            stdin=json.dumps(
+                [
+                    {
+                        "title": "Missing guard",
+                        "body": "The producer found a blocking issue.",
+                        "path": "src/example.py",
+                        "line": 12,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            )
+            + "\n",
+        )
+        self.assertEqual(synced.returncode, 5, synced.stderr)
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        producer_result = session["handoff"]["producer_results"]["code-review"]
+        self.assertEqual(producer_result["status"], "submitted")
+        self.assertEqual(producer_result["findings_count"], 1)
+
+        second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(second.returncode, 5, second.stderr)
+        second_summary = json.loads(second.stdout)
+        self.assertEqual(second_summary["status"], "BLOCKED")
+        self.assertEqual(second_summary["reason_code"], "WAITING_FOR_FIX")
+        self.assertEqual(second_summary["item_kind"], "local_finding")
+
     def test_cli_review_auto_converts_handoff_finding_blocks(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

@@ -415,6 +415,27 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(close_item["status"], "CLOSED")
         self.assertTrue(close_item["handled"])
 
+    def test_ingest_local_records_empty_synced_producer_result(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+
+        result = self.run_engine(
+            "ingest-local",
+            self.repo,
+            self.pr,
+            "--source",
+            "local-agent:test",
+            "--sync",
+            stdin="[]",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        session = self.load_session()
+        producer_result = session["handoff"]["producer_results"]["local-agent:test"]
+        self.assertEqual(producer_result["status"], "submitted")
+        self.assertEqual(producer_result["source"], "local-agent:test")
+        self.assertEqual(producer_result["findings_count"], 0)
+        self.assertTrue(producer_result["sync_enabled"])
+
     def test_ingest_local_sync_keeps_identical_findings_scoped_per_source(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

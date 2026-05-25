@@ -185,6 +185,7 @@ def default_session(repo: str, pr_number: str) -> dict:
         },
         "handoff": {
             "last_consumed_sha256": None,
+            "producer_results": {},
         },
         "items": {},
         "history": [],
@@ -204,8 +205,40 @@ def ensure_loop_state(session: dict):
 
 
 def ensure_handoff_state(session: dict):
-    handoff = session.setdefault("handoff", {})
+    handoff = session.get("handoff")
+    if not isinstance(handoff, dict):
+        handoff = {}
+        session["handoff"] = handoff
     handoff.setdefault("last_consumed_sha256", None)
+    producer_results = handoff.get("producer_results")
+    if not isinstance(producer_results, dict):
+        handoff["producer_results"] = {}
+
+
+def canonical_findings_payload(findings: list[dict]) -> str:
+    return json.dumps(findings, sort_keys=True, separators=(",", ":"))
+
+
+def record_producer_result(
+    session: dict,
+    *,
+    source: str,
+    findings: list[dict],
+    sync_enabled: bool,
+    payload_sha256: str | None = None,
+) -> None:
+    ensure_handoff_state(session)
+    handoff = session["handoff"]
+    producer_results = handoff["producer_results"]
+    producer_results[source] = {
+        "status": "submitted",
+        "source": source,
+        "findings_count": len(findings),
+        "payload_sha256": payload_sha256
+        or hashlib.sha256(canonical_findings_payload(findings).encode("utf-8")).hexdigest(),
+        "sync_enabled": bool(sync_enabled),
+        "submitted_at": utc_now(),
+    }
 
 
 def current_run_id(session: dict, explicit_run_id: str | None = None) -> str | None:
@@ -700,6 +733,13 @@ def cmd_ingest_local(args):
             synced += 1
     if args.handoff_sha256:
         session["handoff"]["last_consumed_sha256"] = args.handoff_sha256
+    record_producer_result(
+        session,
+        source=args.source,
+        findings=findings,
+        sync_enabled=bool(args.sync),
+        payload_sha256=args.handoff_sha256 or None,
+    )
     save_session(session)
     active_local_items = sum(
         1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking")
