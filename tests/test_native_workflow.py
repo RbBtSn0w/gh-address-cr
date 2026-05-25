@@ -462,6 +462,12 @@ class NativeWorkflowTests(unittest.TestCase):
             "source": "github",
             "thread_id": "THREAD_1",
             "severity": "P1",
+            "severity_evidence": {
+                "value": "P1",
+                "source": "github_first_comment",
+                "raw_marker": "P1",
+                "observed_from": "https://github.test/thread",
+            },
             "state": "publish_ready",
             "status": "OPEN",
             "blocking": True,
@@ -504,6 +510,103 @@ class NativeWorkflowTests(unittest.TestCase):
 
                 self.assertEqual(client.replies[0], expected)
 
+    def test_publish_github_thread_fix_without_severity_does_not_default_to_p2(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "publish_resolution": "fix",
+            "accepted_response": {
+                "resolution": "fix",
+                "note": "Fixed thread issue.",
+                "files": ["src/example.py"],
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                "fix_reply": {
+                    "summary": "Added the missing input guard.",
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                    "why": "The input is now checked before use.",
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+
+                workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertNotIn("Severity:", client.replies[0])
+                self.assertNotIn("Medium-severity path", client.replies[0])
+
+    def test_publish_github_thread_fix_with_legacy_unbacked_severity_does_not_default_to_p2(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "severity": "P2",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "publish_resolution": "fix",
+            "accepted_response": {
+                "resolution": "fix",
+                "note": "Fixed thread issue.",
+                "files": ["src/example.py"],
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                "fix_reply": {
+                    "summary": "Added the missing input guard.",
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                    "why": "The input is now checked before use.",
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+
+                workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertNotIn("Severity:", client.replies[0])
+                self.assertNotIn("Medium-severity path", client.replies[0])
+
     def test_publish_github_thread_fix_uses_severity_specific_template_lines(self):
         from gh_address_cr.core import workflow
 
@@ -533,6 +636,12 @@ class NativeWorkflowTests(unittest.TestCase):
                     "source": "github",
                     "thread_id": "THREAD_1",
                     "severity": severity,
+                    "severity_evidence": {
+                        "value": severity,
+                        "source": "github_first_comment",
+                        "raw_marker": severity,
+                        "observed_from": "https://github.test/thread",
+                    },
                     "state": "publish_ready",
                     "status": "OPEN",
                     "blocking": True,

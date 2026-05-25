@@ -14,6 +14,13 @@ from gh_address_cr.core.github_thread_state import (
     is_terminal_github_thread,
 )
 from gh_address_cr.core.session import SessionError, SessionManager
+from gh_address_cr.core.severity import (
+    apply_severity_evidence,
+    extract_review_priority_evidence,
+    extract_severity_evidence,
+    first_scene_item_severity,
+    severity_evidence,
+)
 from gh_address_cr.github.client import GitHubClient
 
 
@@ -288,6 +295,38 @@ def _session_with_remote_threads(
         item["line"] = thread.get("line") or item.get("line")
         item["url"] = thread.get("url") or item.get("url")
         item["body"] = thread.get("body") or item.get("body")
+        first_body = thread.get("first_body")
+        if first_body is None and thread.get("comment_source") == "first":
+            first_body = thread.get("body")
+        first_url = thread.get("first_url") or thread.get("url")
+        raw_severity = thread.get("severity")
+        detected_severity = severity_evidence(
+            raw_severity,
+            source="github_payload",
+            raw_marker=str(raw_severity).strip() if raw_severity is not None else None,
+            observed_from=thread.get("url") or first_url,
+        )
+        if detected_severity is None and first_body is not None:
+            detected_severity = extract_severity_evidence(
+                first_body,
+                source="github_first_comment",
+                observed_from=first_url,
+            )
+        if detected_severity:
+            apply_severity_evidence(item, detected_severity)
+        elif first_scene_item_severity(item):
+            item["severity"] = first_scene_item_severity(item)
+        else:
+            apply_severity_evidence(item, None)
+        priority_evidence = (
+            extract_review_priority_evidence(first_body, source="github_first_comment", observed_from=first_url)
+            if first_body is not None
+            else None
+        )
+        if priority_evidence:
+            item["review_priority_evidence"] = priority_evidence
+        elif first_body is not None:
+            item.pop("review_priority_evidence", None)
         is_resolved = _thread_is_resolved(thread)
         is_outdated = is_stale_or_outdated_github_thread(thread)
         item["is_outdated"] = is_outdated

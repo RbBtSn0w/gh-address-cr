@@ -764,6 +764,134 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(item["state"], "publish_ready")
         self.assertEqual(item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
 
+    def test_agent_fix_fast_path_accepts_explicit_severity_override(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example.py",
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix",
+            self.repo,
+            self.pr,
+            "github-thread:abc",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py",
+            "--summary",
+            "Added the guard.",
+            "--why",
+            "The guarded path now covers the review case.",
+            "--severity",
+            "P1",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = self.load_session()
+        item = session["items"]["github-thread:abc"]
+        self.assertEqual(item["accepted_response"]["fix_reply"]["severity"], "P1")
+
+    def test_agent_fix_rejects_conflicting_severity_without_override_note(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example.py",
+                    thread_id="PRRT_abc",
+                    severity="P2",
+                    severity_evidence={
+                        "value": "P2",
+                        "source": "github_first_comment",
+                        "raw_marker": "P2",
+                        "observed_from": "https://example.test/thread/abc",
+                    },
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix",
+            self.repo,
+            self.pr,
+            "github-thread:abc",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py",
+            "--summary",
+            "Added the guard.",
+            "--why",
+            "The guarded path now covers the review case.",
+            "--severity",
+            "P1",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "SEVERITY_OVERRIDE_NOTE_REQUIRED")
+
+    def test_agent_fix_all_batches_matching_thread_files_with_explicit_severity(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    thread_id="PRRT_abc",
+                ),
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/shared.py",
+                    thread_id="PRRT_def",
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--severity",
+            "P3",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["accepted_response"]["fix_reply"]["severity"], "P3")
+        self.assertEqual(session["items"]["github-thread:def"]["accepted_response"]["fix_reply"]["severity"], "P3")
+
     def test_agent_fix_all_batches_matching_thread_files(self):
         self.write_session(
             items=[

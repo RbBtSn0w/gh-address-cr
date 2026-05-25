@@ -38,6 +38,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -516,6 +517,8 @@ def record_evidence_profile(
     why: str | None = None,
     test_command: str | None = None,
     test_result: str | None = None,
+    severity: str | None = None,
+    severity_note: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     profile_name = name.strip()
@@ -569,6 +572,15 @@ def record_evidence_profile(
         fix_reply["test_command"] = test_command.strip()
     if test_result and test_result.strip():
         fix_reply["test_result"] = test_result.strip()
+    normalized_severity = _validate_requested_severity(
+        severity,
+        status="EVIDENCE_PROFILE_REJECTED",
+        waiting_on="evidence_profile",
+    )
+    if normalized_severity:
+        fix_reply["severity"] = normalized_severity
+    if severity_note and severity_note.strip():
+        fix_reply["severity_note"] = severity_note.strip()
 
     profile = {
         "name": profile_name,
@@ -632,6 +644,8 @@ def fast_fix_item(
     validation_commands: list[dict[str, str]],
     summary: str,
     why: str,
+    severity: str | None = None,
+    severity_note: str | None = None,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -674,6 +688,24 @@ def fast_fix_item(
             message="agent fix requires --summary and --why.",
             payload={"item_id": item_id},
         )
+    normalized_severity = _validate_requested_severity(
+        severity,
+        status="FAST_FIX_REJECTED",
+        waiting_on="fast_fix_input",
+        payload={"item_id": item_id},
+    )
+    if normalized_severity:
+        session = session_store.load_session(repo, pr_number)
+        item = _items(session).get(item_id)
+        if isinstance(item, dict):
+            _validate_severity_override_note(
+                normalized_severity,
+                item,
+                severity_note,
+                status="FAST_FIX_REJECTED",
+                waiting_on="fast_fix_input",
+                payload={"item_id": item_id},
+            )
 
     try:
         classification = record_classification(
@@ -694,6 +726,16 @@ def fast_fix_item(
         )
         request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
         response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
+        fix_reply = {
+            "summary": summary,
+            "why": why,
+            "commit_hash": commit_hash.strip(),
+            "files": normalized_files,
+        }
+        if normalized_severity:
+            fix_reply["severity"] = normalized_severity
+        if severity_note and severity_note.strip():
+            fix_reply["severity_note"] = severity_note.strip()
         response = {
             "schema_version": PROTOCOL_VERSION,
             "request_id": request["request_id"],
@@ -704,12 +746,7 @@ def fast_fix_item(
             "note": summary,
             "files": normalized_files,
             "validation_commands": normalized_validation,
-            "fix_reply": {
-                "summary": summary,
-                "why": why,
-                "commit_hash": commit_hash.strip(),
-                "files": normalized_files,
-            },
+            "fix_reply": fix_reply,
         }
         response_path.write_text(json.dumps(response, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         submitted = submit_action_response(
@@ -746,6 +783,8 @@ def fast_fix_matching_threads(
     validation_commands: list[dict[str, str]],
     include_stale: bool = False,
     stale_only: bool = False,
+    severity: str | None = None,
+    severity_note: str | None = None,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -781,6 +820,11 @@ def fast_fix_matching_threads(
             exit_code=2,
             message=f"{command_name} requires --commit.",
         )
+    normalized_severity = _validate_requested_severity(
+        severity,
+        status=rejected_status,
+        waiting_on=input_waiting_on,
+    )
 
     session = session_store.load_session(repo, pr_number)
     github_items = [
@@ -823,6 +867,15 @@ def fast_fix_matching_threads(
             item_id = str(item["item_id"])
             why = _fast_fix_why(commit_hash, normalized_files, stale=bool(is_stale_github_thread_item(item)))
             try:
+                if normalized_severity:
+                    _validate_severity_override_note(
+                        normalized_severity,
+                        item,
+                        severity_note,
+                        status=rejected_status,
+                        waiting_on=input_waiting_on,
+                        payload={"item_id": item_id},
+                    )
                 record_classification(
                     repo,
                     pr_number,
@@ -854,6 +907,15 @@ def fast_fix_matching_threads(
         if not batch_responses:
             continue
         batch_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-all-batch-{uuid4().hex}.json"
+        common_fix_reply = {
+            "commit_hash": commit_hash.strip(),
+            "summary": f"Fixed related GitHub review threads in {commit_hash.strip()}.",
+            "files": normalized_files,
+        }
+        if normalized_severity:
+            common_fix_reply["severity"] = normalized_severity
+        if severity_note and severity_note.strip():
+            common_fix_reply["severity_note"] = severity_note.strip()
         batch_path.write_text(
             json.dumps(
                 {
@@ -863,11 +925,7 @@ def fast_fix_matching_threads(
                     "common": {
                         "files": normalized_files,
                         "validation_commands": normalized_validation,
-                        "fix_reply": {
-                            "commit_hash": commit_hash.strip(),
-                            "summary": f"Fixed related GitHub review threads in {commit_hash.strip()}.",
-                            "files": normalized_files,
-                        },
+                        "fix_reply": common_fix_reply,
                     },
                     "items": batch_responses,
                 },
@@ -1862,7 +1920,9 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
         return None, "MISSING_FIX_REPLY_TEST_COMMAND"
     if not test_result:
         return None, "MISSING_FIX_REPLY_TEST_RESULT"
-    severity = _normalize_fix_reply_severity(fix_reply.get("severity") or item.get("severity") or "P2")
+    severity, severity_error = _fix_reply_severity_for_publish(fix_reply, item)
+    if severity_error:
+        return None, severity_error
     why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
     summary = str(fix_reply.get("summary") or "").strip() or None
     try:
@@ -1933,9 +1993,106 @@ def _looks_like_validation_result(value: str) -> bool:
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
-def _normalize_fix_reply_severity(value: Any) -> str:
-    severity = str(value or "").strip().upper()
-    return severity if severity in {"P1", "P2", "P3"} else "P2"
+def _normalize_optional_fix_reply_severity(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return normalize_severity(value)
+
+
+def _validate_requested_severity(
+    value: Any,
+    *,
+    status: str,
+    waiting_on: str,
+    payload: dict[str, Any] | None = None,
+) -> str | None:
+    if value in (None, ""):
+        return None
+    normalized = _normalize_optional_fix_reply_severity(value)
+    if normalized:
+        return normalized
+    raise WorkflowError(
+        status=status,
+        reason_code="INVALID_FIX_REPLY_SEVERITY",
+        waiting_on=waiting_on,
+        exit_code=2,
+        message="Explicit severity override must be one of P1, P2, or P3.",
+        payload=payload or {},
+    )
+
+
+def _severity_override_note(fix_reply_or_note: dict[str, Any] | str | None) -> str:
+    if isinstance(fix_reply_or_note, dict):
+        return str(
+            fix_reply_or_note.get("severity_note")
+            or fix_reply_or_note.get("severity_override_note")
+            or ""
+        ).strip()
+    return str(fix_reply_or_note or "").strip()
+
+
+def _validate_severity_override_note(
+    severity: str,
+    item: dict[str, Any],
+    note: str | None,
+    *,
+    status: str,
+    waiting_on: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    first_scene_severity = first_scene_item_severity(item)
+    if not first_scene_severity or first_scene_severity == severity:
+        return
+    if _severity_override_note(note):
+        return
+    raise WorkflowError(
+        status=status,
+        reason_code="SEVERITY_OVERRIDE_NOTE_REQUIRED",
+        waiting_on=waiting_on,
+        exit_code=2,
+        message=(
+            f"Explicit severity override {severity} conflicts with first-scene severity "
+            f"{first_scene_severity}; add a severity note explaining the override."
+        ),
+        payload=payload or {},
+    )
+
+
+def _fix_reply_explicit_severity(fix_reply: dict[str, Any]) -> tuple[str | None, str | None]:
+    if "severity" not in fix_reply or fix_reply.get("severity") in (None, ""):
+        return None, None
+    severity = _normalize_optional_fix_reply_severity(fix_reply.get("severity"))
+    if not severity:
+        return None, "INVALID_FIX_REPLY_SEVERITY"
+    return severity, None
+
+
+def _fix_reply_severity_rejection_reason(fix_reply: dict[str, Any], item: dict[str, Any]) -> str | None:
+    explicit_severity, error = _fix_reply_explicit_severity(fix_reply)
+    if error:
+        return error
+    if not explicit_severity:
+        return None
+    first_scene_severity = first_scene_item_severity(item)
+    if (
+        first_scene_severity
+        and first_scene_severity != explicit_severity
+        and not _severity_override_note(fix_reply)
+    ):
+        return "SEVERITY_OVERRIDE_NOTE_REQUIRED"
+    return None
+
+
+def _fix_reply_severity_for_publish(fix_reply: dict[str, Any], item: dict[str, Any]) -> tuple[str | None, str | None]:
+    explicit_severity, error = _fix_reply_explicit_severity(fix_reply)
+    if error:
+        return None, error
+    if explicit_severity:
+        conflict = _fix_reply_severity_rejection_reason(fix_reply, item)
+        if conflict:
+            return None, conflict
+        return explicit_severity, None
+    return first_scene_item_severity(item), None
 
 
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
@@ -2107,6 +2264,9 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
                 return "MISSING_FIX_REPLY"
             if not isinstance(fix_reply, dict):
                 return "INVALID_FIX_REPLY"
+            severity_reason = _fix_reply_severity_rejection_reason(fix_reply, item)
+            if severity_reason:
+                return severity_reason
             _, publish_error = _publish_reply_body(item, response)
             if publish_error:
                 return publish_error

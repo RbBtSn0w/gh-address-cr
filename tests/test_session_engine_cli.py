@@ -41,6 +41,196 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["status"], "OPEN")
         self.assertTrue(item["blocking"])
 
+    def test_sync_github_records_p_scale_severity_from_first_comment(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_P1",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Later reply says Severity: P3, but should not own the first-scene signal.",
+                    "url": "https://example.test/thread/p1#latest",
+                    "first_body": "**P1 Badge** Reject empty stdin before marking submitted.",
+                    "first_url": "https://example.test/thread/p1",
+                    "latest_body": "Severity: P3",
+                    "latest_url": "https://example.test/thread/p1#latest",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_P1"]
+        self.assertEqual(item["severity"], "P1")
+        self.assertEqual(item["first_url"], "https://example.test/thread/p1")
+        self.assertEqual(
+            item["severity_evidence"],
+            {
+                "value": "P1",
+                "source": "github_first_comment",
+                "raw_marker": "P1",
+                "observed_from": "https://example.test/thread/p1",
+            },
+        )
+
+    def test_sync_github_persists_fallback_first_url_used_for_evidence(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_FALLBACK_URL",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Severity: P2",
+                    "url": "https://example.test/thread/fallback",
+                    "first_body": "Severity: P2",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        item = self.load_session()["items"]["github-thread:THREAD_FALLBACK_URL"]
+        self.assertEqual(item["first_url"], "https://example.test/thread/fallback")
+        self.assertEqual(item["severity_evidence"]["observed_from"], "https://example.test/thread/fallback")
+
+    def test_sync_github_preserves_trusted_severity_evidence_across_markerless_refresh(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        first_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_PRESERVE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Initial payload includes structured severity.",
+                    "url": "https://example.test/thread/preserve",
+                    "severity": "P1",
+                }
+            ]
+        )
+        second_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_PRESERVE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Latest reply has no severity marker.",
+                    "url": "https://example.test/thread/preserve#latest",
+                    "first_body": "Please add the guard.",
+                    "first_url": "https://example.test/thread/preserve",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=first_payload, check=True)
+        self.run_engine("sync-github", self.repo, self.pr, stdin=second_payload, check=True)
+
+        item = self.load_session()["items"]["github-thread:THREAD_PRESERVE"]
+        self.assertEqual(item["severity"], "P1")
+        self.assertEqual(item["severity_evidence"]["source"], "github_payload")
+
+    def test_sync_github_drops_legacy_unbacked_severity(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        session = self.load_session()
+        session["items"]["github-thread:THREAD_LEGACY"] = {
+            "item_id": "github-thread:THREAD_LEGACY",
+            "item_kind": "github_thread",
+            "source": "github",
+            "origin_ref": "THREAD_LEGACY",
+            "path": "src/app.py",
+            "line": 12,
+            "body": "Legacy item",
+            "severity": "P2",
+            "status": "OPEN",
+            "blocking": True,
+            "handled": False,
+            "history": [],
+            "evidence": [],
+        }
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_LEGACY",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Refreshed without first-scene severity.",
+                    "url": "https://example.test/thread/legacy",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        item = self.load_session()["items"]["github-thread:THREAD_LEGACY"]
+        self.assertNotIn("severity", item)
+        self.assertNotIn("severity_evidence", item)
+
+    def test_sync_github_keeps_non_p_priority_as_raw_evidence_without_severity(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_MEDIUM",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)",
+                    "url": "https://example.test/thread/medium",
+                    "first_body": "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)",
+                    "first_url": "https://example.test/thread/medium",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_MEDIUM"]
+        self.assertNotIn("severity", item)
+        self.assertEqual(item["review_priority_evidence"]["value"], "medium")
+        self.assertEqual(item["review_priority_evidence"]["source"], "github_first_comment")
+
+    def test_sync_github_does_not_promote_latest_comment_severity(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_DRIFT",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Maintainer reply with Severity: P1",
+                    "url": "https://example.test/thread/drift#latest",
+                    "first_body": "Please add a null check.",
+                    "first_url": "https://example.test/thread/drift",
+                    "latest_body": "Severity: P1",
+                    "latest_url": "https://example.test/thread/drift#latest",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_DRIFT"]
+        self.assertNotIn("severity", item)
+        self.assertNotIn("severity_evidence", item)
+
     def test_sync_github_marks_resolved_threads_handled(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         unresolved = json.dumps(
@@ -278,6 +468,35 @@ class SessionEngineCLITest(SessionEngineTestCase):
         local_items = [item for item in session["items"].values() if item["item_kind"] == "local_finding"]
         self.assertEqual(len(local_items), 1)
         self.assertEqual(local_items[0]["status"], "OPEN")
+
+    def test_ingest_local_records_structured_severity_evidence(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Producer severity",
+                    "body": "Producer supplied a precise severity.",
+                    "path": "src/severity.py",
+                    "line": 7,
+                    "severity": "P3",
+                }
+            ]
+        )
+
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
+
+        session = self.load_session()
+        item = next(iter(session["items"].values()))
+        self.assertEqual(item["severity"], "P3")
+        self.assertEqual(
+            item["severity_evidence"],
+            {
+                "value": "P3",
+                "source": "producer_payload",
+                "raw_marker": "P3",
+                "observed_from": "local-agent:test",
+            },
+        )
 
     def test_run_local_review_ignores_whitespace_only_finding_differences(self):
         self.run_engine("init", self.repo, self.pr, check=True)

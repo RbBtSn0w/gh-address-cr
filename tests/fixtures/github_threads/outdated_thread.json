@@ -33,6 +33,11 @@
       "path": "src/legacy.py",
       "line": 44,
       "url": "https://example.test/thread/outdated",
+      "first_body": "This older comment still needs explicit handling.",
+      "first_url": "https://example.test/thread/outdated",
+      "latest_body": "This older comment still needs explicit handling.",
+      "latest_url": "https://example.test/thread/outdated",
+      "comment_source": "first",
       "is_resolved": false,
       "is_outdated": true,
       "reply_evidence": null

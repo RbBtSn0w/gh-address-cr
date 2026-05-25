@@ -203,6 +203,17 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
+            "fixed.md": (
+                None,
+                [
+                    "<commit_hash>",
+                    "<file_path_1>,<file_path_2>",
+                    "<test_command>",
+                    "`<pass/fail + key output>`",
+                    "`<technical reasoning tied to the comment>`",
+                ],
+                "`<brief fix summary>`",
+            ),
             "fixed-p1.md": (
                 "P1",
                 [

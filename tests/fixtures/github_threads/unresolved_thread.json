@@ -33,6 +33,11 @@
       "path": "src/example.py",
       "line": 12,
       "url": "https://example.test/thread/unresolved",
+      "first_body": "Validate the input before use.",
+      "first_url": "https://example.test/thread/unresolved",
+      "latest_body": "Validate the input before use.",
+      "latest_url": "https://example.test/thread/unresolved",
+      "comment_source": "first",
       "is_resolved": false,
       "is_outdated": false,
       "reply_evidence": null

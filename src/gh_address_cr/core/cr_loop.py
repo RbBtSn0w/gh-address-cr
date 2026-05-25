@@ -17,6 +17,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 
 
 COMPAT_SCRIPT_DIR = Path(
@@ -541,9 +542,10 @@ def normalize_validation_commands(value: object) -> list[str]:
     return [command] if command else []
 
 
-def normalize_fix_reply_severity(value: object) -> str:
-    severity = str(value or "").strip().upper()
-    return severity if severity in {"P1", "P2", "P3"} else "P2"
+def normalize_fix_reply_severity(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return normalize_severity(value)
 
 
 def build_github_fix_reply(action: dict, item: dict, validation_commands: object) -> tuple[str | None, str]:
@@ -566,7 +568,11 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         return None, "GitHub fix actions require fix_reply.files."
 
     normalized_validation_commands = normalize_validation_commands(validation_commands)
-    severity = normalize_fix_reply_severity(fix_reply.get("severity") or item.get("severity") or "P2")
+    explicit_severity = "severity" in fix_reply
+    raw_severity = fix_reply.get("severity") if explicit_severity else first_scene_item_severity(item)
+    severity = normalize_fix_reply_severity(raw_severity)
+    if explicit_severity and raw_severity not in (None, "") and severity is None:
+        return None, "GitHub fix actions require fix_reply.severity to be P1, P2, or P3 when provided."
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
     test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
     derived_test_result = "passed" if normalized_validation_commands else ""

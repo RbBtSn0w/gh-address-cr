@@ -68,7 +68,6 @@
       "reply_url": "https://example.test/thread/parity#reply",
       "resolution_note": "Replied and resolved in the parity fixture.",
       "scan_id": "scan-github-parity",
-      "severity": "P2",
       "source": "github",
       "start_line": null,
       "status": "CLOSED",
@@ -128,6 +127,12 @@
       "resolution_note": "Clarified by the parity fixture.",
       "scan_id": "scan-local-parity",
       "severity": "P2",
+      "severity_evidence": {
+        "observed_from": "local-agent:parity",
+        "raw_marker": "P2",
+        "source": "producer_payload",
+        "value": "P2"
+      },
       "source": "local-agent:parity",
       "start_line": null,
       "status": "CLARIFIED",

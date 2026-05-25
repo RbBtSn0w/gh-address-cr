@@ -202,6 +202,77 @@ class NativeGateTests(unittest.TestCase):
         self.assertEqual(item["status"], "STALE")
         self.assertTrue(item["blocking"])
 
+    def test_remote_thread_refresh_uses_first_comment_for_severity(self):
+        from gh_address_cr.core import gate
+
+        session = {
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+        }
+
+        merged = gate.session_with_remote_threads(
+            session,
+            [
+                {
+                    "id": "THREAD_P1",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/severity.py",
+                    "line": 12,
+                    "body": "Maintainer reply says Severity: P3",
+                    "url": "https://example.test/thread/p1#latest",
+                    "first_body": "[P1] Reject unsafe fallback.",
+                    "first_url": "https://example.test/thread/p1",
+                    "latest_body": "Severity: P3",
+                    "latest_url": "https://example.test/thread/p1#latest",
+                }
+            ],
+        )
+
+        item = merged["items"]["github-thread:THREAD_P1"]
+        self.assertEqual(item["severity"], "P1")
+        self.assertEqual(item["severity_evidence"]["source"], "github_first_comment")
+        self.assertEqual(item["severity_evidence"]["observed_from"], "https://example.test/thread/p1")
+
+    def test_remote_thread_refresh_drops_legacy_unbacked_severity(self):
+        from gh_address_cr.core import gate
+
+        session = {
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {
+                "github-thread:THREAD_LEGACY": {
+                    "item_id": "github-thread:THREAD_LEGACY",
+                    "item_kind": "github_thread",
+                    "source": "github",
+                    "thread_id": "THREAD_LEGACY",
+                    "severity": "P2",
+                    "state": "open",
+                    "status": "OPEN",
+                }
+            },
+        }
+
+        merged = gate.session_with_remote_threads(
+            session,
+            [
+                {
+                    "id": "THREAD_LEGACY",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/severity.py",
+                    "line": 12,
+                    "body": "No explicit severity marker.",
+                    "url": "https://example.test/thread/legacy",
+                }
+            ],
+        )
+
+        item = merged["items"]["github-thread:THREAD_LEGACY"]
+        self.assertNotIn("severity", item)
+        self.assertNotIn("severity_evidence", item)
+
     def test_stale_thread_without_remote_resolution_does_not_require_reply_evidence(self):
         from gh_address_cr.core import gate
 

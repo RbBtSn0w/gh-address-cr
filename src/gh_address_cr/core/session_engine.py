@@ -13,6 +13,13 @@ from pathlib import Path
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.handoff import ensure_handoff_state, record_producer_result
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.severity import (
+    apply_severity_evidence,
+    extract_review_priority_evidence,
+    extract_severity_evidence,
+    normalize_severity,
+    severity_evidence,
+)
 from gh_address_cr.intake.findings import EMPTY_FINDINGS_INPUT_MESSAGE, normalize_finding
 
 
@@ -356,6 +363,13 @@ def history_event(event: str, note: str = "", actor: str = "system") -> dict:
     return {"ts": utc_now(), "event": event, "note": note, "actor": actor}
 
 
+def _valid_severity_evidence(item: dict) -> bool:
+    evidence = item.get("severity_evidence")
+    if not isinstance(evidence, dict):
+        return False
+    return bool(normalize_severity(evidence.get("value")))
+
+
 def clear_claim(item: dict):
     item["claimed_by"] = None
     item["claimed_at"] = None
@@ -408,6 +422,29 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     else:
         reply_posted = existing.get("reply_posted", False) if existing else False
         reply_url = existing.get("reply_url") if existing else None
+    first_body = row.get("first_body")
+    if first_body is None and row.get("comment_source") == "first":
+        first_body = row.get("body")
+    first_url = row.get("first_url") or (row.get("url") if first_body is not None else None)
+    latest_url = row.get("latest_url") or (row.get("url") if row.get("latest_body") is not None else None)
+    raw_severity = row.get("severity")
+    detected_severity = severity_evidence(
+        raw_severity,
+        source="github_payload",
+        raw_marker=str(raw_severity).strip() if raw_severity is not None else None,
+        observed_from=row.get("url") or first_url,
+    )
+    if detected_severity is None and first_body is not None:
+        detected_severity = extract_severity_evidence(
+            first_body,
+            source="github_first_comment",
+            observed_from=first_url,
+        )
+    priority_evidence = (
+        extract_review_priority_evidence(first_body, source="github_first_comment", observed_from=first_url)
+        if first_body is not None
+        else None
+    )
     payload = {
         "item_id": item_id,
         "item_kind": "github_thread",
@@ -419,7 +456,6 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "end_line": row.get("end_line"),
         "title": row.get("title") or "GitHub review thread",
         "body": row.get("body"),
-        "severity": row.get("severity") or "P2",
         "confidence": row.get("confidence"),
         "category": row.get("category") or "review-thread",
         "status": status,
@@ -432,8 +468,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "published": True,
         "published_ref": row.get("url"),
         "url": row.get("url"),
-        "first_url": row.get("first_url"),
-        "latest_url": row.get("latest_url"),
+        "first_url": first_url,
+        "latest_url": latest_url,
         "is_outdated": bool(row.get("isOutdated")),
         "scan_id": session.get("current_scan_id"),
         "introduced_in_sha": row.get("introduced_in_sha"),
@@ -455,6 +491,21 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "created_run_id": existing.get("created_run_id") if existing else run_id,
         "updated_at": now,
     }
+    if detected_severity:
+        apply_severity_evidence(payload, detected_severity)
+    elif existing and _valid_severity_evidence(existing):
+        payload["severity"] = normalize_severity(existing["severity_evidence"].get("value"))
+        payload["severity_evidence"] = dict(existing["severity_evidence"])
+    else:
+        apply_severity_evidence(payload, None)
+    if priority_evidence:
+        payload["review_priority_evidence"] = priority_evidence
+    elif first_body is None and existing and isinstance(existing.get("review_priority_evidence"), dict):
+        payload["review_priority_evidence"] = dict(existing["review_priority_evidence"])
+    if first_body is not None:
+        payload["first_body"] = first_body
+    if row.get("latest_body") is not None:
+        payload["latest_body"] = row.get("latest_body")
     if reopened:
         set_handled_state(payload, False, run_id=None)
     elif resolved:
@@ -499,6 +550,16 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         existing["scan_id"] = session.get("current_scan_id")
         existing["updated_at"] = now
         existing["repeat_count"] = existing.get("repeat_count", 0) + 1
+        finding_severity = severity_evidence(
+            finding.get("severity"),
+            source="producer_payload",
+            raw_marker=str(finding.get("severity")).strip() if finding.get("severity") is not None else None,
+            observed_from=source,
+        )
+        if finding_severity:
+            apply_severity_evidence(existing, finding_severity)
+        elif "severity" in finding:
+            apply_severity_evidence(existing, None)
         if existing.get("status") != "OPEN":
             existing["status"] = "OPEN"
             existing["blocking"] = True
@@ -515,7 +576,7 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
     title = finding.get("title") or "Local review finding"
     body = finding.get("body") or finding.get("issue") or ""
     status = "OPEN"
-    session["items"][item_id] = {
+    item = {
         "item_id": item_id,
         "item_kind": "local_finding",
         "source": source,
@@ -526,7 +587,6 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         "end_line": finding.get("end_line"),
         "title": title,
         "body": body,
-        "severity": finding.get("severity") or "P2",
         "confidence": finding.get("confidence"),
         "category": finding.get("category") or "general",
         "status": status,
@@ -559,6 +619,15 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         "created_run_id": run_id,
         "updated_at": now,
     }
+    finding_severity = severity_evidence(
+        finding.get("severity"),
+        source="producer_payload",
+        raw_marker=str(finding.get("severity")).strip() if finding.get("severity") is not None else None,
+        observed_from=source,
+    )
+    if finding_severity:
+        apply_severity_evidence(item, finding_severity)
+    session["items"][item_id] = item
     return item_id, True
 
 

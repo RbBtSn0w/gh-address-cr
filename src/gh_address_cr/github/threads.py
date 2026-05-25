@@ -56,6 +56,10 @@ def normalize_thread(node: dict[str, Any], *, viewer_login: str | None = None) -
     first_comment = comments[0] if comments else {}
     body = latest_comment.get("body") or first_comment.get("body") or ""
     url = latest_comment.get("url") or first_comment.get("url")
+    first_body = first_comment.get("body") or ""
+    latest_body = latest_comment.get("body") or ""
+    first_url = first_comment.get("url")
+    latest_url = latest_comment.get("url")
     return {
         "item_id": f"github-thread:{thread_id}",
         "item_kind": "github_thread",
@@ -66,6 +70,11 @@ def normalize_thread(node: dict[str, Any], *, viewer_login: str | None = None) -
         "path": node.get("path"),
         "line": node.get("line"),
         "url": url,
+        "first_body": str(first_body),
+        "first_url": first_url,
+        "latest_body": str(latest_body),
+        "latest_url": latest_url,
+        "comment_source": "latest" if len(comments) > 1 else "first",
         "is_resolved": bool(node.get("isResolved", node.get("is_resolved", False))),
         "is_outdated": bool(node.get("isOutdated", node.get("is_outdated", False))),
         "reply_evidence": _viewer_reply_evidence(comments, viewer_login),
