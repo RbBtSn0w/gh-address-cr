@@ -11,8 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core.handoff import ensure_handoff_state, record_producer_result
 from gh_address_cr.core import session as session_store
-from gh_address_cr.intake.findings import normalize_finding
+from gh_address_cr.intake.findings import EMPTY_FINDINGS_INPUT_MESSAGE, normalize_finding
 
 
 def state_dir() -> Path:
@@ -185,6 +186,7 @@ def default_session(repo: str, pr_number: str) -> dict:
         },
         "handoff": {
             "last_consumed_sha256": None,
+            "producer_results": {},
         },
         "items": {},
         "history": [],
@@ -201,11 +203,6 @@ def ensure_loop_state(session: dict):
     loop_state.setdefault("last_error", "")
     loop_state.setdefault("last_started_at", None)
     loop_state.setdefault("last_completed_at", None)
-
-
-def ensure_handoff_state(session: dict):
-    handoff = session.setdefault("handoff", {})
-    handoff.setdefault("last_consumed_sha256", None)
 
 
 def current_run_id(session: dict, explicit_run_id: str | None = None) -> str | None:
@@ -365,16 +362,19 @@ def clear_claim(item: dict):
     item["lease_expires_at"] = None
 
 
-def read_records_from_stdin() -> list[dict]:
-    raw = sys.stdin.read().strip()
-    if not raw:
+def read_records_from_stdin(*, require_payload: bool = False) -> list[dict]:
+    raw = sys.stdin.read()
+    payload = raw.strip()
+    if not payload:
+        if require_payload:
+            raise SystemExit(EMPTY_FINDINGS_INPUT_MESSAGE)
         return []
-    if raw.startswith("["):
-        payload = json.loads(raw)
-        if not isinstance(payload, list):
+    if payload.startswith("["):
+        data = json.loads(payload)
+        if not isinstance(data, list):
             raise SystemExit("Expected a JSON array.")
-        return payload
-    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+        return data
+    return [json.loads(line) for line in payload.splitlines() if line.strip()]
 
 
 def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
@@ -660,7 +660,7 @@ def cmd_sync_github(args):
 
 def cmd_ingest_local(args):
     session = load_session(args.repo, args.pr_number)
-    findings = [normalize_finding(record) for record in read_records_from_stdin()]
+    findings = [normalize_finding(record) for record in read_records_from_stdin(require_payload=True)]
     session["current_scan_id"] = args.scan_id or utc_now()
     run_id = current_run_id(session)
     incoming_ids = {local_finding_item_id(args.source, finding) for finding in findings}
@@ -700,6 +700,14 @@ def cmd_ingest_local(args):
             synced += 1
     if args.handoff_sha256:
         session["handoff"]["last_consumed_sha256"] = args.handoff_sha256
+    record_producer_result(
+        session,
+        source=args.source,
+        findings=findings,
+        sync_enabled=bool(args.sync),
+        submitted_at=utc_now(),
+        payload_sha256=args.handoff_sha256 or None,
+    )
     save_session(session)
     active_local_items = sum(
         1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking")

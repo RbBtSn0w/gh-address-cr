@@ -37,6 +37,7 @@ Fail-fast contract:
 - If findings are absent, `review` returns `WAITING_FOR_EXTERNAL_REVIEW` and writes a standard producer handoff request instead of waiting on `stdin`.
 - External producer output must be findings JSON or fixed `finding` blocks.
 - `findings` still requires explicit findings JSON input.
+- A successful `findings --input <path>|- --source <producer>` run records a source-scoped producer result in the PR session, including empty `[]` results.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
 - For `adapter`, wrapper `--human` and `--machine` belong before `adapter`. Arguments after `<adapter_cmd...>` are passed through to the adapter command unchanged.
@@ -239,7 +240,9 @@ Automatic external review handoff:
 - preferred handoff file: `incoming-findings.json`
 - fallback handoff file: `incoming-findings.md`
 - `incoming-findings.md` must contain fixed `finding` blocks
+- automation may also satisfy the same session handoff with `findings --input <path>|- --source <producer> [--sync]`
 - rerun the same `review` command after writing one of the handoff files
+- rerun the same `review` command after a successful source-scoped `findings` ingest
 - plain narrative Markdown is not accepted
 
 Producer contract:
@@ -248,6 +251,7 @@ Producer contract:
 - it accepts output from any external review producer
 - the producer may be another skill, a command, or another review tool
 - the only required contract is findings JSON or fixed `finding` blocks
+- `[]` is a valid explicit producer result; an empty file or empty stdin is not
 
 Minimal user prompt:
 
@@ -267,11 +271,13 @@ $gh-address-cr review <PR_URL>
 // - incoming-findings.json
 // - incoming-findings.md
 
-// If you are also the review producer, write findings JSON to incoming-findings.json
-// or fixed `finding` blocks to incoming-findings.md now.
+// If you are also the review producer, write findings JSON to incoming-findings.json,
+// feed it through `findings --input - --source <producer>`, or write fixed
+// `finding` blocks to incoming-findings.md now.
 // Do not write a plain Markdown-only review report.
 
-// After any external review producer fills a handoff file, rerun the same command
+// After any external review producer fills a handoff file or successfully ingests
+// source-scoped findings, rerun the same command
 $gh-address-cr review <PR_URL>
 
 // If review returns BLOCKED, inspect loop-request-*.json, apply fix/clarify/defer,
@@ -306,10 +312,10 @@ Prompt patterns:
 写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`。
 
 如果你自己就是外部 review producer，就在当前任务里直接生成 findings JSON，
-写入 `incoming-findings.json`；或者生成固定格式的 `finding` blocks`，
+写入 `incoming-findings.json`，或者通过 `findings --input - --source <producer>` 交给同一 PR session；或者生成固定格式的 `finding` blocks，
 写入 `incoming-findings.md`。不要只输出普通 Markdown 审查报告。
 
-收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
+收到 handoff 或 source-scoped findings ingest 成功后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
 ```
 
 Ready-to-use prompt variants:
@@ -330,9 +336,10 @@ Ready-to-use prompt variants:
 按照 producer-request.md 的要求交接：
 - 优先把 findings JSON 写入 incoming-findings.json
 - 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 自动化路径也可以用 `findings --input - --sync --source code-review` 交接；`[]` 表示明确的空结果
 - 不要只输出普通 Markdown 审查报告
 
-写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+写入 handoff 文件或成功 ingest source-scoped findings 后，重新运行同一条 $gh-address-cr review 命令，
 继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
 ```
 
@@ -346,9 +353,10 @@ Ready-to-use prompt variants:
 按照 producer-request.md 的要求交接：
 - 优先把 findings JSON 写入 incoming-findings.json
 - 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 自动化路径也可以用 `findings --input - --sync --source <producer>` 交接；`[]` 表示明确的空结果
 - 不要只输出普通 Markdown 审查报告
 
-写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+写入 handoff 文件或成功 ingest source-scoped findings 后，重新运行同一条 $gh-address-cr review 命令，
 继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
 ```
 
@@ -358,7 +366,7 @@ Ready-to-use prompt variants:
 The public user flow above does not require manual `--input`, producer selection, or mode routing.
 The following commands remain available for explicit integrations, repository-root automation, and debugging.
 
-`findings --sync` requires an explicit `--source` so missing local findings stay scoped to one producer.
+`findings --sync` requires an explicit `--source` so missing local findings stay scoped to one producer. Successful `findings --input <path>|- --source <producer>` runs also record a source-scoped producer result so the next plain `review` continues the same PR session instead of returning to `WAITING_FOR_EXTERNAL_REVIEW`.
 
 For explicit automation or repository-root invocation, the main command is:
 
@@ -391,7 +399,7 @@ $gh-address-cr address <PR_URL> --lean
 $gh-address-cr review --auto-simple <PR_URL>
 $gh-address-cr threads <PR_URL> --lean
 $gh-address-cr findings <PR_URL> --input findings.json
-$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr findings <PR_URL> --input - --sync --source <producer>
 $gh-address-cr adapter <PR_URL> <adapter_cmd...>
 $gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 $gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>

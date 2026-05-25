@@ -24,6 +24,11 @@ FIELD_ALIASES = {
     "description": "body",
 }
 ALLOWED_FIELDS = {"title", "path", "line", "body", "severity", "category", "confidence", "head_sha"}
+EMPTY_FINDINGS_INPUT_MESSAGE = "Findings input is empty. Use [] for an explicit empty producer result."
+
+
+def canonical_findings_payload(findings: list[dict[str, Any]]) -> str:
+    return json.dumps(findings, sort_keys=True, separators=(",", ":"))
 
 
 def parse_records(raw: str) -> list[dict[str, Any]]:

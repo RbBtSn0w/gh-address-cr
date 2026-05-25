@@ -30,6 +30,10 @@ from gh_address_cr.core.github_thread_state import (
     is_resolved_github_thread,
     is_stale_or_outdated_github_thread,
 )
+from gh_address_cr.core.handoff import (
+    ensure_handoff_state as _ensure_handoff_state,
+    record_producer_result,
+)
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
@@ -37,7 +41,9 @@ from gh_address_cr.github.diagnostics import classify_github_failure, github_wai
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
 from gh_address_cr.intake.findings import (
+    EMPTY_FINDINGS_INPUT_MESSAGE,
     FindingsFormatError,
+    canonical_findings_payload,
     normalize_finding as native_normalize_finding,
     normalize_findings_payload,
     parse_finding_blocks as native_parse_finding_blocks,
@@ -330,10 +336,6 @@ def ensure_external_review_handoff(repo: str, pr_number: str) -> Path:
     return request_path
 
 
-def canonical_findings_payload(findings: list[dict]) -> str:
-    return json.dumps(findings, sort_keys=True, separators=(",", ":"))
-
-
 def last_consumed_handoff_sha256(repo: str, pr_number: str) -> str | None:
     session = load_session_payload(repo, pr_number)
     handoff = session.get("handoff") if isinstance(session, dict) else None
@@ -341,6 +343,20 @@ def last_consumed_handoff_sha256(repo: str, pr_number: str) -> str | None:
         return None
     value = handoff.get("last_consumed_sha256")
     return value if isinstance(value, str) and value else None
+
+
+def has_submitted_producer_result(repo: str, pr_number: str) -> bool:
+    session = load_session_payload(repo, pr_number)
+    handoff = session.get("handoff") if isinstance(session, dict) else None
+    if not isinstance(handoff, dict):
+        return False
+    producer_results = handoff.get("producer_results")
+    if not isinstance(producer_results, dict):
+        return False
+    return any(
+        isinstance(result, dict) and result.get("status") == "submitted"
+        for result in producer_results.values()
+    )
 
 
 def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None, str | None]:
@@ -783,11 +799,12 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             )
         if normalized_input:
             if handoff_sha256 and handoff_sha256 == last_consumed_handoff_sha256(repo, pr_number):
-                args.review_continue_without_input = True
                 return None
             args.args = [*args.args, "--input", normalized_input]
             if handoff_sha256:
                 args.args.extend(["--handoff-sha256", handoff_sha256])
+            return None
+        if has_submitted_producer_result(repo, pr_number):
             return None
         request_path = ensure_external_review_handoff(repo, pr_number)
         return output_preflight_error(
@@ -845,7 +862,7 @@ def _ensure_native_session_fields(session: dict) -> None:
     session.setdefault("items", {})
     session.setdefault("leases", {})
     session.setdefault("history", [])
-    session.setdefault("handoff", {"last_consumed_sha256": None})
+    _ensure_handoff_state(session)
     session.setdefault(
         "loop_state",
         {
@@ -921,6 +938,8 @@ def _ingest_native_findings(
     scan_id: str | None = None,
     handoff_sha256: str | None = None,
 ) -> list[dict]:
+    if not raw.strip():
+        raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
     format_source = "adapter" if source == "adapter" else "json"
     findings = []
     for finding in normalize_findings_payload(format_source, raw):
@@ -962,8 +981,16 @@ def _ingest_native_findings(
                 item["handled"] = True
                 item["handled_at"] = now
                 item["updated_at"] = now
+    handoff = _ensure_handoff_state(session)
+    record_producer_result(
+        session,
+        source=source,
+        findings=findings,
+        sync_enabled=bool(sync),
+        submitted_at=now,
+        payload_sha256=handoff_sha256 or None,
+    )
     if handoff_sha256:
-        handoff = session.setdefault("handoff", {})
         handoff["last_consumed_sha256"] = handoff_sha256
     return findings
 
@@ -1482,6 +1509,12 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     _set_loop_state(session, run_id=run_id, status="PASSED", iteration=1, max_iterations=parsed.max_iterations)
     _recalc_native_metrics(session)
     session_store.save_session(repo, pr_number, session)
+    next_action = "No action required."
+    if command == "findings":
+        next_action = (
+            f"Run `gh-address-cr review {repo} {pr_number}` to continue PR orchestration, "
+            "including GitHub thread handling and final-gate checks."
+        )
     summary = _native_summary(
         command=command,
         repo=repo,
@@ -1489,7 +1522,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         status="PASSED",
         reason_code="PASSED",
         waiting_on=None,
-        next_action="No action required.",
+        next_action=next_action,
         exit_code=0,
         session=session,
         include_threads=auto_simple,

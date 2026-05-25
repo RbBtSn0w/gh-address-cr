@@ -53,6 +53,12 @@ The session state is stored in a PR-scoped workspace under the user cache direct
 - loop requests: `loop-request-*.json`
 - validation records: `validation-*.json`
 
+`session.json` owns command-to-command handoff state. In addition to local and
+GitHub work items, `handoff.producer_results` records source-scoped producer
+submissions so a later plain `review` command can continue the same PR session
+after `findings --input <path>|- --source <producer>` succeeds, including
+explicit empty `[]` results.
+
 If `gh-address-cr final-gate --auto-clean` passes, the current PR workspace is archived before deletion under:
 
 - archive root: `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
