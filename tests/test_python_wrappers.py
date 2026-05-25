@@ -1002,6 +1002,31 @@ else:
         self.assertEqual(second_summary["reason_code"], "PASSED")
         self.assertNotEqual(second_summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
 
+    def test_cli_findings_rejects_blank_input_without_producer_result(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "findings",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+                "--sync",
+                "--source",
+                "code-review",
+            ],
+            stdin=" \n\t",
+        )
+        self.assertEqual(result.returncode, 2)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "INVALID_FINDINGS_INPUT")
+        self.assertIn("Use [] for an explicit empty producer result", summary["next_action"])
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        self.assertNotIn("code-review", session["handoff"]["producer_results"])
+
     def test_cli_review_continues_after_non_empty_synced_findings_result(self):
         self.install_fake_gh_for_threads([])
 
@@ -1687,6 +1712,24 @@ else:
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires an explicit --source", result.stderr)
+
+    def test_ingest_findings_rejects_blank_input_without_session_mutation(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(INGEST_FINDINGS_PY),
+                "--source",
+                "local-agent:test",
+                "--input",
+                "-",
+                self.repo,
+                self.pr,
+            ],
+            stdin=" \n\t",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Use [] for an explicit empty producer result", result.stderr)
+        self.assertFalse(self.session_file().exists())
 
     def test_cli_dispatches_run_once(self):
         gh = self.bin_dir / "gh"

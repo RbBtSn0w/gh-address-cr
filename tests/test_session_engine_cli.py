@@ -436,6 +436,24 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(producer_result["findings_count"], 0)
         self.assertTrue(producer_result["sync_enabled"])
 
+    def test_ingest_local_rejects_blank_stdin_without_producer_result(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+
+        result = self.run_engine(
+            "ingest-local",
+            self.repo,
+            self.pr,
+            "--source",
+            "local-agent:test",
+            "--sync",
+            stdin=" \n\t",
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Use [] for an explicit empty producer result", result.stderr)
+
+        session = self.load_session()
+        self.assertNotIn("local-agent:test", session["handoff"]["producer_results"])
+
     def test_ingest_local_sync_keeps_identical_findings_scoped_per_source(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

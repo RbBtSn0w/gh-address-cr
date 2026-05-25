@@ -9,6 +9,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
+EMPTY_FINDINGS_INPUT_MESSAGE = "Findings input is empty. Use [] for an explicit empty producer result."
 
 
 def load_payload(input_path: str) -> str:
@@ -133,7 +134,11 @@ def main() -> int:
         print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
         return 2
 
-    findings = [normalize_finding(record) for record in parse_records(load_payload(args.input))]
+    raw = load_payload(args.input)
+    if not raw.strip():
+        print(EMPTY_FINDINGS_INPUT_MESSAGE, file=sys.stderr)
+        return 2
+    findings = [normalize_finding(record) for record in parse_records(raw)]
 
     subprocess.run(
         [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],

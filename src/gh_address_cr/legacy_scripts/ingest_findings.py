@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from gh_address_cr.intake.findings import (
+    EMPTY_FINDINGS_INPUT_MESSAGE,
     normalize_finding as native_normalize_finding,
     parse_records as native_parse_records,
 )
@@ -138,7 +139,11 @@ def main() -> int:
         )
         return 2
 
-    findings = [native_normalize_finding(record) for record in native_parse_records(load_payload(args.input))]
+    raw = load_payload(args.input)
+    if not raw.strip():
+        print(EMPTY_FINDINGS_INPUT_MESSAGE, file=sys.stderr)
+        return 2
+    findings = [native_normalize_finding(record) for record in native_parse_records(raw)]
 
     subprocess.run(
         [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],

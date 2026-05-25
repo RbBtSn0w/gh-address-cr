@@ -312,7 +312,7 @@ Prompt patterns:
 写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`。
 
 如果你自己就是外部 review producer，就在当前任务里直接生成 findings JSON，
-写入 `incoming-findings.json`，或者通过 `findings --input - --source <producer>` 交给同一 PR session；或者生成固定格式的 `finding` blocks`，
+写入 `incoming-findings.json`，或者通过 `findings --input - --source <producer>` 交给同一 PR session；或者生成固定格式的 `finding` blocks，
 写入 `incoming-findings.md`。不要只输出普通 Markdown 审查报告。
 
 收到 handoff 或 source-scoped findings ingest 成功后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
