@@ -9,9 +9,13 @@ SEVERITY_RISK_NOTES = {
 
 DEFAULT_FILE_SUMMARY = "updated per CR scope"
 
-def _normalize_severity(severity: str) -> str:
-    normalized = str(severity or "P2").upper()
-    return normalized if normalized in SEVERITY_RISK_NOTES else "P2"
+def _normalize_severity(severity: str | None) -> str | None:
+    if severity in (None, ""):
+        return None
+    normalized = str(severity).strip().upper()
+    if normalized not in SEVERITY_RISK_NOTES:
+        raise SystemExit(f"Invalid severity: {severity} (expected P1/P2/P3)")
+    return normalized
 
 
 def _sentence_with_period(value: str) -> str:
@@ -21,15 +25,13 @@ def _sentence_with_period(value: str) -> str:
     return text if text.endswith((".", "!", "?")) else f"{text}."
 
 
-def fix_reply(severity: str, payload: list[str], *, summary: str | None = None) -> str:
+def fix_reply(severity: str | None, payload: list[str], *, summary: str | None = None) -> str:
     if len(payload) < 4:
         raise SystemExit(
             "Usage for fix: generate_reply.py [--severity P1|P2|P3] <output_md> "
             "<commit_hash> <files_csv> <test_command> <test_result> [why]"
         )
     normalized_severity = _normalize_severity(severity)
-    if str(severity or "").upper() not in SEVERITY_RISK_NOTES:
-        raise SystemExit(f"Invalid severity: {severity} (expected P1/P2/P3)")
 
     commit_hash, files_csv, test_command, test_result, *rest = payload
     why = rest[0] if rest else "Addressed the CR with minimal targeted changes and regression coverage."
@@ -38,17 +40,17 @@ def fix_reply(severity: str, payload: list[str], *, summary: str | None = None) 
     lines = [
         f"Fixed in `{commit_hash}`.",
         "",
-        f"Severity: `{normalized_severity}`",
-        "",
         "What I changed:",
     ]
+    if normalized_severity:
+        lines[2:2] = [f"Severity: `{normalized_severity}`", ""]
     lines.extend([f"- `{path}`: {file_summary}" for path in files] or ["- No file list provided."])
+    why_lines = ["", "Why this addresses the CR:", f"- {why}"]
+    if normalized_severity:
+        why_lines.append(f"- {SEVERITY_RISK_NOTES[normalized_severity]}")
     lines.extend(
-        [
-            "",
-            "Why this addresses the CR:",
-            f"- {why}",
-            f"- {SEVERITY_RISK_NOTES[normalized_severity]}",
+        why_lines
+        + [
             "",
             "Validation:",
             f"- `{test_command}`",

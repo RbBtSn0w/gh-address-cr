@@ -40,6 +40,11 @@
       "path": "src/resolved.py",
       "line": 7,
       "url": "https://example.test/thread/resolved#reply",
+      "first_body": "Please tighten this branch.",
+      "first_url": "https://example.test/thread/resolved",
+      "latest_body": "Handled in the latest patch.",
+      "latest_url": "https://example.test/thread/resolved#reply",
+      "comment_source": "latest",
       "is_resolved": true,
       "is_outdated": false,
       "reply_evidence": {

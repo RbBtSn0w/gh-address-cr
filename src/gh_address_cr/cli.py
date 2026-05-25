@@ -36,6 +36,7 @@ from gh_address_cr.core.handoff import (
 )
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
 from gh_address_cr.core import workflow
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 from gh_address_cr.github.client import GitHubClient
@@ -957,7 +958,19 @@ def _ingest_native_findings(
         incoming_ids.add(item_id)
         existing = items.get(item_id)
         item = dict(existing) if isinstance(existing, dict) else {}
-        item.update(finding)
+        normalized_finding = dict(finding)
+        raw_severity = normalized_finding.pop("severity", None)
+        item.update(normalized_finding)
+        finding_severity = severity_evidence(
+            raw_severity,
+            source="producer_payload",
+            raw_marker=str(raw_severity).strip() if raw_severity is not None else None,
+            observed_from=source,
+        )
+        if finding_severity:
+            apply_severity_evidence(item, finding_severity)
+        elif raw_severity is not None:
+            apply_severity_evidence(item, None)
         item.setdefault("created_at", now)
         item["updated_at"] = now
         item["status"] = "OPEN"
@@ -1832,6 +1845,8 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--file", action="append", default=[])
     parser.add_argument("--summary", required=True)
     parser.add_argument("--why", required=True)
+    parser.add_argument("--severity", choices=["P1", "P2", "P3"])
+    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
@@ -1850,6 +1865,8 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
             validation_commands=_parse_agent_validation(parsed.validation),
             summary=parsed.summary,
             why=parsed.why,
+            severity=parsed.severity,
+            severity_note=parsed.severity_note,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -1870,6 +1887,8 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--files")
     parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--severity", choices=["P1", "P2", "P3"])
+    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--include-stale", action="store_true")
@@ -1890,6 +1909,8 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
             files=files,
             validation_commands=_parse_agent_validation(parsed.validation),
             include_stale=parsed.include_stale,
+            severity=parsed.severity,
+            severity_note=parsed.severity_note,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -1910,6 +1931,8 @@ def handle_agent_resolve_stale(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--files")
     parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--severity", choices=["P1", "P2", "P3"])
+    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
     parser.add_argument("--match-files", action="store_true")
     parser.add_argument("--publish", action="store_true")
@@ -1943,6 +1966,8 @@ def handle_agent_resolve_stale(repo: str | None, passthrough: list[str]) -> int:
             validation_commands=_parse_agent_validation(parsed.validation),
             include_stale=True,
             stale_only=True,
+            severity=parsed.severity,
+            severity_note=parsed.severity_note,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -1967,6 +1992,8 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--why")
     parser.add_argument("--test-command")
     parser.add_argument("--test-result")
+    parser.add_argument("--severity", choices=["P1", "P2", "P3"])
+    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
@@ -1996,6 +2023,8 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
                 why=parsed.why,
                 test_command=parsed.test_command,
                 test_result=parsed.test_result,
+                severity=parsed.severity,
+                severity_note=parsed.severity_note,
                 now=now_dt,
             )
     except workflow.WorkflowError as exc:

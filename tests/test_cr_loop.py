@@ -59,6 +59,26 @@ class CRLoopCLITest(PythonScriptTestCase):
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["item_id"], "local-finding:open")
 
+    def test_build_github_fix_reply_without_severity_does_not_default_to_p2(self):
+        module = self.load_module()
+
+        reply, error = module.build_github_fix_reply(
+            {
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                    "summary": "Added the guard.",
+                    "why": "The guarded path now covers the review case.",
+                }
+            },
+            {},
+            [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+        )
+
+        self.assertEqual(error, "")
+        self.assertNotIn("Severity:", reply)
+        self.assertNotIn("Medium-severity path", reply)
+
     def test_cr_loop_mixed_adapter_accepts_adapter_command_flags(self):
         adapter = Path(self.temp_dir.name) / "adapter_with_flags.py"
         adapter.write_text(
@@ -728,7 +748,7 @@ else:
         self.assertTrue(updated["handled"])
         self.assertTrue(updated["reply_posted"])
 
-    def test_build_github_fix_reply_normalizes_unknown_severity_to_p2(self):
+    def test_build_github_fix_reply_treats_unknown_item_severity_as_unknown(self):
         module = self.load_module()
 
         reply_markdown, error = module.build_github_fix_reply(
@@ -747,7 +767,7 @@ else:
 
         self.assertEqual(error, "")
         self.assertIsNotNone(reply_markdown)
-        self.assertIn("Severity: `P2`", reply_markdown)
+        self.assertNotIn("Severity:", reply_markdown)
         self.assertIn("`python3 -m unittest tests.test_cr_loop`", reply_markdown)
 
     def test_handle_batch_github_fix_normalizes_string_validation_command(self):

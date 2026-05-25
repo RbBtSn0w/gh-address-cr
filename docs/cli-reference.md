@@ -103,9 +103,9 @@ gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
-gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed"
-gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" --publish
-gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed"
+gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed" [--severity P1|P2|P3 --severity-note <why>]
+gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P1|P2|P3 --severity-note <why>] --publish
+gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" [--severity P1|P2|P3 --severity-note <why>]
 gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
@@ -119,6 +119,8 @@ Classification and resolution are deliberately separate protocol phases:
 
 - `agent classify` records triage evidence on the item before a mutating fixer lease exists. If `agent next --role fixer` returns `MISSING_CLASSIFICATION`, run `agent classify ... --classification <fix|clarify|defer|reject> --note <why>` first.
 - `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`. Use `--publish` only for accepted GitHub review-thread fix responses when the runtime should post the reply and resolve the thread in the same command.
+- Severity is evidence-backed. The runtime preserves explicit `P1`, `P2`, or `P3` markers from the producer payload or the original GitHub review-thread comment. If no trusted P-scale marker exists, severity remains unknown and publish output omits the `Severity:` line. Reviewer words such as `high`, `medium`, or `low priority` are stored only as raw priority evidence and are not converted to `P1/P2/P3`.
+- `agent fix`, `agent fix-all`, `agent resolve-stale`, and `agent evidence add` may pass `--severity P1|P2|P3` as an explicit override. If that override conflicts with first-scene severity evidence on the item, include `--severity-note <why>` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
 Role split:
 
@@ -440,7 +442,7 @@ If you omit the producer where it is required:
     - `summary`
     - `commit_hash`
     - `files`
-    - optional `severity`, `why`, `test_command`, `test_result`
+    - optional `severity`, `severity_note`, `why`, `test_command`, `test_result`
     - `validation_commands` may be used as default validation evidence when `test_command` / `test_result` are omitted
   - for GitHub thread `clarify` or `defer`: `reply_markdown`
   - optional `validation_commands`
@@ -536,6 +538,7 @@ Adapter contract:
 - adapter prints a JSON array to stdout
 - each finding should include `title`, `body`, `path`, `line`
 - optional fields: `severity`, `category`, `confidence`
+- `severity` is accepted only when it is an explicit `P1`, `P2`, or `P3`; missing or non-P-scale values do not create a session severity.
 
 This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
 

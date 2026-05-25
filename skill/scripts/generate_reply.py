@@ -24,7 +24,7 @@ def write_text(path: Path, content: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a Markdown reply template for a CR item.")
-    parser.add_argument("--severity", default="P2", help="P1, P2, or P3 for fix mode.")
+    parser.add_argument("--severity", help="Optional P1, P2, or P3 for fix mode.")
     parser.add_argument("--mode", default="fix", choices=["fix", "clarify", "defer"])
     parser.add_argument("output_md")
     parser.add_argument("args", nargs="*")

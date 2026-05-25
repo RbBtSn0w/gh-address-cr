@@ -76,6 +76,8 @@ If an external producer result is already available, `findings --input <path>|- 
 - Do not infer state from human prose or logs. Use only structured machine fields and the status-action map.
 - Do not post GitHub replies or resolve review threads directly. The runtime records evidence and performs deterministic side effects.
 - Do not treat `STALE` or outdated GitHub threads as clean. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
+- Do not invent severity. Only explicit `P1`, `P2`, or `P3` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping.
+- Do not override first-scene severity silently. If `agent fix`, `agent fix-all`, `agent resolve-stale`, or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
 - Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed.
 - Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.
 - Do not use this skill as the review engine itself; it manages intake, state, processing discipline, and gating.
