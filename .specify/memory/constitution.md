@@ -77,7 +77,11 @@ prove that the agent responded, resolved, and left recoverable evidence.
 ### IV. Packaged Skill Boundary Is Explicit
 
 This repository has two scopes: the source repository and the packaged skill
-payload under `skill/`. The **Deterministic Runtime** MUST be physically
+payload under `skill/`. Do not blur them:
+- **Repository root**: Development, verification, CI, release metadata, and contributor guidance.
+- **`skill/`**: The installable and published skill folder.
+
+The **Deterministic Runtime** MUST be physically
 separated from the packaged skill adapter. The skill adapter MUST remain a **Thin
 Layer** that acts as a router and a **Behavioral Policy Layer**. It MUST explain
 how to use the runtime safely but MUST NOT contain authoritative business logic,
@@ -92,12 +96,10 @@ creates broken installed instructions and unstable agent behavior. Physical
 separation and the policy-layer model prevent runtime-logic drift within the
 skill payload.
 
-### V. Testable Contracts And Fail-Fast Changes
+### V. Testable Contracts
 
 Public behavior changes MUST update code, docs, and executable tests together.
-The project MUST fail fast on missing tools, malformed producer output, invalid
-handoff formats, unsafe resolve-only handling, and unsupported public command
-usage. Silent fallbacks, hidden compatibility shims, alternate prompt contracts,
+Silent fallbacks, hidden compatibility shims, alternate prompt contracts,
 and narrative-only findings ingestion are forbidden unless they are explicitly
 documented, tested, and versioned as public behavior.
 

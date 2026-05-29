@@ -29,8 +29,10 @@ Follow this order of precedence:
 
 ### Python Environment
 - **Version**: Python 3.10+ (enforced by `pyproject.toml`).
-- **Layout**: Source code lives in `src/gh_address_cr/`.
 - **Install for dev**: `pip install -e .`
+
+### Testable Contracts And Fail-Fast Changes
+Public behavior changes MUST update code, docs, and executable tests together. The project MUST fail fast on missing tools, malformed producer output, invalid handoff formats, unsafe resolve-only handling, and unsupported public command usage. Silent fallbacks, hidden compatibility shims, alternate prompt contracts, and narrative-only findings ingestion are forbidden unless they are explicitly documented, tested, and versioned as public behavior.
 
 ### Verification Commands
 Before claiming work is complete, run these local checks:
