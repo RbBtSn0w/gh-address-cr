@@ -1,6 +1,6 @@
 Fixed in `<commit_hash>`.
 
-Severity: `P3`
+Severity: `P3` 🟡
 
 What I changed:
 - `<file_path>`: `<small/non-breaking improvement>`

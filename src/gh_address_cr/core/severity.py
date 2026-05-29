@@ -4,13 +4,13 @@ import re
 from typing import Any
 
 
-VALID_SEVERITIES = {"P1", "P2", "P3"}
+VALID_SEVERITIES = {"P0", "P1", "P2", "P3", "P4"}
 
 _EXPLICIT_P_SCALE_PATTERNS = (
-    re.compile(r"(?i)\b(?:severity|priority)\s*[:=\-]?\s*`?\[?(P[123])\]?`?\b"),
-    re.compile(r"(?i)(?<![A-Z0-9])\[(P[123])\](?![A-Z0-9])"),
-    re.compile(r"(?i)(?<![A-Z0-9])(P[123])\s+badge\b"),
-    re.compile(r"(?i)\bbadge/(P[123])(?:[-_/?#&.]|$)"),
+    re.compile(r"(?i)\b(?:severity|priority)\s*[:=\-]?\s*`?\[?(P[01234])\]?`?\b"),
+    re.compile(r"(?i)(?<![A-Z0-9])\[(P[01234])\](?![A-Z0-9])"),
+    re.compile(r"(?i)(?<![A-Z0-9])(P[01234])\s+badge\b"),
+    re.compile(r"(?i)\bbadge/(P[01234])(?:[-_/?#&.]|$)"),
 )
 _REVIEW_PRIORITY_PATTERNS = (
     re.compile(r"(?i)\b(high|medium|low)[-_\s]+priority\b"),
