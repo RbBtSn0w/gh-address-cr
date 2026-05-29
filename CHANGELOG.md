@@ -1,3 +1,9 @@
+## [2.7.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.6.0...v2.7.0) (2026-05-29)
+
+### Features
+
+* Dynamic CR Replies & Severity Accuracy ([#65](https://github.com/RbBtSn0w/gh-address-cr/issues/65)) ([e5e10b6](https://github.com/RbBtSn0w/gh-address-cr/commit/e5e10b652b92fbbf7b961db8bb9e9133ce606acf))
+
 ## [2.6.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.3...v2.6.0) (2026-05-29)
 
 ### Features
