@@ -113,11 +113,12 @@ def validate_action_response(
             if not fix_reply.get("summary"):
                 raise ResponseValidationError("missing_fix_reply_summary", "fix_reply requires summary.")
             severity = fix_reply.get("severity")
-            if severity and severity.upper() not in VALID_SEVERITIES:
-                raise ResponseValidationError(
-                    "invalid_severity",
-                    f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
-                )
+            if severity is not None:
+                if not isinstance(severity, str) or severity.upper() not in VALID_SEVERITIES:
+                    raise ResponseValidationError(
+                        "invalid_severity",
+                        f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
+                    )
     else:
         code = f"missing_{resolution}_reply_markdown"
         _require_non_empty(payload, "reply_markdown", code)

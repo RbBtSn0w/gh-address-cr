@@ -2016,7 +2016,7 @@ def _validate_requested_severity(
         reason_code="INVALID_FIX_REPLY_SEVERITY",
         waiting_on=waiting_on,
         exit_code=2,
-        message="Explicit severity override must be one of P1, P2, or P3.",
+        message="Explicit severity override must be one of P0, P1, P2, P3, or P4.",
         payload=payload or {},
     )
 

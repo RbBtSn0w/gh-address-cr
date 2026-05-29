@@ -2,7 +2,7 @@
 
 **Feature Branch**: `010-dynamic-cr-replies`  
 **Created**: 2024-05-24  
-**Status**: Verified
+**Status**: In Review
 **Input**: User description: "发现一个问题现在cr的回复内容很多都是死板的内容，回答的内容并不是完整按照提问者进行回答的，还有对于问题的评审级别是p0，p1，p2, 还是什么级别，也是不准确的。"
 
 ## User Scenarios & Testing *(mandatory)*
