@@ -34,13 +34,13 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
   - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common commit/files/validation evidence.
-- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P1|P2|P3 --severity-note <why>]`
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
-- `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P1|P2|P3 --severity-note <why>] [--publish]`
+- `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix.
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P1|P2|P3 --severity-note <why>] [--publish] [--include-stale]`
+- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish] [--include-stale]`
   - Classifies, claims, and submits safe batches for matching GitHub-thread items already present in the runtime session.
-- `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--severity P1|P2|P3 --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - Inspects active and terminal claims.
@@ -53,9 +53,9 @@ Classification is triage-phase evidence. Resolution is response-phase evidence. 
 
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
 
-For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Submitting a plain string may pass `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as default validation evidence.
+For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Submitting a plain string may pass `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as default validation evidence. For `P0` and `P1` severities, `why` SHOULD contain a rich technical rationale (at least two paragraphs or 150+ characters).
 
-Severity is evidence-backed. The runtime stores `P1`, `P2`, or `P3` only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Missing severity remains unknown, and published fix replies omit the `Severity:` line. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence but are not mapped to P-scale severity. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
+Severity is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or `P4` only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Missing severity remains unknown, and published fix replies omit the `Severity:` line. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence but are not mapped to P-scale severity. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
 Clarify, defer, and reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
 

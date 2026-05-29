@@ -538,7 +538,7 @@ Adapter contract:
 - adapter prints a JSON array to stdout
 - each finding should include `title`, `body`, `path`, `line`
 - optional fields: `severity`, `category`, `confidence`
-- `severity` is accepted only when it is an explicit `P1`, `P2`, or `P3`; missing or non-P-scale values do not create a session severity.
+- `severity` is accepted only when it is an explicit `P0`, `P1`, `P2`, `P3`, or `P4`; missing or non-P-scale values do not create a session severity.
 
 This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
 
@@ -617,4 +617,6 @@ To apply a terminal local finding resolution atomically, use:
 gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
 gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
 gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
+```
+up PR."
 ```

@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from gh_address_cr.agent.roles import MUTATING_RESOLUTIONS, TERMINAL_RESOLUTIONS
 from gh_address_cr.core.models import ActionRequest, ActionResponse, ClaimLease, EvidenceRecord, WorkItem
+from gh_address_cr.core.severity import VALID_SEVERITIES
 
 
 class ResponseValidationError(ValueError):
@@ -111,6 +112,13 @@ def validate_action_response(
                 raise ResponseValidationError("invalid_fix_reply", "fix_reply must be an object.")
             if not fix_reply.get("summary"):
                 raise ResponseValidationError("missing_fix_reply_summary", "fix_reply requires summary.")
+            severity = fix_reply.get("severity")
+            if severity is not None:
+                if not isinstance(severity, str) or severity.upper() not in VALID_SEVERITIES:
+                    raise ResponseValidationError(
+                        "invalid_severity",
+                        f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
+                    )
     else:
         code = f"missing_{resolution}_reply_markdown"
         _require_non_empty(payload, "reply_markdown", code)

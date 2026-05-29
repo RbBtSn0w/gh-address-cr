@@ -175,7 +175,7 @@ def emit(result: subprocess.CompletedProcess[str]) -> None:
 
 def severity_rank(item: dict) -> tuple[int, str]:
     severity = item.get("severity") or "P9"
-    mapping = {"P1": 1, "P2": 2, "P3": 3}
+    mapping = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
     return mapping.get(severity, 9), severity
 
 

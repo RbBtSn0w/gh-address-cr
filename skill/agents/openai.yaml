@@ -15,3 +15,10 @@ interface:
     9. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `gh-address-cr submit-feedback` before giving up. Feedback goes to `RbBtSn0w/gh-address-cr` by default. Do not file feedback issues for normal PR findings, codebase bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
     10. Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues. Prefer safe technical diagnostics such as failing command, exit code, status, reason_code, waiting_on, run_id, and skill version.
     11. Always provide `--using-repo` and `--using-pr` for PR-scoped feedback so the issue body records where the problem came from. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred. When those fields are present, feedback can auto-collect the latest local machine summary, session metrics, audit summary hash, and cached PR head SHA. Repeated feedback is deduplicated by fingerprint.
+    12. **Severity & Tone Rubric (P0-P4)**:
+        - **P0 (Blocker)**: Critical system-wide crash, data loss, or severe security flaw. Reply MUST be deeply technical and demonstrate extreme urgency.
+        - **P1 (Critical)**: Major logic error in core path or significant performance regression. Reply MUST provide at least two paragraphs of technical rationale.
+        - **P2 (Major)**: Functional bug in standard path. Reply MUST be detailed and refer to specific logic branches.
+        - **P3 (Minor)**: UX nits, missing tests for low-risk logic, sub-optimal but functional code. Reply SHOULD be concise and professional.
+        - **P4 (Nit)**: Style, typos, or non-functional suggestions. Reply SHOULD be very brief and polite.
+        - **Deep Comprehension**: ALL replies MUST explicitly reference variable names, logic branches, or domain terms from the reviewer's comment. Avoid boilerplate like "Fixed as requested."

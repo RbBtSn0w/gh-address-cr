@@ -3,6 +3,9 @@
 ### Features
 
 * Add brainstorming command for Spec Kit refinement ([cc44dc0](https://github.com/RbBtSn0w/gh-address-cr/commit/cc44dc02c285d33ad99a7f5839f822d7129c8da1))
+* **core**: Expand severity scale to P0-P4 with emojis (🛑, 🔴, 🟠, 🟡, 🔘)
+* **core**: Support rich, multi-paragraph technical rationales in GitHub replies
+* **agent**: Add formal Severity & Tone Rubric to agent prompt instructions
 
 ## [2.5.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.5.2...v2.5.3) (2026-05-25)
 

@@ -198,7 +198,8 @@ class NativeWorkflowTests(unittest.TestCase):
                     "- No code changes were made for this specific comment.\n"
                     "\n"
                     "If you feel this still needs an adjustment, let me know and I can follow up with a patch!\n"
-                )
+                    )
+
                 self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", expected_reply))
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(updated["state"], "closed")
@@ -488,7 +489,7 @@ class NativeWorkflowTests(unittest.TestCase):
         expected = (
             "Fixed in `abc123`.\n"
             "\n"
-            "Severity: `P1`\n"
+            "Severity: `P1` 🔴\n"
             "\n"
             "What I changed:\n"
             "- `src/example.py`: Added the missing input guard.\n"
