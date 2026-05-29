@@ -4,9 +4,9 @@
 **Created**: 2026-05-29
 **Feature**: [spec.md](../spec.md)
 
-## Content Quality
+## Content Quality (spec.md only)
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [x] No implementation details (languages, frameworks, APIs) in spec.md
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed

@@ -17,6 +17,20 @@ def fix_reply(
     efficiency_summary: str | None = None  # NEW
 ) -> str:
     ...
+
+def clarify_reply(
+    payload: list[str], 
+    *, 
+    efficiency_summary: str | None = None  # NEW
+) -> str:
+    ...
+
+def defer_reply(
+    payload: list[str], 
+    *, 
+    efficiency_summary: str | None = None  # NEW
+) -> str:
+    ...
 ```
 
 The `efficiency_summary` string, if provided, will be appended to the bottom of the returned Markdown string.

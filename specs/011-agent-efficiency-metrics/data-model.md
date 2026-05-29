@@ -13,6 +13,8 @@ Represents a single invocation of a shell command or skill.
 - `exit_code` (int): The return code of the subprocess (0 usually indicates success).
 - `is_success` (bool): Derived from `exit_code == 0`.
 - `is_retry` (bool): True if this command is identical to the immediately preceding command and the preceding command failed.
+- `pid` (int): The process ID of the execution.
+- `execution_id` (str): A unique identifier (UUID) for this specific invocation.
 
 ### `EfficiencyReport` (Data Class)
 Represents the aggregated statistics for the entire session.

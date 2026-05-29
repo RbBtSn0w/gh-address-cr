@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-agent-efficiency-metrics`
 **Created**: 2026-05-29
-**Status**: Verified
+**Status**: In Review
 **Input**: User description: "在ai agent的工作流程中，整个流程的高效性，如何评价和度量ai agent使用skill和cli工具，如果存在效率底下，就应该组织性能优化的工作了。"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -78,7 +78,7 @@ As a skill developer, I want to export structured workflow metrics (JSON format)
 
 ### Key Entities
 
-- **Execution Metric**: Represents a single invocation of a skill or CLI tool, containing `tool_name`, `start_time`, `end_time`, `duration`, `exit_status`, and `retry_count`.
+- **Execution Metric**: Represents a single invocation of a skill or CLI tool, containing `command`, `start_time`, `end_time`, `duration`, `exit_code`, `is_retry`, `pid`, and `execution_id`.
 - **Efficiency Report**: An aggregation of Execution Metrics for a specific PR session, containing overall statistics and a list of flagged inefficiencies.
 
 ## Success Criteria *(mandatory)*
