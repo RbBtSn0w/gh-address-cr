@@ -17,8 +17,8 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Define `ExecutionMetric` and `EfficiencyReport` dataclasses in `src/gh_address_cr/core/telemetry.py`
-- [ ] T002 Implement `SessionTelemetry` singleton or context manager in `src/gh_address_cr/core/telemetry.py` for in-memory metric storage
+- [x] T001 Define `ExecutionMetric` and `EfficiencyReport` dataclasses in `src/gh_address_cr/core/telemetry.py`
+- [x] T002 Implement `SessionTelemetry` singleton or context manager in `src/gh_address_cr/core/telemetry.py` for in-memory metric storage
 
 ---
 
@@ -28,8 +28,8 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T003 Create `tests/core/test_telemetry.py` with failing tests for metric recording and reporting logic
-- [ ] T004 Implement telemetry tracking wrapper around `run_cmd` in `src/gh_address_cr/core/cr_loop.py`
+- [x] T003 Create `tests/core/test_telemetry.py` with failing tests for metric recording and reporting logic
+- [x] T004 Implement telemetry tracking wrapper around `run_cmd` in `src/gh_address_cr/core/cr_loop.py`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -43,14 +43,14 @@
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Add unit tests for `fix_reply` formatting with `efficiency_summary` in `tests/core/test_reply_templates.py`
-- [ ] T006 [P] [US1] Add unit tests for total duration and success rate calculation in `tests/core/test_telemetry.py`
+- [x] T005 [P] [US1] Add unit tests for `fix_reply` formatting with `efficiency_summary` in `tests/core/test_reply_templates.py`
+- [x] T006 [P] [US1] Add unit tests for total duration and success rate calculation in `tests/core/test_telemetry.py`
 
 ### Implementation for User Story 1
 
-- [ ] T007 [P] [US1] Update `fix_reply`, `clarify_reply`, and `defer_reply` signatures in `src/gh_address_cr/core/reply_templates.py` to accept `efficiency_summary`
-- [ ] T008 [US1] Implement aggregation logic to generate the human-readable summary string in `src/gh_address_cr/core/telemetry.py`
-- [ ] T009 [US1] Wire the generated summary from `SessionTelemetry` to the reply payload generation in `src/gh_address_cr/agent/responses.py`
+- [x] T007 [P] [US1] Update `fix_reply`, `clarify_reply`, and `defer_reply` signatures in `src/gh_address_cr/core/reply_templates.py` to accept `efficiency_summary`
+- [x] T008 [US1] Implement aggregation logic to generate the human-readable summary string in `src/gh_address_cr/core/telemetry.py`
+- [x] T009 [US1] Wire the generated summary from `SessionTelemetry` to the reply payload generation in `src/gh_address_cr/core/cr_loop.py` (updated location)
 
 **Checkpoint**: Basic execution times and success rates are now tracked and appended to replies.
 
@@ -64,14 +64,14 @@
 
 ### Tests for User Story 2
 
-- [ ] T010 [P] [US2] Add unit tests for threshold evaluations (>60s and >20% error rate) in `tests/core/test_telemetry.py`
-- [ ] T011 [P] [US2] Add unit tests for consecutive retry detection in `tests/core/test_telemetry.py`
+- [x] T010 [P] [US2] Add unit tests for threshold evaluations (>60s and >20% error rate) in `tests/core/test_telemetry.py`
+- [x] T011 [P] [US2] Add unit tests for consecutive retry detection in `tests/core/test_telemetry.py`
 
 ### Implementation for User Story 2
 
-- [ ] T012 [P] [US2] Define `MAX_DURATION_SECONDS` and `MAX_ERROR_RATE_PERCENT` constants in `src/gh_address_cr/core/telemetry.py`
-- [ ] T013 [US2] Implement `evaluate_efficiency` function in `src/gh_address_cr/core/telemetry.py` to identify threshold violations
-- [ ] T014 [US2] Update the summary generator in `src/gh_address_cr/core/telemetry.py` to include a "⚠️ Inefficiencies Detected" block if flags exist
+- [x] T012 [P] [US2] Define `MAX_DURATION_SECONDS` and `MAX_ERROR_RATE_PERCENT` constants in `src/gh_address_cr/core/telemetry.py`
+- [x] T013 [US2] Implement `evaluate_efficiency` function in `src/gh_address_cr/core/telemetry.py` to identify threshold violations
+- [x] T014 [US2] Update the summary generator in `src/gh_address_cr/core/telemetry.py` to include a "⚠️ Inefficiencies Detected" block if flags exist
 
 **Checkpoint**: Inefficiencies are now automatically highlighted in the generated reply output.
 
@@ -86,11 +86,11 @@
 
 ### Tests for User Story 3
 
-- [ ] T015 [P] [US3] Add unit tests verifying `EfficiencyReport` and `ExecutionMetric` can be losslessly serialized to JSON in `tests/core/test_telemetry.py`
+- [x] T015 [P] [US3] Add unit tests verifying `EfficiencyReport` and `ExecutionMetric` can be losslessly serialized to JSON in `tests/core/test_telemetry.py`
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Add a `.to_dict()` or `.to_json()` method to `EfficiencyReport` in `src/gh_address_cr/core/telemetry.py`
+- [x] T016 [US3] Add a `.to_dict()` or `.to_json()` method to `EfficiencyReport` in `src/gh_address_cr/core/telemetry.py`
 
 **Checkpoint**: Metrics data structure is ready for potential future programmatic export (e.g., to an OTel relay).
 
@@ -100,9 +100,9 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T017 [P] Update `CHANGELOG.md` with details about the new Agent Efficiency Metrics feature
-- [ ] T018 Run `ruff check src tests` to ensure code style compliance
-- [ ] T019 Run full test suite `python3 -m unittest discover -s tests` to verify no regressions
+- [x] T017 [P] Update `CHANGELOG.md` with details about the new Agent Efficiency Metrics feature
+- [x] T018 Run `ruff check src tests` to ensure code style compliance
+- [x] T019 Run full test suite `python3 -m unittest discover -s tests` to verify no regressions
 
 ---
 

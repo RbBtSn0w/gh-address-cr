@@ -161,9 +161,52 @@ def _runtime_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_cmd(cmd: list[str], *, stdin: str | None = None, retries: int = 3) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    cmd: list[str], 
+    *, 
+    stdin: str | None = None, 
+    retries: int = 3, 
+    timeout: float | None = 120.0
+) -> subprocess.CompletedProcess[str]:
+    import time
+    from gh_address_cr.core.telemetry import SessionTelemetry
+    
     _ = retries
-    return subprocess.run(cmd, input=stdin, text=True, capture_output=True, env=_runtime_subprocess_env())
+    start_time = time.time()
+    try:
+        result = subprocess.run(
+            cmd, 
+            input=stdin, 
+            text=True, 
+            capture_output=True, 
+            env=_runtime_subprocess_env(),
+            timeout=timeout
+        )
+        end_time = time.time()
+        exit_code = result.returncode
+    except subprocess.TimeoutExpired as exc:
+        end_time = time.time()
+        exit_code = 124
+        result = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=exit_code,
+            stdout=exc.stdout if exc.stdout is not None else "",
+            stderr=(exc.stderr if exc.stderr is not None else "") + f"\nCommand timed out after {timeout} seconds."
+        )
+    
+    # We record the command as a string to avoid cluttering metrics with massive arrays
+    command_str = " ".join(cmd)
+    try:
+        SessionTelemetry.get_instance().record(
+            command=command_str,
+            start_time=start_time,
+            end_time=end_time,
+            exit_code=exit_code
+        )
+    except Exception as telemetry_exc:
+        sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
+        
+    return result
 
 
 def emit(result: subprocess.CompletedProcess[str]) -> None:
@@ -478,7 +521,7 @@ def run_intake(
 
 
 def run_fixer(fixer_cmd: str, payload: dict) -> tuple[dict | None, str]:
-    result = subprocess.run(shlex.split(fixer_cmd), input=json.dumps(payload), text=True, capture_output=True)
+    result = run_cmd(shlex.split(fixer_cmd), stdin=json.dumps(payload))
     if result.returncode != 0:
         return None, result.stderr or "Fixer command failed."
     try:
@@ -583,10 +626,18 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         return None, "GitHub fix actions require fix_reply.test_result or a derivable validation result."
 
     try:
+        try:
+            from gh_address_cr.core.telemetry import SessionTelemetry
+            efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
+        except Exception as telemetry_exc:
+            sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+            efficiency_summary = None
+        
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=str(fix_reply.get("summary") or "").strip() or None,
+            efficiency_summary=efficiency_summary,
         )
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."
@@ -614,7 +665,7 @@ def run_validation(commands: list[str]) -> tuple[bool, str]:
             return False, f"Invalid validation command: {command}\n{exc}"
         if not argv:
             return False, "Invalid validation command: command is empty."
-        result = subprocess.run(argv, text=True, capture_output=True)
+        result = run_cmd(argv)
         if result.returncode != 0:
             output = (result.stdout or "") + (result.stderr or "")
             return False, f"Validation failed: {command}\n{output}".strip()
@@ -825,10 +876,17 @@ def handle_batch(
             else:
                 reply_markdown = action.get("reply_markdown")
                 if isinstance(reply_markdown, str) and reply_markdown.strip():
+                    try:
+                        from gh_address_cr.core.telemetry import SessionTelemetry
+                        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
+                    except Exception as telemetry_exc:
+                        sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+                        efficiency_summary = None
+                    
                     if resolution == "clarify":
-                        reply_markdown = render_clarify_reply([reply_markdown.strip()])
+                        reply_markdown = render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
                     elif resolution == "defer":
-                        reply_markdown = render_defer_reply([reply_markdown.strip()])
+                        reply_markdown = render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
                 error = ""
             if not reply_markdown:
                 error = error or "GitHub thread actions require reply_markdown."
