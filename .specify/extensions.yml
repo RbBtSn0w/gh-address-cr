@@ -1,4 +1,6 @@
-installed: []
+installed:
+- memorylint
+- superb
 settings:
   auto_execute_hooks: true
 hooks:
@@ -11,11 +13,11 @@ hooks:
     description: Initialize Git repository before constitution setup
     condition: null
   - extension: memorylint
-    command: speckit.memorylint.run
+    command: speckit.memorylint.audit
     enabled: true
     optional: true
-    prompt: Run MemoryLint to prune out-of-bounds architecture rules and enrich missing
-      infrastructure guidelines in AGENTS.md?
+    prompt: Run MemoryLint audit to generate a boundary report before constitution
+      generation?
     description: ''
     condition: null
   before_specify:
@@ -108,6 +110,13 @@ hooks:
     prompt: Commit constitution changes?
     description: Auto-commit after constitution update
     condition: null
+  - extension: memorylint
+    command: speckit.memorylint.audit
+    enabled: true
+    optional: true
+    prompt: Run MemoryLint audit to check for conflicts between constitution and AGENTS.md?
+    description: ''
+    condition: null
   after_specify:
   - extension: git
     command: speckit.git.commit
@@ -115,6 +124,18 @@ hooks:
     optional: true
     prompt: Commit specification changes?
     description: Auto-commit after specification
+    condition: null
+  - extension: superb
+    command: speckit.superb.brainstorm
+    enabled: true
+    optional: true
+    prompt: Refine the new spec.md with Superpowers brainstorming before clarification
+      or planning?
+    description: 'Optional spec refinement gate. Uses an installed superpowers brainstorming
+      skill to strengthen the active Spec Kit spec.md while preserving Spec Kit ownership
+      of specification creation.
+
+      '
     condition: null
   after_clarify:
   - extension: git

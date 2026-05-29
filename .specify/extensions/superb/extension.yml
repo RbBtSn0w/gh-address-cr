@@ -3,8 +3,8 @@ schema_version: "1.0"
 extension:
   id: superb
   name: Superpowers Bridge
-  version: 1.3.0
-  description: "Bridges superpowers quality-control skills into Spec Kit and adds native review utilities."
+  version: 1.5.0
+  description: "Bridges selected Superpowers disciplines into Spec Kit as evidence-first trust gates for agent workflows."
   author: rbbtsn0w
   repository: https://github.com/RbBtSn0w/spec-kit-extensions
   license: MIT
@@ -25,6 +25,13 @@ provides:
         Bridge-native diagnostics command. Verifies that required and optional
         superpowers skills are installed in workspace or global skill roots and
         reports which hooks are ready to run.
+
+    - name: speckit.superb.brainstorm
+      file: commands/brainstorm.md
+      description: >
+        Optional after-specify refinement gate. Bridges an installed
+        superpowers brainstorming skill into the active Spec Kit spec.md without
+        creating a second design document or replacing speckit.specify.
 
     - name: speckit.superb.tdd
       file: commands/tdd.md
@@ -54,7 +61,7 @@ provides:
       description: >
         Persistent spec-aligned code-review agent. Loads spec.md, plan.md, and
         tasks.md, then reviews every diff against the declared requirements,
-        reporting issues by severity (Critical / High / Medium / Low).
+        reporting issues by severity (Critical / Important / Minor).
         Bridge-native command.
 
     - name: speckit.superb.debug
@@ -87,6 +94,15 @@ provides:
       required: false
 
 hooks:
+  after_specify:
+    command: speckit.superb.brainstorm
+    optional: true
+    prompt: "Refine the new spec.md with Superpowers brainstorming before clarification or planning?"
+    description: >
+      Optional spec refinement gate. Uses an installed superpowers
+      brainstorming skill to strengthen the active Spec Kit spec.md while
+      preserving Spec Kit ownership of specification creation.
+
   before_implement:
     command: speckit.superb.tdd
     optional: false

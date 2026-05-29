@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-27
+### Added
+
+- Added optional `/speckit.superb.brainstorm` after-specify refinement hook for
+  applying installed Superpowers `brainstorming` discipline to the active Spec
+  Kit `spec.md`.
+
+### Changed
+
+- Clarified the Superpowers gap map: `requesting-code-review` is represented by
+  `critique`/`respond`, `dispatching-parallel-agents` informs `debug`, and
+  `writing-plans` informs task-quality checks in `review`.
+- Added a Superpowers-to-Superpowers Bridge mapping matrix documenting direct
+  bridges, borrowed disciplines, non-exposed workflow skills, and Spec Kit
+  stage integration.
+- Clarified the autonomous agent execution contract for required hooks,
+  optional hooks, manual commands, and borrowed disciplines.
+- Reframed the open-source product positioning around selected Superpowers
+  disciplines delivered as evidence-first trust gates for Spec Kit agent
+  workflows, including ICP and first-success adoption guidance.
+- Documented the naming hierarchy for `Superpowers Bridge`,
+  `superpowers-bridge`, and the `superb` command namespace.
+- Documented the Goal mode prompt pattern for opting into optional superb hooks
+  while preserving the baseline required/optional policy.
+- Expanded bridge diagnostics and configuration templates for optional
+  Superpowers discipline skills without changing hard requirements.
+
+## [1.4.0] - 2026-05-24
+### Added
+
+- Added evidence archiving scripts for Bash and PowerShell so `/speckit.superb.verify` can persist verification output under `.specify/evidence/`.
+- Added regression coverage for evidence archive creation, missing checklist/test output, missing separators, and invalid build statuses.
+
+### Changed
+
+- Updated `/speckit.superb.verify` so `Verified` status synchronization happens only after evidence archiving succeeds.
+- Tightened `/speckit.superb.critique` around requirement mapping, side-effect detection, and fix-plan generation for critical drift.
+- Wired evidence archive tests into CI.
+
 ## [1.3.0] - 2026-04-16
 ### Changed
 
@@ -60,7 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.3.0...HEAD
+[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.5.0...HEAD
 [1.0.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.0.0
 [1.1.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.1.0
 [1.3.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.3.0
+[1.4.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.4.0
+[1.5.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.5.0

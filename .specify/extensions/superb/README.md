@@ -1,9 +1,20 @@
 # Superpowers Bridge
 
-Bridges selected installed [obra/superpowers](https://github.com/obra/superpowers) quality-control skills into the Spec Kit workflow and adds a small set of bridge-native review utilities.
+Bridges selected [obra/superpowers](https://github.com/obra/superpowers)
+disciplines into [Spec Kit](https://github.com/github/spec-kit) as
+evidence-first trust gates for agent workflows.
+
+Superpowers Bridge makes Spec Kit implementation claims verifiable: TDD before
+code, review against `spec.md` / `plan.md` / `tasks.md`, and fresh evidence
+before a feature can be treated as `Verified`.
+
+The current product promise is narrow: no agent should mark a Spec Kit feature
+complete without fresh verification evidence, mapped spec coverage, and a
+durable evidence archive.
 
 This extension combines:
 
+- **Optional post-stage refinement** after `specify`,
 - **Hook-based guardrails** for core Spec Kit commands (`tasks`, `implement`), and
 - **Standalone operational commands** for debugging, review response, and branch completion.
 
@@ -11,14 +22,64 @@ It does **not** replace the Spec Kit main flow. The main flow remains:
 
 `/speckit.specify -> /speckit.clarify -> /speckit.plan -> /speckit.tasks -> /speckit.analyze | /speckit.checklist -> /speckit.implement`
 
+## Naming And Brand
+
+Use these names consistently:
+
+| Name | Use For | Stability |
+|---|---|---|
+| Superpowers Bridge | Official extension and product name | Public, stable |
+| `superpowers-bridge` | Spec Kit extension package, folder, release asset, and tag prefix | Public, stable |
+| `superb` | Command namespace and local shorthand, as in `/speckit.superb.verify` | Public, stable |
+
+Do not use `SuperB` or `SuperBridge` as official public names for this
+extension. `SuperB` is easy to confuse with the lowercase command namespace,
+and `SuperBridge` hides the product's relationship to Superpowers. If a future
+broader bridge product needs either name, document it as a separate brand layer
+rather than renaming this extension in place.
+
+## Who This Is For
+
+Use this extension when:
+
+- You use Spec Kit as the source of truth for `spec.md`, `plan.md`, and
+  `tasks.md`.
+- You let an autonomous coding agent implement features and need proof that it
+  did not skip tests, requirements, or verification.
+- You want selected Superpowers development discipline without adopting the
+  entire Superpowers workflow as a second owner.
+
+It is not a general-purpose code-review bot, a replacement for Spec Kit, or a
+standalone Superpowers workflow runner.
+
+## Open Source Adoption Path
+
+The fastest way to validate the extension is one real feature, not a synthetic
+demo:
+
+1. Install the extension and the hard-required local Superpowers skills.
+2. Run `/speckit.superb.check` and confirm `test-driven-development` and
+   `verification-before-completion` are `READY`.
+3. Run one normal Spec Kit feature through `specify`, `plan`, `tasks`, and
+   `implement`.
+4. Let `/speckit.superb.tdd` run before implementation and
+   `/speckit.superb.verify` run after implementation.
+5. Treat the first success as real only when `.specify/evidence/` contains a
+   fresh archive with test output and a spec-coverage checklist.
+
+The extension is proving value when it blocks a false completion, exposes a
+missing requirement-to-task link, or leaves durable evidence that another
+reviewer can inspect later.
+
 ## Bridge Model
 
 ```text
   [ Spec Kit Main Flow ]                         [ Bridge Enhancements ]
 
  ┌───────────────────┐
- │ /speckit specify  │ ─────> Spec Kit owns specification creation
- └─────────┬─────────┘
+ │ /speckit specify  │ ─────> 1. Spec Kit owns specification creation
+ └─────────┬─────────┘        2. 🧠 brainstorm (Optional: spec refinement)
+           │                  (after_specify)
            │
  ┌─────────▼─────────┐
  │ /speckit clarify  │ ─────> Spec Kit owns clarification and spec updates
@@ -50,6 +111,7 @@ It does **not** replace the Spec Kit main flow. The main flow remains:
 ## Features
 
 - Local skill discovery and readiness diagnostics (`check`)
+- Optional post-specification brainstorming refinement (`brainstorm`)
 - Mandatory TDD gate before implementation (`tdd`)
 - Task/spec coverage and TDD-readiness check (`review`)
 - Mandatory evidence-based completion gate (`verify`)
@@ -58,26 +120,119 @@ It does **not** replace the Spec Kit main flow. The main flow remains:
 - Structured branch completion options (`finish`)
 - Technical response workflow for review feedback (`respond`)
 
+## Evidence-First Completion
+
+`/speckit.superb.verify` archives completion evidence to `.specify/evidence/` before it synchronizes the active `spec.md` status to `Verified`.
+
+Each evidence archive records:
+
+- UTC timestamp
+- git commit hash
+- build/lint status
+- spec-coverage checklist
+- full test output
+
+If the checklist, test output, or archive step is missing, the previous status is preserved.
+
 ## What This Bridge Does Not Do
 
 The bridge intentionally does **not** take over these responsibilities from
 Spec Kit:
 
 - Specification generation and branch creation
-- Clarification and spec mutation
+- Clarification ownership and unapproved spec mutation
 - Technical planning
 - Task generation
 - Implementation orchestration
 
-The following superpowers workflow skills are therefore **not** bridged as
-formal commands or hooks:
+The following superpowers workflow skills are therefore **not** exposed as
+independent bridge commands or hooks:
 
-- `brainstorming`
 - `writing-plans`
 - `subagent-driven-development`
 - `executing-plans`
 - `using-git-worktrees`
-- `requesting-code-review`
+
+The following skills are represented by existing bridge commands rather than
+directly exposed as separate commands:
+
+- `requesting-code-review` is not directly bridged as a standalone command.
+  Its handoff packaging discipline is available inside
+  `/speckit.superb.critique` when the user wants an external or subagent review
+  prompt.
+- `writing-plans` does not generate `plan.md` or `tasks.md`; selected task
+  quality checks are folded into `/speckit.superb.review`.
+- `dispatching-parallel-agents` is not a main-flow hook; its parallel
+  investigation discipline is available inside `/speckit.superb.debug` when
+  there are multiple independent failure domains.
+
+### Review Role Boundaries
+
+The review-related surfaces intentionally have different roles:
+
+| Surface | Role | Owns | Does not own |
+|---|---|---|---|
+| `requesting-code-review` | Review request / handoff pattern | Packaging context for another reviewer or subagent | Performing the review inside this bridge |
+| `/speckit.superb.critique` | Local spec-aligned reviewer | Reviewing diff against `spec.md`, `plan.md`, `tasks.md`, and optionally producing a handoff package | Implementing fixes or receiving feedback |
+| `/speckit.superb.respond` | Feedback receiver / implementer response | Triage, accept/reject/clarify, and implement accepted review items | Producing the original review |
+
+## Superpowers Mapping Matrix
+
+This matrix is the compatibility map between Superpowers skills, the
+Superpowers Bridge (`superb`) command surface, and the Spec Kit lifecycle.
+It separates direct bridges from borrowed disciplines and intentionally
+unexposed workflow skills.
+
+| Superpowers skill | Bridge surface | Spec Kit integration point | Mechanism | Boundary |
+|---|---|---|---|---|
+| `brainstorming` | `/speckit.superb.brainstorm` | After `/speckit.specify`, before `/speckit.clarify` or `/speckit.plan` | Optional `after_specify` hook or manual rerun/refinement | Refines the existing `spec.md` with user approval; does not create a feature, branch, parallel design doc, `plan.md`, `tasks.md`, or lifecycle status. |
+| `test-driven-development` | `/speckit.superb.tdd` | Immediately before `/speckit.implement` writes production code | Required `before_implement` hook | Enforces RED/GREEN/REFACTOR readiness; does not own implementation orchestration. |
+| `verification-before-completion` | `/speckit.superb.verify` | Immediately after `/speckit.implement` claims completion | Required `after_implement` hook | Requires fresh evidence before completion claims and synchronizes only bridge-owned verified state. |
+| `systematic-debugging` | `/speckit.superb.debug` | During implementation when failures repeat or behavior is unexplained | Manual support command | Produces root-cause investigation and evidence; does not bypass TDD or verification gates. |
+| `dispatching-parallel-agents` | `/speckit.superb.debug` parallel mode | Debugging only, when there are 2+ independent failure domains | Borrowed discipline inside `debug` | Creates independent investigation task packages; the controller performs final synthesis and verification. |
+| `requesting-code-review` | `/speckit.superb.critique` handoff section | Before external review, subagent review, PR review, or merge review | Borrowed handoff-packaging discipline | Packages reviewer context; it is not exposed as `/speckit.superb.request-review` and does not receive feedback. |
+| `receiving-code-review` | `/speckit.superb.respond` | After critique output, PR comments, or external review feedback arrives | Manual support command | Triage, accept/reject/clarify, and implement accepted items; it does not produce the original review. |
+| `finishing-a-development-branch` | `/speckit.superb.finish` | After verification succeeds and integration is ready | Manual support command | Handles PR/merge/keep/discard decisions and bridge-owned handoff state; does not replace repository policy. |
+| `writing-plans` | `/speckit.superb.review` task-quality checks | After `/speckit.tasks`, before implementation | Borrowed discipline inside `review` | Checks file ownership, task granularity, RED/GREEN target, and review checkpoint readiness; does not generate or edit `plan.md` or `tasks.md`. |
+| `subagent-driven-development` | Not exposed | None | Not bridged | Would take over implementation orchestration, which belongs to the user, agent, and Spec Kit implementation flow. |
+| `executing-plans` | Not exposed | None | Not bridged | Would execute `plan.md` / `tasks.md` directly and compete with `/speckit.implement`. |
+| `using-git-worktrees` | Not exposed | None | Not bridged | Repository/worktree strategy is project policy, not a required Spec Kit extension behavior. |
+| `using-superpowers` | Not exposed | Agent/bootstrap layer | Not part of the extension command surface | Skill installation and loading remain outside the feature lifecycle; `/speckit.superb.check` only reports readiness. |
+| `writing-skills` | Not exposed | Extension maintenance only | Not part of feature delivery | Useful for maintaining skills, but not for a Spec Kit feature workflow. |
+
+### How The Matrix Connects To Spec Kit
+
+- Hooked stages are limited to `after_specify`, `after_tasks`,
+  `before_implement`, and `after_implement`.
+- Required hooks are reserved for implementation trust boundaries:
+  `/speckit.superb.tdd` before implementation and `/speckit.superb.verify`
+  after implementation.
+- Optional hooks improve artifact quality after Spec Kit has created the
+  relevant artifact, but they do not own the next stage.
+- Manual support commands are called by the user or autonomous agent when the
+  situation appears: debugging, critique, feedback response, and finishing.
+- Borrowed disciplines do not create new bridge commands. They are constrained
+  subroutines inside an existing command and inherit that command's boundary.
+- Every bridge command depends on locally installed Superpowers skill content
+  where applicable; the bridge does not embed remote fallback behavior.
+
+### Agent Execution Contract
+
+When an autonomous agent or Goal mode runs the workflow, the bridge should be
+treated as stage-specific middleware rather than a second workflow engine:
+
+- Spec Kit commands create and advance the canonical artifacts.
+- Required bridge hooks are gates. If their context is missing or verification
+  fails, the agent must stop and report the blocker instead of claiming progress.
+- Optional bridge hooks run only when the user, goal prompt, or local policy
+  opts into them. Skipping an optional hook must not block the Spec Kit stage.
+- Manual bridge commands are situational tools. The agent may call them when
+  their trigger condition appears, but they do not advance the Spec Kit stage by
+  themselves.
+- Borrowed discipline sections, such as `requesting-code-review` packaging or
+  `dispatching-parallel-agents` task bundles, must return evidence or a draft
+  back to the active bridge command; they do not create a new owner for the
+  feature lifecycle.
 
 ## Design Notes
 
@@ -96,7 +251,7 @@ The V2 redesign rationale is documented in
 Install directly from the release asset:
 
 ```bash
-specify extension add superpowers-bridge --from https://github.com/RbBtSn0w/spec-kit-extensions/releases/download/superpowers-bridge-v1.3.0/superpowers-bridge.zip
+specify extension add superpowers-bridge --from https://github.com/RbBtSn0w/spec-kit-extensions/releases/download/superpowers-bridge-v1.5.0/superpowers-bridge.zip
 ```
 
 ### Install from GitHub Repository (Development)
@@ -130,6 +285,7 @@ Run the diagnostics command after installation:
 | Command | Type | Purpose |
 |---|---|---|
 | `/speckit.superb.check` | Standalone | Verify installed skill availability and hook readiness |
+| `/speckit.superb.brainstorm` | Hookable | Optionally refine the active `spec.md` after `speckit.specify` |
 | `/speckit.superb.tdd` | Hookable | Enforce RED-GREEN-REFACTOR before code changes |
 | `/speckit.superb.review` | Hookable | Check `tasks.md` coverage and TDD-readiness |
 | `/speckit.superb.verify` | Hookable | Block completion claims without fresh evidence |
@@ -146,6 +302,7 @@ should be used, whether it is automatic or manual, and what problem it solves.
 | Command | Automatic? | Best Time To Use | Solves |
 |---|---|---|---|
 | `/speckit.superb.check` | Manual | Right after installing the extension or when bridge behavior looks wrong | Confirms which superpowers skills were found, where they were found, and which hooks or standalone commands are ready |
+| `/speckit.superb.brainstorm` | Optional hook after `specify` | After `spec.md` is created, before `clarify` or `plan` | Uses Superpowers brainstorming discipline to refine the active Spec Kit spec without creating a second design document |
 | `/speckit.superb.review` | Optional hook after `tasks` | After `tasks.md` is generated, before implementation starts | Checks whether `tasks.md` really covers `spec.md` and whether the task set is precise enough for strict TDD |
 | `/speckit.superb.tdd` | Mandatory hook before `implement` | Immediately before implementation begins | Enforces RED-GREEN-REFACTOR and blocks speculative production code before a failing test |
 | `/speckit.superb.verify` | Mandatory hook after `implement` | Immediately after implementation claims are made | Requires fresh evidence before any completion claim and verifies spec coverage against passing tests |
@@ -159,13 +316,14 @@ should be used, whether it is automatic or manual, and what problem it solves.
 For most users, the extension should feel like this:
 
 1. Install the extension and run `/speckit.superb.check`.
-2. Run the normal Spec Kit flow through `specify`, `clarify`, `plan`, and `tasks`.
-3. Let `/speckit.superb.review` run after `tasks` if you want a task coverage and TDD-readiness gate.
-4. Start `/speckit.implement`; `/speckit.superb.tdd` runs before implementation and `/speckit.superb.verify` runs after it.
-5. If implementation gets stuck, run `/speckit.superb.debug`.
-6. If you want an implementation review, run `/speckit.superb.critique`.
-7. If review feedback arrives, run `/speckit.superb.respond`.
-8. Once the work is verified and ready to integrate, run `/speckit.superb.finish`.
+2. Run `/speckit.specify`; optionally let `/speckit.superb.brainstorm` refine the new `spec.md`.
+3. Continue the normal Spec Kit flow through `clarify`, `plan`, and `tasks`.
+4. Let `/speckit.superb.review` run after `tasks` if you want a task coverage and TDD-readiness gate.
+5. Start `/speckit.implement`; `/speckit.superb.tdd` runs before implementation and `/speckit.superb.verify` runs after it.
+6. If implementation gets stuck, run `/speckit.superb.debug`.
+7. If you want an implementation review, run `/speckit.superb.critique`.
+8. If review feedback arrives, run `/speckit.superb.respond`.
+9. Once the work is verified and ready to integrate, run `/speckit.superb.finish`.
 
 ## Status Synchronization
 
@@ -223,9 +381,52 @@ So the highest accurate PR-based state in the current design is:
 
 This extension registers the following hooks:
 
+- `after_specify` → `brainstorm` (optional)
 - `after_tasks` → `review` (optional)
 - `before_implement` → `tdd` (mandatory)
 - `after_implement` → `verify` (mandatory)
+
+## Hook Requirement Baseline
+
+The baseline policy is conservative: required hooks protect claims that would
+otherwise make implementation state untrustworthy; optional hooks improve
+quality without owning the next Spec Kit stage.
+
+| Hook | Command | Requirement | Baseline rationale |
+|---|---|---|---|
+| `after_specify` | `/speckit.superb.brainstorm` | Optional | Refines an existing spec, but simple features and teams that prefer direct clarification should not be blocked. |
+| `after_tasks` | `/speckit.superb.review` | Optional | Finds task/spec gaps and task-quality issues, but users may intentionally proceed with acknowledged gaps. |
+| `before_implement` | `/speckit.superb.tdd` | Required | Implementation discipline is a core bridge guarantee; production code should not begin without the TDD gate. |
+| `after_implement` | `/speckit.superb.verify` | Required | Completion claims are not trustworthy without fresh verification evidence and spec coverage. |
+
+Future strict modes may choose to require `after_tasks`, but the default
+baseline keeps it optional so the bridge does not silently take over task
+generation or planning ownership.
+
+## Goal Mode Usage
+
+In Codex Goal mode or another autonomous agent mode, optional hooks may be
+shown as choices rather than executed automatically. If you want the agent to
+run the full baseline workflow for a goal, opt in to the optional superb hooks
+in the goal prompt.
+
+Use this prompt pattern:
+
+```text
+Run this goal with the full Spec Kit + Superpowers Bridge baseline workflow.
+Treat optional superb hooks as accepted for this goal: run `/speckit.superb.brainstorm` after `/speckit.specify` and run `/speckit.superb.review` after `/speckit.tasks` unless the required context is unavailable or I explicitly tell you to skip them.
+Required superb hooks must still run: `/speckit.superb.tdd` before implementation and `/speckit.superb.verify` after implementation.
+Use `/speckit.superb.debug` when repeated failures or unexplained behavior appear, `/speckit.superb.critique` before PR/merge or after major implementation, `/speckit.superb.respond` for review feedback, and `/speckit.superb.finish` after verification when integration decisions are needed.
+```
+
+Short form:
+
+```text
+Use the full superb flow for this goal. Treat optional superb hooks as accepted for this goal, and run required superb hooks as gates.
+```
+
+This keeps the default extension policy conservative while giving a single
+goal-level instruction for users who want the whole workflow.
 
 ## Configuration
 
@@ -241,12 +442,27 @@ remote fallbacks or bundled skill content.
 - Installed superpowers-compatible skills in `./.agents/skills/` or `~/.agents/skills/`
 - Optional: the `superpowers` tool, if you use it to install or manage those skills; the bridge itself relies on the installed skill content being present
 
+## Artifact Ownership Model
+
+Spec Kit owns creation, schema, lifecycle, and canonical meaning of
+`spec.md`, `plan.md`, and `tasks.md`.
+
+Superpowers Bridge may only refine, check, report, or synchronize within declared hook boundaries:
+
+- `brainstorm` may apply user-approved refinements to the existing `spec.md`
+  after Spec Kit creates it.
+- `review`, `critique`, and `debug` report findings, drafts, or task packages;
+  they do not own planning artifacts.
+- `tdd`, `verify`, and `finish` may synchronize only the bridge-owned lifecycle
+  states documented below.
+
 ## Responsibility Boundaries
 
 | Responsibility | Owner |
 |---|---|
-| Create and update `spec.md` | Spec Kit |
+| Create `spec.md` and define its canonical structure | Spec Kit |
 | Clarify unresolved spec decisions | Spec Kit |
+| Apply approved refinements to an existing `spec.md` | Superpowers Bridge, under Spec Kit artifact ownership |
 | Build `plan.md` and `tasks.md` | Spec Kit |
 | Analyze artifact consistency | Spec Kit |
 | Generate requirements-quality checklists | Spec Kit |
@@ -266,6 +482,7 @@ already own specification quality and artifact consistency.
 | Command | Owner | Primary Artifact | Solves |
 |---|---|---|---|
 | `/speckit.clarify` | Spec Kit | `spec.md` | Resolves underspecified or ambiguous product requirements and writes the answers back into the spec |
+| `/speckit.superb.brainstorm` | Superpowers Bridge | existing `spec.md` | Refines a newly created spec through brainstorming discipline without creating another design document |
 | `/speckit.superb.review` | Superpowers Bridge | `tasks.md` against `spec.md` / `plan.md` | Checks whether the generated task plan actually covers the spec and is specific enough for a strict TDD gate |
 | `/speckit.superb.critique` | Superpowers Bridge | code diff against `spec.md` / `plan.md` / `tasks.md` | Reviews implementation output against declared requirements and implementation intent |
 
@@ -288,6 +505,10 @@ already own specification quality and artifact consistency.
      +--> validates local superpowers skills and hook readiness
 
  /speckit.specify -> /speckit.clarify -> /speckit.checklist
+        |                 |                  |
+        +--> /speckit.superb.brainstorm
+        |    optionally refines the active spec.md after creation
+        |
         |                 |                  |
         |                 |                  +--> checks requirement-writing quality
         |                 |
@@ -333,6 +554,9 @@ already own specification quality and artifact consistency.
 ### Practical Division Of Labor
 
 - Use `/speckit.clarify` when the spec still has unresolved product or behavior questions.
+- Use `/speckit.superb.brainstorm` when the newly created spec needs broader
+  design exploration before clarification or planning; do not use it to create
+  a second design source.
 - Use `/speckit.checklist` when you want to test the quality of the written requirements themselves.
 - Use `/speckit.analyze` when you want a broad consistency check across `spec.md`, `plan.md`, and `tasks.md`.
 - Use `/speckit.superb.review` when you specifically want to know whether `tasks.md` is complete enough and precise enough for strict TDD-driven implementation.

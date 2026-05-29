@@ -1,136 +1,207 @@
 # MemoryLint
 
-MemoryLint is a Spec-kit extension designed for AI memory governance and boundary checking. 
+Evidence-driven instruction drift checker for Spec Kit.
 
-This extension serves as an "infrastructure guardian," ensuring that project-specific architecture rules stay in the constitution, while automatically supplementing missing general workflows in the global agent configuration.
+MemoryLint audits long-lived agent instruction files — `AGENTS.md`, `.specify/memory/constitution.md`, `CLAUDE.md`, `.cursor/rules/`, and other sources — to detect boundary violations, stale references, conflicts, and redundancies. Every finding is backed by concrete evidence so reviewers can trust the report before applying any changes.
+
+The current implementation includes executable helpers for all three surfaces:
+
+- `scripts/audit_workspace.py`
+- `scripts/apply_report.py`
+- `scripts/load_agents_state.py`
 
 ## Problem Statement
-In Spec-Driven Development (SDD), AI Agents rely on two core long-term memory files:
-1. `AGENTS.md`: For general infrastructure, environment variables, and workflow standards.
-2. `.specify/memory/constitution.md`: For project core architecture decisions, code paradigms, and safety constraints.
 
-Over time, developers or AI assistants may mistakenly write "architectural constraints" into the global `AGENTS.md`. This causes blurred boundaries, context overload, and loss of a single source of truth.
+In Spec-Driven Development (SDD), AI agents rely on long-lived instruction files:
 
-## Solution: Bidirectional Governance
+1. `AGENTS.md`: Infrastructure rules, environment setup, and workflow standards.
+2. `.specify/memory/constitution.md`: Architecture decisions, code paradigms, and safety constraints.
+3. Additional sources: `CLAUDE.md`, `.cursor/rules/`, `README.md`, workflow configs.
 
-MemoryLint hooks into the `before_constitution` lifecycle to perform bidirectional governance:
-1. **Prune (Clean up)**: Automatically audits `AGENTS.md`, extracts out-of-bounds architectural specifications, and seamlessly hands them over to `constitution.md` via conversational context.
-2. **Enrich (Supplement)**: Analyzes the workspace (e.g., `package.json`, `Makefile`) to infer and supplement `AGENTS.md` with missing essential infrastructure guidelines (like standard test/build commands or Git commit conventions).
+Over time, these files drift:
 
-## Workflow Architecture
+- **Boundary drift**: Architecture rules leak into `AGENTS.md`, or workflow rules end up in the constitution.
+- **Reality drift**: Rules reference scripts, tools, or directories that no longer exist.
+- **Conflict drift**: Two files give contradictory instructions.
+- **Redundancy drift**: The same rule appears in multiple files, risking future divergence.
+
+## Solution: Evidence-Driven Drift Checking
+
+MemoryLint follows a strict pipeline that separates audit from apply:
 
 ```text
-  [ Developer / AI Agent ]                [ AI Agent Execution Engine ]             [ Local File System ]
-           │                                 │                                     │
-           │ 1. Trigger Pre-hook             │                                     │
-           │ > /speckit.memorylint...        │                                     │
-           ├───────────────────────────────> │ Read check-boundaries.md (Prompt)   │
-           │                                 │                                     │
-           │                                 │ ─── (Action 1) Tool: read_file ───> │ 📄 AGENTS.md (Bloated)
-           │                                 │ <── Return file content ────────────│
-           │                                 │                                     │
-           │                                 │ (Action 2) LLM: Identify & Extract  │
-           │                                 │            Architecture Rules       │
-           │                                 │                                     │
-           │                                 │ (Action 3) LLM: Infer & Enrich      │
-           │                                 │            Infrastructure Rules     │
-           │                                 │                                     │
-           │                                 │ ─── (Action 4) Tool: write_file ──> │ 📄 AGENTS.md (Governed)
-           │                                 │     (Remove rules, Add missing info)│
-           │                                 │                                     │
-           │ 2. Hook exits, context ready    │                                     │
-           │ <───────────────────────────────┤ (Output Protocol)                   │
-           │ [Prints Markdown list to UI/CTX]│ Forces extracted rules into chat    │
-           │ "### Extracted Rules..."        │ history (Short-term LLM memory)     │
-           │                                 │                                     │
-═══════════╪═════════════════════════════════╪═════════════════════════════════════╪═══════════════════
-           │                                 │                                     │
-           │ 3. Trigger Main Command         │                                     │
-           │ > /speckit constitution         │                                     │
-           ├───────────────────────────────> │ Read constitution prompt            │
-           │                                 │ + retrieve extracted rules from ctx │
-           │                                 │                                     │
-           │                                 │ LLM: Merge old constitution with    │
-           │                                 │      newly extracted rules          │
-           │                                 │                                     │
-           │                                 │ ─── Tool: write_file ─────────────> │ 📄 constitution.md
-           │                                 │                                     │
-═══════════╪═════════════════════════════════╪═════════════════════════════════════╪═══════════════════
-           │                                 │                                     │
-           │ 4. Trigger Plan Pre-hook        │                                     │
-           │ > /speckit.memorylint.load-agents │ (Mandatory load-agents gate)     │
-           ├───────────────────────────────> │ Read load-agents.md                │
-           │                                 │ ─── (Action) Tool: read_file ─────> │ 📄 AGENTS.md (Governed)
-           │                                 │ <── Return core rules context ──────│
-           │                                 │                                     │
-           │ 5. Trigger Planning Command     │                                     │
-           │ > /speckit plan                 │                                     │
-           ├───────────────────────────────> │ Read plan prompt                    │
-           │                                 │ + retrieve core rules from ctx      │
-           │                                 │                                     │
-           │                                 │ LLM: Generate plan & tasks          │
-           │                                 │      strictly following rules       │
-           │                                 │                                     │
-           │                                 │ ─── Tool: write_file ─────────────> │ 📄 plan.md / tasks.md
-           │                                 │                                     │
-```
-
-## Features
-
-- **Boundary Auditing**: Detects architecture leakage in `AGENTS.md`.
-- **Context Handoff**: Passes extracted rules cleanly without destructive overwrites of `constitution.md`.
-- **Infrastructure Enrichment**: Automatically detects missing test/build/git workflows and injects them into `AGENTS.md`.
-
-## Installation
-
-### Install from ZIP (Recommended)
-
-Install directly from the release asset:
-
-```bash
-specify extension add memorylint --from https://github.com/RbBtSn0w/spec-kit-extensions/releases/download/memorylint-v1.3.0/memorylint.zip
-```
-
-### Install from GitHub Repository (Development)
-
-Clone the collection repository and install the extension folder locally:
-
-```bash
-git clone https://github.com/RbBtSn0w/spec-kit-extensions.git
-cd spec-kit-extensions
-specify extension add --dev ./memorylint
+┌─────────────────────┐
+│ Instruction Inventory│  Scan all long-lived instruction sources
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Rule Classification  │  Categorise each rule (8 categories)
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Evidence Binding     │  Attach file/command proof to every finding
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Drift Detection      │  Detect boundary, reality, conflict, redundancy
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Drift Report         │  Structured, reviewable report (read-only)
+│                     │  Markdown + memorylint-report.json
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Human Apply Gate     │  3-tier: report-only / safe-fixes / all-approved
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│ Post-Apply Validation│  Integrity checks + automatic rollback on failure
+└─────────────────────┘
 ```
 
 ## Commands
 
 | Command | Type | Purpose |
 |---|---|---|
-| `/speckit.memorylint.run` | Hookable | Prune out-of-bounds rules and enrich missing infrastructure guidelines in `AGENTS.md`. |
-| `/speckit.memorylint.load-agents` | Hookable | Mandatory gate: Load `AGENTS.md` to enforce core rules before planning. |
-
-*(Note: If the interactive hook is skipped in non-TTY environments, you can manually trigger `/speckit.memorylint.run` before running `/speckit constitution`.)*
+| `speckit.memorylint.audit` | Hookable | Scan instruction files and generate an evidence-bound Drift Report. Read-only — never modifies files. |
+| `speckit.memorylint.apply` | Manual | Apply approved fixes from a previous audit report. Supports three apply modes with post-apply validation and rollback. |
+| `speckit.memorylint.load-agents` | Hookable | Mandatory gate: load `AGENTS.md` into context before planning to prevent rule drift. |
 
 ## Hook Integration
 
-This extension registers the following hooks:
+This extension registers the following Spec Kit lifecycle hooks:
 
-- `before_constitution` → `run` (optional)
-- `before_plan` → `load-agents` (mandatory)
+| Hook | Command | Required? | Purpose |
+|------|---------|-----------|---------|
+| `before_constitution` | `audit` | Optional | Generate a boundary report before constitution generation |
+| `after_constitution` | `audit` | Optional | Check for conflicts between constitution and AGENTS.md |
+| `before_plan` | `load-agents` | **Mandatory** | Load AGENTS.md to enforce core rules before plan generation |
 
-## Usage / Execution Flow
+Key design constraint: hooks only run **read-only** operations. The `apply` command is never wired to a hook — it is always an explicit user action.
 
-When you run `/speckit constitution`, the system will intercept the process and prompt:
+## Canonical Ownership Matrix
 
-```text
-Run MemoryLint to prune out-of-bounds architecture rules and enrich missing infrastructure guidelines in AGENTS.md? (y/n)
+MemoryLint now applies one canonical ownership matrix during audit:
+
+| Category | Canonical Owner | Notes |
+|----------|-----------------|-------|
+| `architecture` | `.specify/memory/constitution.md` | editor rules may restate, but do not own |
+| `domain` | `.specify/memory/constitution.md` | manifests and docs may reflect, but do not own |
+| `infrastructure` | root `AGENTS.md` | nested/editor sources may scope or mirror |
+| `workflow` | root `AGENTS.md` | nested/editor sources may scope or mirror |
+| `tooling` | root `AGENTS.md` | tool-specific files may add local detail |
+| `personal_preference` | root `AGENTS.md` | editor-specific restatements are secondary |
+
+This matrix is what drives `recommended_destination`, redundancy cleanup, and
+constitution handoff generation.
+
+## Apply Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `report-only` | Default. Re-display the report summary without making changes. |
+| `apply-safe-fixes` | Apply only high-confidence, non-architectural fixes: dead reference removal, deduplication, formatting. |
+| `apply-all-approved` | Apply every fix the user has explicitly approved. Requires confirmation. |
+
+After applying, MemoryLint validates:
+
+1. `AGENTS.md` structural integrity (critical sections preserved).
+2. Constitution rule preservation (no accidental deletions).
+3. Hook reference consistency (all `extension.yml` hooks still valid).
+4. Repository validation commands pass.
+
+If any validation fails, **all changes are automatically reverted**.
+
+## Report Contract
+
+Every audit produces two synchronized outputs:
+
+- A human-readable Markdown Drift Report for review.
+- A fenced `memorylint-report.json` artifact that tools can parse.
+
+The JSON artifact is the authoritative input for `speckit.memorylint.apply`.
+It includes `schema_version`, `source_metadata`, `instruction_map`, `findings`,
+and `metrics`. `source_metadata` records SHA-256 hashes for scanned files so the
+apply gate can reject stale reports before changing anything.
+
+Executable findings may also include:
+
+- `edits`: line-scoped file operations used by the apply gate
+- `manual_handoff`: constitution-targeted handoff material that must be reviewed by a human
+
+## Rule Classification
+
+Every rule is classified into one of eight categories:
+
+| Category | Meaning |
+|----------|---------|
+| `infrastructure` | CI, packaging, release mechanics, build/test commands |
+| `architecture` | Directory layout, module boundaries, design patterns |
+| `workflow` | Git hygiene, review process, commit conventions |
+| `domain` | Product behaviour, Spec Kit hook semantics |
+| `tooling` | CLI tools, language runtimes, editor config |
+| `personal_preference` | Style choices that do not affect correctness |
+| `obsolete` | References something that no longer exists |
+| `conflict` | Contradicts another rule |
+
+## Audit Metrics
+
+Every audit report now emits run-time metrics that match the executable output:
+
+| Metric | Purpose |
+|--------|---------|
+| Total instruction sources scanned | Shows workspace coverage |
+| Total rules catalogued | Shows extracted rule inventory size |
+| Total findings | Shows total actionable/non-actionable drift |
+| High-confidence findings | Indicates directly evidenced findings |
+| Medium-confidence findings | Indicates heuristic findings that need review |
+| Low-confidence findings | Indicates weak-evidence findings |
+| Files that would be modified by suggested actions | Powers safe preview and apply gating |
+
+Longitudinal trust KPIs such as false-positive rate or destructive surprise
+edits remain release-evaluation signals, not per-run report fields.
+
+## Regression Corpus
+
+MemoryLint includes a regression corpus of nine fixture repos under `tests/fixtures/`:
+
+| Fixture | Tests |
+|---------|-------|
+| `clean-repo` | Zero findings baseline |
+| `bloated-agents` | Boundary drift detection |
+| `stale-command` | Reality drift detection |
+| `conflicting-rules` | Conflict drift detection |
+| `redundant-rules` | Redundancy drift detection |
+| `missing-constitution` | Graceful handling of absent files |
+| `monorepo-nested` | Nested instruction file support |
+| `multi-source` | Multi-tool instruction scanning |
+| `post-apply-breakage` | Apply safety validation |
+
+The fixture corpus is executable. `memorylint/scripts/scan_fixtures.py --check`
+re-runs the real audit core against every fixture and compares the normalized
+findings with each fixture's `expected-findings.json`.
+
+## Design
+
+See [DESIGN.md](DESIGN.md) for the product boundary, trust model, audit/apply
+pipeline, machine-readable report contract, and release criteria.
+
+## Installation
+
+### Install from ZIP (Recommended)
+
+```bash
+specify extension add memorylint --from https://github.com/RbBtSn0w/spec-kit-extensions/releases/download/memorylint-v1.5.1/memorylint.zip
 ```
 
-- **If you select `y`**: The audit will run, govern `AGENTS.md`, and the extracted rules will be incorporated into the new constitution seamlessly.
-- **If you select `n`**: The hook is bypassed and the standard constitution generation proceeds.
+### Install from GitHub Repository (Development)
 
-When you run `/speckit plan`, the system will automatically execute the `load-agents` hook:
-
-- **Mandatory Gate**: The system will read your `AGENTS.md` file and acknowledge its core rules before starting the planning process. This ensures that the generated `plan.md` and `tasks.md` strictly adhere to your workspace's architectural constraints without needing manual confirmation.
+```bash
+git clone https://github.com/RbBtSn0w/spec-kit-extensions.git
+cd spec-kit-extensions
+specify extension add --dev ./memorylint
+```
 
 ## Requirements
 

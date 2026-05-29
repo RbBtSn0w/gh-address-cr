@@ -1,0 +1,6 @@
+catalogs:
+- name: rbbtsn0w-spec-kit-extensions
+  url: https://raw.githubusercontent.com/RbBtSn0w/spec-kit-extensions/main/catalog.json
+  priority: 1
+  install_allowed: true
+  description: RbBtSn0w Spec Kit Extensions

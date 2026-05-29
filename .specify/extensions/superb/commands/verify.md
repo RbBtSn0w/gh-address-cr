@@ -6,6 +6,8 @@ description: >
 scripts:
   sh: scripts/bash/sync-spec-status.sh
   ps: scripts/powershell/sync-spec-status.ps1
+  archive_sh: scripts/bash/archive-evidence.sh
+  archive_ps: scripts/powershell/archive-evidence.ps1
 ---
 
 # Verification Before Completion — After Implementation
@@ -99,9 +101,44 @@ Unmet requirements: [list them]
 
 ---
 
-## Step 5 — Status Synchronization
+## Step 5 — Archiving Evidence
 
-Only after all verification checks pass, synchronize the feature spec status to:
+Archive the verification results to `.specify/evidence/` by executing the archiving script. The test output and checklist must both be present and should be passed via stdin to avoid command-line argument size limits.
+
+On Unix-like systems (sh):
+```bash
+ARCHIVE_SCRIPT="$(dirname "{SCRIPT}")/archive-evidence.sh"
+cat << 'EOF' | bash "$ARCHIVE_SCRIPT" --feature-name "[feature-name]" --build-status "[build-status]"
+[checklist]
+
+---OUTPUT---
+[test-output]
+EOF
+```
+
+On Windows (PowerShell):
+```powershell
+$ArchiveScript = Join-Path (Split-Path "{SCRIPT}") "archive-evidence.ps1"
+$EvidenceContent = @"
+[checklist]
+
+---OUTPUT---
+[test-output]
+"@
+$EvidenceContent | pwsh -NoProfile -File "$ArchiveScript" -FeatureName "[feature-name]" -BuildStatus "[build-status]"
+```
+
+Replace the arguments with:
+- `[feature-name]`: The active feature directory name resolved from Step 2. If `spec.md` is at the repository root, use the repository directory name.
+- `[build-status]`: "PASS", "FAIL", or "N/A" depending on the build / lint / type-check status.
+- `[test-output]`: The full stdout/stderr of the test suite (from Step 3).
+- `[checklist]`: The completed markdown Spec Verification Checklist (from Step 4).
+
+---
+
+## Step 6 — Status Synchronization
+
+Only after all verification checks pass AND evidence is successfully archived, synchronize the feature spec status to:
 
 ```bash
 {SCRIPT} --status "Verified"
@@ -111,13 +148,13 @@ Status sync rules:
 
 - Use the script output as the source of truth for resolved spec path and
   resulting status
-- If verification fails, leave the previous status unchanged
+- If verification fails or archiving fails, leave the previous status unchanged
 - Do not overwrite `Abandoned`
 - Do not introduce `Completed` here
 
 ---
 
-## Step 6 — Completion Report
+## Step 7 — Completion Report
 
 When all checks pass, output:
 
