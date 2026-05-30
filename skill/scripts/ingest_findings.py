@@ -6,10 +6,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+def bootstrap_runtime_path() -> None:
+    import os
+    import sys
+    from pathlib import Path
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parents[1]
+    src_root = repo_root / "src"
+    if src_root.is_dir():
+        sys.path.insert(0, str(src_root))
+    os.environ.setdefault("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", str(script_dir))
+
+
+bootstrap_runtime_path()
+
+from gh_address_cr.intake.findings import (  # noqa: E402
+    EMPTY_FINDINGS_INPUT_MESSAGE,
+    normalize_finding as native_normalize_finding,
+    parse_records as native_parse_records,
+)
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
-EMPTY_FINDINGS_INPUT_MESSAGE = "Findings input is empty. Use [] for an explicit empty producer result."
 
 
 def load_payload(input_path: str) -> str:
@@ -111,9 +130,7 @@ def normalize_finding(record: dict) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Ingest findings JSON from stdin or a file into the PR session."
-    )
+    parser = argparse.ArgumentParser(description="Ingest findings JSON from stdin or a file into the PR session.")
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
@@ -131,14 +148,16 @@ def main() -> int:
         print(f"Missing session engine: {SESSION_ENGINE}", file=sys.stderr)
         return 1
     if args.sync and not args.source:
-        print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
+        print(
+            "`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr
+        )
         return 2
 
     raw = load_payload(args.input)
     if not raw.strip():
         print(EMPTY_FINDINGS_INPUT_MESSAGE, file=sys.stderr)
         return 2
-    findings = [normalize_finding(record) for record in parse_records(raw)]
+    findings = [native_normalize_finding(record) for record in native_parse_records(raw)]
 
     subprocess.run(
         [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],

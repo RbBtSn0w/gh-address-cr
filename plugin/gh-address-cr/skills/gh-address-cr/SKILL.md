@@ -1,7 +1,7 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request has unresolved review threads, pending reviews, stale/outdated threads, local findings ingestion, or needs mandatory final-gate proof in one PR-scoped session.
-argument-hint: "<active-pr|review|address|threads|findings|adapter> ..."
+argument-hint: "<active-pr|review|address|threads|findings|adapter|doctor|agent|final-gate|submit-feedback> ..."
 ---
 
 # gh-address-cr
@@ -17,7 +17,30 @@ Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runt
 /gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
+/gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-
+/gh-address-cr doctor [<owner/repo> [<pr_number>]]
+/gh-address-cr final-gate <owner/repo> <pr_number>
+/gh-address-cr submit-action <action-request.json> --resolution <fix|clarify|defer|reject> ...
+/gh-address-cr submit-feedback --category <category> --title <title> --summary <summary> ...
 /gh-address-cr version
+```
+
+Agent protocol commands:
+
+```text
+/gh-address-cr agent manifest
+/gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>
+/gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>
+/gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
+/gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
+/gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed>
+/gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files
+/gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>
+/gh-address-cr agent publish <owner/repo> <pr_number>
+/gh-address-cr agent leases <owner/repo> <pr_number>
+/gh-address-cr agent reclaim <owner/repo> <pr_number>
+/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit> ...
 ```
 
 Examples:
@@ -66,8 +89,11 @@ If the runtime is missing or incompatible, the shim must fail loudly before sess
   - `gh-address-cr threads <owner/repo> <pr_number> --lean`
   - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync --source <producer>]`
   - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
+  - `gh-address-cr agent manifest`
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
+
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely.
 
 If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
 

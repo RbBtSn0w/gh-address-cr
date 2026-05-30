@@ -84,6 +84,19 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("plugin payload is up to date", result.stdout)
 
+    def test_skill_scripts_are_synchronized_with_legacy_scripts(self):
+        sync_builder = ROOT / "scripts" / "sync_scripts.py"
+        result = subprocess.run(
+            [sys.executable, str(sync_builder), "--check"],
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("All compatibility scripts are in sync", result.stdout)
+
+
     def test_community_compliance_docs_exist(self):
         privacy = (ROOT / "PRIVACY.md").read_text(encoding="utf-8")
         terms = (ROOT / "TERMS.md").read_text(encoding="utf-8")

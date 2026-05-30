@@ -6,7 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_write_cmd, github_viewer_login, is_transient_gh_failure, list_pending_review_ids
+from python_common import (
+    audit_event,
+    gh_write_cmd,
+    github_viewer_login,
+    is_transient_gh_failure,
+    list_pending_review_ids,
+)
 
 
 def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> list[str]:
@@ -25,7 +31,9 @@ def submit_pending_reviews_result(repo: str, pr_number: str, review_ids: list[st
     flags = []
 
     for i, node_id in enumerate(review_ids):
-        query_parts.append(f"submit{i}: submitPullRequestReview(input:{{pullRequestReviewId:$id{i}, event:COMMENT, body:$body{i}}}) {{ pullRequestReview {{ id }} }}")
+        query_parts.append(
+            f"submit{i}: submitPullRequestReview(input:{{pullRequestReviewId:$id{i}, event:COMMENT, body:$body{i}}}) {{ pullRequestReview {{ id }} }}"
+        )
         variables[f"id{i}"] = "ID!"
         variables[f"body{i}"] = "String!"
         flags.extend(["-F", f"id{i}={node_id}", "-F", f"body{i}=Submitting pending automated review replies."])
@@ -122,11 +130,23 @@ def main() -> int:
     try:
         login = github_viewer_login() if args.repo and args.pr_number else ""
         result = gh_write_cmd(
-            ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"threadId={args.thread_id}",
+                "-F",
+                f"body={reply_body}",
+            ],
             check=False,
         )
         if result.returncode != 0:
-            payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+            payload["status"] = (
+                "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+            )
             payload["error"] = result.stderr or "reply failed"
             if can_audit:
                 audit_event(
@@ -156,7 +176,9 @@ def main() -> int:
                     {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
                 )
             return emit_result(payload, 1, error_message=payload["error"])
-        reply_url = reply_payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
+        reply_url = (
+            reply_payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
+        )
         if not reply_url:
             payload["status"] = "unknown"
             payload["error"] = "reply succeeded with no comment url in response"

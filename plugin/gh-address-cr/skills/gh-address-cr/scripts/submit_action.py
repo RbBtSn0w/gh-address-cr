@@ -27,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reply-markdown")
     parser.add_argument("--commit-hash")
     parser.add_argument("--files")
-    parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
+    parser.add_argument("--severity", choices=["P1", "P2", "P3"])
     parser.add_argument("--why")
     parser.add_argument("--test-command")
     parser.add_argument("--test-result")

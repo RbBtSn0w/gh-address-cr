@@ -2253,7 +2253,11 @@ def _write_native_final_gate_artifacts(
         "pr": str(pr_number),
         "action": "final-gate",
         "status": status,
-        "message": "Evaluated native final gate",
+        "message": (
+            "Gate passed with zero unresolved threads"
+            if result.passed
+            else f"Gate failed; {_final_gate_failure_message(result)} remain"
+        ),
         "details": {
             "counts": dict(result.counts),
             "failure_codes": list(result.failure_codes),

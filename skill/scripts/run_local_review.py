@@ -11,9 +11,7 @@ SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Run a local review adapter and ingest findings into the PR session."
-    )
+    parser = argparse.ArgumentParser(description="Run a local review adapter and ingest findings into the PR session.")
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
@@ -25,7 +23,9 @@ def main() -> int:
     if not args.adapter_cmd:
         parser.error("missing adapter command")
     if args.sync and not args.source:
-        print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
+        print(
+            "`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr
+        )
         return 2
 
     scan_id = args.scan_id or ""

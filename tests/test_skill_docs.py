@@ -79,6 +79,43 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("then rerun the same `review` command.", text)
         self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
 
+    def test_skill_first_read_covers_runtime_agent_command_surface(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        for command in (
+            "/gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-",
+            "/gh-address-cr doctor [<owner/repo> [<pr_number>]]",
+            "/gh-address-cr final-gate <owner/repo> <pr_number>",
+            "/gh-address-cr submit-action <action-request.json>",
+            "/gh-address-cr submit-feedback --category <category>",
+            "/gh-address-cr agent manifest",
+            "/gh-address-cr agent classify <owner/repo> <pr_number> <item_id>",
+            "/gh-address-cr agent next <owner/repo> <pr_number>",
+            "/gh-address-cr agent submit <owner/repo> <pr_number>",
+            "/gh-address-cr agent submit-batch <owner/repo> <pr_number>",
+            "/gh-address-cr agent fix <owner/repo> <pr_number> <item_id>",
+            "/gh-address-cr agent fix-all <owner/repo> <pr_number>",
+            "/gh-address-cr agent resolve-stale <owner/repo> <pr_number>",
+            "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
+            "/gh-address-cr agent publish <owner/repo> <pr_number>",
+            "/gh-address-cr agent leases <owner/repo> <pr_number>",
+            "/gh-address-cr agent reclaim <owner/repo> <pr_number>",
+            "/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit>",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+
+    def test_skill_guides_cr_reply_comment_tasks_through_runtime_submission(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+        hint_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        combined = "\n".join([skill_text, status_text, hint_text])
+
+        self.assertIn("GitHub review comment reply tasks", combined)
+        self.assertIn("A reply draft is not a submitted task", combined)
+        self.assertIn("`gh-address-cr agent submit`", combined)
+        self.assertIn("`gh-address-cr agent submit-batch`", combined)
+        self.assertIn("`gh-address-cr agent publish`", combined)
+
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("does not accept arbitrary Markdown", text)

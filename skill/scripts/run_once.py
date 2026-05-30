@@ -3,7 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 
-from python_common import audit_event, previous_snapshot_file, refresh_threads_snapshot, session_engine, session_file, snapshot_file
+from python_common import (
+    audit_event,
+    previous_snapshot_file,
+    refresh_threads_snapshot,
+    session_engine,
+    session_file,
+    snapshot_file,
+)
 
 
 def unresolved_ids_from_snapshot_text(snapshot_text: str) -> list[str]:
@@ -40,10 +47,18 @@ def main() -> int:
         print(json.dumps(row, sort_keys=True))
 
     session_engine(["init", args.repo, args.pr_number], check=True)
-    session_engine(["sync-github", args.repo, args.pr_number, "--scan-id", args.audit_id], input_text=snapshot.read_text(encoding="utf-8"), check=True)
+    session_engine(
+        ["sync-github", args.repo, args.pr_number, "--scan-id", args.audit_id],
+        input_text=snapshot.read_text(encoding="utf-8"),
+        check=True,
+    )
 
     print()
-    title = "== Unresolved Threads (including handled) ==" if args.show_all else "== Unresolved Threads (excluding handled) =="
+    title = (
+        "== Unresolved Threads (including handled) =="
+        if args.show_all
+        else "== Unresolved Threads (excluding handled) =="
+    )
     print(title)
     list_result = session_engine(
         [

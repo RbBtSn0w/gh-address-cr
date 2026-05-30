@@ -3,7 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 
-from python_common import list_threads
+def bootstrap_runtime_path() -> None:
+    import os
+    import sys
+    from pathlib import Path
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parents[1]
+    src_root = repo_root / "src"
+    if src_root.is_dir():
+        sys.path.insert(0, str(src_root))
+    os.environ.setdefault("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", str(script_dir))
+
+
+bootstrap_runtime_path()
+
+from gh_address_cr.github.client import GitHubClient  # noqa: E402
 
 
 def main() -> int:
@@ -12,7 +26,7 @@ def main() -> int:
     parser.add_argument("pr_number")
     args = parser.parse_args()
 
-    for row in list_threads(args.repo, args.pr_number):
+    for row in GitHubClient().list_threads(args.repo, args.pr_number):
         print(json.dumps(row, sort_keys=True))
     return 0
 

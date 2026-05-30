@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
-import sys
-from pathlib import Path
-
-
 def bootstrap_runtime_path() -> None:
+    import os
+    import sys
+    from pathlib import Path
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parents[1]
     src_root = repo_root / "src"
