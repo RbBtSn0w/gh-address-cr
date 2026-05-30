@@ -167,13 +167,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("gh-address-cr final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
 
-    def test_skill_prefers_runtime_cli_over_skill_shim_for_agent_execution(self):
+    def test_skill_uses_runtime_cli_as_sole_execution_surface(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("Runtime public entrypoint: `gh-address-cr`", text)
-        self.assertIn("Compatibility shim: `python3 scripts/cli.py`", text)
-        self.assertNotIn("preferred automation surface: `python3 scripts/cli.py", text)
-        self.assertNotIn("stable operator surface: `python3 scripts/cli.py", text)
-        self.assertNotIn("Start from the high-level dispatcher:\n  - `python3 scripts/cli.py", text)
+        self.assertNotIn("scripts/cli.py", text)
+        self.assertNotIn("Compatibility shim", text)
         self.assertIn("Start from the runtime dispatcher:\n  - `gh-address-cr review", text)
 
     def test_skill_completion_contract_does_not_require_current_run_summary(self):
@@ -195,12 +193,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("thin adapter", text.lower())
         self.assertNotIn("direct side effect", text.lower())
 
-    def test_openai_hint_prefers_runtime_cli_for_agent_execution(self):
+    def test_openai_hint_uses_runtime_cli_as_sole_execution_surface(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertIn("Start with `gh-address-cr review <owner/repo> <pr_number>`", text)
         self.assertIn("run `gh-address-cr final-gate ...`", text)
-        self.assertNotIn("Start with `python3 scripts/cli.py review", text)
-        self.assertNotIn("run `python3 scripts/cli.py final-gate", text)
+        self.assertNotIn("scripts/cli.py", text)
 
     def test_openai_hint_does_not_require_natural_language_current_run_counts(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
@@ -460,10 +457,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
             text,
         )
 
-    def test_readme_prefers_runtime_cli_over_skill_shim_for_automation(self):
+    def test_readme_uses_runtime_cli_as_primary_entrypoint(self):
         text = read_repo_docs(README_MD, WORKFLOWS_MD, ARCHITECTURE_MD)
         self.assertIn("`gh-address-cr` is the preferred and stable automation entrypoint", text)
-        self.assertIn("`skill/scripts/cli.py` remains compatibility-only", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` is the only automation entrypoint", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` remains the stable automation surface", text)
         self.assertNotIn("`cli.py` is the preferred Python entrypoint for automation", text)

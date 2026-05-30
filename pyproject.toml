@@ -40,6 +40,9 @@ gh-address-cr = "gh_address_cr.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+gh_address_cr = ["runtime-requirements.json"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

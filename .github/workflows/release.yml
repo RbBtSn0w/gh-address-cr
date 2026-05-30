@@ -103,10 +103,6 @@ jobs:
         if: steps.package-version.outputs.released == 'true'
         run: python -m pip install --upgrade pip build twine
 
-      - name: Script sync check
-        if: steps.package-version.outputs.released == 'true'
-        run: python scripts/sync_scripts.py --check
-
       - name: Plugin payload check
         if: steps.package-version.outputs.released == 'true'
         run: python scripts/build_plugin_payload.py --check

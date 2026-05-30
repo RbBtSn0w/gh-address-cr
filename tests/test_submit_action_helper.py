@@ -4,11 +4,10 @@ import sys
 import unittest
 from pathlib import Path
 
-from tests.helpers import PythonScriptTestCase, ROOT, SRC_ROOT
+from tests.helpers import PythonScriptTestCase, SRC_ROOT
 
 
 HELPER_SCRIPTS = (
-    ROOT / "skill" / "scripts" / "submit_action.py",
     SRC_ROOT / "gh_address_cr" / "legacy_scripts" / "submit_action.py",
 )
 

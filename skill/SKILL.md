@@ -60,7 +60,6 @@ $gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 
 This file is part of the packaged `gh-address-cr` skill. All paths in this document are relative to the installed skill root.
 
-- `scripts/cli.py` is a compatibility shim that delegates to the external runtime CLI.
 - `references/...` means skill-owned reference docs.
 - `agents/openai.yaml` is an assistant-specific hint file inside the skill.
 
@@ -72,10 +71,9 @@ The packaged skill must not be treated as the implementation owner for workflow 
 
 - Runtime public entrypoint: `gh-address-cr`
 - Module entrypoint: `python3 -m gh_address_cr`
-- Compatibility shim: `python3 scripts/cli.py`
-- Compatibility check: `python3 scripts/cli.py adapter check-runtime`
+- Compatibility check: `gh-address-cr adapter check-runtime`
 
-If the runtime is missing or incompatible, the shim must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
+If the runtime is missing, execution must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
 
 ## Execution Ladder
 
@@ -132,4 +130,4 @@ The reference surface is intentionally split so this file stays a first-read ent
 - Evidence ledger expectations: `references/evidence-ledger.md`
 - Optional OTel -> Worker -> Better Stack logging: `references/otel-worker-better-stack.md`
 
-Low-level scripts are implementation details, not the public agent surface.
+Low-level implementation details are inside the `gh-address-cr` runtime package, not the public agent surface.

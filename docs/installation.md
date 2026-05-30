@@ -124,7 +124,7 @@ verification output.
 
 ### Upgrade from skill-shim usage
 
-If you previously relied on `python3 skill/scripts/cli.py` from the packaged skill compatibility shim, reinstall the runtime CLI with `pipx` or `uv tool` instead of reinstalling the skill as a substitute:
+If you previously relied on `python3 skill/scripts/cli.py` from an older version of the packaged skill, that path has been removed. Install the runtime CLI with `pipx` or `uv tool`:
 
 ```bash
 pipx reinstall gh-address-cr

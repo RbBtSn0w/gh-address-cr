@@ -124,7 +124,6 @@ The deterministic implementation belongs to the Python runtime package:
 The packaged skill remains under `skill/` and acts as a thin adapter:
 
 - `skill/SKILL.md` explains agent behavior
-- `skill/scripts/cli.py` is a compatibility shim
 - `skill/runtime-requirements.json` declares runtime compatibility
 - `skill/agents/` and `skill/references/` provide hints and reference docs
 
@@ -160,7 +159,6 @@ Run the local verification gate before submitting changes:
 ruff check src tests scripts/build_plugin_payload.py
 python3 -m unittest discover -s tests
 python3 -m gh_address_cr --help
-python3 skill/scripts/cli.py --help
 python3 -m gh_address_cr agent manifest
 python3 scripts/build_plugin_payload.py --check
 ```

@@ -11,11 +11,10 @@ The deterministic implementation belongs to the runtime package:
 The packaged skill remains under `skill/` and acts as a thin adapter:
 
 - `skill/SKILL.md` explains agent behavior
-- `skill/scripts/cli.py` is a compatibility shim
 - `skill/runtime-requirements.json` declares runtime compatibility
 - `skill/agents/` and `skill/references/` provide hints and reference docs
 
-The shim must delegate to the runtime or fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
+The runtime must be available or execution must fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
 
 
 ## PR Session Architecture
@@ -26,7 +25,6 @@ The implementation model is now:
 
 - Python owns the stateful logic and GitHub/local-review orchestration.
 - `gh-address-cr` is the only stable automation entrypoint for runtime work.
-- `skill/scripts/cli.py` remains a compatibility shim for installed skill payloads.
 - Tests are organized around Python behavior first, then CLI syntax compatibility.
 
 - `github_thread` items are synced from GraphQL thread snapshots.
@@ -86,11 +84,11 @@ The main logic lives in the Python runtime package under `src/gh_address_cr/`.
 - `intake/`: findings parsing and normalization
 - `legacy_scripts/`: compatibility surfaces for older direct script invocations
 
-The packaged `skill/scripts/` folder remains in the installed skill payload for compatibility checks and helper shims. New automation should use `gh-address-cr`, not direct `python3 skill/scripts/*.py` paths.
+New automation should use `gh-address-cr`, not direct script paths.
 
 The runtime package requires Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
 
-The `gh-address-cr` console script is the stable automation surface. The packaged `skill/scripts/cli.py` path is compatibility-only.
+The `gh-address-cr` console script is the stable automation surface.
 
 Unified CLI examples:
 
@@ -116,7 +114,7 @@ This git repository is the development and release wrapper around one shipped sk
 Path convention:
 
 - Repo-level docs and commands that execute runtime workflows use `gh-address-cr`
-- Skill-owned docs inside `skill/` use paths relative to the skill root, such as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`
+- Skill-owned docs inside `skill/` use paths relative to the skill root, such as `references/...` and `agents/openai.yaml`
 
 If a rule or instruction must ship with the installed skill, it must live inside `skill/`, not only at repository root.
 
@@ -126,10 +124,9 @@ If a rule or instruction must ship with the installed skill, it must live inside
 - `skill/`
   - `SKILL.md`
   - `agents/openai.yaml`
-  - `scripts/*.py`
-  - `scripts/cli.py` (compatibility shim)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
+  - `runtime-requirements.json`
 
 
 ## What this skill provides

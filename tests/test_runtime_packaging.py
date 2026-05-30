@@ -11,7 +11,7 @@ from pathlib import Path
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
 
-from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SKILL_ROOT, SRC_ROOT, PythonScriptTestCase
+from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
 
 
 PYPROJECT = ROOT / "pyproject.toml"
@@ -134,23 +134,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
             with self.assertRaises(KeyboardInterrupt):
                 cli.run_script("control_plane.py", [])
 
-    def test_packaged_skill_payload_carries_required_helper_scripts(self):
-        install_root = Path(self.temp_dir.name) / "installed-skill" / "gh-address-cr"
-        shutil.copytree(SKILL_ROOT, install_root)
 
-        for script_name in ("cli.py", "submit_action.py"):
-            with self.subTest(script=script_name):
-                script = install_root / "scripts" / script_name
-                self.assertTrue(script.is_file(), msg=str(script))
-                result = subprocess.run(
-                    [sys.executable, str(script), "--help"],
-                    text=True,
-                    capture_output=True,
-                    cwd=self.cwd,
-                    env={**self.env, "PYTHONPATH": str(SRC_ROOT)},
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("usage:", result.stdout)
 
     def test_session_engine_legacy_script_is_thin_native_delegate(self):
         legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "session_engine.py"
@@ -632,7 +616,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertNotIn("--skill gh-address-cr", text)
         self.assertIn("does not install the runtime CLI package", text)
         self.assertIn("Upgrade from skill-shim usage", text)
-        self.assertIn("reinstall the runtime CLI with `pipx` or `uv tool`", text)
+        self.assertIn("Install the runtime CLI with `pipx` or `uv tool`", text)
         self.assertIn("Homebrew tap", text)
 
     def test_contributing_documents_homebrew_release_policy(self):

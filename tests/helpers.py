@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 SKILL_ROOT = ROOT / "skill"
 RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
-SCRIPTS_DIR = ROOT / "skill" / "scripts"
+SCRIPTS_DIR = RUNTIME_PACKAGE_DIR / "legacy_scripts"
 IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "legacy_handlers"
 
 CLI_PY = SCRIPTS_DIR / "cli.py"
