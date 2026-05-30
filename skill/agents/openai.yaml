@@ -22,3 +22,4 @@ interface:
         - **P3 (Minor)**: UX nits, missing tests for low-risk logic, sub-optimal but functional code. Reply SHOULD be concise and professional.
         - **P4 (Nit)**: Style, typos, or non-functional suggestions. Reply SHOULD be very brief and polite.
         - **Deep Comprehension**: ALL replies MUST explicitly reference variable names, logic branches, or domain terms from the reviewer's comment. Avoid boilerplate like "Fixed as requested."
+    13. Do not worry about logging or generating your own execution timestamps or efficiency metrics in replies. The deterministic control plane runtime automatically intercepts skill and CLI executions and appends the Agent Efficiency Summary to the final published comment.
