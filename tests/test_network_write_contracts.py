@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.helpers import PythonScriptTestCase, SCRIPTS_DIR
+from tests.helpers import PythonScriptTestCase, SCRIPTS_DIR, IMPLEMENTATIONS_DIR
 
 
 @contextmanager
@@ -18,7 +18,7 @@ def patched_argv(argv: list[str]):
 
 class NetworkWriteContractTest(PythonScriptTestCase):
     def load_module(self, script_name: str, module_name: str):
-        path = SCRIPTS_DIR / script_name
+        path = IMPLEMENTATIONS_DIR / script_name
         sys.path.insert(0, str(path.parent))
         spec = importlib.util.spec_from_file_location(module_name, path)
         module = importlib.util.module_from_spec(spec)

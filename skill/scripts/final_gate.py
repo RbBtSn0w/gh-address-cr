@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
-
 def bootstrap_runtime_path() -> None:
     import os
     import sys
@@ -17,11 +15,7 @@ def bootstrap_runtime_path() -> None:
 
 bootstrap_runtime_path()
 
-from gh_address_cr.cli import handle_final_gate  # noqa: E402
-
-
-def main() -> int:
-    return handle_final_gate(None, None, sys.argv[1:])
+from gh_address_cr.legacy_handlers.final_gate import main  # noqa: E402
 
 
 if __name__ == "__main__":
