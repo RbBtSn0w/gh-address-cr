@@ -37,3 +37,17 @@
 - [x] T013 [P] [US2] Run `python3 scripts/sync_scripts.py` to sync thin proxies and remove target `python_common.py`
 - [x] T014 [P] [US2] Run `python3 scripts/build_plugin_payload.py` to rebuild the plugin skills payload
 - [x] T015 [P] [US2] Run Ruff checks and unittest suite to verify all 544 tests pass
+
+## Phase 6: Script Elimination (Phase 3)
+
+- [ ] T016 [US3] Update references to shims in `skill/SKILL.md` to point to `gh-address-cr` CLI
+- [ ] T017 [US3] Update references to shims in `skill/agents/openai.yaml` to point to `gh-address-cr` CLI
+- [ ] T018 [US3] Delete `skill/scripts/` shims and the directory
+- [ ] T019 [US3] Delete `scripts/sync_scripts.py`
+- [ ] T020 [US3] Remove Script sync check from `ci.yml` and `release.yml` and update CLI smoke steps
+- [ ] T021 [US3] Update `tests/helpers.py` to point `SCRIPTS_DIR` to package-internal legacy scripts
+- [ ] T022 [US3] Delete `tests/test_skill_runtime_shim.py`
+- [ ] T023 [US3] Update `tests/test_plugin_packaging.py` and `tests/test_runtime_packaging.py` to remove script check/shim assertions
+- [ ] T024 [US3] Run `python3 scripts/build_plugin_payload.py` to rebuild plugin payload
+- [ ] T025 [US3] Run Ruff check and verify the unit test suite passes successfully
+
