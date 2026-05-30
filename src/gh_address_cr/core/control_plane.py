@@ -10,13 +10,12 @@ import uuid
 from gh_address_cr.core import paths as core_paths
 
 
-COMPAT_SCRIPT_DIR = Path(
-    os.environ.get(
-        "GH_ADDRESS_CR_COMPAT_SCRIPT_DIR",
-        str(Path(__file__).resolve().parents[1] / "legacy_scripts"),
-    )
+COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
+SCRIPT_DIR = (
+    Path(COMPAT_SCRIPT_DIR_OVERRIDE)
+    if COMPAT_SCRIPT_DIR_OVERRIDE
+    else Path(__file__).resolve().parents[1] / "legacy_handlers"
 )
-SCRIPT_DIR = COMPAT_SCRIPT_DIR
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
 INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"

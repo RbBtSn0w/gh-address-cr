@@ -172,6 +172,37 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["reason_code"], "PASSED")
 
+    def test_submit_action_runs_without_legacy_scripts(self):
+        request = self.root / "loop-request.json"
+        request.write_text(
+            json.dumps(
+                {
+                    "repo": self.repo,
+                    "pr_number": self.pr_number,
+                    "item": {
+                        "item_id": "thread-1",
+                        "item_kind": "github_thread",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rc, stdout, stderr = self.run_cli_without_legacy_scripts(
+            "submit-action",
+            str(request),
+            "--resolution",
+            "clarify",
+            "--note",
+            "Need maintainer guidance",
+            "--reply-markdown",
+            "Need maintainer guidance before applying a fix.",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Required gh-address-cr runtime script is missing", stderr)
+        self.assertIn("Action 'clarify' formulated", stdout)
+
     def test_core_public_commands_are_not_legacy_script_mapped(self):
         for command in ("review", "findings", "threads", "adapter", "address"):
             self.assertNotIn(command, cli.COMMAND_TO_SCRIPT)

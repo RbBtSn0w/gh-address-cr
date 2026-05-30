@@ -20,20 +20,17 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 
 
-COMPAT_SCRIPT_DIR = Path(
-    os.environ.get(
-        "GH_ADDRESS_CR_COMPAT_SCRIPT_DIR",
-        str(Path(__file__).resolve().parents[1] / "legacy_scripts"),
-    )
-)
+COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
 SESSION_ENGINE = Path(__file__).resolve().parents[1] / "session_engine.py"
-SCRIPT_DIR = COMPAT_SCRIPT_DIR
+SCRIPT_DIR = (
+    Path(COMPAT_SCRIPT_DIR_OVERRIDE)
+    if COMPAT_SCRIPT_DIR_OVERRIDE
+    else Path(__file__).resolve().parents[1] / "legacy_handlers"
+)
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
 INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
 FINAL_GATE = SCRIPT_DIR / "final_gate.py"
-POST_REPLY = SCRIPT_DIR / "post_reply.py"
-RESOLVE_THREAD = SCRIPT_DIR / "resolve_thread.py"
 CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 
 
