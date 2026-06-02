@@ -79,6 +79,43 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("then rerun the same `review` command.", text)
         self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
 
+    def test_skill_first_read_covers_runtime_agent_command_surface(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        for command in (
+            "/gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-",
+            "/gh-address-cr doctor [<owner/repo> [<pr_number>]]",
+            "/gh-address-cr final-gate <owner/repo> <pr_number>",
+            "/gh-address-cr submit-action <action-request.json>",
+            "/gh-address-cr submit-feedback --category <category>",
+            "/gh-address-cr agent manifest",
+            "/gh-address-cr agent classify <owner/repo> <pr_number> <item_id>",
+            "/gh-address-cr agent next <owner/repo> <pr_number>",
+            "/gh-address-cr agent submit <owner/repo> <pr_number>",
+            "/gh-address-cr agent submit-batch <owner/repo> <pr_number>",
+            "/gh-address-cr agent fix <owner/repo> <pr_number> <item_id>",
+            "/gh-address-cr agent fix-all <owner/repo> <pr_number>",
+            "/gh-address-cr agent resolve-stale <owner/repo> <pr_number>",
+            "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
+            "/gh-address-cr agent publish <owner/repo> <pr_number>",
+            "/gh-address-cr agent leases <owner/repo> <pr_number>",
+            "/gh-address-cr agent reclaim <owner/repo> <pr_number>",
+            "/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit>",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+
+    def test_skill_guides_cr_reply_comment_tasks_through_runtime_submission(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+        hint_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        combined = "\n".join([skill_text, status_text, hint_text])
+
+        self.assertIn("GitHub review comment reply tasks", combined)
+        self.assertIn("A reply draft is not a submitted task", combined)
+        self.assertIn("`gh-address-cr agent submit`", combined)
+        self.assertIn("`gh-address-cr agent submit-batch`", combined)
+        self.assertIn("`gh-address-cr agent publish`", combined)
+
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("does not accept arbitrary Markdown", text)
@@ -130,13 +167,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("gh-address-cr final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
 
-    def test_skill_prefers_runtime_cli_over_skill_shim_for_agent_execution(self):
+    def test_skill_uses_runtime_cli_as_sole_execution_surface(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("Runtime public entrypoint: `gh-address-cr`", text)
-        self.assertIn("Compatibility shim: `python3 scripts/cli.py`", text)
-        self.assertNotIn("preferred automation surface: `python3 scripts/cli.py", text)
-        self.assertNotIn("stable operator surface: `python3 scripts/cli.py", text)
-        self.assertNotIn("Start from the high-level dispatcher:\n  - `python3 scripts/cli.py", text)
+        self.assertNotIn("scripts/cli.py", text)
+        self.assertNotIn("Compatibility shim", text)
         self.assertIn("Start from the runtime dispatcher:\n  - `gh-address-cr review", text)
 
     def test_skill_completion_contract_does_not_require_current_run_summary(self):
@@ -158,12 +193,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("thin adapter", text.lower())
         self.assertNotIn("direct side effect", text.lower())
 
-    def test_openai_hint_prefers_runtime_cli_for_agent_execution(self):
+    def test_openai_hint_uses_runtime_cli_as_sole_execution_surface(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertIn("Start with `gh-address-cr review <owner/repo> <pr_number>`", text)
         self.assertIn("run `gh-address-cr final-gate ...`", text)
-        self.assertNotIn("Start with `python3 scripts/cli.py review", text)
-        self.assertNotIn("run `python3 scripts/cli.py final-gate", text)
+        self.assertNotIn("scripts/cli.py", text)
 
     def test_openai_hint_does_not_require_natural_language_current_run_counts(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
@@ -423,10 +457,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
             text,
         )
 
-    def test_readme_prefers_runtime_cli_over_skill_shim_for_automation(self):
+    def test_readme_uses_runtime_cli_as_primary_entrypoint(self):
         text = read_repo_docs(README_MD, WORKFLOWS_MD, ARCHITECTURE_MD)
         self.assertIn("`gh-address-cr` is the preferred and stable automation entrypoint", text)
-        self.assertIn("`skill/scripts/cli.py` remains compatibility-only", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` is the only automation entrypoint", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` remains the stable automation surface", text)
         self.assertNotIn("`cli.py` is the preferred Python entrypoint for automation", text)

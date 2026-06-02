@@ -236,5 +236,4 @@ gh-address-cr session-engine reclaim-stale-claims owner/repo 123
 Rules:
 
 - `gh-address-cr` is the preferred and stable automation entrypoint
-- `skill/scripts/cli.py` remains compatibility-only for installed skill payloads
 - low-level resolve helpers are stricter than before: `resolve-thread` and batch resolve flows refuse resolve-only handling when reply evidence is absent

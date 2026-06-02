@@ -41,6 +41,7 @@ from gh_address_cr.core import workflow
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
+from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
 from gh_address_cr.intake.findings import (
     EMPTY_FINDINGS_INPUT_MESSAGE,
     FindingsFormatError,
@@ -2176,18 +2177,20 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
         return 5
 
-    _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
-    _emit_final_gate_result(result)
+    summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
+    if result.passed and parsed.auto_clean:
+        archive_target = _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
+        if archive_target is not None:
+            summary_path = archive_target / summary_path.name
+    _emit_final_gate_result(result, summary_path=summary_path)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
 
-    if parsed.auto_clean:
-        _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
     return 0
 
 
-def _emit_final_gate_result(result: core_gate.GateResult) -> None:
+def _emit_final_gate_result(result: core_gate.GateResult, *, summary_path: Path | None = None) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
     print(f"Pending review count: {result.counts['pending_current_login_review_count']}")
@@ -2215,6 +2218,13 @@ def _emit_final_gate_result(result: core_gate.GateResult) -> None:
         print(f"{key}={result.counts[key]}")
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
+    if summary_path is not None:
+        print(f"Audit summary path: {summary_path}")
+        try:
+            summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        except Exception:
+            summary_sha256 = "unavailable"
+        print(f"Audit summary sha256: {summary_sha256}")
 
 
 def _write_native_final_gate_artifacts(
@@ -2222,7 +2232,7 @@ def _write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> None:
+) -> Path:
     workspace = session_store.workspace_dir(repo, pr_number)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
@@ -2253,7 +2263,11 @@ def _write_native_final_gate_artifacts(
         "pr": str(pr_number),
         "action": "final-gate",
         "status": status,
-        "message": "Evaluated native final gate",
+        "message": (
+            "Gate passed with zero unresolved threads"
+            if result.passed
+            else f"Gate failed; {_final_gate_failure_message(result)} remain"
+        ),
         "details": {
             "counts": dict(result.counts),
             "failure_codes": list(result.failure_codes),
@@ -2276,6 +2290,7 @@ def _write_native_final_gate_artifacts(
     for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return summary_path
 
 
 def _final_gate_failure_message(result: core_gate.GateResult) -> str:
@@ -2297,10 +2312,10 @@ def _final_gate_failure_message(result: core_gate.GateResult) -> str:
     return " and ".join(reasons) or "gate checks reported failure"
 
 
-def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> None:
+def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Path | None:
     workspace = session_store.workspace_dir(repo, pr_number)
     if not workspace.exists():
-        return
+        return None
     archive_root = core_paths.state_dir() / "archive" / core_paths.normalize_repo(repo) / f"pr-{pr_number}"
     archive_root.mkdir(parents=True, exist_ok=True)
     base_name = audit_id or "final-gate"
@@ -2313,6 +2328,7 @@ def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> No
     shutil.rmtree(workspace, ignore_errors=True)
     print(f"Archived PR workspace: {archive_target}")
     print(f"Auto-cleaned PR workspace: {workspace}")
+    return archive_target
 
 
 def _prepend_optional(value: str | None, args: list[str]) -> list[str]:
@@ -2685,18 +2701,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
             return 0
-        cmd = []
+        cmd: list[str] = []
         if args.machine:
             cmd.append("--machine")
         if args.human:
             cmd.append("--human")
-        passthrough = list(args.args)
-        result = run_script("submit_action.py", [*cmd, *passthrough])
-        if result.stdout:
-            sys.stdout.write(result.stdout)
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        return result.returncode
+        return int(submit_action_handler.main([*cmd, *args.args]))
 
     if args.command not in COMMAND_TO_SCRIPT and args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
         supported_commands = ", ".join(

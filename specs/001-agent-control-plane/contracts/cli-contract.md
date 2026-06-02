@@ -1,5 +1,9 @@
 # Contract: CLI Control Plane
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 ## Existing Public Commands
 
 These commands remain stable:

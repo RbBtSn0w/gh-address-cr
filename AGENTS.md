@@ -38,7 +38,7 @@ Public behavior changes MUST update code, docs, and executable tests together. T
 Before claiming work is complete, run these local checks:
 - **Linting**: `ruff check src tests` (configured in `pyproject.toml`).
 - **Unit Tests**: `python3 -m unittest discover -s tests`.
-- **CLI Smoke Test**: `python3 -m gh_address_cr --help` or `python3 skill/scripts/cli.py --help`.
+- **CLI Smoke Test**: `python3 -m gh_address_cr --help`.
 
 ### Git Workflow
 - **Status Check**: Always run `git status` before starting work.
@@ -47,8 +47,8 @@ Before claiming work is complete, run these local checks:
 
 ## Path Conventions
 
-- **In repo-root docs/tests**: Use repo-root paths like `skill/scripts/cli.py`.
-- **In skill-owned docs (`skill/`)**: Use skill-root-relative paths like `scripts/cli.py`.
+- **In repo-root docs/tests**: Use repo-root paths like `src/gh_address_cr/legacy_scripts/cli.py`.
+- **In skill-owned docs (`skill/`)**: Use skill-root-relative paths like `references/...` and `agents/openai.yaml`.
 - **Do not rename product identifiers**: Use `gh-address-cr` for the runtime CLI, PyPI package, GitHub repository, skill name, and slash command.
 
 ## Execution Discipline
@@ -86,5 +86,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-[specs/010-dynamic-cr-replies/plan.md](specs/010-dynamic-cr-replies/plan.md)
+  [specs/012-cli-skill-sync/plan.md](specs/012-cli-skill-sync/plan.md)
 <!-- SPECKIT END -->

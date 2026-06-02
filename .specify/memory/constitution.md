@@ -88,8 +88,8 @@ how to use the runtime safely but MUST NOT contain authoritative business logic,
 state-machine transitions, or direct implementation of side effects.
 
 Path language MUST match the active scope. Repo-root docs and commands use
-paths such as `skill/scripts/cli.py`; skill-owned docs use paths such
-as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`.
+paths such as `src/gh_address_cr/legacy_scripts/cli.py`; skill-owned docs use
+paths such as `references/...` and `agents/openai.yaml`.
 
 Rationale: The project ships a skill. Blurring repo-root and skill-root paths
 creates broken installed instructions and unstable agent behavior. Physical

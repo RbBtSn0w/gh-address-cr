@@ -178,9 +178,9 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
                 "--actual",
                 "The run stopped with a blocked status and no actionable recovery path.",
                 "--source-command",
-                "python3 /Users/snow/Documents/GitHub/gh-address-cr-skill/skill/scripts/cli.py review octo/example 77",
+                "gh-address-cr review octo/example 77",
                 "--failing-command",
-                "python3 /Users/snow/Documents/GitHub/gh-address-cr-skill/skill/scripts/final_gate.py octo/example 77",
+                "gh-address-cr final-gate octo/example 77",
                 "--exit-code",
                 "5",
                 "--status",
@@ -215,8 +215,8 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("## Actual Behavior", payload["body"])
         self.assertIn("## Reproduction Context", payload["body"])
         self.assertIn("## Technical Diagnostics", payload["body"])
-        self.assertIn("`python3 .../skill/scripts/cli.py review octo/example 77`", payload["body"])
-        self.assertIn("`python3 .../skill/scripts/final_gate.py octo/example 77`", payload["body"])
+        self.assertIn("`gh-address-cr review octo/example 77`", payload["body"])
+        self.assertIn("`gh-address-cr final-gate octo/example 77`", payload["body"])
         self.assertIn("- Exit code: `5`", payload["body"])
         self.assertIn("- Status: `BLOCKED`", payload["body"])
         self.assertIn("- Reason code: `WAITING_FOR_FIX`", payload["body"])
@@ -407,7 +407,7 @@ else:
                 "--actual",
                 "The agent had no standardized place to report the problem.",
                 "--failing-command",
-                "python3 /Users/snow/Documents/GitHub/gh-address-cr-skill/skill/scripts/control_plane.py mixed json octo/example 77",
+                "gh-address-cr control-plane mixed json octo/example 77",
                 "--exit-code",
                 "2",
                 "--status",

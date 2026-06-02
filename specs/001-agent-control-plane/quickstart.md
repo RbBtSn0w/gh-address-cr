@@ -1,5 +1,9 @@
 # Quickstart: Agent Control Plane
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 This quickstart describes the intended validation flow for the multi-agent
 control-plane design. Some protocol commands are planned advanced/internal
 commands and will become executable during implementation.

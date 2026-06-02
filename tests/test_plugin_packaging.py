@@ -84,6 +84,7 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("plugin payload is up to date", result.stdout)
 
+
     def test_community_compliance_docs_exist(self):
         privacy = (ROOT / "PRIVACY.md").read_text(encoding="utf-8")
         terms = (ROOT / "TERMS.md").read_text(encoding="utf-8")
@@ -119,8 +120,10 @@ class PluginPackagingTest(unittest.TestCase):
 
         self.assertIn("Plugin payload check", ci_text)
         self.assertIn("python scripts/build_plugin_payload.py --check", ci_text)
+        self.assertNotIn("sync_scripts.py", ci_text)
         self.assertIn("Plugin payload check", release_text)
         self.assertIn("python scripts/build_plugin_payload.py --check", release_text)
+        self.assertNotIn("sync_scripts.py", release_text)
 
     def test_release_version_prepare_regenerates_plugin_payload(self):
         release_config = RELEASE_CONFIG.read_text(encoding="utf-8")

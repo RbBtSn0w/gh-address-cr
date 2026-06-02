@@ -2330,6 +2330,7 @@ body: Missing title should fail.
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must include a title", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_code_review_adapter_normalizes_findings(self):
         payload = json.dumps(
@@ -2882,15 +2883,16 @@ else:
         self.assertIn("Verified: 0 Pending Reviews found", result.stdout)
         self.assertIn("Session blocking items: 0", result.stdout)
         self.assertIn("== Machine Gate Diagnostics ==", result.stdout)
-        self.assertIn("github_threads_total_count=1", result.stdout)
-        self.assertIn("github_threads_new_count=1", result.stdout)
-        self.assertIn("github_threads_handled_this_run_count=1", result.stdout)
-        self.assertIn("github_threads_unresolved_count=0", result.stdout)
-        self.assertIn("local_findings_total_count=0", result.stdout)
-        self.assertIn("local_findings_new_count=0", result.stdout)
-        self.assertIn("local_findings_handled_this_run_count=0", result.stdout)
-        self.assertIn("local_findings_unresolved_count=0", result.stdout)
-        self.assertIn("Audit summary file:", result.stdout)
+        self.assertIn("unresolved_github_threads_count=0", result.stdout)
+        self.assertIn("unresolved_remote_threads_count=0", result.stdout)
+        self.assertIn("blocking_items_count=0", result.stdout)
+        self.assertIn("blocking_local_items_count=0", result.stdout)
+        self.assertIn("blocking_github_items_count=0", result.stdout)
+        self.assertIn("github_threads_missing_reply_count=0", result.stdout)
+        self.assertIn("missing_validation_evidence_count=0", result.stdout)
+        self.assertIn("pending_current_login_review_count=0", result.stdout)
+        summary_file = self.workspace_dir() / "audit_summary.md"
+        self.assertTrue(summary_file.exists())
 
     def test_final_gate_python_fails_on_resolved_thread_without_viewer_reply(self):
         gh = self.bin_dir / "gh"
@@ -2978,6 +2980,8 @@ else:
             [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Audit summary path:", result.stdout)
+        self.assertIn("Audit summary sha256:", result.stdout)
 
         report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "native-run", self.repo, self.pr])
 
@@ -3509,10 +3513,13 @@ else:
         archived_runs = sorted(self.archive_root().iterdir())
         self.assertEqual(len(archived_runs), 1)
         archived_workspace = archived_runs[0]
+        archived_summary = archived_workspace / "audit_summary.md"
         self.assertTrue((archived_workspace / "audit.jsonl").exists())
         self.assertTrue((archived_workspace / "trace.jsonl").exists())
-        self.assertTrue((archived_workspace / "audit_summary.md").exists())
+        self.assertTrue(archived_summary.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
+        self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
+        self.assertIn("Audit summary sha256:", result.stdout)
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)
@@ -3562,8 +3569,7 @@ else:
         self.assertEqual(report.returncode, 0, report.stderr)
         self.assertIn("Run: run-a", report.stdout)
         self.assertIn('"run_id": "run-a"', report.stdout)
-        self.assertIn('"action": "sync-github"', report.stdout)
-        self.assertIn('"action": "gate"', report.stdout)
+        self.assertIn('"action": "final-gate"', report.stdout)
         self.assertNotIn('"run_id": "run-b"', report.stdout)
 
     def test_resolve_thread_python_updates_session(self):

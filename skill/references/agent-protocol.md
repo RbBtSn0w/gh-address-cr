@@ -57,7 +57,7 @@ For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Su
 
 Severity is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or `P4` only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Missing severity remains unknown, and published fix replies omit the `Severity:` line. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence but are not mapped to P-scale severity. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
-Clarify, defer, and reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid.
+Clarify, defer, and reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid. The `efficiency_summary` is automatically managed and appended by the control plane telemetry layer to final published comments; agents must not manually record or format this summary.
 
 For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved.
 

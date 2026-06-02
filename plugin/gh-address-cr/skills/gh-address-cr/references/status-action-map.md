@@ -16,6 +16,7 @@ If `status` is `BLOCKED`:
 
 If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
 - **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent fix-all` / `agent submit-batch` when one commit/files/validation set addresses multiple matching GitHub threads, then run `agent publish`.
+- **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
 - **Lean path**: Re-run `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr threads <owner/repo> <pr_number> --lean` when only item IDs, claimability, and evidence presence are needed.
 
 If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKING_GITHUB_ITEMS`:

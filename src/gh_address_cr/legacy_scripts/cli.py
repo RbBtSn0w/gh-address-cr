@@ -8,12 +8,21 @@ from pathlib import Path
 
 
 def load_requirements() -> dict:
-    path = Path(__file__).resolve().parents[1] / "runtime-requirements.json"
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        print(f"gh-address-cr runtime compatibility requirements are unreadable: {exc}", file=sys.stderr)
-        raise SystemExit(127) from exc
+    script_dir = Path(__file__).resolve().parent
+    candidates = [
+        script_dir.parent / "runtime-requirements.json",  # src/gh_address_cr/
+    ]
+    if len(script_dir.parents) > 2:
+        candidates.append(script_dir.parents[2] / "skill" / "runtime-requirements.json")  # repo root / skill /
+    for path in candidates:
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                print(f"gh-address-cr runtime compatibility requirements are unreadable: {exc}", file=sys.stderr)
+                raise SystemExit(127) from exc
+    print(f"gh-address-cr runtime compatibility requirements not found in: {[str(p) for p in candidates]}", file=sys.stderr)
+    raise SystemExit(127)
 
 
 def parse_version(value: str) -> tuple[int, ...]:
@@ -87,10 +96,15 @@ def validate_runtime(runtime, runtime_cli, requirements: dict) -> int | None:
 def bootstrap_runtime() -> int:
     requirements = load_requirements()
     if os.environ.get("GH_ADDRESS_CR_DISABLE_LOCAL_SRC_RUNTIME") != "1":
-        repo_root = Path(__file__).resolve().parents[2]
-        src_root = repo_root / "src"
-        if src_root.is_dir():
-            sys.path.insert(0, str(src_root))
+        script_dir = Path(__file__).resolve().parent
+        # Try repo root candidates: skill/scripts/ => parents[2], legacy_scripts/ => parents[3]
+        for depth in (2, 3):
+            if len(script_dir.parents) > depth:
+                candidate = script_dir.parents[depth]
+                src_root = candidate / "src"
+                if src_root.is_dir() and (src_root / "gh_address_cr").is_dir():
+                    sys.path.insert(0, str(src_root))
+                    break
 
     try:
         import gh_address_cr as runtime

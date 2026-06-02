@@ -4,6 +4,10 @@ description: "Task list for reply template parity implementation"
 
 # Tasks: Reply Template Parity
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 **Input**: Design documents from `/specs/009-reply-template-parity/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/
 

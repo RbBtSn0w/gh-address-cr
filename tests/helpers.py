@@ -11,28 +11,30 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 SKILL_ROOT = ROOT / "skill"
 RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
-SCRIPTS_DIR = ROOT / "skill" / "scripts"
+SCRIPTS_DIR = RUNTIME_PACKAGE_DIR / "legacy_scripts"
+IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "legacy_handlers"
+
 CLI_PY = SCRIPTS_DIR / "cli.py"
 SCRIPT = SCRIPTS_DIR / "session_engine.py"
-RUN_LOCAL_REVIEW_PY = SCRIPTS_DIR / "run_local_review.py"
-INGEST_FINDINGS_PY = SCRIPTS_DIR / "ingest_findings.py"
-PUBLISH_FINDING_PY = SCRIPTS_DIR / "publish_finding.py"
-RUN_ONCE_PY = SCRIPTS_DIR / "run_once.py"
-FINAL_GATE_PY = SCRIPTS_DIR / "final_gate.py"
-AUDIT_REPORT_PY = SCRIPTS_DIR / "audit_report.py"
-LIST_THREADS_PY = SCRIPTS_DIR / "list_threads.py"
-POST_REPLY_PY = SCRIPTS_DIR / "post_reply.py"
-RESOLVE_THREAD_PY = SCRIPTS_DIR / "resolve_thread.py"
-GENERATE_REPLY_PY = SCRIPTS_DIR / "generate_reply.py"
-BATCH_RESOLVE_PY = SCRIPTS_DIR / "batch_resolve.py"
-CLEAN_STATE_PY = SCRIPTS_DIR / "clean_state.py"
-CONTROL_PLANE_PY = SCRIPTS_DIR / "control_plane.py"
-CR_LOOP_PY = SCRIPTS_DIR / "cr_loop.py"
-PREPARE_CODE_REVIEW_PY = SCRIPTS_DIR / "prepare_code_review.py"
-CODE_REVIEW_ADAPTER_PY = SCRIPTS_DIR / "code_review_adapter.py"
-REVIEW_TO_FINDINGS_PY = SCRIPTS_DIR / "review_to_findings.py"
-PYTHON_COMMON_PY = SCRIPTS_DIR / "python_common.py"
-SUBMIT_FEEDBACK_PY = SCRIPTS_DIR / "submit_feedback.py"
+RUN_LOCAL_REVIEW_PY = IMPLEMENTATIONS_DIR / "run_local_review.py"
+INGEST_FINDINGS_PY = IMPLEMENTATIONS_DIR / "ingest_findings.py"
+PUBLISH_FINDING_PY = IMPLEMENTATIONS_DIR / "publish_finding.py"
+RUN_ONCE_PY = IMPLEMENTATIONS_DIR / "run_once.py"
+FINAL_GATE_PY = IMPLEMENTATIONS_DIR / "final_gate.py"
+AUDIT_REPORT_PY = IMPLEMENTATIONS_DIR / "audit_report.py"
+LIST_THREADS_PY = IMPLEMENTATIONS_DIR / "list_threads.py"
+POST_REPLY_PY = IMPLEMENTATIONS_DIR / "post_reply.py"
+RESOLVE_THREAD_PY = IMPLEMENTATIONS_DIR / "resolve_thread.py"
+GENERATE_REPLY_PY = IMPLEMENTATIONS_DIR / "generate_reply.py"
+BATCH_RESOLVE_PY = IMPLEMENTATIONS_DIR / "batch_resolve.py"
+CLEAN_STATE_PY = IMPLEMENTATIONS_DIR / "clean_state.py"
+CONTROL_PLANE_PY = IMPLEMENTATIONS_DIR / "control_plane.py"
+CR_LOOP_PY = IMPLEMENTATIONS_DIR / "cr_loop.py"
+PREPARE_CODE_REVIEW_PY = IMPLEMENTATIONS_DIR / "prepare_code_review.py"
+CODE_REVIEW_ADAPTER_PY = IMPLEMENTATIONS_DIR / "code_review_adapter.py"
+REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
+PYTHON_COMMON_PY = IMPLEMENTATIONS_DIR / "python_common.py"
+SUBMIT_FEEDBACK_PY = IMPLEMENTATIONS_DIR / "submit_feedback.py"
 
 
 class SessionEngineTestCase(unittest.TestCase):
@@ -47,6 +49,7 @@ class SessionEngineTestCase(unittest.TestCase):
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
+        self.env["PYTHONPATH"] = str(SRC_ROOT)
 
     def tearDown(self):
         if self.original_process_state_dir is None:
@@ -92,6 +95,7 @@ class PythonScriptTestCase(unittest.TestCase):
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
         self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
+        self.env["PYTHONPATH"] = str(SRC_ROOT)
 
     def tearDown(self):
         if self.original_process_state_dir is None:

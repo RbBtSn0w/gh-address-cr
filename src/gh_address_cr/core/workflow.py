@@ -1640,6 +1640,7 @@ def publish_github_thread_responses(
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
     timestamp = _format_timestamp(current_time)
+    _configure_publish_telemetry(repo, pr_number)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
     client = github_client or GitHubClient()
@@ -1825,6 +1826,15 @@ def publish_github_thread_responses(
     }
 
 
+def _configure_publish_telemetry(repo: str, pr_number: str) -> None:
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        SessionTelemetry.get_instance().configure_context(repo, pr_number)
+    except Exception:
+        return
+
+
 def list_leases(repo: str, pr_number: str) -> dict[str, Any]:
     session = session_store.load_session(repo, pr_number)
     return {
@@ -1896,13 +1906,20 @@ def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
 def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[str | None, str | None]:
     resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
+
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
+    except Exception:
+        efficiency_summary = None
+
     if resolution != "fix":
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
             return None, "MISSING_PUBLISH_REPLY"
         if resolution == "clarify":
-            return render_clarify_reply([reply_markdown.strip()]), None
+            return render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
         if resolution == "defer":
-            return render_defer_reply([reply_markdown.strip()]), None
+            return render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
@@ -1930,6 +1947,7 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=summary,
+            efficiency_summary=efficiency_summary,
         ), None
     except SystemExit as exc:
         return None, str(exc) or "MISSING_PUBLISH_REPLY"

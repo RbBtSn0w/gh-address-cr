@@ -1050,6 +1050,58 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 item = session["items"]["github-thread:THREAD_STALE"]
                 self.assertEqual(item["classification_evidence"]["classification"], "fix")
 
+    def test_publish_github_thread_responses_includes_efficiency_summary(self):
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "clarify",
+                "note": "Need maintainer input.",
+                "reply_markdown": "Can you confirm the intended behavior?",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+
+                SessionTelemetry.reset()
+                tracker = SessionTelemetry.get_instance()
+                tracker.configure_context(repo, pr_number)
+                tracker.record("npm install", 100.0, 105.0, 0)
+                SessionTelemetry.reset()
+
+                workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(len(client.replies), 1)
+                self.assertIn("> **Agent Efficiency Summary**:", client.replies[0])
+                self.assertIn("1 tools invoked", client.replies[0])
+
 
 if __name__ == "__main__":
     unittest.main()

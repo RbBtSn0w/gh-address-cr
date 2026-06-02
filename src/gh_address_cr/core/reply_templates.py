@@ -48,7 +48,13 @@ def _format_rationale(text: str) -> list[str]:
     return lines
 
 
-def fix_reply(severity: str | None, payload: list[str], *, summary: str | None = None) -> str:
+def fix_reply(
+    severity: str | None, 
+    payload: list[str], 
+    *, 
+    summary: str | None = None,
+    efficiency_summary: str | None = None
+) -> str:
     if len(payload) < 4:
         raise SystemExit(
             "Usage for fix: generate_reply.py [--severity P0|P1|P2|P3|P4] <output_md> "
@@ -102,10 +108,14 @@ def fix_reply(severity: str | None, payload: list[str], *, summary: str | None =
             f"- Result: {test_result}",
         ]
     )
+    
+    if efficiency_summary:
+        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
+        
     return "\n".join(lines) + "\n"
 
 
-def clarify_reply(payload: list[str]) -> str:
+def clarify_reply(payload: list[str], *, efficiency_summary: str | None = None) -> str:
     rationale = payload[0] if payload else "No code changes were made for this specific comment."
     lines = [
         "Thanks for the review.",
@@ -122,10 +132,14 @@ def clarify_reply(payload: list[str]) -> str:
             "If you feel this still needs an adjustment, let me know and I can follow up with a patch!",
         ]
     )
+    
+    if efficiency_summary:
+        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
+        
     return "\n".join(lines) + "\n"
 
 
-def defer_reply(payload: list[str]) -> str:
+def defer_reply(payload: list[str], *, efficiency_summary: str | None = None) -> str:
     reason = payload[0] if payload else "Marking as deferred (non-blocking for this PR)."
     lines = [
         "Thanks, this is valid feedback.",
@@ -144,4 +158,8 @@ def defer_reply(payload: list[str]) -> str:
             "If you prefer, I can bring this into the current PR instead.",
         ]
     )
+    
+    if efficiency_summary:
+        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
+        
     return "\n".join(lines) + "\n"

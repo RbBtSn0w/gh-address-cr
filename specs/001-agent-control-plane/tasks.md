@@ -1,5 +1,9 @@
 # Tasks: Agentic Control Plane Runtime Separation
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 **Input**: Design documents from `/specs/001-agent-control-plane/`
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 **Fail-Fast Rule**: Every behavior task starts with a failing executable check or an exact contract assertion before implementation. No hidden fallback, guessed compatibility, or silent downgrade is allowed.

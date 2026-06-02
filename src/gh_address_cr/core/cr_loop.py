@@ -20,20 +20,17 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 
 
-COMPAT_SCRIPT_DIR = Path(
-    os.environ.get(
-        "GH_ADDRESS_CR_COMPAT_SCRIPT_DIR",
-        str(Path(__file__).resolve().parents[1] / "legacy_scripts"),
-    )
-)
+COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
 SESSION_ENGINE = Path(__file__).resolve().parents[1] / "session_engine.py"
-SCRIPT_DIR = COMPAT_SCRIPT_DIR
+SCRIPT_DIR = (
+    Path(COMPAT_SCRIPT_DIR_OVERRIDE)
+    if COMPAT_SCRIPT_DIR_OVERRIDE
+    else Path(__file__).resolve().parents[1] / "legacy_handlers"
+)
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
 INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
 FINAL_GATE = SCRIPT_DIR / "final_gate.py"
-POST_REPLY = SCRIPT_DIR / "post_reply.py"
-RESOLVE_THREAD = SCRIPT_DIR / "resolve_thread.py"
 CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 
 
@@ -41,6 +38,18 @@ NEEDS_HUMAN_EXIT = 4
 BLOCKED_EXIT = 5
 VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
+
+
+def telemetry_debug_enabled() -> bool:
+    return (os.environ.get("GH_ADDRESS_CR_DEBUG_TELEMETRY") or "").strip().lower() in {"1", "true", "yes"}
+
+
+def timeout_stream_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
 
 
 def _workspace_file(repo: str, pr_number: str, name: str) -> Path:
@@ -161,9 +170,51 @@ def _runtime_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_cmd(cmd: list[str], *, stdin: str | None = None, retries: int = 3) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    cmd: list[str],
+    *,
+    stdin: str | None = None,
+    retries: int = 3,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    import time
+    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
     _ = retries
-    return subprocess.run(cmd, input=stdin, text=True, capture_output=True, env=_runtime_subprocess_env())
+    start_time = time.time()
+    try:
+        result = subprocess.run(
+            cmd,
+            input=stdin,
+            text=True,
+            capture_output=True,
+            env=_runtime_subprocess_env(),
+            timeout=timeout,
+        )
+        end_time = time.time()
+        exit_code = result.returncode
+    except subprocess.TimeoutExpired as exc:
+        end_time = time.time()
+        exit_code = 124
+        result = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=exit_code,
+            stdout=timeout_stream_text(exc.stdout),
+            stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+        )
+
+    try:
+        SessionTelemetry.get_instance().record(
+            command=command_label(cmd),
+            start_time=start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+        )
+    except Exception as telemetry_exc:
+        if telemetry_debug_enabled():
+            sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
+
+    return result
 
 
 def emit(result: subprocess.CompletedProcess[str]) -> None:
@@ -478,7 +529,7 @@ def run_intake(
 
 
 def run_fixer(fixer_cmd: str, payload: dict) -> tuple[dict | None, str]:
-    result = subprocess.run(shlex.split(fixer_cmd), input=json.dumps(payload), text=True, capture_output=True)
+    result = run_cmd(shlex.split(fixer_cmd), stdin=json.dumps(payload))
     if result.returncode != 0:
         return None, result.stderr or "Fixer command failed."
     try:
@@ -572,7 +623,7 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
     raw_severity = fix_reply.get("severity") if explicit_severity else first_scene_item_severity(item)
     severity = normalize_fix_reply_severity(raw_severity)
     if explicit_severity and raw_severity not in (None, "") and severity is None:
-        return None, "GitHub fix actions require fix_reply.severity to be P1, P2, or P3 when provided."
+        return None, "GitHub fix actions require fix_reply.severity to be P0, P1, P2, P3, or P4 when provided."
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
     test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
     derived_test_result = "passed" if normalized_validation_commands else ""
@@ -583,10 +634,19 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         return None, "GitHub fix actions require fix_reply.test_result or a derivable validation result."
 
     try:
+        try:
+            from gh_address_cr.core.telemetry import SessionTelemetry
+            efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
+        except Exception as telemetry_exc:
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+            efficiency_summary = None
+
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=str(fix_reply.get("summary") or "").strip() or None,
+            efficiency_summary=efficiency_summary,
         )
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."
@@ -614,7 +674,7 @@ def run_validation(commands: list[str]) -> tuple[bool, str]:
             return False, f"Invalid validation command: {command}\n{exc}"
         if not argv:
             return False, "Invalid validation command: command is empty."
-        result = subprocess.run(argv, text=True, capture_output=True)
+        result = run_cmd(argv)
         if result.returncode != 0:
             output = (result.stdout or "") + (result.stderr or "")
             return False, f"Validation failed: {command}\n{output}".strip()
@@ -825,10 +885,18 @@ def handle_batch(
             else:
                 reply_markdown = action.get("reply_markdown")
                 if isinstance(reply_markdown, str) and reply_markdown.strip():
+                    try:
+                        from gh_address_cr.core.telemetry import SessionTelemetry
+                        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
+                    except Exception as telemetry_exc:
+                        if telemetry_debug_enabled():
+                            sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+                        efficiency_summary = None
+
                     if resolution == "clarify":
-                        reply_markdown = render_clarify_reply([reply_markdown.strip()])
+                        reply_markdown = render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
                     elif resolution == "defer":
-                        reply_markdown = render_defer_reply([reply_markdown.strip()])
+                        reply_markdown = render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
                 error = ""
             if not reply_markdown:
                 error = error or "GitHub thread actions require reply_markdown."
@@ -1015,6 +1083,13 @@ def handle_batch(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     producer, repo, pr_number, extra = parse_dispatch(args.mode, args.parts)
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        SessionTelemetry.get_instance().configure_context(repo, pr_number)
+    except Exception as telemetry_exc:
+        if telemetry_debug_enabled():
+            sys.stderr.write(f"Telemetry context setup failed: {telemetry_exc}\n")
     if producer is not None and producer not in VALID_PRODUCERS:
         print(
             f"Unsupported producer: {producer}\n"

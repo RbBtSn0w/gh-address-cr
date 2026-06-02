@@ -1,5 +1,9 @@
 # Implementation Plan: Action Request Friction Repair
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 **Branch**: `codex/010-agent-contract-friction` | **Date**: 2026-04-30 | **Spec**: [specs/009-action-request-friction/spec.md](specs/009-action-request-friction/spec.md)
 **Input**: Feature specification from `/specs/009-action-request-friction/spec.md`
 
