@@ -1,7 +1,7 @@
 # Feature Specification: Remove Legacy Compatibility
 
-**Feature Branch**: `013-remove-legacy-compat`  
-**Created**: 2026-06-02  
+**Feature Branch**: `013-remove-legacy-compat`
+**Created**: 2026-06-02
 **Status**: Verified
 **Input**: User description: "历史兼容代码移除，保证高效性执行和最佳化。"
 

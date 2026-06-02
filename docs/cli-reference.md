@@ -585,11 +585,11 @@ Minimum accepted finding shape:
 
 This is the long-term integration path for any local code-review tool. If it can emit structured findings JSON, `gh-address-cr` can ingest it into the PR session.
 
-To publish a local finding back to GitHub as a review comment:
+To record and close a local finding inside the PR session:
 
 ```bash
 gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
-gh-address-cr agent publish owner/repo 123
+gh-address-cr final-gate --no-auto-clean owner/repo 123
 ```
 
 To reclaim expired item claims inside a PR session:

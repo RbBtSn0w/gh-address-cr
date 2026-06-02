@@ -13,14 +13,14 @@ before session mutation or GitHub side effects.
 
 ## Technical Context
 
-**Language/Version**: Python 3.10+  
-**Primary Dependencies**: Python standard library plus `packaging` from `pyproject.toml`  
-**Storage**: Cache-backed PR session files managed by the runtime; no new storage  
-**Testing**: `ruff check src tests`, `python3 -m unittest discover -s tests`, CLI smoke checks  
-**Target Platform**: Cross-platform Python CLI runtime  
-**Project Type**: Single Python CLI package plus installable skill payload  
-**Performance Goals**: Supported commands perform zero legacy-script dispatcher checks before native handling  
-**Constraints**: Preserve current public commands, machine summaries, reason codes, final-gate evidence, normalized findings intake, and packaged skill boundary  
+**Language/Version**: Python 3.10+
+**Primary Dependencies**: Python standard library plus `packaging` from `pyproject.toml`
+**Storage**: Cache-backed PR session files managed by the runtime; no new storage
+**Testing**: `ruff check src tests`, `python3 -m unittest discover -s tests`, CLI smoke checks
+**Target Platform**: Cross-platform Python CLI runtime
+**Project Type**: Single Python CLI package plus installable skill payload
+**Performance Goals**: Supported commands perform zero legacy-script dispatcher checks before native handling
+**Constraints**: Preserve current public commands, machine summaries, reason codes, final-gate evidence, normalized findings intake, and packaged skill boundary
 **Scale/Scope**: One runtime package, one packaged skill payload, repository tests and current feature artifacts
 
 ## Constitution Check
