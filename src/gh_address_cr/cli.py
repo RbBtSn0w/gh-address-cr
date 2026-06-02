@@ -37,9 +37,6 @@ from gh_address_cr.core import workflow
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
-from gh_address_cr.legacy_handlers import review_to_findings as review_to_findings_handler
-from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
-from gh_address_cr.legacy_handlers import submit_feedback as submit_feedback_handler
 from gh_address_cr.intake.findings import (
     EMPTY_FINDINGS_INPUT_MESSAGE,
     FindingsFormatError,
@@ -2644,6 +2641,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
             return 0
+        from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
+
         cmd: list[str] = []
         if args.machine:
             cmd.append("--machine")
@@ -2652,9 +2651,13 @@ def main(argv: list[str] | None = None) -> int:
         return int(submit_action_handler.main([*cmd, *args.args]))
 
     if args.command == "review-to-findings":
+        from gh_address_cr.legacy_handlers import review_to_findings as review_to_findings_handler
+
         return int(review_to_findings_handler.main(args.args))
 
     if args.command == "submit-feedback":
+        from gh_address_cr.legacy_handlers import submit_feedback as submit_feedback_handler
+
         return int(submit_feedback_handler.main(args.args))
 
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:

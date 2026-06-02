@@ -1732,7 +1732,7 @@ else:
         self.assertIn("Use [] for an explicit empty producer result", result.stderr)
         self.assertFalse(self.session_file().exists())
 
-    def test_cli_dispatches_run_once(self):
+    def test_run_once_helper_syncs_github_threads(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
