@@ -2092,53 +2092,6 @@ def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
     return harness.handle_agent_orchestrate(repo, passthrough)
 
 
-def handle_superpowers_command(args: argparse.Namespace) -> int:
-    if args.repo != "check":
-        print(f"Unknown superpowers subcommand: {args.repo}. Did you mean 'check'?", file=sys.stderr)
-        return 2
-
-    # Simple scanner for superpowers bridge verification
-    required_skills = [
-        "verification-before-completion",
-        "test-driven-development",
-        "systematic-debugging",
-        "receiving-code-review",
-        "finishing-a-development-branch",
-    ]
-    optional_skills = [
-        "fail-fast-loud",
-        "dispatching-parallel-agents",
-        "code-review",
-    ]
-
-    global_root = Path.home() / ".agents" / "skills"
-
-    lines = [
-        "# Superpowers Bridge Report",
-        "",
-        "This report verifies the presence of required and optional skills for the gh-address-cr control plane.",
-        "",
-        "## Required Skills",
-        "",
-    ]
-
-    for skill in required_skills:
-        global_path = global_root / skill
-        status = "✅ Found" if global_path.is_dir() else "❌ Missing"
-        lines.append(f"- **{skill}**: {status} (at {global_path})")
-
-    lines.extend(["", "## Optional Skills", ""])
-    for skill in optional_skills:
-        global_path = global_root / skill
-        status = "✅ Found" if global_path.is_dir() else "⚪ Missing"
-        lines.append(f"- **{skill}**: {status} (at {global_path})")
-
-    content = "\n".join(lines) + "\n"
-    Path("superpowers-bridge-report.md").write_text(content, encoding="utf-8")
-    sys.stdout.write(content)
-    return 0
-
-
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr final-gate")
     auto_group = parser.add_mutually_exclusive_group()
@@ -2609,9 +2562,6 @@ def main(argv: list[str] | None = None) -> int:
             print(alias_help(args.command), end="")
             return 0
         return handle_doctor_command(args)
-
-    if args.command == "superpowers":
-        return handle_superpowers_command(args)
 
     if args.command == "final-gate":
         if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
