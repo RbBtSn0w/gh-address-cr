@@ -132,6 +132,14 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("Supported commands:", result.stderr)
         self.assertNotIn("superpowers", result.stderr)
 
+    def test_cli_superpowers_command_is_removed(self):
+        report_path = Path("superpowers-bridge-report.md")
+        result = self.run_cmd([sys.executable, str(CLI_PY), "superpowers", "check"])
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Unknown command", result.stderr)
+        self.assertFalse((self.cwd / report_path).exists())
+
     def test_cli_submit_feedback_passthrough_dry_run(self):
         result = self.run_cmd(
             [
