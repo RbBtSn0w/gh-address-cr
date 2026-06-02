@@ -1,3 +1,9 @@
+## [2.8.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.7.0...v2.8.0) (2026-06-02)
+
+### Features
+
+* 012 skill-to-CLI sync artifacts ([#67](https://github.com/RbBtSn0w/gh-address-cr/issues/67)) ([0867d5b](https://github.com/RbBtSn0w/gh-address-cr/commit/0867d5b35b8a67b042d22bb03293c029452c6308)), closes [#66](https://github.com/RbBtSn0w/gh-address-cr/issues/66)
+
 ## Unreleased
 
 ### Features
