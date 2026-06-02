@@ -1,3 +1,9 @@
+## [2.9.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.8.0...v2.9.0) (2026-06-02)
+
+### Features
+
+* Remove legacy runtime script compatibility ([#68](https://github.com/RbBtSn0w/gh-address-cr/issues/68)) ([1848e34](https://github.com/RbBtSn0w/gh-address-cr/commit/1848e34c53c635e142bb3d533bf449a567807d53))
+
 ## [2.8.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.7.0...v2.8.0) (2026-06-02)
 
 ### Features
