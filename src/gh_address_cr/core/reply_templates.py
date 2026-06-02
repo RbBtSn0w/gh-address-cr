@@ -78,7 +78,8 @@ def fix_reply(
 ) -> str:
     if len(payload) < 4:
         raise SystemExit(
-            "Usage for fix: generate_reply.py [--severity P0|P1|P2|P3|P4] <output_md> "
+            "Usage for fix reply: gh-address-cr agent submit <repo> <pr> --input <action-response.json> "
+            "or gh-address-cr submit-action <action-request.json> --resolution fix "
             "<commit_hash> <files_csv> <test_command> <test_result> [why]"
         )
     normalized_severity = _normalize_severity(severity)

@@ -52,6 +52,15 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertIn("Reviewer-provided priority from the original review comment.", result)
         self.assertIn("Medium-priority reviewer signal", result)
 
+    def test_fix_reply_usage_uses_supported_cli_surface(self):
+        with self.assertRaises(SystemExit) as context:
+            fix_reply(None, [])
+
+        message = str(context.exception)
+        self.assertNotIn("generate_reply.py", message)
+        self.assertIn("gh-address-cr agent submit", message)
+        self.assertIn("gh-address-cr submit-action", message)
+
     def test_clarify_reply_with_efficiency_summary(self):
         summary = "5 tools invoked, 10s duration."
         result = clarify_reply(["Clarification note."], efficiency_summary=summary)

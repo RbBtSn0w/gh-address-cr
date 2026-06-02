@@ -129,6 +129,7 @@ Clarify example:
 
 ```bash
 gh-address-cr submit-action <action-request.json> --resolution clarify --note "Initialization must stay lazy." --reply-markdown "The current control flow is intentional because initialization must stay lazy."
+gh-address-cr agent submit owner/repo 123 --input <action-response.json>
 gh-address-cr agent publish owner/repo 123
 ```
 
@@ -136,6 +137,7 @@ Defer example:
 
 ```bash
 gh-address-cr submit-action <action-request.json> --resolution defer --note "Deferred to a follow-up PR." --reply-markdown "This requires broader refactoring and is deferred to a follow-up PR."
+gh-address-cr agent submit owner/repo 123 --input <action-response.json>
 gh-address-cr agent publish owner/repo 123
 ```
 
@@ -143,6 +145,7 @@ Rules:
 
 - even without code changes, GitHub thread items still require reply plus resolve
 - defer/clarify should carry rationale, not just a status change
+- `submit-action` output must be submitted back to the session before `agent publish`
 - low-level resolve paths are intentionally blocked until reply evidence exists in the session or the same action posts a fresh reply
 
 ### Mode 3: Local Finding Only

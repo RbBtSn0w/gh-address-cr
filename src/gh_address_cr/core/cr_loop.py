@@ -17,7 +17,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
 
 
 COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
@@ -654,19 +654,6 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."
     return reply_markdown, ""
-
-
-def review_priority_for_publish(item: dict) -> tuple[str | None, str | None]:
-    evidence = item.get("review_priority_evidence")
-    if not isinstance(evidence, dict):
-        return None, None
-    priority = str(evidence.get("value") or "").strip().lower()
-    if priority not in {"high", "medium", "low"}:
-        return None, None
-    source = str(evidence.get("source") or "").strip()
-    if source:
-        return priority, f"Reviewer-provided priority from {source} was preserved as raw priority evidence."
-    return priority, "Reviewer-provided priority was preserved as raw priority evidence."
 
 
 def accepted_agent_action(item: dict) -> dict | None:

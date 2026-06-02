@@ -38,7 +38,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -1942,7 +1942,7 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
         return None, severity_error
     why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
     summary = str(fix_reply.get("summary") or "").strip() or None
-    review_priority, review_priority_note = _review_priority_for_publish(item)
+    review_priority, review_priority_note = review_priority_for_publish(item)
     try:
         return render_fix_reply(
             severity,
@@ -2114,19 +2114,6 @@ def _fix_reply_severity_for_publish(fix_reply: dict[str, Any], item: dict[str, A
             return None, conflict
         return explicit_severity, None
     return first_scene_item_severity(item), None
-
-
-def _review_priority_for_publish(item: dict[str, Any]) -> tuple[str | None, str | None]:
-    evidence = item.get("review_priority_evidence")
-    if not isinstance(evidence, dict):
-        return None, None
-    priority = str(evidence.get("value") or "").strip().lower()
-    if priority not in {"high", "medium", "low"}:
-        return None, None
-    source = str(evidence.get("source") or "").strip()
-    if source:
-        return priority, f"Reviewer-provided priority from {source} was preserved as raw priority evidence."
-    return priority, "Reviewer-provided priority was preserved as raw priority evidence."
 
 
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
