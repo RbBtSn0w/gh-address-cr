@@ -285,8 +285,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(result["status"], "PUBLISH_COMPLETE")
                 self.assertEqual(result["published_count"], 2)
                 self.assertEqual(len(client.replies), 2)
-                first_body = client.replies[0][1]
-                second_body = client.replies[1][1]
+                bodies_by_thread_id = {thread_id: body for thread_id, body in client.replies}
+                first_body = bodies_by_thread_id["THREAD_1"]
+                second_body = bodies_by_thread_id["THREAD_2"]
                 self.assertNotEqual(first_body, second_body)
                 self.assertIn("The nil-validation branch now rejects missing values before use.", first_body)
                 self.assertIn("The logging path now omits the sensitive token mentioned in this thread.", second_body)

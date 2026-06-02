@@ -1009,6 +1009,120 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
 
+    def test_agent_fix_all_rejects_distinct_thread_bodies_with_homogeneous_reason(self):
+        self.write_session(
+            items=[
+                github_thread("github-thread:abc", body="Why does this branch skip nil validation?"),
+                github_thread("github-thread:def", body="Can this log expose private data?"),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            "Both comments are covered by the same shared patch.",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
+        self.assertIn("distinct thread bodies", payload["next_action"])
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+
+    def test_agent_fix_all_input_rejects_common_only_reply_evidence(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    classification_evidence={"classification": "fix", "record_id": "ev_abc"},
+                ),
+                github_thread(
+                    "github-thread:def",
+                    classification_evidence={"classification": "fix", "record_id": "ev_def"},
+                ),
+            ]
+        )
+        first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
+        second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "common-only-fix-all-input.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/shared.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_shared", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "summary": "Fixed shared issues.",
+                            "why": "The shared patch covers every thread.",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": first_request["request_id"],
+                            "lease_id": first_request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "note": "Accepted common evidence for first thread.",
+                        },
+                        {
+                            "request_id": second_request["request_id"],
+                            "lease_id": second_request["lease_id"],
+                            "item_id": "github-thread:def",
+                            "note": "Accepted common evidence for second thread.",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "fix-all", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_FIX_ALL_ITEM_REPLY_EVIDENCE")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+
+    def test_agent_fix_all_input_rejects_conflicting_commit_argument(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        batch_path = self.workspace_dir() / "empty-batch.json"
+        batch_path.write_text("{}", encoding="utf-8")
+
+        result = self.run_runtime_module(
+            "agent", "fix-all", self.repo, self.pr, "--input", str(batch_path), "--commit", "abc123"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "CONFLICTING_FIX_ALL_INPUT")
+
     def test_agent_fix_all_input_preserves_per_item_summary_why_severity_and_validation(self):
         self.write_session(
             items=[
@@ -1049,9 +1163,13 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                             "request_id": first_request["request_id"],
                             "lease_id": first_request["lease_id"],
                             "item_id": "github-thread:abc",
-                            "summary": "Restored nil validation.",
+                            "note": "Audit note for the accepted evidence ledger.",
                             "why": "The nil-validation branch now rejects missing values before use.",
-                            "fix_reply": {"severity": "P1", "severity_note": "Reviewer called out a crash path."},
+                            "fix_reply": {
+                                "summary": "Restored nil validation.",
+                                "severity": "P1",
+                                "severity_note": "Reviewer called out a crash path.",
+                            },
                         },
                         {
                             "request_id": second_request["request_id"],

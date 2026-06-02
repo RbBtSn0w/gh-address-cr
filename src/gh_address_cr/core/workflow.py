@@ -516,6 +516,17 @@ def fast_fix_from_batch_input(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    batch = _load_response_json_object(
+        batch_path,
+        status="FAST_FIX_ALL_REJECTED",
+        missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
+        invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
+        shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
+        shape_message="BatchActionResponse must be a JSON object.",
+        payload_name="BatchActionResponse",
+        waiting_on="batch_action_response",
+    )
+    _validate_fix_all_input_item_reply_evidence(batch)
     submitted = submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=now)
     payload = {
         "status": "FAST_FIX_ALL_ACCEPTED",
@@ -538,6 +549,33 @@ def fast_fix_from_batch_input(
         payload["publish"] = published
         payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
+
+
+def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
+    items = batch.get("items")
+    if not isinstance(items, list) or not items:
+        return
+    missing: list[int] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        fix_reply = item.get("fix_reply") if isinstance(item.get("fix_reply"), dict) else {}
+        item_summary = str(item.get("summary") or fix_reply.get("summary") or "").strip()
+        item_why = str(item.get("why") or fix_reply.get("why") or "").strip()
+        if not item_summary or not item_why:
+            missing.append(index)
+    if missing:
+        raise WorkflowError(
+            status="FAST_FIX_ALL_REJECTED",
+            reason_code="MISSING_FIX_ALL_ITEM_REPLY_EVIDENCE",
+            waiting_on="batch_action_response",
+            exit_code=2,
+            message=(
+                "agent fix-all --input requires each batch item to supply item-level summary and why. "
+                "Common fix_reply summary/why cannot stand in for per-thread reviewer-answer evidence."
+            ),
+            payload={"missing_item_indexes": missing},
+        )
 
 
 def record_evidence_profile(
@@ -924,6 +962,20 @@ def fast_fix_matching_threads(
             message=next_action,
             payload={"matched_count": len(matches), "files": sorted(normalized_file_set)},
         )
+    if not stale_only and normalized_homogeneous_reason and not _has_homogeneous_thread_bodies(matches):
+        next_action = (
+            f"Use `gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json` "
+            "with per-thread summary/why entries. The matched threads have missing or distinct thread bodies, "
+            "so fix-all cannot prove a homogeneous repeated concern."
+        )
+        raise WorkflowError(
+            status=rejected_status,
+            reason_code=FIX_ALL_PER_THREAD_EVIDENCE_REASON,
+            waiting_on="batch_action_response",
+            exit_code=4,
+            message=next_action,
+            payload={"matched_count": len(matches), "files": sorted(normalized_file_set)},
+        )
 
     accepted_count = 0
     batches: list[dict[str, Any]] = []
@@ -1090,6 +1142,16 @@ def _matches_fast_fix_thread(
     if stale and not include_stale:
         return False
     return is_claimable_github_thread(item)
+
+
+def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:
+    bodies = [_normalized_thread_body(item) for item in items]
+    return all(bodies) and len(set(bodies)) == 1
+
+
+def _normalized_thread_body(item: dict[str, Any]) -> str:
+    return " ".join(str(item.get("body") or "").split()).casefold()
+
 
 def _fast_fix_failed_row(item_id: str, exc: WorkflowError) -> dict[str, Any]:
     return {
@@ -1354,7 +1416,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
         if not lease_id:
             _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
 
-        summary = str(item.get("summary") or item.get("note") or item_fix_reply.get("summary") or "").strip()
+        summary = str(item.get("summary") or item_fix_reply.get("summary") or item.get("note") or "").strip()
         why = str(item.get("why") or item_fix_reply.get("why") or summary).strip()
         note = str(item.get("note") or summary or why).strip()
         if not note:
