@@ -1,3 +1,9 @@
+## [2.9.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.0...v2.9.1) (2026-06-02)
+
+### Bug Fixes
+
+* remove superpowers cli handler ([#69](https://github.com/RbBtSn0w/gh-address-cr/issues/69)) ([#71](https://github.com/RbBtSn0w/gh-address-cr/issues/71)) ([38da22a](https://github.com/RbBtSn0w/gh-address-cr/commit/38da22a7c75ba4cddfe73b9af89bf3501d6b3942))
+
 ## [2.9.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.8.0...v2.9.0) (2026-06-02)
 
 ### Features
