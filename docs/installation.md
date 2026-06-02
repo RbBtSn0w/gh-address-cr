@@ -157,10 +157,10 @@ Native runtime ownership is now split by responsibility:
 - `src/gh_address_cr/core/gate.py`: final-gate policy evaluation and the native `Gatekeeper`
 - `src/gh_address_cr/github/client.py`: GitHub CLI IO for thread listing, replies, resolves, and pending reviews
 - `src/gh_address_cr/intake/findings.py`: findings parsing, normalization, source-scoped fingerprints, and fixed finding blocks
-- `src/gh_address_cr/legacy_scripts/`: compatibility shims for packaged runtime script paths
+- `src/gh_address_cr/legacy_handlers/`: helper implementations that remain behind supported public commands
 
-The native packages under `core/`, `github/`, and `intake/` must not import `legacy_scripts`.
-Public high-level commands (`active-pr`, `review`, `address`, `threads`, `findings`, and `adapter`) are routed through the native runtime package. Core script entrypoints such as `session_engine.py`, `cr_loop.py`, and `control_plane.py` now delegate to native modules; the remaining `legacy_scripts` files are compatibility surfaces for older direct script invocations.
+The native packages under `core/`, `github/`, and `intake/` must not depend on removed script-path compatibility shims.
+Public commands such as `active-pr`, `review`, `address`, `threads`, `findings`, `adapter`, `agent`, and `final-gate` are routed through the native runtime package. Historical direct script commands are rejected with unsupported-legacy guidance.
 
 
 ## Install with npx skills

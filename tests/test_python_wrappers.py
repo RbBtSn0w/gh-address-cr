@@ -3379,6 +3379,15 @@ else:
         self.assertIn("--machine and --human are only supported for", result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
+    def test_cli_output_flags_reject_utility_commands_before_running_them(self):
+        for command in ("review-to-findings", "submit-feedback"):
+            with self.subTest(command=command):
+                result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", command, "--help"])
+
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("--machine and --human are only supported for", result.stderr)
+                self.assertFalse(self.workspace_dir().exists())
+
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

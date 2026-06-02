@@ -188,9 +188,9 @@ Rules:
 - local items need valid state transitions and notes
 - the PR is not clear until both session blocking count and unresolved GitHub thread count are zero
 
-### Mode 5: Publish Local Finding Back To GitHub
+### Mode 5: Handle Local Finding In Session
 
-Use this when a locally discovered issue should become visible in the GitHub PR discussion.
+Use this when a locally discovered issue should be fixed and closed inside the PR session.
 
 Example:
 
@@ -198,15 +198,15 @@ Example:
 gh-address-cr adapter owner/repo 123 ./adapter.sh
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 
-gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Published local finding evidence." --why "Confirmed locally." --validation "python3 -m unittest=passed"
-gh-address-cr agent publish owner/repo 123
+gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Fixed local finding." --why "Confirmed locally." --validation "python3 -m unittest=passed"
+gh-address-cr final-gate --no-auto-clean owner/repo 123
 ```
 
 What happens:
 
-- the local finding is published as a GitHub review comment
-- later GitHub sync can associate the local finding with the resulting thread
-- from that point onward, the issue can be handled like a normal GitHub review item
+- the local finding is recorded with fix evidence in the PR session
+- no GitHub review reply is posted for local-only findings
+- `agent publish` is reserved for accepted GitHub review-thread responses
 
 ### Mode 6: Direct Session Engine / Unified CLI
 

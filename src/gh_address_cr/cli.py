@@ -1610,9 +1610,7 @@ def build_agent_manifest() -> dict:
         "constraints": {
             "max_parallel_claims": MAX_PARALLEL_CLAIMS,
         },
-        "public_commands": sorted(
-            ["active-pr", "address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]
-        ),
+        "public_commands": sorted(PUBLIC_COMMANDS),
     }
 
 
@@ -2651,11 +2649,23 @@ def main(argv: list[str] | None = None) -> int:
         return int(submit_action_handler.main([*cmd, *args.args]))
 
     if args.command == "review-to-findings":
+        if args.machine or args.human:
+            print(
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                file=sys.stderr,
+            )
+            return 2
         from gh_address_cr.legacy_handlers import review_to_findings as review_to_findings_handler
 
         return int(review_to_findings_handler.main(args.args))
 
     if args.command == "submit-feedback":
+        if args.machine or args.human:
+            print(
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                file=sys.stderr,
+            )
+            return 2
         from gh_address_cr.legacy_handlers import submit_feedback as submit_feedback_handler
 
         return int(submit_feedback_handler.main(args.args))
