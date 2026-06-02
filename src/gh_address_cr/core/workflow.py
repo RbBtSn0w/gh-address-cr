@@ -1416,7 +1416,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
         if not lease_id:
             _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
 
-        summary = str(item.get("summary") or item_fix_reply.get("summary") or item.get("note") or "").strip()
+        summary = str(item.get("summary") or item_fix_reply.get("summary") or "").strip()
         why = str(item.get("why") or item_fix_reply.get("why") or "").strip()
         note = str(item.get("note") or summary or why).strip()
         if not note:

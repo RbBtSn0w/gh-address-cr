@@ -1903,13 +1903,35 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
         if parsed.input:
+            conflicting_flags = []
             if parsed.commit:
+                conflicting_flags.append("--commit")
+            if parsed.files:
+                conflicting_flags.append("--files")
+            if parsed.file:
+                conflicting_flags.append("--file")
+            if parsed.validation:
+                conflicting_flags.append("--validation")
+            if parsed.severity:
+                conflicting_flags.append("--severity")
+            if parsed.severity_note:
+                conflicting_flags.append("--severity-note")
+            if parsed.homogeneous_reason:
+                conflicting_flags.append("--homogeneous-reason")
+            if parsed.concern_label:
+                conflicting_flags.append("--concern-label")
+            if parsed.include_stale:
+                conflicting_flags.append("--include-stale")
+            if conflicting_flags:
                 raise workflow.WorkflowError(
                     status="FAST_FIX_ALL_REJECTED",
                     reason_code="CONFLICTING_FIX_ALL_INPUT",
                     waiting_on="fast_fix_input",
                     exit_code=2,
-                    message="agent fix-all accepts either --input or --commit evidence, not both.",
+                    message=(
+                        "agent fix-all accepts either --input or evidence flags, not both. "
+                        f"Move {', '.join(conflicting_flags)} into the BatchActionResponse."
+                    ),
                 )
             payload = workflow.fast_fix_from_batch_input(
                 parsed.repo,

@@ -1162,6 +1162,37 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "CONFLICTING_FIX_ALL_INPUT")
 
+    def test_agent_fix_all_input_rejects_conflicting_evidence_arguments(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        batch_path = self.workspace_dir() / "empty-batch.json"
+        batch_path.write_text("{}", encoding="utf-8")
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--input",
+            str(batch_path),
+            "--files",
+            "src/example.py",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+            "--severity",
+            "P2",
+            "--homogeneous-reason",
+            "Common repeated concern.",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "CONFLICTING_FIX_ALL_INPUT")
+        self.assertIn("--files", payload["next_action"])
+        self.assertIn("--validation", payload["next_action"])
+        self.assertIn("--severity", payload["next_action"])
+        self.assertIn("--homogeneous-reason", payload["next_action"])
+
     def test_agent_fix_all_input_preserves_per_item_summary_why_severity_and_validation(self):
         self.write_session(
             items=[
@@ -1758,6 +1789,63 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
+
+    def test_agent_submit_batch_keeps_note_separate_from_reply_summary(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    },
+                )
+            ]
+        )
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "batch-note-summary-separation.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/shared.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_shared", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "summary": "Fixed shared validation.",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "note": "Audit note for the accepted batch item.",
+                            "why": "The thread now validates the input before use.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = self.load_session()
+        response = session["items"]["github-thread:abc"]["accepted_response"]
+        self.assertEqual(response["note"], "Audit note for the accepted batch item.")
+        self.assertEqual(response["fix_reply"]["summary"], "Fixed shared validation.")
 
     def test_agent_submit_batch_rejects_mixed_invalid_item_without_partial_acceptance(self):
         self.write_session(
