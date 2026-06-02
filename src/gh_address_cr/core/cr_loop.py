@@ -44,6 +44,14 @@ def telemetry_debug_enabled() -> bool:
     return (os.environ.get("GH_ADDRESS_CR_DEBUG_TELEMETRY") or "").strip().lower() in {"1", "true", "yes"}
 
 
+def timeout_stream_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
+
+
 def _workspace_file(repo: str, pr_number: str, name: str) -> Path:
     path = core_paths.workspace_dir(repo, pr_number)
     path.mkdir(parents=True, exist_ok=True)
@@ -167,7 +175,7 @@ def run_cmd(
     *,
     stdin: str | None = None,
     retries: int = 3,
-    timeout: float | None = 120.0,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     import time
     from gh_address_cr.core.telemetry import SessionTelemetry, command_label
@@ -191,8 +199,8 @@ def run_cmd(
         result = subprocess.CompletedProcess(
             args=cmd,
             returncode=exit_code,
-            stdout=exc.stdout if exc.stdout is not None else "",
-            stderr=(exc.stderr if exc.stderr is not None else "") + f"\nCommand timed out after {timeout} seconds.",
+            stdout=timeout_stream_text(exc.stdout),
+            stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
         )
 
     try:
@@ -1075,6 +1083,13 @@ def handle_batch(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     producer, repo, pr_number, extra = parse_dispatch(args.mode, args.parts)
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        SessionTelemetry.get_instance().configure_context(repo, pr_number)
+    except Exception as telemetry_exc:
+        if telemetry_debug_enabled():
+            sys.stderr.write(f"Telemetry context setup failed: {telemetry_exc}\n")
     if producer is not None and producer not in VALID_PRODUCERS:
         print(
             f"Unsupported producer: {producer}\n"

@@ -2042,6 +2042,9 @@ def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        SessionTelemetry.get_instance().configure_context(parsed.repo, parsed.pr_number)
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))

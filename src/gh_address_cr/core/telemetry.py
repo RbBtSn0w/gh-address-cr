@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar
+
+from gh_address_cr.core import paths as core_paths
 
 
 def command_label(cmd: list[str]) -> str:
@@ -89,6 +93,8 @@ class SessionTelemetry:
 
     def __init__(self):
         self.metrics: list[ExecutionMetric] = []
+        self.telemetry_file: Path | None = None
+        self._loaded_files: set[Path] = set()
 
     @classmethod
     def get_instance(cls) -> SessionTelemetry:
@@ -99,6 +105,47 @@ class SessionTelemetry:
     @classmethod
     def reset(cls) -> None:
         cls._instance = None
+
+    def configure_context(self, repo: str, pr_number: str) -> None:
+        path = core_paths.workspace_dir(repo, pr_number) / "telemetry.jsonl"
+        self.configure_file(path)
+
+    def configure_file(self, path: Path) -> None:
+        self.telemetry_file = path
+        self._load_persisted_metrics(path)
+
+    def _load_persisted_metrics(self, path: Path) -> None:
+        if path in self._loaded_files or not path.is_file():
+            self._loaded_files.add(path)
+            return
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            metric = self._metric_from_payload(payload)
+            if metric is not None:
+                self.metrics.append(metric)
+        self._loaded_files.add(path)
+
+    @staticmethod
+    def _metric_from_payload(payload: object) -> ExecutionMetric | None:
+        if not isinstance(payload, dict):
+            return None
+        try:
+            return ExecutionMetric(
+                command=str(payload["command"]),
+                start_time=float(payload["start_time"]),
+                end_time=float(payload["end_time"]),
+                exit_code=int(payload["exit_code"]),
+                is_retry=bool(payload.get("is_retry", False)),
+                pid=int(payload.get("pid", 0)),
+                execution_id=str(payload.get("execution_id") or ""),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def record(
         self,
@@ -115,17 +162,24 @@ class SessionTelemetry:
             if last_metric.command == command and not last_metric.is_success:
                 is_retry = True
 
-        self.metrics.append(
-            ExecutionMetric(
-                command=command,
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_code,
-                is_retry=is_retry,
-                pid=pid if pid is not None else os.getpid(),
-                execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
-            )
+        metric = ExecutionMetric(
+            command=command,
+            start_time=start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+            is_retry=is_retry,
+            pid=pid if pid is not None else os.getpid(),
+            execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
         )
+        self.metrics.append(metric)
+        self._persist_metric(metric)
+
+    def _persist_metric(self, metric: ExecutionMetric) -> None:
+        if self.telemetry_file is None:
+            return
+        self.telemetry_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.telemetry_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(metric.to_dict(), sort_keys=True) + "\n")
 
     def evaluate_efficiency(self) -> list[str]:
         flags = []

@@ -1,5 +1,7 @@
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from gh_address_cr.core.telemetry import SessionTelemetry, command_label
@@ -148,6 +150,22 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(report.flagged_inefficiencies, [])
         self.assertEqual(report.metrics, [])
 
+    def test_metrics_persist_across_process_instances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+            tracker.record("pytest", 0, 2, 0)
+
+            SessionTelemetry.reset()
+            restored = SessionTelemetry.get_instance()
+            restored.configure_file(telemetry_file)
+            report = restored.get_report()
+
+        self.assertEqual(report.total_invocations, 1)
+        self.assertEqual(report.total_duration, 2.0)
+        self.assertEqual(report.metrics[0].command, "pytest")
+
     def test_metric_pid_and_execution_id(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("some cmd", 0, 1, 0, pid=12345, execution_id="exec-id-abc")
@@ -162,17 +180,28 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_run_cmd_timeout(self, mock_run):
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output="out", stderr="err")
-        
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err")
+
         from gh_address_cr.core.cr_loop import run_cmd
         res = run_cmd(["sleep", "10"], timeout=120.0)
-        
+
         self.assertEqual(res.returncode, 124)
+        self.assertEqual(res.stdout, "out")
+        self.assertIn("err", res.stderr)
         self.assertIn("Command timed out after 120.0 seconds.", res.stderr)
         
         tracker = SessionTelemetry.get_instance()
         self.assertEqual(len(tracker.metrics), 1)
         self.assertEqual(tracker.metrics[0].exit_code, 124)
+
+    @patch("subprocess.run")
+    def test_run_cmd_does_not_apply_default_timeout(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
+
+        from gh_address_cr.core.cr_loop import run_cmd
+        run_cmd(["ls"])
+
+        self.assertIsNone(mock_run.call_args.kwargs["timeout"])
 
     @patch("sys.stderr")
     @patch("gh_address_cr.core.telemetry.SessionTelemetry.record")
