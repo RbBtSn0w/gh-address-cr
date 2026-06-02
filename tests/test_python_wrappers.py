@@ -1,6 +1,9 @@
+import contextlib
+import io
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.helpers import (
     CLI_PY,
@@ -125,6 +128,41 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Supported commands:", result.stderr)
         self.assertNotIn("superpowers", result.stderr)
+
+    def test_cli_utility_handlers_treat_none_return_as_success(self):
+        import gh_address_cr.cli as cli
+        from gh_address_cr.commands import review_to_findings, submit_action, submit_feedback
+
+        cases = [
+            ("submit-action", submit_action, ["request.json", "--resolution", "fix", "--note", "done"]),
+            ("review-to-findings", review_to_findings, ["--input", "-"]),
+            ("submit-feedback", submit_feedback, ["--category", "workflow-gap", "--title", "t"]),
+        ]
+
+        for command, module, args in cases:
+            with self.subTest(command=command):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    patch.object(module, "main", return_value=None),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    rc = cli.main([command, *args])
+
+                self.assertEqual(rc, 0)
+
+    def test_python_helper_command_normalization_resolves_relative_paths(self):
+        command = [
+            sys.executable,
+            str(Path("src/gh_address_cr/commands/review_to_findings.py")),
+            "--help",
+        ]
+
+        normalized = self._normalize_python_module_command(command)
+
+        self.assertEqual(normalized[:3], [sys.executable, "-m", "gh_address_cr.commands.review_to_findings"])
+        self.assertEqual(normalized[3:], ["--help"])
 
     def test_cli_submit_feedback_passthrough_dry_run(self):
         result = self.run_cmd(

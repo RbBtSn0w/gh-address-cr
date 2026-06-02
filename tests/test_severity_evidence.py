@@ -1,6 +1,11 @@
 import unittest
 
-from gh_address_cr.core.severity import extract_review_priority_evidence, extract_severity_evidence, normalize_severity
+from gh_address_cr.core.severity import (
+    extract_review_priority_evidence,
+    extract_severity_evidence,
+    normalize_severity,
+    review_priority_for_publish,
+)
 
 
 class SeverityEvidenceTests(unittest.TestCase):
@@ -49,6 +54,10 @@ class SeverityEvidenceTests(unittest.TestCase):
         self.assertIsNone(normalize_severity(False))
         self.assertIsNone(normalize_severity(0))
         self.assertIsNone(normalize_severity(None))
+
+    def test_review_priority_for_publish_tolerates_missing_item(self):
+        self.assertEqual(review_priority_for_publish(None), (None, None))
+        self.assertEqual(review_priority_for_publish([]), (None, None))
 
 
 if __name__ == "__main__":

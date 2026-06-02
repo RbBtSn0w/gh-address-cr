@@ -112,7 +112,7 @@ class PythonScriptTestCase(unittest.TestCase):
     def _normalize_python_module_command(self, cmd):
         if len(cmd) < 2 or cmd[0] != sys.executable:
             return cmd
-        path = Path(cmd[1])
+        path = Path(cmd[1]).resolve()
         module_by_path = {
             CORE_DIR / "session_engine.py": "gh_address_cr.core.session_engine",
             CORE_DIR / "control_plane.py": "gh_address_cr.core.control_plane",

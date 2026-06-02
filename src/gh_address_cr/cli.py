@@ -2595,7 +2595,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd.append("--machine")
         if args.human:
             cmd.append("--human")
-        return int(submit_action_handler.main([*cmd, *args.args]))
+        rc = submit_action_handler.main([*cmd, *args.args])
+        return rc if rc is not None else 0
 
     if args.command == "review-to-findings":
         if args.machine or args.human:
@@ -2606,7 +2607,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from gh_address_cr.commands import review_to_findings as review_to_findings_handler
 
-        return int(review_to_findings_handler.main(args.args))
+        rc = review_to_findings_handler.main(args.args)
+        return rc if rc is not None else 0
 
     if args.command == "submit-feedback":
         if args.machine or args.human:
@@ -2617,7 +2619,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from gh_address_cr.commands import submit_feedback as submit_feedback_handler
 
-        return int(submit_feedback_handler.main(args.args))
+        rc = submit_feedback_handler.main(args.args)
+        return rc if rc is not None else 0
 
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:
         print(
