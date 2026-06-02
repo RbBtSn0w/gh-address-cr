@@ -307,5 +307,93 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(res.stderr, "")
         mock_stderr.write.assert_not_called()
 
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
+    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        response = {
+            "agent_id": "test-agent",
+            "resolution": "fix",
+            "note": "my fix note",
+            "validation_commands": [
+                {
+                    "command": "pytest tests/core --token ghp_secret",
+                    "result": "passed",
+                    "duration": 5.5
+                },
+                {
+                    "command": "ruff check src",
+                    "result": "failed",
+                    "start_time": 1000.0,
+                    "end_time": 1002.5
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "fixer"},
+            "item_id": "finding-1",
+            "item": {"item_kind": "local_finding"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+
+            # We should have 2 metrics recorded
+            self.assertEqual(len(tracker.metrics), 2)
+            
+            # First one: pytest tests/core --token ghp_secret (should be sanitized to pytest tests/core)
+            self.assertEqual(tracker.metrics[0].command, "pytest tests/core")
+            self.assertEqual(tracker.metrics[0].exit_code, 0)
+            self.assertAlmostEqual(tracker.metrics[0].duration, 5.5)
+
+            # Second one: ruff check src, exit_code 1, duration 2.5
+            self.assertEqual(tracker.metrics[1].command, "ruff check src")
+            self.assertEqual(tracker.metrics[1].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
+            self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
+            self.assertAlmostEqual(tracker.metrics[1].end_time, 1002.5)
+
+    @patch("subprocess.run")
+    def test_run_adapter_command_records_telemetry(self, mock_run):
+        from gh_address_cr.cli import _run_adapter_command
+        import tempfile
+        from pathlib import Path
+
+        mock_run.return_value = subprocess.CompletedProcess(args=["my-adapter"], returncode=0, stdout="findings JSON", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            stdout, error = _run_adapter_command(["my-adapter", "--fast"])
+
+            self.assertEqual(stdout, "findings JSON")
+            self.assertIsNone(error)
+            
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "my-adapter --fast")
+            self.assertEqual(tracker.metrics[0].exit_code, 0)
+
 if __name__ == "__main__":
+    from datetime import datetime, timezone
     unittest.main()

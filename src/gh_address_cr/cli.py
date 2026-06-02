@@ -849,6 +849,11 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict:
     except session_store.SessionError:
         session = manager.create(status="ACTIVE")
     _ensure_native_session_fields(session)
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+        SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
+    except Exception:
+        pass
     return session
 
 
@@ -1271,7 +1276,38 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
 def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if not argv:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
-    result = subprocess.run(argv, text=True, capture_output=True)
+    import time
+    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
+    start_time = time.time()
+    try:
+        result = subprocess.run(argv, text=True, capture_output=True)
+        end_time = time.time()
+        exit_code = result.returncode
+    except Exception as exc:
+        end_time = time.time()
+        exit_code = 1
+        try:
+            SessionTelemetry.get_instance().record(
+                command=command_label(argv),
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+            )
+        except Exception:
+            pass
+        return None, str(exc)
+
+    try:
+        SessionTelemetry.get_instance().record(
+            command=command_label(argv),
+            start_time=start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+        )
+    except Exception:
+        pass
+
     if result.returncode != 0:
         return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
     return result.stdout, None

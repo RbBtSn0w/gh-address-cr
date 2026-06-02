@@ -1660,6 +1660,46 @@ def _accept_action_response_submission(
         )
 
     _apply_response_to_item(item, response)
+
+    # FR-001/FR-002: Retrospectively record validation commands in telemetry.
+    validation_cmds = response.get("validation_commands") or []
+    if isinstance(validation_cmds, list):
+        try:
+            import shlex
+            import time
+            from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+            telemetry = SessionTelemetry.get_instance()
+            for val_cmd in _normalize_validation_command_records(validation_cmds):
+                cmd_name = val_cmd.get("command")
+                try:
+                    cmd_label = command_label(shlex.split(cmd_name))
+                except Exception:
+                    cmd_label = cmd_name
+                res = val_cmd.get("result", "passed")
+                exit_code = 0 if res in {"passed", "pass", "success", "succeeded", "ok"} else 1
+                dur = val_cmd.get("duration")
+                start = val_cmd.get("start_time")
+                end = val_cmd.get("end_time")
+
+                if start is not None and end is not None:
+                    start_val = float(start)
+                    end_val = float(end)
+                elif dur is not None:
+                    end_val = time.time()
+                    start_val = end_val - float(dur)
+                else:
+                    end_val = time.time()
+                    start_val = end_val
+
+                telemetry.record(
+                    command=cmd_label,
+                    start_time=start_val,
+                    end_time=end_val,
+                    exit_code=exit_code,
+                )
+        except Exception:
+            pass
+
     return ledger.append_event(
         session_id=str(session["session_id"]),
         item_id=item_id,
@@ -2169,24 +2209,36 @@ def _normalize_validation_commands(value: Any) -> list[str]:
     return commands
 
 
-def _normalize_validation_command_records(value: Any) -> list[dict[str, str]]:
+def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    commands: list[dict[str, str]] = []
+    commands: list[dict[str, Any]] = []
     for entry in value:
         if isinstance(entry, dict):
             command = str(entry.get("command") or "").strip()
             result = str(entry.get("result") or "").strip()
             summary = str(entry.get("summary") or "").strip()
+            duration = entry.get("duration")
+            start_time = entry.get("start_time")
+            end_time = entry.get("end_time")
         else:
             raw = str(entry or "").strip()
             command, result = _split_validation_command_record(raw)
             summary = ""
+            duration = None
+            start_time = None
+            end_time = None
         if not command or not result:
             continue
-        row = {"command": command, "result": result}
+        row: dict[str, Any] = {"command": command, "result": result}
         if summary:
             row["summary"] = summary
+        if duration is not None:
+            row["duration"] = duration
+        if start_time is not None:
+            row["start_time"] = start_time
+        if end_time is not None:
+            row["end_time"] = end_time
         commands.append(row)
     return commands
 
