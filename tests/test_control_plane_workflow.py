@@ -1043,6 +1043,45 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
 
+    def test_agent_fix_all_homogeneous_reason_compares_original_thread_bodies(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    body="Fixed in `abc123`.",
+                    first_body="Why does this branch skip nil validation?",
+                ),
+                github_thread(
+                    "github-thread:def",
+                    body="Fixed in `abc123`.",
+                    first_body="Can this log expose private data?",
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            "Both comments are covered by the same shared patch.",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
+        self.assertIn("distinct thread bodies", payload["next_action"])
+
     def test_agent_fix_all_input_rejects_common_only_reply_evidence(self):
         self.write_session(
             items=[
@@ -1661,6 +1700,64 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_batch_requires_item_specific_why(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    },
+                )
+            ]
+        )
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "batch-without-item-why.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/shared.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_shared", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "why": "A common rationale must not satisfy item-specific review evidence.",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "item_id": "github-thread:abc",
+                            "summary": "Fixed shared validation.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_BATCH_ITEM_WHY")
+        session = self.load_session()
+        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
+        self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
 
     def test_agent_submit_batch_rejects_mixed_invalid_item_without_partial_acceptance(self):
         self.write_session(

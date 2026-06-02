@@ -1150,7 +1150,7 @@ def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:
 
 
 def _normalized_thread_body(item: dict[str, Any]) -> str:
-    return " ".join(str(item.get("body") or "").split()).casefold()
+    return " ".join(str(item.get("first_body") or item.get("body") or "").split()).casefold()
 
 
 def _fast_fix_failed_row(item_id: str, exc: WorkflowError) -> dict[str, Any]:
@@ -1417,7 +1417,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
             _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
 
         summary = str(item.get("summary") or item_fix_reply.get("summary") or item.get("note") or "").strip()
-        why = str(item.get("why") or item_fix_reply.get("why") or summary).strip()
+        why = str(item.get("why") or item_fix_reply.get("why") or "").strip()
         note = str(item.get("note") or summary or why).strip()
         if not note:
             _raise_batch_schema_error("MISSING_BATCH_ITEM_NOTE", f"BatchActionResponse item {index} needs note or summary.")
@@ -1425,6 +1425,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
         files = _normalize_string_list(item.get("files") or item_fix_reply.get("files") or common_files)
         validation_commands = item.get("validation_commands") or common_validation
         fix_reply = dict(common_fix_reply)
+        fix_reply.pop("why", None)
         fix_reply.update(item_fix_reply)
         if common_commit_hash and not fix_reply.get("commit_hash"):
             fix_reply["commit_hash"] = common_commit_hash
