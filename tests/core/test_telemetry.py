@@ -1,4 +1,5 @@
 import subprocess
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -127,6 +128,18 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(label, "'custom tool' 'sub command'")
         self.assertNotIn("value", label)
 
+    def test_command_label_skips_flag_values_and_sensitive_tokens(self):
+        label = command_label([
+            "curl",
+            "-H",
+            "Authorization: Bearer ghp_secret",
+            "https://api.github.com/user",
+        ])
+        self.assertEqual(label, "curl")
+        self.assertNotIn("Bearer", label)
+        self.assertNotIn("ghp_secret", label)
+        self.assertNotIn("https://", label)
+
     def test_json_serialization(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("cmd", 0, 1, 0)
@@ -149,6 +162,60 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(report.success_rate, 0.0)
         self.assertEqual(report.flagged_inefficiencies, [])
         self.assertEqual(report.metrics, [])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.workspace_dir")
+    def test_configure_context_resets_metrics(self, workspace_dir):
+        first_payload = {
+            "command": "pytest",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "duration": 1.0,
+            "exit_code": 0,
+            "is_success": True,
+            "is_retry": False,
+            "pid": 1234,
+            "execution_id": "first-run",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_dir = Path(tmp) / "owner__repo" / "pr-77"
+            telemetry_file = telemetry_dir / "telemetry.jsonl"
+            telemetry_file.parent.mkdir(parents=True, exist_ok=True)
+            telemetry_file.write_text(json.dumps(first_payload) + "\n", encoding="utf-8")
+
+            workspace_dir.return_value = telemetry_dir
+            tracker = SessionTelemetry.get_instance()
+            tracker.record("leftover", 10.0, 11.0, 0)
+            tracker.configure_context("owner/repo", "77")
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "pytest")
+
+            second_dir = Path(tmp) / "owner__repo" / "pr-78"
+            second_file = second_dir / "telemetry.jsonl"
+            second_file.parent.mkdir(parents=True, exist_ok=True)
+            second_file.write_text(
+                json.dumps({**first_payload, "command": "ruff", "execution_id": "second-run"}) + "\n",
+                encoding="utf-8",
+            )
+
+            workspace_dir.return_value = second_dir
+            tracker.configure_context("owner/repo", "78")
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "ruff")
+
+    def test_display_command_only_uses_ellipsis_if_needed(self):
+        tracker = SessionTelemetry.get_instance()
+        tracker.record("short cmd", 0, 1, 124)
+        short_flags = tracker.get_report().flagged_inefficiencies
+        self.assertTrue(any("`short cmd` hit execution timeout (hung)." in flag for flag in short_flags))
+        self.assertFalse(any("`" + "short cmd" + "..." in flag for flag in short_flags))
+
+        SessionTelemetry.reset()
+        tracker = SessionTelemetry.get_instance()
+        tracker.record("x" * 55, 0, 1, 124)
+        long_flags = tracker.get_report().flagged_inefficiencies
+        self.assertTrue(any("`" + "x" * 50 + "...` hit execution timeout (hung)." in flag for flag in long_flags))
 
     def test_metrics_persist_across_process_instances(self):
         with tempfile.TemporaryDirectory() as tmp:

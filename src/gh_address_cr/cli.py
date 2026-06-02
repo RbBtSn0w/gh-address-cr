@@ -2180,8 +2180,8 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
         return 5
 
-    _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
-    _emit_final_gate_result(result)
+    summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
+    _emit_final_gate_result(result, summary_path=summary_path)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
@@ -2191,7 +2191,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     return 0
 
 
-def _emit_final_gate_result(result: core_gate.GateResult) -> None:
+def _emit_final_gate_result(result: core_gate.GateResult, *, summary_path: Path | None = None) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
     print(f"Pending review count: {result.counts['pending_current_login_review_count']}")
@@ -2219,6 +2219,13 @@ def _emit_final_gate_result(result: core_gate.GateResult) -> None:
         print(f"{key}={result.counts[key]}")
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
+    if summary_path is not None:
+        print(f"Audit summary path: {summary_path}")
+        try:
+            summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        except Exception:
+            summary_sha256 = "unavailable"
+        print(f"Audit summary sha256: {summary_sha256}")
 
 
 def _write_native_final_gate_artifacts(
@@ -2226,7 +2233,7 @@ def _write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> None:
+) -> Path:
     workspace = session_store.workspace_dir(repo, pr_number)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
@@ -2284,6 +2291,7 @@ def _write_native_final_gate_artifacts(
     for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return summary_path
 
 
 def _final_gate_failure_message(result: core_gate.GateResult) -> str:

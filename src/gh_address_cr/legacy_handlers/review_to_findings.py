@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from gh_address_cr.intake.findings import parse_finding_blocks
+from gh_address_cr.intake.findings import FindingsFormatError
 from gh_address_cr.legacy_handlers.python_common import findings_file
 
 
@@ -38,7 +39,11 @@ def main() -> int:
     parser.add_argument("pr_number")
     args = parser.parse_args()
 
-    findings = parse_findings(load_payload(args.input))
+    try:
+        findings = parse_findings(load_payload(args.input))
+    except FindingsFormatError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     if args.output == "-":
         output_path = None

@@ -18,14 +18,22 @@ def command_label(cmd: list[str]) -> str:
 
     label_tokens = [os.path.basename(cmd[0]) or cmd[0]]
     index = 1
+    previous_was_flag = False
     if len(cmd) > 2 and label_tokens[0].startswith("python") and cmd[1] == "-m":
         label_tokens.extend(["-m", cmd[2]])
         index = 3
+        previous_was_flag = False
 
     for token in cmd[index:]:
         if token == "--":
             break
         if token.startswith("-"):
+            previous_was_flag = True
+            continue
+        if previous_was_flag:
+            previous_was_flag = False
+            continue
+        if ":" in token:
             continue
         if "/" in token or "\\" in token or "=" in token:
             continue
@@ -107,6 +115,8 @@ class SessionTelemetry:
         cls._instance = None
 
     def configure_context(self, repo: str, pr_number: str) -> None:
+        self.metrics.clear()
+        self._loaded_files.clear()
         path = core_paths.workspace_dir(repo, pr_number) / "telemetry.jsonl"
         self.configure_file(path)
 
@@ -186,12 +196,19 @@ class SessionTelemetry:
         if not self.metrics:
             return flags
 
+        def _display_command(command: str) -> str:
+            if len(command) > 50:
+                return f"{command[:50]}..."
+            return command
+
         # 1. Individual Duration check
         for m in self.metrics:
             if m.duration > MAX_DURATION_SECONDS:
-                flags.append(f"`{m.command[:50]}...` took {m.duration:.1f}s (Exceeds {int(MAX_DURATION_SECONDS)}s threshold).")
+                flags.append(
+                    f"`{_display_command(m.command)}` took {m.duration:.1f}s (Exceeds {int(MAX_DURATION_SECONDS)}s threshold)."
+                )
             if m.exit_code == 124:
-                flags.append(f"CRITICAL: `{m.command[:50]}...` hit execution timeout (hung).")
+                flags.append(f"CRITICAL: `{_display_command(m.command)}` hit execution timeout (hung).")
 
         # 2. Global Error Rate check
         total_inv = len(self.metrics)
@@ -227,7 +244,7 @@ class SessionTelemetry:
             if count >= 1:
                 retry_word = "retry" if count == 1 else "retries"
                 flags.append(
-                    f"`{cmd[:50]}...` ran {count + 1} times consecutively with {count} {retry_word} (High Retry Rate)."
+                    f"`{_display_command(cmd)}` ran {count + 1} times consecutively with {count} {retry_word} (High Retry Rate)."
                 )
 
         return flags

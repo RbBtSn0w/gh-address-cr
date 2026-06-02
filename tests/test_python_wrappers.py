@@ -2330,6 +2330,7 @@ body: Missing title should fail.
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must include a title", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_code_review_adapter_normalizes_findings(self):
         payload = json.dumps(
@@ -2979,6 +2980,8 @@ else:
             [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Audit summary path:", result.stdout)
+        self.assertIn("Audit summary sha256:", result.stdout)
 
         report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "native-run", self.repo, self.pr])
 
