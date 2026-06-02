@@ -75,6 +75,8 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("adapter", result.stdout)
         self.assertIn("review-to-findings", result.stdout)
         self.assertIn("gh-address-cr review", result.stdout)
+        self.assertIn("--input batch-response.json", result.stdout)
+        self.assertIn("--homogeneous-reason <why>", result.stdout)
         self.assertNotIn("superpowers", result.stdout)
         self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
@@ -450,7 +452,11 @@ else:
                 "submit_batch": f"gh-address-cr agent submit-batch {self.repo} {self.pr} --input batch-response.json",
                 "fix_all": (
                     f"gh-address-cr agent fix-all {self.repo} {self.pr} "
-                    "--commit <sha> --files <paths> --validation <cmd=passed>"
+                    "--input batch-response.json"
+                ),
+                "fix_all_homogeneous": (
+                    f"gh-address-cr agent fix-all {self.repo} {self.pr} "
+                    "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
                 ),
                 "resolve_stale": (
                     f"gh-address-cr agent resolve-stale {self.repo} {self.pr} "
@@ -462,6 +468,8 @@ else:
         )
         self.assertNotIn("scripts/cli.py", json.dumps(request))
         self.assertIn("submit-batch", request["commands"]["submit_batch"])
+        self.assertIn("--input batch-response.json", request["commands"]["fix_all"])
+        self.assertIn("--homogeneous-reason", request["commands"]["fix_all_homogeneous"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
     def test_cli_threads_lean_omits_verbose_thread_context(self):

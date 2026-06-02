@@ -20,6 +20,7 @@ from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_CLAIMABLE_STATES,
     is_claimable_github_thread,
     is_github_thread_item,
+    is_stale_or_outdated_github_thread,
     is_stale_github_thread_item,
     returned_claimable_state,
 )
@@ -48,6 +49,8 @@ from gh_address_cr.github.errors import GitHubError
 MUTATING_ROLES = {"fixer"}
 TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
+FIX_ALL_STALE_ROUTE_REASON = "STALE_THREADS_REQUIRE_RESOLVE_STALE"
 
 
 class WorkflowError(RuntimeError):
@@ -504,6 +507,39 @@ def submit_batch_action_response(
     }
 
 
+def fast_fix_from_batch_input(
+    repo: str,
+    pr_number: str,
+    *,
+    batch_path: str | Path,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    submitted = submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=now)
+    payload = {
+        "status": "FAST_FIX_ALL_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "submit": submitted,
+        "accepted_count": int(submitted.get("accepted_count") or 0),
+        "item_ids": submitted.get("item_ids") or [],
+        "next_action": submitted["next_action"],
+    }
+    if publish:
+        published = publish_github_thread_responses(
+            repo,
+            pr_number,
+            github_client=github_client,
+            agent_id="gh-address-cr-publisher",
+            now=now,
+        )
+        payload["status"] = "FAST_FIX_ALL_COMPLETE"
+        payload["publish"] = published
+        payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+    return payload
+
+
 def record_evidence_profile(
     repo: str,
     pr_number: str,
@@ -785,6 +821,8 @@ def fast_fix_matching_threads(
     stale_only: bool = False,
     severity: str | None = None,
     severity_note: str | None = None,
+    homogeneous_reason: str | None = None,
+    concern_label: str | None = None,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -825,6 +863,8 @@ def fast_fix_matching_threads(
         status=rejected_status,
         waiting_on=input_waiting_on,
     )
+    normalized_homogeneous_reason = str(homogeneous_reason or "").strip()
+    normalized_concern_label = str(concern_label or "").strip()
 
     session = session_store.load_session(repo, pr_number)
     github_items = [
@@ -856,6 +896,34 @@ def fast_fix_matching_threads(
             message="No matching claimable GitHub review threads were found for the supplied files.",
             payload={"files": sorted(normalized_file_set)},
         )
+    if not stale_only and any(is_stale_or_outdated_github_thread(item) for item in matches):
+        next_action = (
+            f"Use `gh-address-cr agent resolve-stale {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files` "
+            "for stale or outdated GitHub review threads."
+        )
+        raise WorkflowError(
+            status=rejected_status,
+            reason_code=FIX_ALL_STALE_ROUTE_REASON,
+            waiting_on="stale_resolution_input",
+            exit_code=4,
+            message=next_action,
+            payload={"matched_count": len(matches), "files": sorted(normalized_file_set)},
+        )
+    if not stale_only and not normalized_homogeneous_reason:
+        next_action = (
+            f"Use `gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json` "
+            "with per-thread summary/why entries, or rerun fix-all with `--homogeneous-reason <why>` "
+            "only for a homogeneous repeated concern."
+        )
+        raise WorkflowError(
+            status=rejected_status,
+            reason_code=FIX_ALL_PER_THREAD_EVIDENCE_REASON,
+            waiting_on="batch_action_response",
+            exit_code=4,
+            message=next_action,
+            payload={"matched_count": len(matches), "files": sorted(normalized_file_set)},
+        )
 
     accepted_count = 0
     batches: list[dict[str, Any]] = []
@@ -865,7 +933,16 @@ def fast_fix_matching_threads(
         batch_responses: list[dict[str, Any]] = []
         for item in batch_items:
             item_id = str(item["item_id"])
-            why = _fast_fix_why(commit_hash, normalized_files, stale=bool(is_stale_github_thread_item(item)))
+            why = normalized_homogeneous_reason or _fast_fix_why(
+                commit_hash,
+                normalized_files,
+                stale=bool(is_stale_github_thread_item(item)),
+            )
+            summary = (
+                f"Addressed repeated review concern for {item_id}."
+                if normalized_homogeneous_reason
+                else f"Fixed {item_id} in {commit_hash.strip()}."
+            )
             try:
                 if normalized_severity:
                     _validate_severity_override_note(
@@ -900,7 +977,7 @@ def fast_fix_matching_threads(
                     "item_id": item_id,
                     "request_id": requested["resume_token"].removeprefix("resume:"),
                     "lease_id": requested["lease_id"],
-                    "summary": f"Fixed {item_id} in {commit_hash.strip()}.",
+                    "summary": summary,
                     "why": why,
                 }
             )
@@ -909,7 +986,11 @@ def fast_fix_matching_threads(
         batch_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-all-batch-{uuid4().hex}.json"
         common_fix_reply = {
             "commit_hash": commit_hash.strip(),
-            "summary": f"Fixed related GitHub review threads in {commit_hash.strip()}.",
+            "summary": (
+                f"Addressed homogeneous repeated review concern: {normalized_concern_label}."
+                if normalized_concern_label
+                else f"Fixed related GitHub review threads in {commit_hash.strip()}."
+            ),
             "files": normalized_files,
         }
         if normalized_severity:
@@ -1287,7 +1368,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
             fix_reply["commit_hash"] = common_commit_hash
         if files:
             fix_reply["files"] = files
-        if summary and not fix_reply.get("summary"):
+        if summary:
             fix_reply["summary"] = summary
         if why:
             fix_reply["why"] = why

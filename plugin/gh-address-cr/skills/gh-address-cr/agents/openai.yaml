@@ -7,7 +7,8 @@ interface:
     1. The `gh-address-cr` runtime CLI is the only execution surface. Stateful work belongs to the external `gh-address-cr` runtime.
     2. Start with `gh-address-cr review <owner/repo> <pr_number>` or `gh-address-cr address <owner/repo> <pr_number>`.
     3. For multi-agent work, inspect `gh-address-cr agent manifest`, claim with `agent next`, fill `response_skeleton_path`, submit evidence with `agent submit` or GitHub-thread batch evidence with `agent submit-batch`, reuse evidence with `agent evidence add` when appropriate, inspect with `agent leases`, and recover stale claims with `agent reclaim`.
-    4. GitHub review comment reply tasks are not complete when a reply is drafted. Submit the `ActionResponse` with `gh-address-cr agent submit` or the `BatchActionResponse` with `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish`.
+    4. GitHub review comment reply tasks are not complete when a reply is drafted. Submit the `ActionResponse` with `gh-address-cr agent submit` or the `BatchActionResponse` with `gh-address-cr agent submit-batch`, preserving per-thread summary/why, then run `gh-address-cr agent publish`.
+    4a. Use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern; mixed reviewer questions need per-thread batch evidence.
     5. AI agents may classify, fix, clarify, defer, reject, or verify. They must not post GitHub replies or resolve threads directly.
     6. GitHub review threads require both reply and resolve, with durable reply evidence from the current authenticated login.
     7. Local findings require valid terminal notes and validation evidence.

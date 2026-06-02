@@ -212,6 +212,85 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertIn("thread_resolved", event_types)
                 self.assertIn("response_published", event_types)
 
+    def test_publish_mixed_review_threads_posts_distinct_targeted_replies(self):
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((thread_id, body))
+                return f"https://github.test/reply/{thread_id}"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        first = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "body": "Why does this branch skip nil validation?",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "fix",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_shared", "result": "passed"}],
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/shared.py"],
+                    "summary": "Restored nil validation.",
+                    "why": "The nil-validation branch now rejects missing values before use.",
+                },
+            },
+        }
+        second = {
+            "item_id": "github-thread:THREAD_2",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_2",
+            "body": "Can this log expose private data?",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "fix",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_shared", "result": "passed"}],
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/shared.py"],
+                    "summary": "Redacted private log data.",
+                    "why": "The logging path now omits the sensitive token mentioned in this thread.",
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, first)
+                session = manager.load()
+                session["items"][second["item_id"]] = second
+                manager.save(session)
+                client = FakeGitHubClient()
+
+                result = workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(result["published_count"], 2)
+                self.assertEqual(len(client.replies), 2)
+                first_body = client.replies[0][1]
+                second_body = client.replies[1][1]
+                self.assertNotEqual(first_body, second_body)
+                self.assertIn("The nil-validation branch now rejects missing values before use.", first_body)
+                self.assertIn("The logging path now omits the sensitive token mentioned in this thread.", second_body)
+
     def test_submit_action_response_with_publish_posts_and_resolves_thread(self):
         from gh_address_cr.core import workflow
 

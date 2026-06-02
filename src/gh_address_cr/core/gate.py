@@ -517,9 +517,11 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "address": f"gh-address-cr address {repo} {pr_number} --lean",
         "publish": f"gh-address-cr agent publish {repo} {pr_number}",
         "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
-        "fix_all": (
+        "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
+        "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
+        "fix_all_homogeneous": (
             f"gh-address-cr agent fix-all {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed>"
+            "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
         ),
         "resolve_stale": (
             f"gh-address-cr agent resolve-stale {repo} {pr_number} "

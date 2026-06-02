@@ -34,7 +34,8 @@ Agent protocol commands:
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
 /gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
 /gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
-/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed>
+/gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json>
+/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
 /gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files
 /gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>
 /gh-address-cr agent publish <owner/repo> <pr_number>
@@ -91,7 +92,7 @@ If the runtime is missing, execution must fail loudly before session mutation. D
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely. For shared commit/files/validation evidence, keep per-thread summary/why entries in the batch; use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern.
 
 If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
 

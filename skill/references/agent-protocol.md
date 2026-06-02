@@ -33,13 +33,15 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
-  - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common commit/files/validation evidence.
+  - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common commit/files/validation evidence while preserving per-thread summary/why.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
 - `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix.
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish] [--include-stale]`
-  - Classifies, claims, and submits safe batches for matching GitHub-thread items already present in the runtime session.
+- `gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json> [--publish]`
+  - Routes explicit per-thread batch evidence through the same lease and validation contract as `agent submit-batch`.
+- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
+  - Classifies, claims, and submits the homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session.
 - `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
@@ -63,6 +65,6 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent fix-all` when one commit/files/validation set addresses multiple already-synced GitHub threads.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent submit-batch` when one commit/files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Use `agent fix-all` only with `--input <batch-response.json>` or with `--homogeneous-reason <why>` for a homogeneous repeated concern.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.
