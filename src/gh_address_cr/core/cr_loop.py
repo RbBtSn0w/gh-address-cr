@@ -17,7 +17,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
 
 
 COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
@@ -642,11 +642,14 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
                 sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
             efficiency_summary = None
 
+        review_priority, review_priority_note = review_priority_for_publish(item)
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=str(fix_reply.get("summary") or "").strip() or None,
             efficiency_summary=efficiency_summary,
+            review_priority=review_priority,
+            review_priority_note=review_priority_note,
         )
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."

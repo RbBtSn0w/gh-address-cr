@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 import unittest
-from unittest import mock
 from pathlib import Path
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
@@ -42,125 +41,18 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertTrue((RUNTIME_PACKAGE_DIR / "cli.py").exists())
         self.assertIn(RUNTIME_VERSION, result.stdout)
 
-    def test_installed_runtime_carries_legacy_command_scripts(self):
+    def test_installed_runtime_does_not_carry_legacy_command_scripts(self):
         install_root = Path(self.temp_dir.name) / "installed"
         shutil.copytree(RUNTIME_PACKAGE_DIR, install_root / "gh_address_cr")
-        env = self.env.copy()
-        env["PYTHONPATH"] = str(install_root)
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import gh_address_cr.cli as cli\n"
-                    "result = cli.run_script('session_engine.py', ['--help'])\n"
-                    "print(result.returncode)\n"
-                    "print(result.stdout)\n"
-                ),
-            ],
-            text=True,
-            capture_output=True,
-            cwd=self.cwd,
-            env=env,
-        )
+        self.assertFalse((install_root / "gh_address_cr" / "legacy_scripts").exists())
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertEqual(lines[0], "0")
-        self.assertIn("usage:", result.stdout)
-
-    def test_runtime_dispatcher_invokes_legacy_command_in_process(self):
+    def test_runtime_cli_has_no_legacy_script_dispatcher(self):
         import gh_address_cr.cli as cli
 
-        with mock.patch("gh_address_cr.cli.subprocess.run", side_effect=AssertionError("subprocess dispatch forbidden")):
-            result = cli.run_script("review_to_findings.py", ["--help"])
-
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("usage:", result.stdout)
-
-    def test_runtime_dispatcher_preserves_system_exit_string_errors(self):
-        import gh_address_cr.cli as cli
-
-        result = cli.run_script("control_plane.py", ["remote"])
-
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "remote expects: <owner/repo> <pr_number>\n")
-
-    def test_runtime_dispatcher_exposes_runtime_import_root_to_nested_python_processes(self):
-        import gh_address_cr.cli as cli
-
-        captured = {}
-
-        class FakeLegacyModule:
-            @staticmethod
-            def main():
-                captured["pythonpath"] = os.environ.get("PYTHONPATH", "")
-                captured["sys_path"] = list(sys.path)
-                return 0
-
-        previous_pythonpath = os.environ.pop("PYTHONPATH", None)
-        original_sys_path = list(sys.path)
-        try:
-            script_dir = str(Path(cli.__file__).resolve().parent / "legacy_scripts")
-            sys.path.append(script_dir)
-            with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
-                result = cli.run_script("control_plane.py", [])
-            restored_pythonpath = os.environ.get("PYTHONPATH")
-            restored_sys_path = list(sys.path)
-        finally:
-            sys.path[:] = original_sys_path
-            if previous_pythonpath is None:
-                os.environ.pop("PYTHONPATH", None)
-            else:
-                os.environ["PYTHONPATH"] = previous_pythonpath
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(str(Path(cli.__file__).resolve().parents[1]), captured["pythonpath"].split(os.pathsep))
-        self.assertEqual(captured["sys_path"][0], script_dir)
-        self.assertEqual(restored_pythonpath, previous_pythonpath)
-        self.assertEqual(restored_sys_path, original_sys_path + [script_dir])
-
-    def test_runtime_dispatcher_does_not_swallow_keyboard_interrupt(self):
-        import gh_address_cr.cli as cli
-
-        class FakeLegacyModule:
-            @staticmethod
-            def main():
-                raise KeyboardInterrupt
-
-        with mock.patch("gh_address_cr.cli.importlib.import_module", return_value=FakeLegacyModule):
-            with self.assertRaises(KeyboardInterrupt):
-                cli.run_script("control_plane.py", [])
-
-
-
-    def test_session_engine_legacy_script_is_thin_native_delegate(self):
-        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "session_engine.py"
-        text = legacy_script.read_text(encoding="utf-8")
-
-        self.assertIn("from gh_address_cr.core.session_engine import main", text)
-        self.assertNotIn("def default_session", text)
-        self.assertNotIn("def load_session", text)
-        self.assertNotIn("from python_common import", text)
-
-    def test_cr_loop_legacy_script_is_thin_native_delegate(self):
-        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "cr_loop.py"
-        text = legacy_script.read_text(encoding="utf-8")
-
-        self.assertIn("from gh_address_cr.core.cr_loop import main", text)
-        self.assertNotIn("def handle_batch", text)
-        self.assertNotIn("import session_engine as engine", text)
-        self.assertNotIn("from python_common import", text)
-
-    def test_control_plane_legacy_script_is_thin_native_delegate(self):
-        legacy_script = RUNTIME_PACKAGE_DIR / "legacy_scripts" / "control_plane.py"
-        text = legacy_script.read_text(encoding="utf-8")
-
-        self.assertIn("from gh_address_cr.core.control_plane import main", text)
-        self.assertNotIn("def run_or_return", text)
-        self.assertNotIn("from python_common import", text)
+        self.assertFalse(hasattr(cli, "COMMAND_TO_SCRIPT"))
+        self.assertFalse(hasattr(cli, "SCRIPT_DIR"))
+        self.assertFalse(hasattr(cli, "run_script"))
 
     def test_native_session_engine_exposes_legacy_cli_contract(self):
         env = self.env.copy()
@@ -262,7 +154,6 @@ class RuntimePackagingTest(PythonScriptTestCase):
             ("adapter", "--help"),
             ("review-to-findings", "--help"),
             ("final-gate", "--help"),
-            ("cr-loop", "--help"),
         ]
 
         for command in commands:
@@ -271,6 +162,18 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("usage:", result.stdout)
 
+    def test_legacy_root_commands_fail_without_session_mutation(self):
+        legacy_commands = ["cr-loop", "session-engine", "clean-state"]
+
+        for command in legacy_commands:
+            with self.subTest(command=command):
+                result = self.run_runtime_module(command, "--help")
+
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("unsupported legacy command", result.stderr.lower())
+                self.assertIn("gh-address-cr review", result.stderr)
+                self.assertFalse(self.session_file().exists())
+
     def test_agent_manifest_outputs_runtime_capabilities(self):
         result = self.run_runtime_module("agent", "manifest")
 
@@ -278,6 +181,11 @@ class RuntimePackagingTest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "MANIFEST_READY")
         self.assertIn("address", payload["public_commands"])
+        self.assertIn("review-to-findings", payload["public_commands"])
+        self.assertIn("submit-feedback", payload["public_commands"])
+        self.assertIn("agent", payload["public_commands"])
+        self.assertIn("version", payload["public_commands"])
+        self.assertNotIn("superpowers", payload["public_commands"])
         validate_capability_manifest(payload)
         self.assertIn("coordinator", payload["roles"])
         self.assertIn("triage", payload["roles"])

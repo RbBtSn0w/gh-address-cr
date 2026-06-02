@@ -6,8 +6,8 @@
        [ Start PR Review Session ]
                    |
                    v
-+-------------------------------------+      (Fetch PR threads, exclude handled)
-|          1. gh-address-cr run-once             | <-----------------------------------------+
++-------------------------------------+      (Fetch PR threads, sync session)
+| 1. gh-address-cr address or gh-address-cr review | <---------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
                    v [Generates Snapshot, Syncs Session, Lists Work]              |
@@ -29,21 +29,17 @@
          |                   |                       |                            |
          v                   v                       v                            |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
-| 4a. generate_   | | 4b. generate_   |     | 4c. generate_   |                   |
-|    reply     | |    reply     |     |    reply     |                   |
-|    --mode fix   | |  --mode clarify |     |   --mode defer  |                   |
+| 4a. agent       | | 4b. submit-    |     | 4c. submit-    |                   |
+|     fix/submit  | |     action     |     |     action     |                   |
+|     evidence    | |     clarify    |     |     defer      |                   |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
          |                   |                       |                            |
          +---------+---------+-----------------------+                            |
                    |                                                              |
                    v [Generates reply markdown in the PR workspace]               |
                    |                                                              |
-+------------------+------------------+      (GitHub API: Reply)                  |
-|         5. gh-address-cr post-reply            |                                           |
-+------------------+------------------+                                           |
-                   |                                                              |
-+------------------+------------------+      (MANDATORY for all paths)            |
-|       6. gh-address-cr resolve-thread          |      (Local state marked 'Handled')       |
++------------------+------------------+      (GitHub API: Reply + Resolve)        |
+|         5. gh-address-cr agent publish         |                                           |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (HARD GATE: Re-fetch GitHub state)   |
@@ -90,10 +86,8 @@ Do not stretch the PR just to silence a thread. If the item is valid but not app
 ## Quick usage after installation
 
 ```bash
-gh-address-cr run-once --audit-id run-YYYYMMDD owner/repo 123
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
-gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
+gh-address-cr review owner/repo 123
+gh-address-cr adapter owner/repo 123 ./adapter.sh
 gh-address-cr submit-action <loop_request_path> --resolution fix --note "Fixed it" -- <resume_command>
 gh-address-cr submit-action <action-request.json> --agent-id codex-fixer-1 --resolution fix --note "Fixed it" --files src/example.py --validation-cmd "python3 -m unittest tests.test_example=passed"
 gh-address-cr final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
@@ -111,20 +105,19 @@ Use this when the PR already has remote review threads and there is no local AI 
 Example:
 
 ```bash
-gh-address-cr run-once --audit-id run-20260412 owner/repo 123
+gh-address-cr address owner/repo 123 --lean
 
 # inspect one unresolved GitHub thread
-gh-address-cr generate-reply --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
-gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit abc123 --files src/app.py --summary "Added the missing guard." --why "Accepted reviewer finding." --validation "python3 -m unittest=passed" --severity P2
+gh-address-cr agent publish owner/repo 123
 
 gh-address-cr final-gate --auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
 
-- GitHub thread items require both `gh-address-cr post-reply` and `gh-address-cr resolve-thread`
-- `gh-address-cr resolve-thread` rejects silent resolve attempts when reply evidence is missing
+- GitHub thread items require both a submitted response and `gh-address-cr agent publish`
+- `gh-address-cr agent publish` records reply evidence before resolving handled threads
 - outdated / `STALE` GitHub threads still count as unresolved until explicitly handled
 - `gh-address-cr final-gate` must pass before completion and now fails if a terminal GitHub thread has no reply evidence
 
@@ -135,23 +128,24 @@ Use this when the review comment is not accepted as a code change and you need t
 Clarify example:
 
 ```bash
-gh-address-cr generate-reply --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
-gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr submit-action <action-request.json> --resolution clarify --note "Initialization must stay lazy." --reply-markdown "The current control flow is intentional because initialization must stay lazy."
+gh-address-cr agent submit owner/repo 123 --input <action-response.json>
+gh-address-cr agent publish owner/repo 123
 ```
 
 Defer example:
 
 ```bash
-gh-address-cr generate-reply --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
-gh-address-cr post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-gh-address-cr resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+gh-address-cr submit-action <action-request.json> --resolution defer --note "Deferred to a follow-up PR." --reply-markdown "This requires broader refactoring and is deferred to a follow-up PR."
+gh-address-cr agent submit owner/repo 123 --input <action-response.json>
+gh-address-cr agent publish owner/repo 123
 ```
 
 Rules:
 
 - even without code changes, GitHub thread items still require reply plus resolve
 - defer/clarify should carry rationale, not just a status change
+- `submit-action` output must be submitted back to the session before `agent publish`
 - low-level resolve paths are intentionally blocked until reply evidence exists in the session or the same action posts a fresh reply
 
 ### Mode 3: Local Finding Only
@@ -161,13 +155,10 @@ Use this when you want to run local AI review without waiting for GitHub or Copi
 Example:
 
 ```bash
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
 
-gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding --status OPEN
-gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
-gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
-gh-address-cr session-engine update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
-gh-address-cr session-engine close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Implemented fix." --why "Confirmed locally." --validation "python3 -m unittest=passed"
 
 gh-address-cr final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
@@ -185,11 +176,11 @@ Use this when the PR has both remote GitHub threads and local AI findings.
 Example:
 
 ```bash
-gh-address-cr run-once --audit-id run-20260412 owner/repo 123
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+gh-address-cr review owner/repo 123
+gh-address-cr adapter owner/repo 123 ./adapter.sh
 
 # process GitHub items with reply + resolve
-# process local items through gh-address-cr session-engine transitions
+# process local items through gh-address-cr agent transitions
 
 gh-address-cr final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
@@ -200,25 +191,25 @@ Rules:
 - local items need valid state transitions and notes
 - the PR is not clear until both session blocking count and unresolved GitHub thread count are zero
 
-### Mode 5: Publish Local Finding Back To GitHub
+### Mode 5: Handle Local Finding In Session
 
-Use this when a locally discovered issue should become visible in the GitHub PR discussion.
+Use this when a locally discovered issue should be fixed and closed inside the PR session.
 
 Example:
 
 ```bash
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
-gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding --status OPEN
+gh-address-cr adapter owner/repo 123 ./adapter.sh
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 
-gh-address-cr publish-finding --repo owner/repo --pr 123 local-finding:FINGERPRINT
-gh-address-cr run-once --audit-id run-20260412 owner/repo 123
+gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Fixed local finding." --why "Confirmed locally." --validation "python3 -m unittest=passed"
+gh-address-cr final-gate --no-auto-clean owner/repo 123
 ```
 
 What happens:
 
-- the local finding is published as a GitHub review comment
-- later GitHub sync can associate the local finding with the resulting thread
-- from that point onward, the issue can be handled like a normal GitHub review item
+- the local finding is recorded with fix evidence in the PR session
+- no GitHub review reply is posted for local-only findings
+- `agent publish` is reserved for accepted GitHub review-thread responses
 
 ### Mode 6: Direct Session Engine / Unified CLI
 
@@ -227,13 +218,14 @@ Use this when you need low-level session control or when integrating the skill i
 Examples:
 
 ```bash
-gh-address-cr run-once owner/repo 123
+gh-address-cr review owner/repo 123
+gh-address-cr address owner/repo 123 --lean
 gh-address-cr final-gate --no-auto-clean owner/repo 123
-gh-address-cr session-engine list-items owner/repo 123 --item-kind local_finding
-gh-address-cr session-engine reclaim-stale-claims owner/repo 123
+gh-address-cr agent leases owner/repo 123
+gh-address-cr agent reclaim owner/repo 123
 ```
 
 Rules:
 
 - `gh-address-cr` is the preferred and stable automation entrypoint
-- low-level resolve helpers are stricter than before: `resolve-thread` and batch resolve flows refuse resolve-only handling when reply evidence is absent
+- `gh-address-cr agent publish` records reply evidence before resolving handled GitHub threads

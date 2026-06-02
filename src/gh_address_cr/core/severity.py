@@ -104,3 +104,16 @@ def first_scene_item_severity(item: dict[str, Any]) -> str | None:
     if not isinstance(evidence, dict):
         return None
     return normalize_severity(evidence.get("value"))
+
+
+def review_priority_for_publish(item: dict[str, Any]) -> tuple[str | None, str | None]:
+    evidence = item.get("review_priority_evidence")
+    if not isinstance(evidence, dict):
+        return None, None
+    priority = str(evidence.get("value") or "").strip().lower()
+    if priority not in {"high", "medium", "low"}:
+        return None, None
+    source = str(evidence.get("source") or "").strip()
+    if source:
+        return priority, f"Reviewer-provided priority from {source} was preserved as raw priority evidence."
+    return priority, "Reviewer-provided priority was preserved as raw priority evidence."

@@ -38,7 +38,7 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
+from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -1942,12 +1942,15 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
         return None, severity_error
     why = str(fix_reply.get("why") or "Addressed the CR with targeted changes and validation evidence.").strip()
     summary = str(fix_reply.get("summary") or "").strip() or None
+    review_priority, review_priority_note = review_priority_for_publish(item)
     try:
         return render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=summary,
             efficiency_summary=efficiency_summary,
+            review_priority=review_priority,
+            review_priority_note=review_priority_note,
         ), None
     except SystemExit as exc:
         return None, str(exc) or "MISSING_PUBLISH_REPLY"

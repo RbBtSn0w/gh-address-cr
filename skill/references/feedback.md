@@ -43,7 +43,7 @@ gh-address-cr submit-feedback \
   --status BLOCKED \
   --reason-code WAITING_FOR_FIX \
   --waiting-on human_fix \
-  --run-id cr-loop-20260417T120000Z \
+  --run-id review-20260417T120000Z \
   --skill-version 1.2.0 \
   --using-repo owner/repo \
   --using-pr 123 \

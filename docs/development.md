@@ -7,7 +7,7 @@ Run the current automated checks with:
 ```bash
 python3 -m unittest discover -s tests
 gh-address-cr --help
-gh-address-cr cr-loop --help
+gh-address-cr review --help
 ```
 
 Current test layout:
@@ -51,7 +51,7 @@ Recommended deployment shape:
 - Better Stack as the backend
 
 This keeps the Better Stack source token out of the CLI runtime while preserving
-local audit artifacts for `audit-report`, archive, and tests.
+local audit artifacts for final-gate archives and tests.
 
 Repository-root reference docs:
 
@@ -110,7 +110,7 @@ gh-address-cr submit-feedback \
   --status BLOCKED \
   --reason-code WAITING_FOR_FIX \
   --waiting-on human_fix \
-  --run-id cr-loop-20260417T120000Z \
+  --run-id review-20260417T120000Z \
   --skill-version 1.2.0 \
   --using-repo owner/repo \
   --using-pr 123 \
@@ -149,13 +149,13 @@ fix: avoid duplicate handled-state writes when thread already resolved
 docs: clarify npx skills update behavior
 ```
 
-## Breaking changes (2026-04-09)
+## Historical Breaking Changes (2026-04-09)
 
-- `gh-address-cr batch-resolve` now requires an approved list format:
+- Direct batch resolve helper usage was superseded by the current agent publish workflow. The old helper required an approved list format:
   - one thread per line: `APPROVED <thread_id>`
   - empty lines and `#` comments are allowed
   - raw thread-id lines now fail fast
-- `gh-address-cr list-threads` now uses the latest thread comment as primary context and emits:
+- The old thread listing helper used the latest thread comment as primary context and emitted:
   - `comment_source` (`latest|first|none`)
   - `first_url`, `latest_url`
   - `url`/`body` remain available, now latest-first with fallback

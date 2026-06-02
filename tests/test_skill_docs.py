@@ -234,6 +234,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`test_command`", protocol_text)
         self.assertIn("`test_result`", protocol_text)
         self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
+        self.assertIn("Reviewer priority:", cli_text)
+        self.assertIn("Reviewer priority:", protocol_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
@@ -463,6 +465,46 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("`python3 skill/scripts/cli.py` is the only automation entrypoint", text)
         self.assertNotIn("`python3 skill/scripts/cli.py` remains the stable automation surface", text)
         self.assertNotIn("`cli.py` is the preferred Python entrypoint for automation", text)
+
+    def test_active_docs_do_not_reintroduce_unsupported_legacy_commands(self):
+        text = read_repo_docs(
+            README_MD,
+            AGENTS_MD,
+            ARCHITECTURE_MD,
+            CLI_REFERENCE_MD,
+            DEVELOPMENT_MD,
+            INSTALLATION_MD,
+            TROUBLESHOOTING_MD,
+            WORKFLOWS_MD,
+            SKILL_MD,
+            COMPLETION_CONTRACT_MD,
+            FEEDBACK_MD,
+            LOCAL_REVIEW_ADAPTER_MD,
+            MODE_PRODUCER_MATRIX_MD,
+            STATUS_ACTION_MAP_MD,
+        )
+        unsupported_commands = [
+            "audit-report",
+            "batch-resolve",
+            "clean-state",
+            "code-review-adapter",
+            "control-plane",
+            "cr-loop",
+            "generate-reply",
+            "ingest-findings",
+            "list-threads",
+            "mark-handled",
+            "post-reply",
+            "prepare-code-review",
+            "publish-finding",
+            "resolve-thread",
+            "run-local-review",
+            "run-once",
+            "session-engine",
+        ]
+        for command in unsupported_commands:
+            with self.subTest(command=command):
+                self.assertNotIn(command, text)
 
     def test_readme_documents_external_review_handoff_contract(self):
         readme_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")

@@ -10,6 +10,7 @@ from tests.helpers import (
     FINAL_GATE_PY,
     INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
+    MARK_HANDLED_PY,
     POST_REPLY_PY,
     PUBLISH_FINDING_PY,
     PREPARE_CODE_REVIEW_PY,
@@ -77,6 +78,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("adapter", result.stdout)
         self.assertIn("review-to-findings", result.stdout)
         self.assertIn("gh-address-cr review", result.stdout)
+        self.assertNotIn("superpowers", result.stdout)
         self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("control-plane", result.stdout)
@@ -122,6 +124,13 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("fixed finding blocks only", result.stdout)
         self.assertIn("submit-feedback --category", result.stdout)
         self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
+
+    def test_cli_unknown_command_hint_omits_hidden_superpowers_command(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "unknown-command"])
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Supported commands:", result.stderr)
+        self.assertNotIn("superpowers", result.stderr)
 
     def test_cli_submit_feedback_passthrough_dry_run(self):
         result = self.run_cmd(
@@ -1731,7 +1740,7 @@ else:
         self.assertIn("Use [] for an explicit empty producer result", result.stderr)
         self.assertFalse(self.session_file().exists())
 
-    def test_cli_dispatches_run_once(self):
+    def test_run_once_helper_syncs_github_threads(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -1766,11 +1775,11 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "run-once", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("github-thread:THREAD_CLI", result.stdout)
 
-    def test_cli_dispatches_session_engine_list_items(self):
+    def test_session_engine_helper_lists_items(self):
         self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
         payload = json.dumps(
             [
@@ -1793,8 +1802,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "session-engine",
+                str(SCRIPT),
                 "list-items",
                 self.repo,
                 self.pr,
@@ -1881,7 +1889,7 @@ else:
         self.assertEqual(item["line"], 9)
         self.assertEqual(item["body"], "Imported from another review tool.")
 
-    def test_cli_dispatches_ingest_findings(self):
+    def test_ingest_findings_helper_accepts_ndjson(self):
         payload_file = Path(self.temp_dir.name) / "findings-ndjson.jsonl"
         payload_file.write_text(
             "\n".join(
@@ -1904,8 +1912,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "ingest-findings",
+                str(INGEST_FINDINGS_PY),
                 "--source",
                 "local-agent:cli-import",
                 "--input",
@@ -2356,8 +2363,8 @@ body: Missing title should fail.
         self.assertEqual(findings[0]["path"], "src/code_review.py")
         self.assertEqual(findings[0]["line"], 9)
 
-    def test_cli_dispatches_prepare_code_review(self):
-        result = self.run_cmd([sys.executable, str(CLI_PY), "prepare-code-review", "local", self.repo, self.pr])
+    def test_prepare_code_review_helper_emits_prompt(self):
+        result = self.run_cmd([sys.executable, str(PREPARE_CODE_REVIEW_PY), "local", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["mode"], "local")
@@ -3380,6 +3387,15 @@ else:
         self.assertIn("--machine and --human are only supported for", result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
+    def test_cli_output_flags_reject_utility_commands_before_running_them(self):
+        for command in ("review-to-findings", "submit-feedback"):
+            with self.subTest(command=command):
+                result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", command, "--help"])
+
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("--machine and --human are only supported for", result.stderr)
+                self.assertFalse(self.workspace_dir().exists())
+
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -3741,8 +3757,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "mark-handled",
+                str(MARK_HANDLED_PY),
                 "--repo",
                 self.repo,
                 "--pr",
@@ -3783,8 +3798,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "mark-handled",
+                str(MARK_HANDLED_PY),
                 "--repo",
                 self.repo,
                 "--pr",
@@ -3820,4 +3834,4 @@ else:
 
         result = self.run_cmd([sys.executable, str(CLI_PY), "mark-handled", "THREAD_NEEDS_CONTEXT"])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--repo and --pr are required", result.stderr)
+        self.assertIn("Unsupported legacy command: mark-handled", result.stderr)

@@ -43,7 +43,16 @@ jobs:
           PYTHONPATH: src
         run: |
           python -m gh_address_cr --help
-          python -m gh_address_cr cr-loop --help
+          python -m gh_address_cr review --help
+          python -m gh_address_cr agent manifest
+
+          set +e
+          output="$(python -m gh_address_cr cr-loop --help 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 2
+          printf '%s\n' "$output" | grep -qi "unsupported legacy command"
 
       - name: Package build
         run: |

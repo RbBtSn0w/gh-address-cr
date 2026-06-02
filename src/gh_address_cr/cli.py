@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import hashlib
-import importlib
-import io
 import json
 import os
 import platform
@@ -12,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -41,7 +37,6 @@ from gh_address_cr.core import workflow
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.errors import GitHubError
-from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
 from gh_address_cr.intake.findings import (
     EMPTY_FINDINGS_INPUT_MESSAGE,
     FindingsFormatError,
@@ -54,34 +49,36 @@ from gh_address_cr.intake.findings import (
 )
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent / "legacy_scripts"
-
-COMMAND_TO_SCRIPT = {
-    "cr-loop": "cr_loop.py",
-    "control-plane": "control_plane.py",
-    "code-review-adapter": "code_review_adapter.py",
-    "review-to-findings": "review_to_findings.py",
-    "prepare-code-review": "prepare_code_review.py",
-    "run-once": "run_once.py",
-    "final-gate": "final_gate.py",
-    "list-threads": "list_threads.py",
-    "post-reply": "post_reply.py",
-    "resolve-thread": "resolve_thread.py",
-    "run-local-review": "run_local_review.py",
-    "ingest-findings": "ingest_findings.py",
-    "publish-finding": "publish_finding.py",
-    "mark-handled": "mark_handled.py",
-    "audit-report": "audit_report.py",
-    "generate-reply": "generate_reply.py",
-    "batch-resolve": "batch_resolve.py",
-    "clean-state": "clean_state.py",
-    "session-engine": "session_engine.py",
-    "submit-feedback": "submit_feedback.py",
-    "submit-action": "submit_action.py",
-}
-
 HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version"}
 NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
+UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
+PUBLIC_COMMANDS = {
+    *NATIVE_HIGH_LEVEL_COMMANDS,
+    *UTILITY_COMMANDS,
+    "active-pr",
+    "agent",
+    "doctor",
+    "final-gate",
+}
+UNSUPPORTED_LEGACY_COMMANDS = {
+    "audit-report",
+    "batch-resolve",
+    "clean-state",
+    "code-review-adapter",
+    "control-plane",
+    "cr-loop",
+    "generate-reply",
+    "ingest-findings",
+    "list-threads",
+    "mark-handled",
+    "post-reply",
+    "prepare-code-review",
+    "publish-finding",
+    "resolve-thread",
+    "run-local-review",
+    "run-once",
+    "session-engine",
+}
 OUTPUT_FLAGS = {"--machine", "--human"}
 LEAN_FLAGS = {"--lean", "--summary"}
 HIGH_LEVEL_GH_COMMANDS = {"address", "review", "threads", "adapter"}
@@ -1612,9 +1609,7 @@ def build_agent_manifest() -> dict:
         "constraints": {
             "max_parallel_claims": MAX_PARALLEL_CLAIMS,
         },
-        "public_commands": sorted(
-            ["active-pr", "address", "review", "threads", "findings", "adapter", "doctor", "submit-action", "final-gate"]
-        ),
+        "public_commands": sorted(PUBLIC_COMMANDS),
     }
 
 
@@ -2596,64 +2591,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_script(script_name: str, passthrough_args: list[str]) -> subprocess.CompletedProcess[str]:
-    target = SCRIPT_DIR / script_name
-    command = [sys.executable, str(target), *passthrough_args]
-    if not target.is_file():
-        return subprocess.CompletedProcess(
-            command,
-            127,
-            "",
-            f"Required gh-address-cr runtime script is missing: {target}\n",
-        )
-    module_name = f"gh_address_cr.legacy_scripts.{Path(script_name).stem}"
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    previous_argv = sys.argv
-    previous_sys_path = list(sys.path)
-    previous_pythonpath = os.environ.get("PYTHONPATH")
-    try:
-        script_dir = str(SCRIPT_DIR)
-        sys.path.insert(0, script_dir)
-        runtime_import_root = str(Path(__file__).resolve().parents[1])
-        pythonpath_parts = [part for part in (previous_pythonpath or "").split(os.pathsep) if part]
-        if runtime_import_root not in pythonpath_parts:
-            os.environ["PYTHONPATH"] = os.pathsep.join([runtime_import_root, *pythonpath_parts])
-        module = importlib.import_module(module_name)
-        script_main = getattr(module, "main", None)
-        if not callable(script_main):
-            return subprocess.CompletedProcess(
-                command,
-                127,
-                "",
-                f"Required gh-address-cr runtime script does not expose main(): {module_name}\n",
-            )
-        sys.argv = [str(target), *passthrough_args]
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            try:
-                code = script_main()
-            except SystemExit as exc:
-                code = exc.code
-    except Exception:
-        traceback.print_exc(file=stderr)
-        return subprocess.CompletedProcess(command, 1, stdout.getvalue(), stderr.getvalue())
-    finally:
-        sys.argv = previous_argv
-        sys.path[:] = previous_sys_path
-        if previous_pythonpath is None:
-            os.environ.pop("PYTHONPATH", None)
-        else:
-            os.environ["PYTHONPATH"] = previous_pythonpath
-    if code is None:
-        returncode = 0
-    elif isinstance(code, int):
-        returncode = code
-    else:
-        stderr.write(f"{code}\n")
-        returncode = 1
-    return subprocess.CompletedProcess(command, returncode, stdout.getvalue(), stderr.getvalue())
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -2701,6 +2638,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
             return 0
+        from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
+
         cmd: list[str] = []
         if args.machine:
             cmd.append("--machine")
@@ -2708,10 +2647,39 @@ def main(argv: list[str] | None = None) -> int:
             cmd.append("--human")
         return int(submit_action_handler.main([*cmd, *args.args]))
 
-    if args.command not in COMMAND_TO_SCRIPT and args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
-        supported_commands = ", ".join(
-            sorted([*COMMAND_TO_SCRIPT, *NATIVE_HIGH_LEVEL_COMMANDS, "active-pr", "agent", "doctor"])
+    if args.command == "review-to-findings":
+        if args.machine or args.human:
+            print(
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                file=sys.stderr,
+            )
+            return 2
+        from gh_address_cr.legacy_handlers import review_to_findings as review_to_findings_handler
+
+        return int(review_to_findings_handler.main(args.args))
+
+    if args.command == "submit-feedback":
+        if args.machine or args.human:
+            print(
+                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                file=sys.stderr,
+            )
+            return 2
+        from gh_address_cr.legacy_handlers import submit_feedback as submit_feedback_handler
+
+        return int(submit_feedback_handler.main(args.args))
+
+    if args.command in UNSUPPORTED_LEGACY_COMMANDS:
+        print(
+            f"Unsupported legacy command: {args.command}. "
+            "Use current workflows such as `gh-address-cr review <owner/repo> <pr_number>`, "
+            "`gh-address-cr address <owner/repo> <pr_number>`, or `gh-address-cr agent ...`.",
+            file=sys.stderr,
         )
+        return 2
+
+    if args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
+        supported_commands = ", ".join(sorted(PUBLIC_COMMANDS))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     normalize_leading_high_level_options(args)
@@ -2728,29 +2696,7 @@ def main(argv: list[str] | None = None) -> int:
         preflight_rc = preflight_high_level(args)
         if preflight_rc is not None:
             return preflight_rc
-    if args.command in NATIVE_HIGH_LEVEL_COMMANDS:
-        return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
-    rewritten_args = rewrite_alias_args(
-        args.command,
-        args.args,
-        review_continue_without_input=bool(getattr(args, "review_continue_without_input", False)),
-    )
-    result = run_script(COMMAND_TO_SCRIPT[args.command], rewritten_args)
-    if args.command in HIGH_LEVEL_COMMANDS and not args.human:
-        summary = build_machine_summary(args.command, args.args[0], args.args[1], result)
-        persist_machine_summary(args.args[0], args.args[1], summary)
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    else:
-        if result.stdout:
-            sys.stdout.write(result.stdout)
-        if result.stderr:
-            error_text = result.stderr
-            if args.command in HIGH_LEVEL_COMMANDS and "Unsupported producer:" in error_text:
-                error_text += (
-                    "\nproducer expects a category (`code-review`, `json`, `adapter`), not the upstream tool name.\n"
-                )
-            sys.stderr.write(error_text)
-    return result.returncode
+    return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
 if __name__ == "__main__":

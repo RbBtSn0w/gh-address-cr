@@ -21,10 +21,10 @@ Final output must include:
 
 Use `audit_summary.md` or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed.
 
-For run-scoped diagnostics, use:
+For run-scoped diagnostics that must keep artifacts available after the gate, use:
 
 ```text
-gh-address-cr audit-report --run-id <run_id> <owner/repo> <pr_number>
+gh-address-cr final-gate --no-auto-clean <owner/repo> <pr_number>
 ```
 
 Successful `gh-address-cr final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`.

@@ -9,6 +9,12 @@ SEVERITY_RISK_NOTES = {
     "P4": "Nit/Suggestion path verified for stylistic or non-functional consistency.",
 }
 
+REVIEW_PRIORITY_RISK_NOTES = {
+    "high": "High-priority reviewer signal addressed with targeted regression evidence.",
+    "medium": "Medium-priority reviewer signal addressed with focused drift and correctness validation.",
+    "low": "Low-priority reviewer signal addressed as a non-breaking cleanup or clarity improvement.",
+}
+
 DEFAULT_FILE_SUMMARY = "updated per CR scope"
 
 def _normalize_severity(severity: str | None) -> str | None:
@@ -25,6 +31,19 @@ def _sentence_with_period(value: str) -> str:
     if not text:
         return text
     return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
+def _normalize_review_priority(priority: str | None) -> str | None:
+    if priority in (None, ""):
+        return None
+    normalized = str(priority).strip().lower()
+    if normalized not in REVIEW_PRIORITY_RISK_NOTES:
+        raise SystemExit(f"Invalid reviewer priority: {priority} (expected high/medium/low)")
+    return normalized
+
+
+def _review_priority_label(priority: str) -> str:
+    return f"{priority.title()} Priority"
 
 
 def _format_rationale(text: str) -> list[str]:
@@ -53,14 +72,18 @@ def fix_reply(
     payload: list[str], 
     *, 
     summary: str | None = None,
-    efficiency_summary: str | None = None
+    efficiency_summary: str | None = None,
+    review_priority: str | None = None,
+    review_priority_note: str | None = None,
 ) -> str:
     if len(payload) < 4:
         raise SystemExit(
-            "Usage for fix: generate_reply.py [--severity P0|P1|P2|P3|P4] <output_md> "
+            "Usage for fix reply: gh-address-cr agent submit <repo> <pr> --input <action-response.json> "
+            "or gh-address-cr submit-action <action-request.json> --resolution fix "
             "<commit_hash> <files_csv> <test_command> <test_result> [why]"
         )
     normalized_severity = _normalize_severity(severity)
+    normalized_review_priority = _normalize_review_priority(review_priority)
 
     commit_hash, files_csv, test_command, test_result, *rest = payload
     why = rest[0] if rest else "Addressed the CR with minimal targeted changes and regression coverage."
@@ -91,6 +114,8 @@ def fix_reply(
     ]
     if normalized_severity:
         lines[2:2] = [f"Severity: {severity_label}", ""]
+    elif normalized_review_priority:
+        lines[2:2] = [f"Reviewer priority: `{_review_priority_label(normalized_review_priority)}`", ""]
     
     lines.extend([f"- `{path}`: {file_summary}" for path in files] or ["- No file list provided."])
     
@@ -99,6 +124,11 @@ def fix_reply(
     
     if normalized_severity:
         lines.append(f"- {SEVERITY_RISK_NOTES[normalized_severity]}")
+    elif normalized_review_priority:
+        priority_note = str(review_priority_note or "").strip()
+        if priority_note:
+            lines.append(f"- {priority_note}")
+        lines.append(f"- {REVIEW_PRIORITY_RISK_NOTES[normalized_review_priority]}")
     
     lines.extend(
         [

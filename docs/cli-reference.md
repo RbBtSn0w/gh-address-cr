@@ -119,7 +119,7 @@ Classification and resolution are deliberately separate protocol phases:
 
 - `agent classify` records triage evidence on the item before a mutating fixer lease exists. If `agent next --role fixer` returns `MISSING_CLASSIFICATION`, run `agent classify ... --classification <fix|clarify|defer|reject> --note <why>` first.
 - `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`. Use `--publish` only for accepted GitHub review-thread fix responses when the runtime should post the reply and resolve the thread in the same command.
-- Severity is evidence-backed. The runtime preserves explicit `P1`, `P2`, or `P3` markers from the producer payload or the original GitHub review-thread comment. If no trusted P-scale marker exists, severity remains unknown and publish output omits the `Severity:` line. Reviewer words such as `high`, `medium`, or `low priority` are stored only as raw priority evidence and are not converted to `P1/P2/P3`.
+- Severity is evidence-backed. The runtime preserves explicit `P1`, `P2`, or `P3` markers from the producer payload or the original GitHub review-thread comment. If no trusted P-scale marker exists, severity remains unknown and publish output omits the `Severity:` line. Reviewer words such as `high`, `medium`, or `low priority` are stored as raw priority evidence, are not converted to `P1/P2/P3`, and are shown in published fix replies as `Reviewer priority:`.
 - `agent fix`, `agent fix-all`, `agent resolve-stale`, and `agent evidence add` may pass `--severity P1|P2|P3` as an explicit override. If that override conflicts with first-scene severity evidence on the item, include `--severity-note <why>` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
 Role split:
@@ -378,13 +378,7 @@ gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 gh-address-cr address <owner/repo> <pr_number> [--human|--lean]
 ```
 
-For `producer=code-review`, generate the standardized bridge prompt with:
-
-```bash
-gh-address-cr prepare-code-review <local|mixed> <owner/repo> <pr_number>
-```
-
-This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
+For `producer=code-review`, start with `review`. When external findings are absent, it emits `WAITING_FOR_EXTERNAL_REVIEW` and writes the standardized producer handoff to `producer-request.md`.
 
 If the upstream review output is Markdown review blocks, convert it first with:
 
@@ -527,15 +521,15 @@ gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 
 ## Local AI Review Ingestion
 
-Use `gh-address-cr run-local-review` to feed local AI findings into the PR session:
+Use `gh-address-cr findings --input -` to feed local AI findings into the PR session without requiring GitHub thread preflight:
 
 ```bash
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
 ```
 
-Adapter contract:
+Producer contract:
 
-- adapter prints a JSON array to stdout
+- the producer prints a JSON array to stdout
 - each finding should include `title`, `body`, `path`, `line`
 - optional fields: `severity`, `category`, `confidence`
 - `severity` is accepted only when it is an explicit `P0`, `P1`, `P2`, `P3`, or `P4`; missing or non-P-scale values do not create a session severity.
@@ -545,7 +539,6 @@ This path does not auto-post to GitHub. It creates local session items that can 
 If the producer is a local `code-review` run, use the built-in adapter backend:
 
 ```bash
-gh-address-cr prepare-code-review mixed owner/repo 123
 cat findings.json | gh-address-cr review owner/repo 123 --input -
 ```
 
@@ -556,19 +549,12 @@ Input rule:
 - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
 - use `--sync` when you want missing local findings from the same source to auto-close on refresh
 
-`prepare-code-review` now also returns:
+When `review` returns `WAITING_FOR_EXTERNAL_REVIEW`, use the cache-backed `producer-request.md` handoff instead of creating review artifacts in the project workspace.
 
-- `workspace_dir`
-- `findings_output_path`
-- `reply_output_path`
-- `loop_request_path`
-
-Use that cache-backed findings path instead of creating review artifacts in the project workspace.
-
-If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr ingest-findings` instead:
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr findings` instead:
 
 ```bash
-cat findings.json | gh-address-cr ingest-findings --source local-agent:code-review owner/repo 123
+cat findings.json | gh-address-cr findings owner/repo 123 --input - --sync --source code-review
 ```
 
 Accepted input shapes:
@@ -602,21 +588,20 @@ This is the long-term integration path for any local code-review tool. If it can
 To publish a local finding back to GitHub as a review comment:
 
 ```bash
-gh-address-cr publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
+gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
+gh-address-cr agent publish owner/repo 123
 ```
 
 To reclaim expired item claims inside a PR session:
 
 ```bash
-gh-address-cr session-engine reclaim-stale-claims owner/repo 123
+gh-address-cr agent reclaim owner/repo 123
 ```
 
 To apply a terminal local finding resolution atomically, use:
 
 ```bash
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
-```
-up PR."
+gh-address-cr submit-action <action-request.json> --resolution fix --note "Fixed locally and verified." --files src/example.py --validation-cmd "python3 -m unittest=passed"
+gh-address-cr submit-action <action-request.json> --resolution clarify --note "Expected behavior." --reply-markdown "Expected behavior."
+gh-address-cr submit-action <action-request.json> --resolution defer --note "Deferred to a follow-up PR." --reply-markdown "Deferred to a follow-up PR."
 ```

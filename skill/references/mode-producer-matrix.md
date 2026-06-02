@@ -23,9 +23,9 @@
 - input:
   - `remote <owner/repo> <pr_number>`
 - actions:
-  1. `gh-address-cr run-once <owner/repo> <pr_number>`
-  2. process GitHub review threads
-  3. `gh-address-cr post-reply ...` + `gh-address-cr resolve-thread ...` for handled GitHub items
+  1. `gh-address-cr address <owner/repo> <pr_number>`
+  2. process GitHub review threads through the runtime workflow
+  3. publish replies and resolve handled GitHub items through runtime-owned side effects
   4. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
 ### `local code-review`
@@ -33,12 +33,11 @@
 - input:
   - `local code-review <owner/repo> <pr_number>`
 - actions:
-  1. generate the standard producer prompt with `gh-address-cr prepare-code-review local <owner/repo> <pr_number>`
-  2. run a local code-review workflow
-  3. require structured findings JSON, not only Markdown
-  4. `gh-address-cr run-local-review --source local-agent:code-review <owner/repo> <pr_number> gh-address-cr code-review-adapter --input findings.json`
-  5. process local findings through session status transitions
-  6. `gh-address-cr final-gate <owner/repo> <pr_number>`
+  1. run a local code-review workflow
+  2. require structured findings JSON, not only Markdown
+  3. `gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source code-review`
+  4. process local findings through session status transitions
+  5. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -57,7 +56,7 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --
   - `local json <owner/repo> <pr_number>`
 - actions:
   1. read provided findings JSON
-  2. `gh-address-cr ingest-findings --input findings.json <owner/repo> <pr_number>`
+  2. `gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source json`
   3. process local findings through session status transitions
   4. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
@@ -66,7 +65,7 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --
 - input:
   - `local adapter <owner/repo> <pr_number>`
 - actions:
-  1. `gh-address-cr run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
+  1. `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
   2. process local findings through session status transitions
   3. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
@@ -75,13 +74,11 @@ $gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --
 - input:
   - `mixed code-review <owner/repo> <pr_number>`
 - actions:
-  1. `gh-address-cr run-once <owner/repo> <pr_number>`
-  2. generate the standard producer prompt with `gh-address-cr prepare-code-review mixed <owner/repo> <pr_number>`
-  3. run a local code-review workflow
-  4. require structured findings JSON
-  5. `gh-address-cr run-local-review --source local-agent:code-review <owner/repo> <pr_number> gh-address-cr code-review-adapter --input findings.json`
-  6. process GitHub threads and local findings as one session queue
-  7. `gh-address-cr final-gate <owner/repo> <pr_number>`
+  1. run a local code-review workflow
+  2. require structured findings JSON
+  3. `gh-address-cr review <owner/repo> <pr_number> --input findings.json`
+  4. process GitHub threads and local findings as one session queue
+  5. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -106,11 +103,10 @@ $gh-address-cr findings <owner/repo> <pr_number> --input - --sync --source code-
 - input:
   - `mixed json <owner/repo> <pr_number>`
 - actions:
-  1. `gh-address-cr run-once <owner/repo> <pr_number>`
-  2. read provided findings JSON
-  3. `gh-address-cr ingest-findings --input findings.json <owner/repo> <pr_number>`
-  4. process GitHub threads and local findings as one session queue
-  5. `gh-address-cr final-gate <owner/repo> <pr_number>`
+  1. read provided findings JSON
+  2. `gh-address-cr review <owner/repo> <pr_number> --input findings.json`
+  3. process GitHub threads and local findings as one session queue
+  4. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
 Typical invocation:
 
@@ -124,8 +120,7 @@ $gh-address-cr review <owner/repo> <pr_number>
 - input:
   - `mixed adapter <owner/repo> <pr_number>`
 - actions:
-  1. `gh-address-cr run-once <owner/repo> <pr_number>`
-  2. `gh-address-cr run-local-review <owner/repo> <pr_number> <adapter_cmd...>`
+  1. `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
   3. process GitHub threads and local findings as one session queue
   4. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
@@ -135,7 +130,7 @@ $gh-address-cr review <owner/repo> <pr_number>
   - `ingest json <owner/repo> <pr_number>`
 - actions:
   1. read provided findings JSON
-  2. `gh-address-cr ingest-findings --input findings.json <owner/repo> <pr_number>`
+  2. `gh-address-cr findings <owner/repo> <pr_number> --input findings.json --sync --source json`
   3. process local findings through session status transitions
   4. `gh-address-cr final-gate <owner/repo> <pr_number>`
 
@@ -144,8 +139,8 @@ $gh-address-cr review <owner/repo> <pr_number>
 - `code-review`
   - must produce findings JSON before session handling starts
   - do not stop at a Markdown summary
-  - use `prepare-code-review` to generate the bridge prompt shape
-  - intake is normalized by the built-in `code-review-adapter`
+  - use `review-to-findings` only when the upstream tool emits fixed Markdown finding blocks
+  - intake is normalized by the current `findings`, `review`, or `adapter` command
 - `json`
   - assumes findings already exist in machine-readable form
 - `adapter`
