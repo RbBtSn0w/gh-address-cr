@@ -1,7 +1,11 @@
 import json
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
+from gh_address_cr import cli
 from gh_address_cr.core.models import ActionRequest
 
 from tests.helpers import PythonScriptTestCase
@@ -1541,6 +1545,31 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "NO_PUBLISH_READY_ITEMS")
         self.assertEqual(payload["published_count"], 0)
+
+    def test_agent_publish_does_not_configure_telemetry_in_cli_handler(self):
+        expected = {
+            "status": "NO_PUBLISH_READY_ITEMS",
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "published_count": 0,
+        }
+        stdout = StringIO()
+
+        with (
+            patch("gh_address_cr.core.telemetry.SessionTelemetry.get_instance", side_effect=AssertionError("blocked")),
+            patch("gh_address_cr.cli.workflow.publish_github_thread_responses", return_value=expected) as publish,
+            redirect_stdout(stdout),
+        ):
+            result = cli.handle_agent_publish(None, [self.repo, self.pr])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), expected)
+        publish.assert_called_once_with(
+            self.repo,
+            self.pr,
+            agent_id="gh-address-cr-publisher",
+            now=None,
+        )
 
     def test_agent_submit_verifier_rejection_reopens_item_without_side_effects(self):
         self.write_session(
