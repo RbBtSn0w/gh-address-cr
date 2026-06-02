@@ -40,6 +40,10 @@ VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
 
 
+def telemetry_debug_enabled() -> bool:
+    return (os.environ.get("GH_ADDRESS_CR_DEBUG_TELEMETRY") or "").strip().lower() in {"1", "true", "yes"}
+
+
 def _workspace_file(repo: str, pr_number: str, name: str) -> Path:
     path = core_paths.workspace_dir(repo, pr_number)
     path.mkdir(parents=True, exist_ok=True)
@@ -159,25 +163,25 @@ def _runtime_subprocess_env() -> dict[str, str]:
 
 
 def run_cmd(
-    cmd: list[str], 
-    *, 
-    stdin: str | None = None, 
-    retries: int = 3, 
-    timeout: float | None = 120.0
+    cmd: list[str],
+    *,
+    stdin: str | None = None,
+    retries: int = 3,
+    timeout: float | None = 120.0,
 ) -> subprocess.CompletedProcess[str]:
     import time
-    from gh_address_cr.core.telemetry import SessionTelemetry
-    
+    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
     _ = retries
     start_time = time.time()
     try:
         result = subprocess.run(
-            cmd, 
-            input=stdin, 
-            text=True, 
-            capture_output=True, 
+            cmd,
+            input=stdin,
+            text=True,
+            capture_output=True,
             env=_runtime_subprocess_env(),
-            timeout=timeout
+            timeout=timeout,
         )
         end_time = time.time()
         exit_code = result.returncode
@@ -188,21 +192,20 @@ def run_cmd(
             args=cmd,
             returncode=exit_code,
             stdout=exc.stdout if exc.stdout is not None else "",
-            stderr=(exc.stderr if exc.stderr is not None else "") + f"\nCommand timed out after {timeout} seconds."
+            stderr=(exc.stderr if exc.stderr is not None else "") + f"\nCommand timed out after {timeout} seconds.",
         )
-    
-    # We record the command as a string to avoid cluttering metrics with massive arrays
-    command_str = " ".join(cmd)
+
     try:
         SessionTelemetry.get_instance().record(
-            command=command_str,
+            command=command_label(cmd),
             start_time=start_time,
             end_time=end_time,
-            exit_code=exit_code
+            exit_code=exit_code,
         )
     except Exception as telemetry_exc:
-        sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
-        
+        if telemetry_debug_enabled():
+            sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
+
     return result
 
 
@@ -612,7 +615,7 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
     raw_severity = fix_reply.get("severity") if explicit_severity else first_scene_item_severity(item)
     severity = normalize_fix_reply_severity(raw_severity)
     if explicit_severity and raw_severity not in (None, "") and severity is None:
-        return None, "GitHub fix actions require fix_reply.severity to be P1, P2, or P3 when provided."
+        return None, "GitHub fix actions require fix_reply.severity to be P0, P1, P2, P3, or P4 when provided."
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
     test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
     derived_test_result = "passed" if normalized_validation_commands else ""
@@ -627,9 +630,10 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
             from gh_address_cr.core.telemetry import SessionTelemetry
             efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
         except Exception as telemetry_exc:
-            sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
             efficiency_summary = None
-        
+
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
@@ -877,9 +881,10 @@ def handle_batch(
                         from gh_address_cr.core.telemetry import SessionTelemetry
                         efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
                     except Exception as telemetry_exc:
-                        sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
+                        if telemetry_debug_enabled():
+                            sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
                         efficiency_summary = None
-                    
+
                     if resolution == "clarify":
                         reply_markdown = render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
                     elif resolution == "defer":

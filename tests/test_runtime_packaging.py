@@ -385,6 +385,18 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
 
+    def test_changelog_top_entry_is_not_future_release_without_version_bump(self):
+        changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        pyproject_text = PYPROJECT.read_text(encoding="utf-8")
+
+        version_match = re.search(r'^version = "([^"]+)"$', pyproject_text, re.MULTILINE)
+        self.assertIsNotNone(version_match)
+        package_version = version_match.group(1)
+        first_heading = next(line for line in changelog_text.splitlines() if line.startswith("## "))
+
+        if first_heading != "## Unreleased":
+            self.assertIn(f"[{package_version}]", first_heading)
+
     def test_version_sync_script_updates_pyproject_and_runtime_version(self):
         pyproject = Path(self.temp_dir.name) / "pyproject.toml"
         init_file = Path(self.temp_dir.name) / "__init__.py"

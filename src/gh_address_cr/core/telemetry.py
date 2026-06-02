@@ -1,7 +1,35 @@
+from __future__ import annotations
+
 import os
+import shlex
 import uuid
 from dataclasses import dataclass
 from typing import ClassVar
+
+
+def command_label(cmd: list[str]) -> str:
+    """Return a public-safe command label for telemetry summaries."""
+    if not cmd:
+        return ""
+
+    label_tokens = [os.path.basename(cmd[0]) or cmd[0]]
+    index = 1
+    if len(cmd) > 2 and label_tokens[0].startswith("python") and cmd[1] == "-m":
+        label_tokens.extend(["-m", cmd[2]])
+        index = 3
+
+    for token in cmd[index:]:
+        if token == "--":
+            break
+        if token.startswith("-"):
+            continue
+        if "/" in token or "\\" in token or "=" in token:
+            continue
+        label_tokens.append(token)
+        break
+
+    return shlex.join(label_tokens)
+
 
 @dataclass
 class ExecutionMetric:
@@ -37,6 +65,7 @@ class ExecutionMetric:
 MAX_DURATION_SECONDS = 60.0
 MAX_ERROR_RATE_PERCENT = 20.0
 
+
 @dataclass
 class EfficiencyReport:
     total_invocations: int
@@ -54,14 +83,15 @@ class EfficiencyReport:
             "metrics": [m.to_dict() for m in self.metrics],
         }
 
+
 class SessionTelemetry:
-    _instance: ClassVar['SessionTelemetry | None'] = None
+    _instance: ClassVar[SessionTelemetry | None] = None
 
     def __init__(self):
         self.metrics: list[ExecutionMetric] = []
 
     @classmethod
-    def get_instance(cls) -> 'SessionTelemetry':
+    def get_instance(cls) -> SessionTelemetry:
         if cls._instance is None:
             cls._instance = SessionTelemetry()
         return cls._instance
@@ -71,70 +101,92 @@ class SessionTelemetry:
         cls._instance = None
 
     def record(
-        self, 
-        command: str, 
-        start_time: float, 
-        end_time: float, 
+        self,
+        command: str,
+        start_time: float,
+        end_time: float,
         exit_code: int,
         pid: int | None = None,
-        execution_id: str | None = None
+        execution_id: str | None = None,
     ) -> None:
         is_retry = False
         if self.metrics:
             last_metric = self.metrics[-1]
             if last_metric.command == command and not last_metric.is_success:
                 is_retry = True
-        
-        self.metrics.append(ExecutionMetric(
-            command=command,
-            start_time=start_time,
-            end_time=end_time,
-            exit_code=exit_code,
-            is_retry=is_retry,
-            pid=pid if pid is not None else os.getpid(),
-            execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
-        ))
+
+        self.metrics.append(
+            ExecutionMetric(
+                command=command,
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+                is_retry=is_retry,
+                pid=pid if pid is not None else os.getpid(),
+                execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
+            )
+        )
 
     def evaluate_efficiency(self) -> list[str]:
         flags = []
         if not self.metrics:
             return flags
-            
+
         # 1. Individual Duration check
         for m in self.metrics:
             if m.duration > MAX_DURATION_SECONDS:
                 flags.append(f"`{m.command[:50]}...` took {m.duration:.1f}s (Exceeds {int(MAX_DURATION_SECONDS)}s threshold).")
             if m.exit_code == 124:
-                flags.append(f"CRITICAL: `{m.command[:50]}...` hit execution timeout (Hanged).")
-                
+                flags.append(f"CRITICAL: `{m.command[:50]}...` hit execution timeout (hung).")
+
         # 2. Global Error Rate check
         total_inv = len(self.metrics)
         successes = sum(1 for m in self.metrics if m.is_success)
         error_rate = ((total_inv - successes) / total_inv) * 100.0
         if error_rate > MAX_ERROR_RATE_PERCENT:
             flags.append(f"Global error rate is {error_rate:.1f}% (Exceeds {MAX_ERROR_RATE_PERCENT}% threshold).")
-            
+
         # 3. Consecutive Retries check
-        retry_counts = {}
+        consecutive_retries: dict[str, int] = {}
+        current_command: str | None = None
+        current_retry_count = 0
+
         for m in self.metrics:
+            if m.command != current_command:
+                if current_command is not None:
+                    consecutive_retries[current_command] = max(
+                        consecutive_retries.get(current_command, 0),
+                        current_retry_count,
+                    )
+                current_command = m.command
+                current_retry_count = 0
             if m.is_retry:
-                retry_counts[m.command] = retry_counts.get(m.command, 0) + 1
-        
-        for cmd, count in retry_counts.items():
-            if count >= 1: # Flag even a single retry for now to meet test requirements
-                flags.append(f"`{cmd[:50]}...` ran {count + 1} times consecutively with {count} retries (High Retry Rate).")
-                
+                current_retry_count += 1
+
+        if current_command is not None:
+            consecutive_retries[current_command] = max(
+                consecutive_retries.get(current_command, 0),
+                current_retry_count,
+            )
+
+        for cmd, count in consecutive_retries.items():
+            if count >= 1:
+                retry_word = "retry" if count == 1 else "retries"
+                flags.append(
+                    f"`{cmd[:50]}...` ran {count + 1} times consecutively with {count} {retry_word} (High Retry Rate)."
+                )
+
         return flags
 
     def get_report(self) -> EfficiencyReport:
         total_inv = len(self.metrics)
         if total_inv == 0:
             return EfficiencyReport(0, 0.0, 0.0, [], [])
-        
+
         total_dur = sum(m.duration for m in self.metrics)
         successes = sum(1 for m in self.metrics if m.is_success)
         success_rate = (successes / total_inv) * 100.0
-        
+
         flags = self.evaluate_efficiency()
 
         return EfficiencyReport(
@@ -142,18 +194,18 @@ class SessionTelemetry:
             total_duration=total_dur,
             success_rate=success_rate,
             flagged_inefficiencies=flags,
-            metrics=list(self.metrics)
+            metrics=list(self.metrics),
         )
 
     def get_summary_string(self) -> str | None:
         if not self.metrics:
             return None
-            
+
         report = self.get_report()
         summary = f"{report.total_invocations} tools invoked ({report.success_rate:.0f}% success). Total tool duration: {report.total_duration:.1f}s."
-        
+
         if report.flagged_inefficiencies:
             summary += "\n> ⚠️ **Inefficiencies Detected**:\n"
             summary += "\n".join(f"> - {f}" for f in report.flagged_inefficiencies)
-            
+
         return summary

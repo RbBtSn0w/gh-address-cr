@@ -11,8 +11,9 @@ def load_requirements() -> dict:
     script_dir = Path(__file__).resolve().parent
     candidates = [
         script_dir.parent / "runtime-requirements.json",  # src/gh_address_cr/
-        script_dir.parents[2] / "skill" / "runtime-requirements.json",  # repo root / skill /
     ]
+    if len(script_dir.parents) > 2:
+        candidates.append(script_dir.parents[2] / "skill" / "runtime-requirements.json")  # repo root / skill /
     for path in candidates:
         if path.is_file():
             try:

@@ -1,7 +1,9 @@
-import unittest
 import subprocess
+import unittest
 from unittest.mock import patch
-from gh_address_cr.core.telemetry import SessionTelemetry
+
+from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
 
 class TestTelemetry(unittest.TestCase):
     def setUp(self):
@@ -71,6 +73,58 @@ class TestTelemetry(unittest.TestCase):
         # Should flag "pytest" for high retry count
         self.assertTrue(any("retries" in f.lower() and "pytest" in f for f in report.flagged_inefficiencies))
 
+    def test_retry_flagging_uses_max_consecutive_chain(self):
+        tracker = SessionTelemetry.get_instance()
+        tracker.record("pytest", 0, 1, 1)
+        tracker.record("pytest", 2, 3, 0)
+        tracker.record("other", 4, 5, 0)
+        tracker.record("pytest", 6, 7, 1)
+        tracker.record("pytest", 8, 9, 0)
+
+        report = tracker.get_report()
+
+        retry_flags = [f for f in report.flagged_inefficiencies if "pytest" in f and "High Retry Rate" in f]
+        self.assertEqual(len(retry_flags), 1)
+        self.assertIn("ran 2 times consecutively with 1 retry", retry_flags[0])
+        self.assertNotIn("ran 3 times consecutively", retry_flags[0])
+
+    def test_timeout_wording_uses_hung(self):
+        tracker = SessionTelemetry.get_instance()
+        tracker.record("hang cmd", 200, 320, 124)
+
+        report = tracker.get_report()
+
+        timeout_flags = [f for f in report.flagged_inefficiencies if "execution timeout" in f]
+        self.assertTrue(timeout_flags)
+        self.assertIn("hung", timeout_flags[0])
+        self.assertNotIn("Hanged", timeout_flags[0])
+
+    def test_command_label_sanitizes_sensitive_arguments(self):
+        label = command_label(
+            [
+                "/Users/snow/.pyenv/versions/3.10.19/bin/python",
+                "-m",
+                "gh_address_cr",
+                "address",
+                "owner/repo",
+                "67",
+                "--token",
+                "ghp_secret",
+                "/Users/snow/private workspace/file.txt",
+            ]
+        )
+
+        self.assertEqual(label, "python -m gh_address_cr address")
+        self.assertNotIn("ghp_secret", label)
+        self.assertNotIn("/Users/snow", label)
+        self.assertNotIn("owner/repo", label)
+
+    def test_command_label_uses_shell_escaping_for_label_tokens(self):
+        label = command_label(["/tmp/custom tool", "sub command", "--secret", "value"])
+
+        self.assertEqual(label, "'custom tool' 'sub command'")
+        self.assertNotIn("value", label)
+
     def test_json_serialization(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("cmd", 0, 1, 0)
@@ -120,9 +174,10 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(len(tracker.metrics), 1)
         self.assertEqual(tracker.metrics[0].exit_code, 124)
 
+    @patch("sys.stderr")
     @patch("gh_address_cr.core.telemetry.SessionTelemetry.record")
     @patch("subprocess.run")
-    def test_run_cmd_fail_open(self, mock_run, mock_record):
+    def test_run_cmd_fail_open(self, mock_run, mock_record, mock_stderr):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
         mock_record.side_effect = Exception("Telemetry DB error")
         
@@ -130,6 +185,8 @@ class TestTelemetry(unittest.TestCase):
         res = run_cmd(["ls"])
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout, "ok")
+        self.assertEqual(res.stderr, "")
+        mock_stderr.write.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

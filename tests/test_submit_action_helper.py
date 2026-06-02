@@ -125,6 +125,37 @@ class SubmitActionHelperTest(PythonScriptTestCase):
                     [{"command": "PYENV_VERSION=3.10.19 python -m unittest tests.test_example", "result": "passed"}],
                 )
 
+    def test_runtime_action_request_accepts_full_documented_severity_range(self):
+        for severity in ("P0", "P4"):
+            for script in HELPER_SCRIPTS:
+                with self.subTest(script=script, severity=severity):
+                    request_path = self.write_request(f"{severity.lower()}-action-request.json", runtime_request())
+
+                    result = self.run_helper(
+                        script,
+                        str(request_path),
+                        "--agent-id",
+                        "codex-1",
+                        "--resolution",
+                        "fix",
+                        "--note",
+                        "Fixed the thread.",
+                        "--commit-hash",
+                        "abc123",
+                        "--files",
+                        "src/example.py",
+                        "--severity",
+                        severity,
+                        "--validation-cmd",
+                        "python3 -m unittest tests.test_example=passed",
+                    )
+
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    response_path = self.workspace_dir() / "action-response-github-thread_abc.json"
+                    response = json.loads(response_path.read_text(encoding="utf-8"))
+                    self.assertEqual(response["fix_reply"]["severity"], severity)
+                    response_path.unlink()
+
     def test_runtime_action_request_reject_generates_reply_response(self):
         for script in HELPER_SCRIPTS:
             with self.subTest(script=script):

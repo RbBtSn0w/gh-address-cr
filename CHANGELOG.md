@@ -1,4 +1,4 @@
-## [2.8.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.7.0...v2.8.0) (2026-05-29)
+## Unreleased
 
 ### Features
 
