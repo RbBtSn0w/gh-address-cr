@@ -10,6 +10,7 @@ from tests.helpers import (
     FINAL_GATE_PY,
     INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
+    MARK_HANDLED_PY,
     POST_REPLY_PY,
     PUBLISH_FINDING_PY,
     PREPARE_CODE_REVIEW_PY,
@@ -1766,11 +1767,11 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "run-once", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("github-thread:THREAD_CLI", result.stdout)
 
-    def test_cli_dispatches_session_engine_list_items(self):
+    def test_session_engine_helper_lists_items(self):
         self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
         payload = json.dumps(
             [
@@ -1793,8 +1794,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "session-engine",
+                str(SCRIPT),
                 "list-items",
                 self.repo,
                 self.pr,
@@ -1881,7 +1881,7 @@ else:
         self.assertEqual(item["line"], 9)
         self.assertEqual(item["body"], "Imported from another review tool.")
 
-    def test_cli_dispatches_ingest_findings(self):
+    def test_ingest_findings_helper_accepts_ndjson(self):
         payload_file = Path(self.temp_dir.name) / "findings-ndjson.jsonl"
         payload_file.write_text(
             "\n".join(
@@ -1904,8 +1904,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "ingest-findings",
+                str(INGEST_FINDINGS_PY),
                 "--source",
                 "local-agent:cli-import",
                 "--input",
@@ -2356,8 +2355,8 @@ body: Missing title should fail.
         self.assertEqual(findings[0]["path"], "src/code_review.py")
         self.assertEqual(findings[0]["line"], 9)
 
-    def test_cli_dispatches_prepare_code_review(self):
-        result = self.run_cmd([sys.executable, str(CLI_PY), "prepare-code-review", "local", self.repo, self.pr])
+    def test_prepare_code_review_helper_emits_prompt(self):
+        result = self.run_cmd([sys.executable, str(PREPARE_CODE_REVIEW_PY), "local", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["mode"], "local")
@@ -3741,8 +3740,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "mark-handled",
+                str(MARK_HANDLED_PY),
                 "--repo",
                 self.repo,
                 "--pr",
@@ -3783,8 +3781,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CLI_PY),
-                "mark-handled",
+                str(MARK_HANDLED_PY),
                 "--repo",
                 self.repo,
                 "--pr",
@@ -3820,4 +3817,4 @@ else:
 
         result = self.run_cmd([sys.executable, str(CLI_PY), "mark-handled", "THREAD_NEEDS_CONTEXT"])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--repo and --pr are required", result.stderr)
+        self.assertIn("Unsupported legacy command: mark-handled", result.stderr)

@@ -47,7 +47,7 @@ Before claiming work is complete, run these local checks:
 
 ## Path Conventions
 
-- **In repo-root docs/tests**: Use repo-root paths like `src/gh_address_cr/legacy_scripts/cli.py`.
+- **In repo-root docs/tests**: Use repo-root paths like `src/gh_address_cr/cli.py`.
 - **In skill-owned docs (`skill/`)**: Use skill-root-relative paths like `references/...` and `agents/openai.yaml`.
 - **Do not rename product identifiers**: Use `gh-address-cr` for the runtime CLI, PyPI package, GitHub repository, skill name, and slash command.
 
@@ -86,5 +86,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/012-cli-skill-sync/plan.md](specs/012-cli-skill-sync/plan.md)
+  [specs/013-remove-legacy-compat/plan.md](specs/013-remove-legacy-compat/plan.md)
 <!-- SPECKIT END -->

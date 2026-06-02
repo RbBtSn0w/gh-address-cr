@@ -32,11 +32,7 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
     def run_cli_without_legacy_scripts(self, *args):
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with (
-            patch.object(cli, "SCRIPT_DIR", self.root / "missing-legacy-scripts"),
-            contextlib.redirect_stdout(stdout),
-            contextlib.redirect_stderr(stderr),
-        ):
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             rc = cli.main(list(args))
         return rc, stdout.getvalue(), stderr.getvalue()
 
@@ -204,8 +200,9 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
         self.assertIn("Action 'clarify' formulated", stdout)
 
     def test_core_public_commands_are_not_legacy_script_mapped(self):
-        for command in ("review", "findings", "threads", "adapter", "address"):
-            self.assertNotIn(command, cli.COMMAND_TO_SCRIPT)
+        self.assertFalse(hasattr(cli, "COMMAND_TO_SCRIPT"))
+        self.assertFalse(hasattr(cli, "SCRIPT_DIR"))
+        self.assertFalse(hasattr(cli, "run_script"))
 
 
 if __name__ == "__main__":

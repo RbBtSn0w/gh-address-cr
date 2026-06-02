@@ -1,7 +1,7 @@
 # Local Review Adapter Contract
 
-`gh-address-cr run-local-review` executes an adapter command and expects a JSON array on stdout.
-If your tool already emits findings JSON, use `gh-address-cr ingest-findings` directly instead of writing an adapter.
+`gh-address-cr adapter` executes an adapter command and expects a JSON array on stdout.
+If your tool already emits findings JSON, use `gh-address-cr findings --input <path>|-` directly instead of writing an adapter.
 
 ## Required fields per finding
 
@@ -40,11 +40,11 @@ If your tool already emits findings JSON, use `gh-address-cr ingest-findings` di
 - The adapter should not mutate repo state.
 - The adapter should not post directly to GitHub.
 - `gh-address-cr` assigns stable local item ids and stores them in the PR session.
-- `gh-address-cr ingest-findings` accepts these payload shapes:
+- `gh-address-cr findings --input <path>|-` accepts these payload shapes:
   - JSON array
   - JSON object with `findings`, `issues`, or `results`
   - NDJSON
-- `gh-address-cr ingest-findings` also accepts these alias fields for easier interoperability:
+- `gh-address-cr findings --input <path>|-` also accepts these alias fields for easier interoperability:
   - `path` / `file` / `filename`
   - `line` / `start_line` / `position`
   - `title` / `rule` / `check`

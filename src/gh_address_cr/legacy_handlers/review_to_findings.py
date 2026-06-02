@@ -20,7 +20,7 @@ def parse_findings(raw: str) -> list[dict]:
     return parse_finding_blocks(raw)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Convert Markdown review blocks into standardized findings JSON.",
     )
@@ -37,7 +37,7 @@ def main() -> int:
     )
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         findings = parse_findings(load_payload(args.input))

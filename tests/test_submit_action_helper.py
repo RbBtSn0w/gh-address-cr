@@ -8,7 +8,7 @@ from tests.helpers import PythonScriptTestCase, SRC_ROOT
 
 
 HELPER_SCRIPTS = (
-    SRC_ROOT / "gh_address_cr" / "legacy_scripts" / "submit_action.py",
+    SRC_ROOT / "gh_address_cr" / "legacy_handlers" / "submit_action.py",
 )
 
 
