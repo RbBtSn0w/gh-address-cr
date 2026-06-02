@@ -1,6 +1,6 @@
 Fixed in `<commit_hash>`.
 
-Severity: `P1` 🔴
+Review signal: `P1`
 
 What I changed:
 - `<file_path>`: `<critical-path fix>`

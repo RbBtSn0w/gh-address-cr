@@ -544,7 +544,9 @@ else:
         self.assertEqual(status, "done")
         self.assertEqual(error, "")
         self.assertIn("Fixed in `abc123`.", captured["reply_body"])
-        self.assertIn("Severity: `P2`", captured["reply_body"])
+        self.assertIn("Review signal: `P2`", captured["reply_body"])
+        self.assertNotIn("Severity:", captured["reply_body"])
+        self.assertNotIn("Reviewer priority:", captured["reply_body"])
         self.assertIn("What I changed:", captured["reply_body"])
         self.assertIn("- `src/template_fix.py`: updated per CR scope", captured["reply_body"])
         self.assertNotIn("<fix summary>", captured["reply_body"])
@@ -782,6 +784,7 @@ else:
         self.assertEqual(error, "")
         self.assertIsNotNone(reply_markdown)
         self.assertNotIn("Severity:", reply_markdown)
+        self.assertNotIn("Review signal:", reply_markdown)
         self.assertIn("`python3 -m unittest tests.test_cr_loop`", reply_markdown)
 
     def test_build_github_fix_reply_surfaces_raw_reviewer_priority(self):
@@ -810,7 +813,8 @@ else:
         self.assertEqual(error, "")
         self.assertIsNotNone(reply_markdown)
         self.assertNotIn("Severity:", reply_markdown)
-        self.assertIn("Reviewer priority: `Medium Priority`", reply_markdown)
+        self.assertNotIn("Reviewer priority:", reply_markdown)
+        self.assertIn("Review signal: `Medium Priority`", reply_markdown)
         self.assertIn("Medium-priority reviewer signal", reply_markdown)
 
     def test_handle_batch_github_fix_normalizes_string_validation_command(self):

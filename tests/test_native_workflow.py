@@ -569,7 +569,7 @@ class NativeWorkflowTests(unittest.TestCase):
         expected = (
             "Fixed in `abc123`.\n"
             "\n"
-            "Severity: `P1` 🔴\n"
+            "Review signal: `P1`\n"
             "\n"
             "What I changed:\n"
             "- `src/example.py`: Added the missing input guard.\n"
@@ -590,6 +590,8 @@ class NativeWorkflowTests(unittest.TestCase):
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertEqual(client.replies[0], expected)
+                self.assertNotIn("Severity:", client.replies[0])
+                self.assertNotIn("Reviewer priority:", client.replies[0])
 
     def test_publish_github_thread_fix_without_severity_does_not_default_to_p2(self):
         from gh_address_cr.core import workflow
@@ -637,6 +639,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertNotIn("Severity:", client.replies[0])
+                self.assertNotIn("Review signal:", client.replies[0])
                 self.assertNotIn("Medium-severity path", client.replies[0])
 
     def test_publish_github_thread_fix_surfaces_raw_reviewer_priority(self):
@@ -691,7 +694,8 @@ class NativeWorkflowTests(unittest.TestCase):
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertNotIn("Severity:", client.replies[0])
-                self.assertIn("Reviewer priority: `Low Priority`", client.replies[0])
+                self.assertNotIn("Reviewer priority:", client.replies[0])
+                self.assertIn("Review signal: `Low Priority`", client.replies[0])
                 self.assertIn("Reviewer-provided priority from github_first_comment", client.replies[0])
                 self.assertIn("Low-priority reviewer signal", client.replies[0])
 
@@ -803,7 +807,9 @@ class NativeWorkflowTests(unittest.TestCase):
 
                         workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
-                        self.assertIn(f"Severity: `{severity}`", client.replies[0])
+                        self.assertIn(f"Review signal: `{severity}`", client.replies[0])
+                        self.assertNotIn("Severity:", client.replies[0])
+                        self.assertNotIn("Reviewer priority:", client.replies[0])
                         self.assertIn(expected_line, client.replies[0])
 
     def test_publish_github_thread_fix_ignores_reply_markdown_when_fix_reply_exists(self):

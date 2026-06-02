@@ -224,6 +224,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
         self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
@@ -238,8 +239,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`test_command`", protocol_text)
         self.assertIn("`test_result`", protocol_text)
         self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
-        self.assertIn("Reviewer priority:", cli_text)
-        self.assertIn("Reviewer priority:", protocol_text)
+        self.assertIn("Review signal:", cli_text)
+        self.assertIn("Review signal:", protocol_text)
+        self.assertNotIn("Published fix replies should surface that signal as `Reviewer priority:`", skill_text)
+        self.assertNotIn("shown in published fix replies as `Reviewer priority:`", protocol_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
