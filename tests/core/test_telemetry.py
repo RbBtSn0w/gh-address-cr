@@ -244,6 +244,18 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(tracker.metrics, [])
 
+    def test_record_is_fail_open_when_metric_persistence_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            with patch.object(Path, "open", side_effect=OSError("denied")):
+                tracker.record("pytest", 0, 1, 0)
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "pytest")
+
     def test_metric_pid_and_execution_id(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("some cmd", 0, 1, 0, pid=12345, execution_id="exec-id-abc")

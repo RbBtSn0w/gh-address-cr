@@ -192,9 +192,12 @@ class SessionTelemetry:
     def _persist_metric(self, metric: ExecutionMetric) -> None:
         if self.telemetry_file is None:
             return
-        self.telemetry_file.parent.mkdir(parents=True, exist_ok=True)
-        with self.telemetry_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(metric.to_dict(), sort_keys=True) + "\n")
+        try:
+            self.telemetry_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.telemetry_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(metric.to_dict(), sort_keys=True) + "\n")
+        except OSError:
+            return
 
     def evaluate_efficiency(self) -> list[str]:
         flags = []
