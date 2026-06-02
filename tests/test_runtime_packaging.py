@@ -46,13 +46,47 @@ class RuntimePackagingTest(PythonScriptTestCase):
         shutil.copytree(RUNTIME_PACKAGE_DIR, install_root / "gh_address_cr")
 
         self.assertFalse((install_root / "gh_address_cr" / "legacy_scripts").exists())
+        self.assertFalse((install_root / "gh_address_cr" / "legacy_handlers").exists())
+        self.assertFalse((install_root / "gh_address_cr" / "command_handlers").exists())
+        self.assertTrue((install_root / "gh_address_cr" / "commands").exists())
 
-    def test_runtime_cli_has_no_legacy_script_dispatcher(self):
+    def test_runtime_cli_has_no_legacy_or_handler_script_dispatcher(self):
         import gh_address_cr.cli as cli
+        from gh_address_cr.core import control_plane, cr_loop
 
         self.assertFalse(hasattr(cli, "COMMAND_TO_SCRIPT"))
         self.assertFalse(hasattr(cli, "SCRIPT_DIR"))
         self.assertFalse(hasattr(cli, "run_script"))
+        self.assertFalse(hasattr(control_plane, "SCRIPT_DIR"))
+        self.assertFalse(hasattr(control_plane, "RUN_ONCE"))
+        self.assertFalse(hasattr(control_plane, "RUN_LOCAL_REVIEW"))
+        self.assertFalse(hasattr(cr_loop, "SCRIPT_DIR"))
+        self.assertFalse(hasattr(cr_loop, "RUN_ONCE"))
+        self.assertFalse(hasattr(cr_loop, "RUN_LOCAL_REVIEW"))
+
+    def test_current_runtime_commands_are_not_handler_package_named(self):
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(SRC_ROOT)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import importlib.util\n"
+                    "print(importlib.util.find_spec('gh_address_cr.commands') is not None)\n"
+                    "print(importlib.util.find_spec('gh_address_cr.command_handlers') is None)\n"
+                    "print(importlib.util.find_spec('gh_address_cr.legacy_handlers') is None)\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines(), ["True", "True", "True"])
 
     def test_native_session_engine_exposes_legacy_cli_contract(self):
         env = self.env.copy()
@@ -185,6 +219,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("submit-feedback", payload["public_commands"])
         self.assertIn("agent", payload["public_commands"])
         self.assertIn("version", payload["public_commands"])
+
+        self.assertNotIn("superpowers", payload["public_commands"])
         validate_capability_manifest(payload)
         self.assertIn("coordinator", payload["roles"])
         self.assertIn("triage", payload["roles"])

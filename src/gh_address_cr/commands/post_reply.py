@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gh_address_cr.legacy_handlers.python_common import (
+from gh_address_cr.commands.python_common import (
     audit_event,
     gh_write_cmd,
     github_viewer_login,

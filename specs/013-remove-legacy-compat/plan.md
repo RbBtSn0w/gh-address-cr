@@ -13,14 +13,14 @@ before session mutation or GitHub side effects.
 
 ## Technical Context
 
-**Language/Version**: Python 3.10+  
-**Primary Dependencies**: Python standard library plus `packaging` from `pyproject.toml`  
-**Storage**: Cache-backed PR session files managed by the runtime; no new storage  
-**Testing**: `ruff check src tests`, `python3 -m unittest discover -s tests`, CLI smoke checks  
-**Target Platform**: Cross-platform Python CLI runtime  
-**Project Type**: Single Python CLI package plus installable skill payload  
-**Performance Goals**: Supported commands perform zero legacy-script dispatcher checks before native handling  
-**Constraints**: Preserve current public commands, machine summaries, reason codes, final-gate evidence, normalized findings intake, and packaged skill boundary  
+**Language/Version**: Python 3.10+
+**Primary Dependencies**: Python standard library plus `packaging` from `pyproject.toml`
+**Storage**: Cache-backed PR session files managed by the runtime; no new storage
+**Testing**: `ruff check src tests`, `python3 -m unittest discover -s tests`, CLI smoke checks
+**Target Platform**: Cross-platform Python CLI runtime
+**Project Type**: Single Python CLI package plus installable skill payload
+**Performance Goals**: Supported commands perform zero legacy-script dispatcher checks before native handling
+**Constraints**: Preserve current public commands, machine summaries, reason codes, final-gate evidence, normalized findings intake, and packaged skill boundary
 **Scale/Scope**: One runtime package, one packaged skill payload, repository tests and current feature artifacts
 
 ## Constitution Check
@@ -69,8 +69,7 @@ specs/013-remove-legacy-compat/
 ```text
 src/gh_address_cr/
 ├── cli.py                         # public CLI routing and fail-fast unsupported usage
-├── legacy_handlers/               # internal helper implementations retained for current tests and utilities
-├── legacy_scripts/                # historical wrapper package targeted for removal
+├── commands/                      # current internal command modules only
 ├── core/
 ├── intake/
 └── github/
@@ -92,9 +91,11 @@ plugin/gh-address-cr/
 ```
 
 **Structure Decision**: Use the existing single Python CLI package. Remove
-historical script compatibility from runtime routing, keep current behavior in
-native runtime modules or internal helper implementations, and keep repo-root
-tests as the executable contract.
+historical script compatibility from runtime routing, delete obsolete low-level
+handler modules, keep current behavior in native runtime modules or current
+internal command modules, and keep repo-root tests as the executable contract.
+Historical runtime package names such as `legacy_scripts`, `legacy_handlers`,
+and `command_handlers` must not remain in the installed payload.
 
 ## Complexity Tracking
 

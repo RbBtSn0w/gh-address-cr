@@ -106,7 +106,9 @@ def first_scene_item_severity(item: dict[str, Any]) -> str | None:
     return normalize_severity(evidence.get("value"))
 
 
-def review_priority_for_publish(item: dict[str, Any]) -> tuple[str | None, str | None]:
+def review_priority_for_publish(item: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    if not isinstance(item, dict):
+        return None, None
     evidence = item.get("review_priority_evidence")
     if not isinstance(evidence, dict):
         return None, None

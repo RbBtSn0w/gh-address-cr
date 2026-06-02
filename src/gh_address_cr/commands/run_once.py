@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from gh_address_cr.legacy_handlers.python_common import (
+from gh_address_cr.commands.python_common import (
     audit_event,
     previous_snapshot_file,
     refresh_threads_snapshot,

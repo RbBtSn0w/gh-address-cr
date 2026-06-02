@@ -82,7 +82,7 @@ The main logic lives in the Python runtime package under `src/gh_address_cr/`.
 - `core/`: session state, workflow transitions, final-gate, and orchestration helpers
 - `github/`: GitHub CLI IO and failure diagnostics
 - `intake/`: findings parsing and normalization
-- `legacy_handlers/`: helper implementations that remain behind supported public commands
+- `commands/`: current internal command modules behind supported public commands
 
 New automation should use `gh-address-cr`, not direct script paths.
 

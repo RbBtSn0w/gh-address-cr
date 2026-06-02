@@ -1,4 +1,4 @@
-import importlib.util
+import importlib
 import io
 import json
 import subprocess
@@ -6,10 +6,7 @@ import sys
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from tests.helpers import PythonScriptTestCase, CR_LOOP_PY
-
-
-BATCH_GITHUB_EXECUTE_PY = CR_LOOP_PY.parent / "batch_github_execute.py"
+from tests.helpers import PythonScriptTestCase, SRC_ROOT
 
 
 @contextmanager
@@ -26,15 +23,12 @@ def patched_stdin(text: str):
 
 class BatchGitHubExecuteTestCase(PythonScriptTestCase):
     def load_module(self):
-        sys.path.insert(0, str(BATCH_GITHUB_EXECUTE_PY.parent))
-        spec = importlib.util.spec_from_file_location("batch_github_execute_under_test", BATCH_GITHUB_EXECUTE_PY)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
+        sys.path.insert(0, str(SRC_ROOT))
         try:
-            spec.loader.exec_module(module)
+            module = importlib.import_module("gh_address_cr.commands.batch_github_execute")
+            return importlib.reload(module)
         finally:
             sys.path.pop(0)
-        return module
 
     def test_batch_github_execute_submits_current_pending_reviews(self):
         module = self.load_module()

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from gh_address_cr.legacy_handlers.python_common import (
+from gh_address_cr.commands.python_common import (
     audit_event,
     audit_summary_file,
     gh_read_json,

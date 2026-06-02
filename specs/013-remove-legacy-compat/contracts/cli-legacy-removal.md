@@ -59,3 +59,11 @@ Unsupported historical usage must:
 Active user-facing docs and packaged skill guidance must not instruct users to
 run removed script paths or unsupported historical commands. Historical specs
 may retain old examples only when marked as superseded or archival.
+
+## Runtime Package Requirements
+
+The installed runtime payload must not contain active implementation packages
+named `legacy_scripts`, `legacy_handlers`, or `command_handlers`. Obsolete
+low-level handler modules must be deleted rather than kept as compatibility
+entrypoints. Current helper behavior may remain as internal implementation only
+when it is exposed through current runtime package names and public CLI commands.

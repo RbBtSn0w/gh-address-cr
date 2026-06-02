@@ -10,19 +10,9 @@ import uuid
 from gh_address_cr.core import paths as core_paths
 
 
-COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
-SCRIPT_DIR = (
-    Path(COMPAT_SCRIPT_DIR_OVERRIDE)
-    if COMPAT_SCRIPT_DIR_OVERRIDE
-    else Path(__file__).resolve().parents[1] / "legacy_handlers"
-)
-RUN_ONCE = SCRIPT_DIR / "run_once.py"
-RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
-INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
-FINAL_GATE = SCRIPT_DIR / "final_gate.py"
-CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
+RUNTIME_MODULE_PREFIX = "gh_address_cr.commands"
 
 
 def _workspace_file(repo: str, pr_number: str, name: str) -> Path:
@@ -118,6 +108,10 @@ def run_command(cmd: list[str], *, stdin: str | None = None) -> subprocess.Compl
     return subprocess.run(cmd, input=stdin, text=True, capture_output=True, env=_runtime_subprocess_env())
 
 
+def command_module(name: str) -> list[str]:
+    return [sys.executable, "-m", f"{RUNTIME_MODULE_PREFIX}.{name}"]
+
+
 def emit(result: subprocess.CompletedProcess[str]) -> None:
     if result.stdout:
         sys.stdout.write(result.stdout)
@@ -173,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.mode in {"remote", "mixed"}:
-            cmd = [sys.executable, str(RUN_ONCE)]
+            cmd = command_module("run_once")
             if args.audit_id:
                 cmd.extend(["--audit-id", args.audit_id])
             cmd.extend([repo, pr_number])
@@ -183,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.mode in {"local", "mixed", "ingest"}:
             if producer == "adapter":
-                cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+                cmd = command_module("run_local_review")
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
@@ -202,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     persisted_input_path.write_text(stdin_payload, encoding="utf-8")
                     input_arg = str(persisted_input_path)
-                cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+                cmd = command_module("run_local_review")
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
@@ -213,8 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                     [
                         repo,
                         pr_number,
-                        sys.executable,
-                        str(CODE_REVIEW_ADAPTER),
+                        *command_module("code_review_adapter"),
                         "--input",
                         input_arg or "-",
                     ]
@@ -223,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                 if result is not None:
                     return result.returncode
             else:
-                cmd = [sys.executable, str(INGEST_FINDINGS)]
+                cmd = command_module("ingest_findings")
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
                 if source:
@@ -238,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
                     return result.returncode
 
         if args.gate:
-            cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
+            cmd = [*command_module("final_gate"), "--no-auto-clean"]
             if args.audit_id:
                 cmd.extend(["--audit-id", args.audit_id])
             if args.mode in {"remote", "mixed"}:

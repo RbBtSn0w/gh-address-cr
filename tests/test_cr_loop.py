@@ -11,6 +11,14 @@ from unittest.mock import patch
 from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT, SRC_ROOT
 
 
+def _is_python_module_cmd(cmd, module: str, script_name: str, subcommand: str | None = None) -> bool:
+    if len(cmd) > 2 and cmd[1] == "-m" and cmd[2] == module:
+        return subcommand is None or (len(cmd) > 3 and cmd[3] == subcommand)
+    if len(cmd) > 1 and Path(cmd[1]).name == script_name:
+        return subcommand is None or (len(cmd) > 2 and cmd[2] == subcommand)
+    return False
+
+
 class CRLoopCLITest(PythonScriptTestCase):
     def artifacts_dir(self) -> Path:
         return super().artifacts_dir()
@@ -343,7 +351,7 @@ else:
             )
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 return subprocess.CompletedProcess(
                     cmd,
                     1,
@@ -358,7 +366,7 @@ else:
                     ),
                     "",
                 )
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 updates = json.loads(stdin or "[]")
                 session = json.loads(self.session_file().read_text(encoding="utf-8"))
                 for update in updates:
@@ -366,13 +374,13 @@ else:
                     current.update(update)
                 self.session_file().write_text(json.dumps(session), encoding="utf-8")
                 return subprocess.CompletedProcess(cmd, 0, "", "")
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "record-auto-attempt":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "record-auto-attempt"):
                 session = json.loads(self.session_file().read_text(encoding="utf-8"))
                 item = session["items"][cmd[5]]
                 item["last_auto_failure"] = cmd[9]
                 self.session_file().write_text(json.dumps(session), encoding="utf-8")
                 return subprocess.CompletedProcess(cmd, 0, "", "")
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "release-claim":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "release-claim"):
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -486,7 +494,7 @@ else:
             return True, ""
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 payload = json.loads(stdin or "[]")
                 self.assertEqual(len(payload), 1)
                 captured["reply_body"] = payload[0]["reply_body"]
@@ -503,7 +511,7 @@ else:
                     ),
                     "",
                 )
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 updates = json.loads(stdin or "[]")
                 session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
                 for update in updates:
@@ -698,7 +706,7 @@ else:
             raise AssertionError("accepted agent responses must publish without invoking a fixer")
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 payload = json.loads(stdin or "[]")
                 self.assertEqual(len(payload), 1)
                 captured["github_action"] = payload[0]
@@ -715,7 +723,7 @@ else:
                     ),
                     "",
                 )
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 updates = json.loads(stdin or "[]")
                 session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
                 for update in updates:
@@ -879,7 +887,7 @@ else:
             return True, ""
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 payload = json.loads(stdin or "[]")
                 captured["reply_body"] = payload[0]["reply_body"]
                 return subprocess.CompletedProcess(
@@ -890,7 +898,7 @@ else:
                     ),
                     "",
                 )
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 updates = json.loads(stdin or "[]")
                 session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
                 for update in updates:
@@ -995,7 +1003,7 @@ else:
             return True, ""
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 payload = json.loads(stdin or "[]")
                 captured["reply_body"] = payload[0]["reply_body"]
                 return subprocess.CompletedProcess(
@@ -1006,7 +1014,7 @@ else:
                     ),
                     "",
                 )
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 updates = json.loads(stdin or "[]")
                 session_data = json.loads(self.session_file().read_text(encoding="utf-8"))
                 for update in updates:
@@ -1720,9 +1728,9 @@ print(json.dumps({{
             )
 
         def fake_run_cmd(cmd, *, stdin=None):
-            if Path(cmd[1]).name == "batch_github_execute.py":
+            if _is_python_module_cmd(cmd, "gh_address_cr.commands.batch_github_execute", "batch_github_execute.py"):
                 return subprocess.CompletedProcess(cmd, 1, "", "batch helper failed")
-            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+            if _is_python_module_cmd(cmd, "gh_address_cr.core.session_engine", "session_engine.py", "update-items-batch"):
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             raise AssertionError(f"unexpected command: {cmd}")
 

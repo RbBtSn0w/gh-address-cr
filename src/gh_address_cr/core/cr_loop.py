@@ -20,24 +20,11 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
 
 
-COMPAT_SCRIPT_DIR_OVERRIDE = os.environ.get("GH_ADDRESS_CR_COMPAT_SCRIPT_DIR", "")
-SESSION_ENGINE = Path(__file__).resolve().parents[1] / "session_engine.py"
-SCRIPT_DIR = (
-    Path(COMPAT_SCRIPT_DIR_OVERRIDE)
-    if COMPAT_SCRIPT_DIR_OVERRIDE
-    else Path(__file__).resolve().parents[1] / "legacy_handlers"
-)
-RUN_ONCE = SCRIPT_DIR / "run_once.py"
-RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
-INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
-FINAL_GATE = SCRIPT_DIR / "final_gate.py"
-CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
-
-
 NEEDS_HUMAN_EXIT = 4
 BLOCKED_EXIT = 5
 VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
+RUNTIME_MODULE_PREFIX = "gh_address_cr.commands"
 
 
 def telemetry_debug_enabled() -> bool:
@@ -50,6 +37,14 @@ def timeout_stream_text(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode(errors="replace")
     return value
+
+
+def command_module(name: str) -> list[str]:
+    return [sys.executable, "-m", f"{RUNTIME_MODULE_PREFIX}.{name}"]
+
+
+def session_engine_module() -> list[str]:
+    return [sys.executable, "-m", "gh_address_cr.core.session_engine"]
 
 
 def _workspace_file(repo: str, pr_number: str, name: str) -> Path:
@@ -437,8 +432,8 @@ def run_gate(
     mode: str, repo: str, pr_number: str, audit_id: str, *, snapshot: str = ""
 ) -> subprocess.CompletedProcess[str]:
     if mode == "local":
-        return run_cmd([sys.executable, str(SESSION_ENGINE), "gate", repo, pr_number])
-    cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
+        return run_cmd([*session_engine_module(), "gate", repo, pr_number])
+    cmd = [*command_module("final_gate"), "--no-auto-clean"]
     if audit_id:
         cmd.extend(["--audit-id", audit_id])
     if snapshot:
@@ -466,18 +461,16 @@ def run_intake(
     stdin_payload: str | None,
 ) -> subprocess.CompletedProcess[str]:
     if iteration == 1:
-        run_cmd([sys.executable, str(SESSION_ENGINE), "init", repo, pr_number])
+        run_cmd([*session_engine_module(), "init", repo, pr_number])
 
     if args.mode in {"remote", "mixed"}:
-        result = run_cmd(
-            [sys.executable, str(RUN_ONCE), *(["--audit-id", args.audit_id] if args.audit_id else []), repo, pr_number]
-        )
+        result = run_cmd([*command_module("run_once"), *(["--audit-id", args.audit_id] if args.audit_id else []), repo, pr_number])
         if result.returncode != 0:
             return result
 
     if args.mode in {"local", "mixed", "ingest"}:
         if producer == "adapter":
-            cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+            cmd = command_module("run_local_review")
             if args.scan_id:
                 cmd.extend(["--scan-id", args.scan_id])
             if args.source or producer:
@@ -489,7 +482,7 @@ def run_intake(
         if producer == "json":
             if iteration > 1:
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-            cmd = [sys.executable, str(INGEST_FINDINGS)]
+            cmd = command_module("ingest_findings")
             if args.scan_id:
                 cmd.extend(["--scan-id", args.scan_id])
             if args.source or producer:
@@ -514,13 +507,13 @@ def run_intake(
                     )
                     persisted_input_path.write_text(stdin_payload, encoding="utf-8")
                     input_arg = str(persisted_input_path)
-                cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+                cmd = command_module("run_local_review")
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
                 cmd.extend(["--source", args.source or "local-agent:code-review"])
                 if args.sync:
                     cmd.append("--sync")
-                cmd.extend([repo, pr_number, sys.executable, str(CODE_REVIEW_ADAPTER), "--input", input_arg or "-"])
+                cmd.extend([repo, pr_number, *command_module("code_review_adapter"), "--input", input_arg or "-"])
                 return run_cmd(cmd)
             finally:
                 if persisted_input_path and persisted_input_path.exists():
@@ -954,8 +947,7 @@ def handle_batch(
     if github_actions:
         payload_str = json.dumps(github_actions)
         cmd = [
-            sys.executable,
-            str(SCRIPT_DIR / "batch_github_execute.py"),
+            *command_module("batch_github_execute"),
             "--repo",
             repo,
             "--pr",
@@ -1018,15 +1010,14 @@ def handle_batch(
 
         if session_updates:
             run_cmd(
-                [sys.executable, str(SESSION_ENGINE), "update-items-batch", repo, pr_number],
+                [*session_engine_module(), "update-items-batch", repo, pr_number],
                 stdin=json.dumps(session_updates),
             )
 
     for update in local_updates:
         result = run_cmd(
             [
-                sys.executable,
-                str(SESSION_ENGINE),
+                *session_engine_module(),
                 "resolve-local-item",
                 repo,
                 pr_number,
@@ -1065,7 +1056,7 @@ def handle_batch(
             return "needs_human", result.stderr or "resolve-local-item failed"
 
         run_cmd(
-            [sys.executable, str(SESSION_ENGINE), "update-items-batch", repo, pr_number],
+            [*session_engine_module(), "update-items-batch", repo, pr_number],
             stdin=json.dumps(
                 [
                     {
@@ -1127,7 +1118,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
 
     run_id = args.audit_id or f"cr-loop-{engine.utc_now()}"
-    run_cmd([sys.executable, str(SESSION_ENGINE), "init", repo, pr_number])
+    run_cmd([*session_engine_module(), "init", repo, pr_number])
     update_loop_state(repo, pr_number, run_id=run_id, status="ACTIVE", iteration=0, max_iterations=args.max_iterations)
 
     for iteration in range(1, args.max_iterations + 1):
@@ -1197,8 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
             for item in batch_items:
                 claim = run_cmd(
                     [
-                        sys.executable,
-                        str(SESSION_ENGINE),
+                        *session_engine_module(),
                         "claim",
                         repo,
                         pr_number,

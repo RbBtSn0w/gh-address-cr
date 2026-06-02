@@ -7,7 +7,7 @@ from pathlib import Path
 
 from gh_address_cr.intake.findings import parse_finding_blocks
 from gh_address_cr.intake.findings import FindingsFormatError
-from gh_address_cr.legacy_handlers.python_common import findings_file
+from gh_address_cr.commands.python_common import findings_file
 
 
 def load_payload(input_path: str) -> str:

@@ -8,8 +8,6 @@ import shlex
 from pathlib import Path
 import subprocess
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     argv = list(sys.argv[1:] if argv is None else argv)

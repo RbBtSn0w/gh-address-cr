@@ -4,8 +4,8 @@ import argparse
 import json
 import sys
 
-from gh_address_cr.legacy_handlers.post_reply import submit_pending_reviews_result
-from gh_address_cr.legacy_handlers.python_common import (
+from gh_address_cr.commands.post_reply import submit_pending_reviews_result
+from gh_address_cr.commands.python_common import (
     audit_event,
     gh_write_cmd,
     github_thread_reply_evidence,

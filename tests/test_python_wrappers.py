@@ -1,21 +1,18 @@
+import contextlib
+import io
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.helpers import (
-    AUDIT_REPORT_PY,
     CLI_PY,
     CONTROL_PLANE_PY,
     CODE_REVIEW_ADAPTER_PY,
     FINAL_GATE_PY,
     INGEST_FINDINGS_PY,
-    LIST_THREADS_PY,
-    MARK_HANDLED_PY,
     POST_REPLY_PY,
-    PUBLISH_FINDING_PY,
-    PREPARE_CODE_REVIEW_PY,
     REVIEW_TO_FINDINGS_PY,
-    RESOLVE_THREAD_PY,
     RUN_LOCAL_REVIEW_PY,
     RUN_ONCE_PY,
     SCRIPT,
@@ -78,6 +75,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("adapter", result.stdout)
         self.assertIn("review-to-findings", result.stdout)
         self.assertIn("gh-address-cr review", result.stdout)
+        self.assertNotIn("superpowers", result.stdout)
         self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("control-plane", result.stdout)
@@ -124,6 +122,47 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("submit-feedback --category", result.stdout)
         self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
 
+    def test_cli_unknown_command_hint_omits_hidden_superpowers_command(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "unknown-command"])
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Supported commands:", result.stderr)
+        self.assertNotIn("superpowers", result.stderr)
+
+    def test_cli_utility_handlers_treat_none_return_as_success(self):
+        import gh_address_cr.cli as cli
+        from gh_address_cr.commands import review_to_findings, submit_action, submit_feedback
+
+        cases = [
+            ("submit-action", submit_action, ["request.json", "--resolution", "fix", "--note", "done"]),
+            ("review-to-findings", review_to_findings, ["--input", "-"]),
+            ("submit-feedback", submit_feedback, ["--category", "workflow-gap", "--title", "t"]),
+        ]
+
+        for command, module, args in cases:
+            with self.subTest(command=command):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    patch.object(module, "main", return_value=None),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    rc = cli.main([command, *args])
+
+                self.assertEqual(rc, 0)
+
+    def test_python_helper_command_normalization_resolves_relative_paths(self):
+        command = [
+            sys.executable,
+            str(Path("src/gh_address_cr/commands/review_to_findings.py")),
+            "--help",
+        ]
+
+        normalized = self._normalize_python_module_command(command)
+
+        self.assertEqual(normalized[:3], [sys.executable, "-m", "gh_address_cr.commands.review_to_findings"])
+        self.assertEqual(normalized[3:], ["--help"])
 
     def test_cli_submit_feedback_passthrough_dry_run(self):
         result = self.run_cmd(
@@ -2239,31 +2278,6 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires an explicit --source", result.stderr)
 
-    def test_prepare_code_review_emits_bridge_prompt(self):
-        result = self.run_cmd([sys.executable, str(PREPARE_CODE_REVIEW_PY), "mixed", self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["producer"], "code-review")
-        self.assertEqual(payload["mode"], "mixed")
-        self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
-        self.assertIn("code-review-adapter", payload["adapter_backend"])
-        self.assertIn("review-to-findings", payload["review_to_findings_command"])
-        self.assertIn("control-plane mixed code-review", payload["ingest_command"])
-        self.assertIn("gh-address-cr", payload["adapter_backend"])
-        self.assertIn("gh-address-cr", payload["review_to_findings_command"])
-        self.assertIn("gh-address-cr", payload["ingest_command"])
-        self.assertNotIn("scripts/cli.py", payload["adapter_backend"])
-        self.assertNotIn("scripts/cli.py", payload["review_to_findings_command"])
-        self.assertNotIn("scripts/cli.py", payload["ingest_command"])
-        self.assertNotIn("skill/scripts/cli.py", payload["adapter_backend"])
-        self.assertNotIn("skill/scripts/cli.py", payload["review_to_findings_command"])
-        self.assertNotIn("skill/scripts/cli.py", payload["ingest_command"])
-        self.assertIn("/octo__example/pr-77", payload["workspace_dir"])
-        self.assertTrue(payload["findings_output_path"].endswith("/octo__example/pr-77/code-review-findings.json"))
-        self.assertTrue(payload["reply_output_path"].endswith("/octo__example/pr-77/reply.md"))
-        self.assertTrue(payload["loop_request_path"].endswith("/octo__example/pr-77/loop-request.json"))
-        self.assertTrue(payload["review_to_findings_command"].endswith("/octo__example/pr-77"))
-
     def test_review_to_findings_python_converts_markdown_blocks_to_workspace_json(self):
         markdown = """Intro text that should be ignored.
 
@@ -2356,12 +2370,6 @@ body: Missing title should fail.
         self.assertEqual(findings[0]["path"], "src/code_review.py")
         self.assertEqual(findings[0]["line"], 9)
 
-    def test_prepare_code_review_helper_emits_prompt(self):
-        result = self.run_cmd([sys.executable, str(PREPARE_CODE_REVIEW_PY), "local", self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["mode"], "local")
-
     def test_cli_dispatches_review_to_findings(self):
         markdown = """```finding
 title: CLI finding
@@ -2423,279 +2431,6 @@ body: CLI bridge output.
         self.assertEqual(item["path"], "src/stdin.py")
         self.assertEqual(item["line"], 3)
         self.assertEqual(item["source"], "local-agent:stdin-review")
-
-    def test_publish_finding_python_dry_run_uses_diff_position(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:3] == ['pr', 'view', '77']:
-    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
-    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
-    if page == '1':
-        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
-    else:
-        print('[]')
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
-            [
-                {
-                    "title": "Publish me",
-                    "body": "Dry-run publication.",
-                    "path": "src/a.py",
-                    "line": 4,
-                    "severity": "P3",
-                    "category": "docs",
-                }
-            ]
-        )
-        ingest = self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
-        self.assertIn("Created 1 local item", ingest.stdout)
-
-        list_result = self.run_cmd(
-            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
-        )
-        item_id = json.loads(list_result.stdout.strip())["item_id"]
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(PUBLISH_FINDING_PY),
-                "--dry-run",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                item_id,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("position=4", result.stdout)
-
-    def test_publish_finding_python_dry_run_handles_multiple_pages(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:3] == ['pr', 'view', '77']:
-    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
-    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
-    if page == '1':
-        print(json.dumps([{'filename':'src/other.py','patch':'@@ -1,1 +1,1 @@\\n line1\\n+line2'}]))
-    elif page == '2':
-        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
-    else:
-        print('[]')
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
-            [
-                {
-                    "title": "Publish me",
-                    "body": "Dry-run publication.",
-                    "path": "src/a.py",
-                    "line": 4,
-                    "severity": "P3",
-                    "category": "docs",
-                }
-            ]
-        )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
-        list_result = self.run_cmd(
-            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
-        )
-        item_id = json.loads(list_result.stdout.strip())["item_id"]
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(PUBLISH_FINDING_PY),
-                "--dry-run",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                item_id,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("position=4", result.stdout)
-
-    def test_publish_finding_python_reports_structured_success(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:3] == ['pr', 'view', '77']:
-    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
-    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
-    if page == '1':
-        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
-    else:
-        print('[]')
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/comments']:
-    print(json.dumps({'id': 321, 'html_url': 'https://example.test/comment/321'}))
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
-            [
-                {
-                    "title": "Publish me",
-                    "body": "Non-dry-run publication.",
-                    "path": "src/a.py",
-                    "line": 4,
-                    "severity": "P3",
-                    "category": "docs",
-                }
-            ]
-        )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
-        list_result = self.run_cmd(
-            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
-        )
-        item_id = json.loads(list_result.stdout.strip())["item_id"]
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(PUBLISH_FINDING_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                item_id,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        summary = json.loads(result.stdout)
-        self.assertEqual(summary["status"], "succeeded")
-        self.assertEqual(summary["remote_status"], "succeeded")
-        self.assertEqual(summary["session_status"], "succeeded")
-        self.assertEqual(summary["comment_id"], 321)
-        self.assertEqual(summary["comment_url"], "https://example.test/comment/321")
-
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
-        item = session["items"][item_id]
-        self.assertTrue(item["published"])
-        self.assertEqual(item["published_ref"], "321")
-
-    def test_publish_finding_python_reuses_pr_files_cache_for_same_head(self):
-        gh = self.bin_dir / "gh"
-        state_file = Path(self.temp_dir.name) / "publish_cache_state.json"
-        state_file.write_text(json.dumps({"files_calls": 0, "head_calls": 0}), encoding="utf-8")
-        gh.write_text(
-            f"""#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-state_file = Path({str(state_file)!r})
-state = json.loads(state_file.read_text(encoding='utf-8'))
-args = sys.argv[1:]
-if args[:3] == ['pr', 'view', '77']:
-    state['head_calls'] += 1
-    state_file.write_text(json.dumps(state), encoding='utf-8')
-    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
-    state['files_calls'] += 1
-    state_file.write_text(json.dumps(state), encoding='utf-8')
-    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
-    if page == '1':
-        print(json.dumps([{{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}}]))
-    else:
-        print('[]')
-else:
-    raise SystemExit(f'unhandled gh args: {{args}}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
-            [
-                {
-                    "title": "Publish me",
-                    "body": "Dry-run publication.",
-                    "path": "src/a.py",
-                    "line": 4,
-                    "severity": "P3",
-                    "category": "docs",
-                }
-            ]
-        )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
-
-        list_result = self.run_cmd(
-            [sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True
-        )
-        item_id = json.loads(list_result.stdout.strip())["item_id"]
-
-        for _ in range(2):
-            result = self.run_cmd(
-                [
-                    sys.executable,
-                    str(PUBLISH_FINDING_PY),
-                    "--dry-run",
-                    "--repo",
-                    self.repo,
-                    "--pr",
-                    self.pr,
-                    item_id,
-                ]
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("position=4", result.stdout)
-
-        state = json.loads(state_file.read_text(encoding="utf-8"))
-        self.assertEqual(state["head_calls"], 2)
-        self.assertEqual(state["files_calls"], 2)
 
     def test_run_once_python_syncs_session_with_mocked_gh(self):
         gh = self.bin_dir / "gh"
@@ -2983,15 +2718,6 @@ else:
         self.assertIn("Audit summary path:", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
 
-        report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "native-run", self.repo, self.pr])
-
-        self.assertEqual(report.returncode, 0, report.stderr)
-        self.assertNotIn("No audit log found.", report.stdout)
-        self.assertNotIn("No trace log found.", report.stdout)
-        self.assertNotIn("No audit summary found.", report.stdout)
-        self.assertIn('"run_id": "native-run"', report.stdout)
-        self.assertIn("== Audit Summary SHA256 ==", report.stdout)
-
     def test_final_gate_python_fails_when_current_login_has_pending_reviews(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -3046,119 +2772,6 @@ else:
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("Pending review count: 1", result.stdout)
         self.assertIn("pending review(s)", result.stderr)
-
-    def test_list_threads_python_outputs_normalized_rows(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-if sys.argv[1:3] == ['api', 'graphql']:
-    print(json.dumps({
-        'data': {
-            'repository': {
-                'pullRequest': {
-                    'reviewThreads': {
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                        'nodes': [{
-                            'id': 'THREAD_LIST',
-                            'isResolved': False,
-                            'isOutdated': True,
-                            'path': 'src/list.py',
-                            'line': 2,
-                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/list-first', 'body': 'first'}]},
-                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/list-latest', 'body': 'latest'}]},
-                        }]
-                    }
-                }
-            }
-        }
-    }))
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        result = self.run_cmd([sys.executable, str(LIST_THREADS_PY), self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        row = json.loads(result.stdout.strip())
-        self.assertEqual(row["id"], "THREAD_LIST")
-        self.assertEqual(row["url"], "https://example.test/thread/list-latest")
-        self.assertEqual(row["comment_source"], "latest")
-
-    def test_list_threads_python_paginates_comments_for_viewer_reply_evidence(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:2] == ['api', 'user']:
-    print(json.dumps({'login': 'agent-login'}))
-elif args[:2] == ['api', 'graphql']:
-    query = next(arg.split('=', 1)[1] for arg in args if arg.startswith('query='))
-    if 'reviewThreads(first:100' in query:
-        comments = [{'url': 'https://example.test/thread/list-page-1', 'body': 'first', 'author': {'login': 'reviewer'}}]
-        comments.extend(
-            {'url': f'https://example.test/thread/list-page-1#{i}', 'body': f'comment-{i}', 'author': {'login': 'reviewer'}}
-            for i in range(1, 100)
-        )
-        print(json.dumps({
-            'data': {
-                'repository': {
-                    'pullRequest': {
-                        'reviewThreads': {
-                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                            'nodes': [{
-                                'id': 'THREAD_LIST_PAGINATED',
-                                'isResolved': True,
-                                'isOutdated': False,
-                                'path': 'src/list.py',
-                                'line': 2,
-                                'comments': {
-                                    'pageInfo': {'hasNextPage': True, 'endCursor': 'CURSOR_1'},
-                                    'nodes': comments,
-                                },
-                                'firstComment': {'nodes': [{'url': 'https://example.test/thread/list-page-1', 'body': 'first'}]},
-                                'latestComment': {'nodes': [{'url': 'https://example.test/thread/list-page-1#99', 'body': 'comment-99'}]},
-                            }]
-                        }
-                    }
-                }
-            }
-        }))
-    elif 'node(id:$threadId)' in query:
-        print(json.dumps({
-            'data': {
-                'node': {
-                    'comments': {
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                        'nodes': [
-                            {'url': 'https://example.test/thread/list-page-2#100', 'body': 'late reply', 'author': {'login': 'agent-login'}}
-                        ],
-                    }
-                }
-            }
-        }))
-    else:
-        raise SystemExit(f'unhandled graphql query: {query}')
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        result = self.run_cmd([sys.executable, str(LIST_THREADS_PY), self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        row = json.loads(result.stdout.strip())
-        self.assertEqual(row["id"], "THREAD_LIST_PAGINATED")
-        self.assertTrue(row["viewer_replied"])
-        self.assertEqual(row["viewer_reply_url"], "https://example.test/thread/list-page-2#100")
 
     def test_post_reply_python_dry_run_prints_body(self):
         reply_file = Path(self.temp_dir.name) / "reply.md"
@@ -3533,278 +3146,6 @@ else:
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)
         self.assertTrue(any(json.loads(line).get("run_id") == "archive-run" for line in trace_lines if line.strip()))
-
-    def test_audit_report_filters_trace_to_one_run_id(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-if sys.argv[1:3] == ['api', 'graphql']:
-    print(json.dumps({
-        'data': {
-            'repository': {
-                'pullRequest': {
-                    'reviewThreads': {
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                        'nodes': []
-                    }
-                }
-            }
-        }
-    }))
-elif sys.argv[1:3] == ['api', 'user']:
-    print(json.dumps({'login': 'agent-login'}))
-elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
-    print('[]')
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        first = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-a", self.repo, self.pr]
-        )
-        self.assertEqual(first.returncode, 0, first.stderr)
-        second = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-b", self.repo, self.pr]
-        )
-        self.assertEqual(second.returncode, 0, second.stderr)
-
-        report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "run-a", self.repo, self.pr])
-        self.assertEqual(report.returncode, 0, report.stderr)
-        self.assertIn("Run: run-a", report.stdout)
-        self.assertIn('"run_id": "run-a"', report.stdout)
-        self.assertIn('"action": "final-gate"', report.stdout)
-        self.assertNotIn('"run_id": "run-b"', report.stdout)
-
-    def test_resolve_thread_python_updates_session(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-if sys.argv[1:3] == ['api', 'graphql']:
-    print(json.dumps({
-        'data': {
-            'resolveReviewThread': {
-                'thread': {
-                    'id': 'THREAD_RESOLVE',
-                    'isResolved': True,
-                }
-            }
-        }
-    }))
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        payload = json.dumps(
-            [
-                {
-                    "id": "THREAD_RESOLVE",
-                    "isResolved": False,
-                    "isOutdated": False,
-                    "path": "src/resolve.py",
-                    "line": 9,
-                    "body": "Resolve me.",
-                    "url": "https://example.test/thread/resolve",
-                }
-            ]
-        )
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "sync-github", self.repo, self.pr],
-            stdin=payload,
-            check=True,
-        )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "update-items-batch", self.repo, self.pr],
-            stdin=json.dumps(
-                [
-                    {
-                        "item_id": "github-thread:THREAD_RESOLVE",
-                        "reply_posted": True,
-                        "reply_url": "https://example.test/thread/resolve#reply",
-                    }
-                ]
-            ),
-            check=True,
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(RESOLVE_THREAD_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_RESOLVE",
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "succeeded")
-        self.assertEqual(payload["remote_status"], "succeeded")
-        self.assertEqual(payload["session_status"], "succeeded")
-        self.assertTrue(payload["resolved"])
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
-        item = session["items"]["github-thread:THREAD_RESOLVE"]
-        self.assertEqual(item["status"], "CLOSED")
-        self.assertTrue(item["handled"])
-
-    def test_resolve_thread_python_refuses_when_item_not_yet_synced(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-if sys.argv[1:3] == ['api', 'graphql']:
-    print(json.dumps({
-        'data': {
-            'resolveReviewThread': {
-                'thread': {
-                    'id': 'THREAD_ONLY_REMOTE',
-                    'isResolved': True,
-                }
-            }
-        }
-    }))
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(RESOLVE_THREAD_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_ONLY_REMOTE",
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "failed")
-        self.assertIn("not tracked", payload["error"])
-        handled_file = self.github_dir() / "handled_threads.txt"
-        self.assertFalse(handled_file.exists())
-
-    def test_resolve_thread_python_requires_explicit_repo_and_pr(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:3] == ['repo', 'view', '--json']:
-    print(json.dumps({'nameWithOwner': 'octo/example'}))
-elif args[:3] == ['pr', 'view', '--json']:
-    print(json.dumps({'number': 77}))
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        result = self.run_cmd([sys.executable, str(RESOLVE_THREAD_PY), "THREAD_NEEDS_CONTEXT"])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--repo and --pr are required", result.stderr)
-
-    def test_mark_handled_appends_without_clobbering_existing_entries(self):
-        handled_file = self.github_dir() / "handled_threads.txt"
-        handled_file.parent.mkdir(parents=True, exist_ok=True)
-        handled_file.write_text("THREAD_EXISTING\n", encoding="utf-8")
-        payload = json.dumps(
-            [
-                {
-                    "id": "THREAD_NEW",
-                    "isResolved": False,
-                    "isOutdated": False,
-                    "path": "src/thread.py",
-                    "line": 8,
-                    "body": "Mark handled test.",
-                    "url": "https://example.test/thread/new",
-                }
-            ]
-        )
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        self.run_cmd([sys.executable, str(SCRIPT), "sync-github", self.repo, self.pr], stdin=payload, check=True)
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(MARK_HANDLED_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_NEW",
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(handled_file.read_text(encoding="utf-8").splitlines(), ["THREAD_EXISTING", "THREAD_NEW"])
-
-    def test_mark_handled_routes_local_finding_prefix_to_resolve_local_item(self):
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "ingest-local",
-                self.repo,
-                self.pr,
-                "--source",
-                "local-agent:test",
-            ],
-            stdin=json.dumps(
-                [
-                    {
-                        "title": "Local finding",
-                        "body": "Resolve this locally.",
-                        "path": "src/local.py",
-                        "line": 11,
-                    }
-                ]
-            ),
-            check=True,
-        )
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
-        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(MARK_HANDLED_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                local_id,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
-        item = session["items"][local_id]
-        self.assertEqual(item["status"], "CLOSED")
-        self.assertTrue(item["handled"])
-        self.assertEqual(item["decision"], "accept")
 
     def test_mark_handled_requires_explicit_repo_and_pr(self):
         gh = self.bin_dir / "gh"
