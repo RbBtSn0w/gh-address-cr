@@ -13,8 +13,7 @@ from gh_address_cr.intake.findings import (
 )
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
+SESSION_ENGINE_MODULE = "gh_address_cr.core.session_engine"
 
 
 def load_payload(input_path: str) -> str:
@@ -130,9 +129,6 @@ def main() -> int:
     parser.add_argument("pr_number")
     args = parser.parse_args()
 
-    if not SESSION_ENGINE.exists():
-        print(f"Missing session engine: {SESSION_ENGINE}", file=sys.stderr)
-        return 1
     if args.sync and not args.source:
         print(
             "`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr
@@ -146,14 +142,15 @@ def main() -> int:
     findings = [native_normalize_finding(record) for record in native_parse_records(raw)]
 
     subprocess.run(
-        [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],
+        [sys.executable, "-m", SESSION_ENGINE_MODULE, "init", args.repo, args.pr_number],
         check=True,
         stdout=subprocess.DEVNULL,
     )
 
     ingest_cmd = [
         sys.executable,
-        str(SESSION_ENGINE),
+        "-m",
+        SESSION_ENGINE_MODULE,
         "ingest-local",
         args.repo,
         args.pr_number,

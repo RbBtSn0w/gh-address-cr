@@ -107,6 +107,21 @@
 
 ---
 
+## Phase 7: Runtime Handler Removal
+
+**Purpose**: Complete the historical-burden cleanup by deleting obsolete
+low-level handler modules, removing handler-named runtime packages, and keeping
+only current command modules that are part of the supported workflow surface.
+
+- [X] T032 Add failing package contract tests that reject `src/gh_address_cr/legacy_handlers/`, `src/gh_address_cr/command_handlers/`, and obsolete handler-script dispatch in installed runtime payload inspection
+- [X] T033 Delete obsolete low-level handler modules that are no longer part of the current supported workflow surface
+- [X] T034 Move retained current helper implementations to `src/gh_address_cr/commands/` and update runtime subprocess calls to use `python -m gh_address_cr.commands.<module>`
+- [X] T035 Update tests to exercise module invocation instead of direct legacy/helper script paths
+- [X] T036 Re-run targeted runtime/package tests and affected workflow suites after removal
+- [X] T037 Re-run full lint, unittest, CLI smoke, plugin payload check, diff check, and archive updated superb evidence
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

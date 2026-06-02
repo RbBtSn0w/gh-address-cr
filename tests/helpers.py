@@ -11,27 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 SKILL_ROOT = ROOT / "skill"
 RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
-IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "legacy_handlers"
+IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "commands"
 SCRIPTS_DIR = IMPLEMENTATIONS_DIR
+CORE_DIR = RUNTIME_PACKAGE_DIR / "core"
 
 CLI_PY = RUNTIME_PACKAGE_DIR / "cli.py"
-SCRIPT = IMPLEMENTATIONS_DIR / "session_engine.py"
+SCRIPT = CORE_DIR / "session_engine.py"
 RUN_LOCAL_REVIEW_PY = IMPLEMENTATIONS_DIR / "run_local_review.py"
 INGEST_FINDINGS_PY = IMPLEMENTATIONS_DIR / "ingest_findings.py"
-PUBLISH_FINDING_PY = IMPLEMENTATIONS_DIR / "publish_finding.py"
 RUN_ONCE_PY = IMPLEMENTATIONS_DIR / "run_once.py"
 FINAL_GATE_PY = IMPLEMENTATIONS_DIR / "final_gate.py"
-AUDIT_REPORT_PY = IMPLEMENTATIONS_DIR / "audit_report.py"
-LIST_THREADS_PY = IMPLEMENTATIONS_DIR / "list_threads.py"
 POST_REPLY_PY = IMPLEMENTATIONS_DIR / "post_reply.py"
-RESOLVE_THREAD_PY = IMPLEMENTATIONS_DIR / "resolve_thread.py"
-GENERATE_REPLY_PY = IMPLEMENTATIONS_DIR / "generate_reply.py"
-BATCH_RESOLVE_PY = IMPLEMENTATIONS_DIR / "batch_resolve.py"
-CLEAN_STATE_PY = IMPLEMENTATIONS_DIR / "clean_state.py"
-MARK_HANDLED_PY = IMPLEMENTATIONS_DIR / "mark_handled.py"
-CONTROL_PLANE_PY = IMPLEMENTATIONS_DIR / "control_plane.py"
-CR_LOOP_PY = IMPLEMENTATIONS_DIR / "cr_loop.py"
-PREPARE_CODE_REVIEW_PY = IMPLEMENTATIONS_DIR / "prepare_code_review.py"
+CONTROL_PLANE_PY = CORE_DIR / "control_plane.py"
+CR_LOOP_PY = CORE_DIR / "cr_loop.py"
 CODE_REVIEW_ADAPTER_PY = IMPLEMENTATIONS_DIR / "code_review_adapter.py"
 REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
 PYTHON_COMMON_PY = IMPLEMENTATIONS_DIR / "python_common.py"
@@ -60,7 +52,7 @@ class SessionEngineTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def run_engine(self, *args, stdin=None, check=False):
-        cmd = [sys.executable, str(SCRIPT), *args]
+        cmd = [sys.executable, "-m", "gh_address_cr.core.session_engine", *args]
         return subprocess.run(
             cmd,
             input=stdin,
@@ -106,6 +98,7 @@ class PythonScriptTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def run_cmd(self, cmd, check=False, stdin=None):
+        cmd = self._normalize_python_module_command(list(cmd))
         return subprocess.run(
             cmd,
             input=stdin,
@@ -115,6 +108,29 @@ class PythonScriptTestCase(unittest.TestCase):
             env=self.env,
             check=check,
         )
+
+    def _normalize_python_module_command(self, cmd):
+        if len(cmd) < 2 or cmd[0] != sys.executable:
+            return cmd
+        path = Path(cmd[1])
+        module_by_path = {
+            CORE_DIR / "session_engine.py": "gh_address_cr.core.session_engine",
+            CORE_DIR / "control_plane.py": "gh_address_cr.core.control_plane",
+            CORE_DIR / "cr_loop.py": "gh_address_cr.core.cr_loop",
+            IMPLEMENTATIONS_DIR / "run_once.py": "gh_address_cr.commands.run_once",
+            IMPLEMENTATIONS_DIR / "run_local_review.py": "gh_address_cr.commands.run_local_review",
+            IMPLEMENTATIONS_DIR / "ingest_findings.py": "gh_address_cr.commands.ingest_findings",
+            IMPLEMENTATIONS_DIR / "final_gate.py": "gh_address_cr.commands.final_gate",
+            IMPLEMENTATIONS_DIR / "code_review_adapter.py": "gh_address_cr.commands.code_review_adapter",
+            IMPLEMENTATIONS_DIR / "review_to_findings.py": "gh_address_cr.commands.review_to_findings",
+            IMPLEMENTATIONS_DIR / "submit_action.py": "gh_address_cr.commands.submit_action",
+            IMPLEMENTATIONS_DIR / "submit_feedback.py": "gh_address_cr.commands.submit_feedback",
+            IMPLEMENTATIONS_DIR / "post_reply.py": "gh_address_cr.commands.post_reply",
+        }
+        module = module_by_path.get(path)
+        if module is None:
+            return cmd
+        return [cmd[0], "-m", module, *cmd[2:]]
 
     def run_runtime_module(self, *args, check=False, stdin=None):
         env = self.env.copy()

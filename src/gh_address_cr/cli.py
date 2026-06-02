@@ -2588,7 +2588,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
             return 0
-        from gh_address_cr.legacy_handlers import submit_action as submit_action_handler
+        from gh_address_cr.commands import submit_action as submit_action_handler
 
         cmd: list[str] = []
         if args.machine:
@@ -2604,7 +2604,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        from gh_address_cr.legacy_handlers import review_to_findings as review_to_findings_handler
+        from gh_address_cr.commands import review_to_findings as review_to_findings_handler
 
         return int(review_to_findings_handler.main(args.args))
 
@@ -2615,7 +2615,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        from gh_address_cr.legacy_handlers import submit_feedback as submit_feedback_handler
+        from gh_address_cr.commands import submit_feedback as submit_feedback_handler
 
         return int(submit_feedback_handler.main(args.args))
 

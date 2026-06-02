@@ -71,6 +71,7 @@ As a maintainer, I want historical documentation to remain recognizable as past 
 - **FR-008**: The feature MUST preserve audit evidence for review handling, including verification, classification, reply, resolve, and final-gate outcomes.
 - **FR-009**: The feature MUST avoid creating new hidden fallbacks, silent shims, or alternate undocumented prompt contracts.
 - **FR-010**: The feature MUST provide measurable verification that current workflows complete without depending on removed compatibility behavior.
+- **FR-011**: The runtime package MUST NOT retain `legacy_handlers`, `command_handlers`, or obsolete low-level handler modules as active implementation surface; current helper behavior MUST live only under the current `gh_address_cr.commands` module set.
 
 ### Constitution Alignment *(mandatory)*
 
@@ -98,6 +99,7 @@ As a maintainer, I want historical documentation to remain recognizable as past 
 - **SC-004**: No active user-facing artifact contains an unmarked instruction to use a deprecated compatibility path.
 - **SC-005**: Unsupported legacy usage produces an actionable rejection outcome in every tested case.
 - **SC-006**: Current workflow execution avoids additional compatibility-only decision steps, reducing obsolete-path evaluation to zero for supported usage.
+- **SC-007**: Installed package inspection shows `gh_address_cr/legacy_scripts`, `gh_address_cr/legacy_handlers`, and `gh_address_cr/command_handlers` are absent from the runtime payload.
 
 ## Assumptions
 

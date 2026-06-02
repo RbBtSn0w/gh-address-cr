@@ -9,12 +9,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
-
 from tests.helpers import (
-    BATCH_RESOLVE_PY,
-    CLEAN_STATE_PY,
-    GENERATE_REPLY_PY,
     PYTHON_COMMON_PY,
     PythonScriptTestCase,
     RUN_ONCE_PY,
@@ -88,78 +83,6 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         with self.assertRaises(SystemExit) as ctx:
             ingest_module.parse_records('{"title": "ok"}\nnot-json\n')
         self.assertIn("Invalid NDJSON input on line 2", str(ctx.exception))
-
-    def test_generate_reply_fix_mode_writes_markdown(self):
-        output = Path(self.temp_dir.name) / "reply.md"
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(GENERATE_REPLY_PY),
-                "--severity",
-                "P1",
-                str(output),
-                "abc123",
-                "src/a.py, src/b.py",
-                "pytest",
-                "passed",
-                "Fixed the root cause.",
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        body = output.read_text(encoding="utf-8")
-        self.assertIn("Fixed in `abc123`.", body)
-        self.assertIn("- `src/a.py`: updated per CR scope", body)
-        self.assertNotIn("<critical-path fix>", body)
-        self.assertIn("- Fixed the root cause.", body)
-        self.assertIn("- High-severity path validated with targeted regression checks.", body)
-        self.assertNotIn("safe to merge", body)
-
-    def test_generate_reply_modes_match_runtime_renderer(self):
-        cases = [
-            (
-                ["--severity", "P2"],
-                ["abc123", "src/a.py", "pytest", "passed", "Fixed the root cause."],
-                fix_reply(
-                    "P2",
-                    ["abc123", "src/a.py", "pytest", "passed", "Fixed the root cause."],
-                    summary="updated per CR scope",
-                ),
-            ),
-            (
-                ["--mode", "clarify"],
-                ["The current lazy initialization is intentional."],
-                clarify_reply(["The current lazy initialization is intentional."]),
-            ),
-            (
-                ["--mode", "defer"],
-                ["This needs a broader cleanup outside this PR."],
-                defer_reply(["This needs a broader cleanup outside this PR."]),
-            ),
-        ]
-        for flags, args, expected in cases:
-            with self.subTest(flags=flags):
-                output = Path(self.temp_dir.name) / f"reply-{len(flags)}-{len(args)}.md"
-                result = self.run_cmd([sys.executable, str(GENERATE_REPLY_PY), *flags, str(output), *args])
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(output.read_text(encoding="utf-8"), expected)
-
-    def test_generate_reply_rejects_invalid_severity(self):
-        output = Path(self.temp_dir.name) / "reply.md"
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(GENERATE_REPLY_PY),
-                "--severity",
-                "P9",
-                str(output),
-                "abc123",
-                "src/a.py",
-                "pytest",
-                "passed",
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Invalid severity", result.stderr)
 
     def test_submit_feedback_dry_run_outputs_canonical_issue_body(self):
         result = self.run_cmd(
@@ -628,50 +551,6 @@ else:
         self.assertEqual(last["action"], "submit_feedback")
         self.assertEqual(last["status"], "ok")
         self.assertEqual(last["audit_id"], "feedback-audit-1")
-
-    def test_batch_resolve_python_processes_approved_lines(self):
-        approved = Path(self.temp_dir.name) / "approved.txt"
-        approved.write_text("# comment\nAPPROVED THREAD_1\n\nAPPROVED THREAD_2\n", encoding="utf-8")
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(BATCH_RESOLVE_PY),
-                "--dry-run",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                str(approved),
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry-run] Would resolve thread: THREAD_1", result.stdout)
-        self.assertIn("[dry-run] Would resolve thread: THREAD_2", result.stdout)
-
-    def test_batch_resolve_requires_explicit_repo_and_pr(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-if args[:3] == ['repo', 'view', '--json']:
-    print(json.dumps({'nameWithOwner': 'octo/example'}))
-elif args[:3] == ['pr', 'view', '--json']:
-    print(json.dumps({'number': 77}))
-else:
-    raise SystemExit(f'unhandled gh args: {args}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        approved = Path(self.temp_dir.name) / "approved.txt"
-        approved.write_text("APPROVED THREAD_1\n", encoding="utf-8")
-        result = self.run_cmd([sys.executable, str(BATCH_RESOLVE_PY), "--dry-run", str(approved)])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--repo and --pr are required", result.stderr)
 
     def test_python_common_gh_read_cmd_retries_transient_failure(self):
         gh = self.bin_dir / "gh"
@@ -1461,56 +1340,3 @@ else:
         self.assertEqual(first, "tester")
         self.assertEqual(second, "tester")
         self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 1)
-
-    def test_batch_resolve_rejects_invalid_lines(self):
-        approved = Path(self.temp_dir.name) / "approved.txt"
-        approved.write_text("NOPE THREAD_1\n", encoding="utf-8")
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(BATCH_RESOLVE_PY),
-                "--dry-run",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                str(approved),
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Expected format: APPROVED <thread_id>", result.stderr)
-
-    def test_clean_state_removes_pr_scoped_files(self):
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        session_file = self.session_file()
-        audit_file = self.audit_log_file()
-        summary_file = self.audit_summary_file()
-        artifacts_dir = self.artifacts_dir()
-        session_file.parent.mkdir(parents=True, exist_ok=True)
-        audit_file.parent.mkdir(parents=True, exist_ok=True)
-        summary_file.parent.mkdir(parents=True, exist_ok=True)
-        session_file.write_text("{}", encoding="utf-8")
-        audit_file.write_text("{}\n", encoding="utf-8")
-        summary_file.write_text("summary", encoding="utf-8")
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        (artifacts_dir / "request.json").write_text("{}", encoding="utf-8")
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(CLEAN_STATE_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(session_file.exists())
-        self.assertFalse(audit_file.exists())
-        self.assertFalse(summary_file.exists())
-        self.assertFalse(artifacts_dir.exists())
-
-    def test_clean_state_accepts_legacy_clean_tmp_flag(self):
-        result = self.run_cmd([sys.executable, str(CLEAN_STATE_PY), "--clean-tmp"])
-        self.assertEqual(result.returncode, 0, result.stderr)

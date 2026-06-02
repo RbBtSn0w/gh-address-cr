@@ -18,8 +18,6 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
 _GITHUB_VIEWER_LOGIN: str | None = None
 OTLP_HTTP_JSON_PROTOCOL = "http/json"
 DEFAULT_OTLP_TIMEOUT_SECONDS = 3.0
@@ -941,7 +939,11 @@ def load_pull_request_head_sha(repo: str, pr_number: str) -> str:
 def session_engine(
     args: list[str], *, input_text: str | None = None, check: bool = False
 ) -> subprocess.CompletedProcess:
-    return run_cmd([sys.executable, str(SESSION_ENGINE), *args], input_text=input_text, check=check)
+    return run_cmd(
+        [sys.executable, "-m", "gh_address_cr.core.session_engine", *args],
+        input_text=input_text,
+        check=check,
+    )
 
 
 def _comment_nodes(connection: dict | None) -> list[dict]:

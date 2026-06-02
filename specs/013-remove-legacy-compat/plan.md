@@ -69,8 +69,7 @@ specs/013-remove-legacy-compat/
 ```text
 src/gh_address_cr/
 ├── cli.py                         # public CLI routing and fail-fast unsupported usage
-├── legacy_handlers/               # internal helper implementations retained for current tests and utilities
-├── legacy_scripts/                # historical wrapper package targeted for removal
+├── commands/                      # current internal command modules only
 ├── core/
 ├── intake/
 └── github/
@@ -92,9 +91,11 @@ plugin/gh-address-cr/
 ```
 
 **Structure Decision**: Use the existing single Python CLI package. Remove
-historical script compatibility from runtime routing, keep current behavior in
-native runtime modules or internal helper implementations, and keep repo-root
-tests as the executable contract.
+historical script compatibility from runtime routing, delete obsolete low-level
+handler modules, keep current behavior in native runtime modules or current
+internal command modules, and keep repo-root tests as the executable contract.
+Historical runtime package names such as `legacy_scripts`, `legacy_handlers`,
+and `command_handlers` must not remain in the installed payload.
 
 ## Complexity Tracking
 

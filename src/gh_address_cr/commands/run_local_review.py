@@ -3,11 +3,9 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
+SESSION_ENGINE_MODULE = "gh_address_cr.core.session_engine"
 
 
 def main() -> int:
@@ -29,9 +27,6 @@ def main() -> int:
         return 2
 
     scan_id = args.scan_id or ""
-    if not SESSION_ENGINE.exists():
-        print(f"Missing session engine: {SESSION_ENGINE}", file=sys.stderr)
-        return 1
 
     adapter_result = subprocess.run(args.adapter_cmd, text=True, capture_output=True)
     if adapter_result.returncode != 0:
@@ -39,14 +34,15 @@ def main() -> int:
         return adapter_result.returncode
 
     subprocess.run(
-        [sys.executable, str(SESSION_ENGINE), "init", args.repo, args.pr_number],
+        [sys.executable, "-m", SESSION_ENGINE_MODULE, "init", args.repo, args.pr_number],
         check=True,
         stdout=subprocess.DEVNULL,
     )
 
     ingest_cmd = [
         sys.executable,
-        str(SESSION_ENGINE),
+        "-m",
+        SESSION_ENGINE_MODULE,
         "ingest-local",
         args.repo,
         args.pr_number,
