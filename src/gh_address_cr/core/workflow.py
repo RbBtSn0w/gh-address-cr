@@ -527,6 +527,7 @@ def fast_fix_from_batch_input(
         waiting_on="batch_action_response",
     )
     _validate_fix_all_input_item_reply_evidence(batch)
+    _validate_fix_all_input_stale_threads(repo, pr_number, batch)
     submitted = submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=now)
     payload = {
         "status": "FAST_FIX_ALL_ACCEPTED",
@@ -576,6 +577,44 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
             ),
             payload={"missing_item_indexes": missing},
         )
+
+
+def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict[str, Any]) -> None:
+    items = batch.get("items")
+    if not isinstance(items, list) or not items:
+        return
+
+    requested_ids = {
+        str(item.get("item_id") or "").strip()
+        for item in items
+        if isinstance(item, dict)
+    }
+    requested_ids.discard("")
+    if not requested_ids:
+        return
+
+    session = session_store.load_session(repo, pr_number)
+    stale_or_outdated = [
+        item_id
+        for item_id in sorted(requested_ids)
+        if is_stale_or_outdated_github_thread(_items(session).get(item_id) or {})
+    ]
+    if not stale_or_outdated:
+        return
+
+    next_action = (
+        f"Use `gh-address-cr agent resolve-stale {repo} {pr_number} "
+        "--commit <sha> --files <paths> --validation <cmd=passed> --match-files` "
+        "for stale or outdated GitHub review threads."
+    )
+    raise WorkflowError(
+        status="FAST_FIX_ALL_REJECTED",
+        reason_code=FIX_ALL_STALE_ROUTE_REASON,
+        waiting_on="stale_resolution_input",
+        exit_code=4,
+        message=next_action,
+        payload={"item_ids": stale_or_outdated},
+    )
 
 
 def record_evidence_profile(
@@ -1150,7 +1189,15 @@ def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:
 
 
 def _normalized_thread_body(item: dict[str, Any]) -> str:
-    return " ".join(str(item.get("first_body") or item.get("body") or "").split()).casefold()
+    first_body = str(item.get("first_body") or "").strip()
+    if first_body:
+        source_text = first_body
+    elif str(item.get("comment_source") or "").strip().casefold() == "latest":
+        # latest-only rows may contain reviewer follow-up text in `body`; do not treat that as origin evidence.
+        source_text = ""
+    else:
+        source_text = str(item.get("body") or "")
+    return " ".join(source_text.split()).casefold()
 
 
 def _fast_fix_failed_row(item_id: str, exc: WorkflowError) -> dict[str, Any]:

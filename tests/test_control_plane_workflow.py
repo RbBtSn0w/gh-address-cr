@@ -1082,6 +1082,47 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
         self.assertIn("distinct thread bodies", payload["next_action"])
 
+    def test_agent_fix_all_homogeneous_reason_rejects_latest_only_bodies_without_first_body(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    body="Fixed in `abc123`.",
+                    comment_source="latest",
+                    first_body="",
+                ),
+                github_thread(
+                    "github-thread:def",
+                    body="Fixed in `abc123`.",
+                    comment_source="latest",
+                    first_body="",
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            "Both comments are covered by the same shared patch.",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
+        self.assertIn("distinct thread bodies", payload["next_action"])
+
     def test_agent_fix_all_input_rejects_common_only_reply_evidence(self):
         self.write_session(
             items=[
@@ -1147,6 +1188,64 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+
+    def test_agent_fix_all_input_rejects_stale_or_outdated_threads(self):
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:stale",
+                    path="src/stale.py",
+                    state="stale",
+                    status="STALE",
+                    is_outdated=True,
+                    classification_evidence={"classification": "fix", "record_id": "ev_stale"},
+                )
+            ]
+        )
+
+        claimed = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        self.assertEqual(claimed.returncode, 0, claimed.stderr)
+        request = json.loads(Path(json.loads(claimed.stdout)["request_path"]).read_text(encoding="utf-8"))
+        batch_path = self.workspace_dir() / "stale-fix-all-input.json"
+        batch_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "common": {
+                        "files": ["src/stale.py"],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_stale", "result": "passed"}
+                        ],
+                        "fix_reply": {
+                            "commit_hash": "abc123",
+                            "summary": "Resolved stale thread.",
+                            "why": "Shared patch handles stale thread updates.",
+                        },
+                    },
+                    "items": [
+                        {
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "item_id": "github-thread:stale",
+                            "note": "Provided stale thread fix evidence.",
+                            "summary": "Resolved stale thread.",
+                            "why": "Shared patch handles stale thread updates.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "fix-all", self.repo, self.pr, "--input", str(batch_path))
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "STALE_THREADS_REQUIRE_RESOLVE_STALE")
+        self.assertIn("agent resolve-stale", payload["next_action"])
 
     def test_agent_fix_all_input_rejects_conflicting_commit_argument(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
