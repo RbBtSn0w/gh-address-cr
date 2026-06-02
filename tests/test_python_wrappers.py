@@ -78,7 +78,6 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("adapter", result.stdout)
         self.assertIn("review-to-findings", result.stdout)
         self.assertIn("gh-address-cr review", result.stdout)
-        self.assertNotIn("superpowers", result.stdout)
         self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("control-plane", result.stdout)
@@ -125,20 +124,6 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("submit-feedback --category", result.stdout)
         self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
 
-    def test_cli_unknown_command_hint_omits_hidden_superpowers_command(self):
-        result = self.run_cmd([sys.executable, str(CLI_PY), "unknown-command"])
-
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Supported commands:", result.stderr)
-        self.assertNotIn("superpowers", result.stderr)
-
-    def test_cli_superpowers_command_is_removed(self):
-        report_path = Path("superpowers-bridge-report.md")
-        result = self.run_cmd([sys.executable, str(CLI_PY), "superpowers", "check"])
-
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Unknown command", result.stderr)
-        self.assertFalse((self.cwd / report_path).exists())
 
     def test_cli_submit_feedback_passthrough_dry_run(self):
         result = self.run_cmd(
