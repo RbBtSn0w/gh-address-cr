@@ -439,6 +439,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("Installed CLI smoke", text)
         self.assertIn("python -m build", text)
         self.assertIn("python -m pip install dist/*.whl", text)
+        self.assertIn("PYTHONPATH: src", text)
         self.assertIn("ModuleNotFoundError", text)
         self.assertIn("Final gate failed to evaluate", text)
         self.assertIn("error connecting to api.github.com", text)
