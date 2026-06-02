@@ -27,6 +27,17 @@ Follow this order of precedence:
 
 ## Infrastructure Guidelines
 
+### Compatibility Policy
+- Default to current best-practice behavior. Do not preserve backward compatibility unless explicitly requested by direct instructions.
+- Remove deprecated or legacy compatibility paths when updating features.
+- Prefer a clean contract over transitional shims, aliases, or fallback branches kept only for historical behavior.
+
+### CLI And Skill Evolution Policy
+- Treat this CLI as local-first tooling and optimize for the best current usage patterns.
+- Treat the published `skill/` payload with the same standard: prioritize current best-practice behavior over legacy compatibility.
+- Do not spend maintenance effort on historical CLI or skill compatibility unless explicitly required.
+- When CLI or skill behavior is modernized, remove obsolete flags, pathways, references, and compatibility glue in the same change.
+
 ### Python Environment
 - **Version**: Python 3.10+ (enforced by `pyproject.toml`).
 - **Install for dev**: `pip install -e .`
@@ -82,6 +93,8 @@ A task is complete only when:
 - Consolidated verification commands to match `pyproject.toml`.
 - Added Conventional Commits guideline.
 - Simplified "Execution Discipline" to focus on repository-root behavior.
+- Added explicit no-backward-compatibility default for feature updates.
+- Added local-first CLI and skill evolution guidance to remove obsolete compatibility paths.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
