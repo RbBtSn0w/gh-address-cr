@@ -378,13 +378,7 @@ gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 gh-address-cr address <owner/repo> <pr_number> [--human|--lean]
 ```
 
-For `producer=code-review`, generate the standardized bridge prompt with:
-
-```bash
-gh-address-cr prepare-code-review <local|mixed> <owner/repo> <pr_number>
-```
-
-This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
+For `producer=code-review`, start with `review`. When external findings are absent, it emits `WAITING_FOR_EXTERNAL_REVIEW` and writes the standardized producer handoff to `producer-request.md`.
 
 If the upstream review output is Markdown review blocks, convert it first with:
 
@@ -527,10 +521,10 @@ gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 
 ## Local AI Review Ingestion
 
-Use `gh-address-cr run-local-review` to feed local AI findings into the PR session:
+Use `gh-address-cr adapter` to feed local AI findings into the PR session:
 
 ```bash
-gh-address-cr run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+gh-address-cr adapter owner/repo 123 ./adapter.sh --base main --head HEAD
 ```
 
 Adapter contract:
@@ -545,7 +539,6 @@ This path does not auto-post to GitHub. It creates local session items that can 
 If the producer is a local `code-review` run, use the built-in adapter backend:
 
 ```bash
-gh-address-cr prepare-code-review mixed owner/repo 123
 cat findings.json | gh-address-cr review owner/repo 123 --input -
 ```
 
@@ -556,19 +549,12 @@ Input rule:
 - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
 - use `--sync` when you want missing local findings from the same source to auto-close on refresh
 
-`prepare-code-review` now also returns:
+When `review` returns `WAITING_FOR_EXTERNAL_REVIEW`, use the cache-backed `producer-request.md` handoff instead of creating review artifacts in the project workspace.
 
-- `workspace_dir`
-- `findings_output_path`
-- `reply_output_path`
-- `loop_request_path`
-
-Use that cache-backed findings path instead of creating review artifacts in the project workspace.
-
-If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr ingest-findings` instead:
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr findings` instead:
 
 ```bash
-cat findings.json | gh-address-cr ingest-findings --source local-agent:code-review owner/repo 123
+cat findings.json | gh-address-cr findings owner/repo 123 --input - --sync --source code-review
 ```
 
 Accepted input shapes:
@@ -602,21 +588,20 @@ This is the long-term integration path for any local code-review tool. If it can
 To publish a local finding back to GitHub as a review comment:
 
 ```bash
-gh-address-cr publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
+gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
+gh-address-cr agent publish owner/repo 123
 ```
 
 To reclaim expired item claims inside a PR session:
 
 ```bash
-gh-address-cr session-engine reclaim-stale-claims owner/repo 123
+gh-address-cr agent reclaim owner/repo 123
 ```
 
 To apply a terminal local finding resolution atomically, use:
 
 ```bash
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
-```
-up PR."
+gh-address-cr submit-action <action-request.json> --resolution fix --note "Fixed locally and verified." --files src/example.py --validation-cmd "python3 -m unittest=passed"
+gh-address-cr submit-action <action-request.json> --resolution clarify --note "Expected behavior." --reply-markdown "Expected behavior."
+gh-address-cr submit-action <action-request.json> --resolution defer --note "Deferred to a follow-up PR." --reply-markdown "Deferred to a follow-up PR."
 ```

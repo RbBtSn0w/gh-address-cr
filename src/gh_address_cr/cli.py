@@ -2667,9 +2667,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
-        supported_commands = ", ".join(
-            sorted([*NATIVE_HIGH_LEVEL_COMMANDS, *UTILITY_COMMANDS, "active-pr", "agent", "doctor", "final-gate"])
-        )
+        supported_commands = ", ".join(sorted(PUBLIC_COMMANDS))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
     normalize_leading_high_level_options(args)
@@ -2686,10 +2684,7 @@ def main(argv: list[str] | None = None) -> int:
         preflight_rc = preflight_high_level(args)
         if preflight_rc is not None:
             return preflight_rc
-    if args.command in NATIVE_HIGH_LEVEL_COMMANDS:
-        return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
-    print(f"Unknown command. Supported commands: {', '.join(sorted(PUBLIC_COMMANDS))}.", file=sys.stderr)
-    return 2
+    return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
 if __name__ == "__main__":

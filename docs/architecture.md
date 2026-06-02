@@ -19,7 +19,7 @@ The runtime must be available or execution must fail loudly before mutating sess
 
 ## PR Session Architecture
 
-`gh-address-cr` now ships the session engine through the runtime package and exposes it through `gh-address-cr session-engine ...`.
+`gh-address-cr` ships the session engine inside the runtime package and exposes supported workflows through the public `gh-address-cr` entrypoint.
 
 The implementation model is now:
 
@@ -29,7 +29,7 @@ The implementation model is now:
 
 - `github_thread` items are synced from GraphQL thread snapshots.
 - `local_finding` items are ingested from a local review adapter.
-- local findings can now be explicitly closed in-session with `gh-address-cr session-engine close-item`.
+- local findings can be explicitly handled in-session with `gh-address-cr agent fix`, `gh-address-cr agent fix-all`, or `gh-address-cr submit-action`.
 - `gh-address-cr final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count
@@ -64,7 +64,7 @@ If `gh-address-cr final-gate --auto-clean` passes, the current PR workspace is a
 To inspect one run after the fact, use:
 
 ```bash
-gh-address-cr audit-report --run-id <run_id> <owner/repo> <pr_number>
+gh-address-cr final-gate --no-auto-clean <owner/repo> <pr_number>
 ```
 
 The session also tracks loop-safety metadata per item:
@@ -82,7 +82,7 @@ The main logic lives in the Python runtime package under `src/gh_address_cr/`.
 - `core/`: session state, workflow transitions, final-gate, and orchestration helpers
 - `github/`: GitHub CLI IO and failure diagnostics
 - `intake/`: findings parsing and normalization
-- `legacy_scripts/`: compatibility surfaces for older direct script invocations
+- `legacy_handlers/`: helper implementations that remain behind supported public commands
 
 New automation should use `gh-address-cr`, not direct script paths.
 
@@ -93,13 +93,12 @@ The `gh-address-cr` console script is the stable automation surface.
 Unified CLI examples:
 
 ```bash
-gh-address-cr run-once owner/repo 123
+gh-address-cr review owner/repo 123
+gh-address-cr address owner/repo 123 --lean
 gh-address-cr final-gate --no-auto-clean owner/repo 123
-gh-address-cr session-engine gate owner/repo 123
-gh-address-cr ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
 gh-address-cr review owner/repo 123 --input -
 gh-address-cr findings owner/repo 123 --input -
-gh-address-cr session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
+gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
 ```
 
 
