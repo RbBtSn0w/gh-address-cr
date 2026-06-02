@@ -1640,6 +1640,7 @@ def publish_github_thread_responses(
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
     timestamp = _format_timestamp(current_time)
+    _configure_publish_telemetry(repo, pr_number)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
     client = github_client or GitHubClient()
@@ -1823,6 +1824,15 @@ def publish_github_thread_responses(
         "published_count": len(published),
         "published_items": published,
     }
+
+
+def _configure_publish_telemetry(repo: str, pr_number: str) -> None:
+    try:
+        from gh_address_cr.core.telemetry import SessionTelemetry
+
+        SessionTelemetry.get_instance().configure_context(repo, pr_number)
+    except Exception:
+        return
 
 
 def list_leases(repo: str, pr_number: str) -> dict[str, Any]:

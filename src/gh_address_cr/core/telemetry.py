@@ -125,10 +125,16 @@ class SessionTelemetry:
         self._load_persisted_metrics(path)
 
     def _load_persisted_metrics(self, path: Path) -> None:
-        if path in self._loaded_files or not path.is_file():
-            self._loaded_files.add(path)
+        if path in self._loaded_files:
             return
-        for line in path.read_text(encoding="utf-8").splitlines():
+        self._loaded_files.add(path)
+        try:
+            if not path.is_file():
+                return
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines:
             if not line.strip():
                 continue
             try:
@@ -138,7 +144,6 @@ class SessionTelemetry:
             metric = self._metric_from_payload(payload)
             if metric is not None:
                 self.metrics.append(metric)
-        self._loaded_files.add(path)
 
     @staticmethod
     def _metric_from_payload(payload: object) -> ExecutionMetric | None:

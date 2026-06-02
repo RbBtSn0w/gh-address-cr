@@ -1090,10 +1090,11 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 self.write_session(repo, pr_number, item)
                 client = FakeGitHubClient()
 
-                # Set up telemetry
                 SessionTelemetry.reset()
                 tracker = SessionTelemetry.get_instance()
+                tracker.configure_context(repo, pr_number)
                 tracker.record("npm install", 100.0, 105.0, 0)
+                SessionTelemetry.reset()
 
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 

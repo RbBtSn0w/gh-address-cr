@@ -233,6 +233,17 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(report.total_duration, 2.0)
         self.assertEqual(report.metrics[0].command, "pytest")
 
+    def test_configure_file_is_fail_open_when_persisted_metrics_are_unreadable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            telemetry_file.write_text("{}", encoding="utf-8")
+            tracker = SessionTelemetry.get_instance()
+
+            with patch.object(Path, "read_text", side_effect=OSError("denied")):
+                tracker.configure_file(telemetry_file)
+
+            self.assertEqual(tracker.metrics, [])
+
     def test_metric_pid_and_execution_id(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("some cmd", 0, 1, 0, pid=12345, execution_id="exec-id-abc")

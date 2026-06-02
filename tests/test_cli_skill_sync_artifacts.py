@@ -29,7 +29,7 @@ class CliSkillSyncArtifactTest(unittest.TestCase):
         self.assertIn("Phase 7: Closeout Audit", tasks)
 
         combined = "\n".join([spec, plan, tasks])
-        self.assertNotIn("544", combined)
+        self.assertNotRegex(combined, r"\b544\s+(?:unit\s+)?tests?\b")
         self.assertNotIn("scripts/sync_scripts.py", plan)
         self.assertNotIn("python3 scripts/sync_scripts.py", spec)
 

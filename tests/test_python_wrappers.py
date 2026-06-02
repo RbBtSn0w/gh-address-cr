@@ -3513,10 +3513,13 @@ else:
         archived_runs = sorted(self.archive_root().iterdir())
         self.assertEqual(len(archived_runs), 1)
         archived_workspace = archived_runs[0]
+        archived_summary = archived_workspace / "audit_summary.md"
         self.assertTrue((archived_workspace / "audit.jsonl").exists())
         self.assertTrue((archived_workspace / "trace.jsonl").exists())
-        self.assertTrue((archived_workspace / "audit_summary.md").exists())
+        self.assertTrue(archived_summary.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
+        self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
+        self.assertIn("Audit summary sha256:", result.stdout)
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)

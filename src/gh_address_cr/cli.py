@@ -2181,13 +2181,15 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return 5
 
     summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
+    if result.passed and parsed.auto_clean:
+        archive_target = _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
+        if archive_target is not None:
+            summary_path = archive_target / summary_path.name
     _emit_final_gate_result(result, summary_path=summary_path)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
 
-    if parsed.auto_clean:
-        _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
     return 0
 
 
@@ -2313,10 +2315,10 @@ def _final_gate_failure_message(result: core_gate.GateResult) -> str:
     return " and ".join(reasons) or "gate checks reported failure"
 
 
-def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> None:
+def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Path | None:
     workspace = session_store.workspace_dir(repo, pr_number)
     if not workspace.exists():
-        return
+        return None
     archive_root = core_paths.state_dir() / "archive" / core_paths.normalize_repo(repo) / f"pr-{pr_number}"
     archive_root.mkdir(parents=True, exist_ok=True)
     base_name = audit_id or "final-gate"
@@ -2329,6 +2331,7 @@ def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> No
     shutil.rmtree(workspace, ignore_errors=True)
     print(f"Archived PR workspace: {archive_target}")
     print(f"Auto-cleaned PR workspace: {workspace}")
+    return archive_target
 
 
 def _prepend_optional(value: str | None, args: list[str]) -> list[str]:
