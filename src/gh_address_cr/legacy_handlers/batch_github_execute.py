@@ -16,7 +16,7 @@ from gh_address_cr.legacy_handlers.python_common import (
 
 
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
-    return [actions[i : i + max_size] for i in range(0, len(actions), max_size)]
+    return [actions[i: i + max_size] for i in range(0, len(actions), max_size)]
 
 
 def item_result(
