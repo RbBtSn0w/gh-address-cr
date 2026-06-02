@@ -185,6 +185,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("submit-feedback", payload["public_commands"])
         self.assertIn("agent", payload["public_commands"])
         self.assertIn("version", payload["public_commands"])
+
+        self.assertNotIn("superpowers", payload["public_commands"])
         validate_capability_manifest(payload)
         self.assertIn("coordinator", payload["roles"])
         self.assertIn("triage", payload["roles"])
