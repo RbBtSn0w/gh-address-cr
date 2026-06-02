@@ -39,6 +39,19 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertIn("> **Agent Efficiency Summary**:", result)
         self.assertIn(summary, result)
 
+    def test_fix_reply_surfaces_reviewer_priority_without_p_scale_severity(self):
+        result = fix_reply(
+            None,
+            ["sha123", "src/file.py", "pytest", "Passed", "Centralized command listing to avoid drift."],
+            review_priority="medium",
+            review_priority_note="Reviewer-provided priority from the original review comment.",
+        )
+
+        self.assertNotIn("Severity:", result)
+        self.assertIn("Reviewer priority: `Medium Priority`", result)
+        self.assertIn("Reviewer-provided priority from the original review comment.", result)
+        self.assertIn("Medium-priority reviewer signal", result)
+
     def test_clarify_reply_with_efficiency_summary(self):
         summary = "5 tools invoked, 10s duration."
         result = clarify_reply(["Clarification note."], efficiency_summary=summary)

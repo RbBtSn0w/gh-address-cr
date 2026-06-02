@@ -776,6 +776,35 @@ else:
         self.assertNotIn("Severity:", reply_markdown)
         self.assertIn("`python3 -m unittest tests.test_cr_loop`", reply_markdown)
 
+    def test_build_github_fix_reply_surfaces_raw_reviewer_priority(self):
+        module = self.load_module()
+
+        reply_markdown, error = module.build_github_fix_reply(
+            {
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/gh_address_cr/cli.py"],
+                    "summary": "Centralized command listing.",
+                    "why": "The supported command list now reuses the canonical public command set.",
+                }
+            },
+            {
+                "item_id": "github-thread:THREAD_MEDIUM_PRIORITY",
+                "review_priority_evidence": {
+                    "value": "medium",
+                    "source": "github_first_comment",
+                    "raw_marker": "Medium Priority",
+                },
+            },
+            ["python3 -m unittest tests.test_cr_loop"],
+        )
+
+        self.assertEqual(error, "")
+        self.assertIsNotNone(reply_markdown)
+        self.assertNotIn("Severity:", reply_markdown)
+        self.assertIn("Reviewer priority: `Medium Priority`", reply_markdown)
+        self.assertIn("Medium-priority reviewer signal", reply_markdown)
+
     def test_handle_batch_github_fix_normalizes_string_validation_command(self):
         module = self.load_module()
         item_id = "github-thread:THREAD_FIX_STRING_VALIDATION"

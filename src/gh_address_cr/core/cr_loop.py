@@ -642,15 +642,31 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
                 sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
             efficiency_summary = None
 
+        review_priority, review_priority_note = review_priority_for_publish(item)
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=str(fix_reply.get("summary") or "").strip() or None,
             efficiency_summary=efficiency_summary,
+            review_priority=review_priority,
+            review_priority_note=review_priority_note,
         )
     except SystemExit as exc:
         return None, str(exc) or "Invalid fix_reply payload."
     return reply_markdown, ""
+
+
+def review_priority_for_publish(item: dict) -> tuple[str | None, str | None]:
+    evidence = item.get("review_priority_evidence")
+    if not isinstance(evidence, dict):
+        return None, None
+    priority = str(evidence.get("value") or "").strip().lower()
+    if priority not in {"high", "medium", "low"}:
+        return None, None
+    source = str(evidence.get("source") or "").strip()
+    if source:
+        return priority, f"Reviewer-provided priority from {source} was preserved as raw priority evidence."
+    return priority, "Reviewer-provided priority was preserved as raw priority evidence."
 
 
 def accepted_agent_action(item: dict) -> dict | None:

@@ -234,6 +234,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`test_command`", protocol_text)
         self.assertIn("`test_result`", protocol_text)
         self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
+        self.assertIn("Reviewer priority:", cli_text)
+        self.assertIn("Reviewer priority:", protocol_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
