@@ -49,12 +49,15 @@ class ExecutionMetric:
     start_time: float
     end_time: float
     exit_code: int
+    duration_seconds: float | None = None
     is_retry: bool = False
     pid: int = 0
     execution_id: str = ""
 
     @property
     def duration(self) -> float:
+        if self.duration_seconds is not None:
+            return self.duration_seconds
         return self.end_time - self.start_time
 
     @property
@@ -155,6 +158,7 @@ class SessionTelemetry:
                 start_time=float(payload["start_time"]),
                 end_time=float(payload["end_time"]),
                 exit_code=int(payload["exit_code"]),
+                duration_seconds=float(payload["duration"]) if "duration" in payload else None,
                 is_retry=bool(payload.get("is_retry", False)),
                 pid=int(payload.get("pid", 0)),
                 execution_id=str(payload.get("execution_id") or ""),
@@ -168,6 +172,7 @@ class SessionTelemetry:
         start_time: float,
         end_time: float,
         exit_code: int,
+        duration_seconds: float | None = None,
         pid: int | None = None,
         execution_id: str | None = None,
     ) -> None:
@@ -182,6 +187,7 @@ class SessionTelemetry:
             start_time=start_time,
             end_time=end_time,
             exit_code=exit_code,
+            duration_seconds=duration_seconds,
             is_retry=is_retry,
             pid=pid if pid is not None else os.getpid(),
             execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,

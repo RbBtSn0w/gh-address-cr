@@ -182,6 +182,7 @@ def run_cmd(
 
     _ = retries
     start_time = time.time()
+    start_monotonic = time.monotonic()
     try:
         result = subprocess.run(
             cmd,
@@ -192,9 +193,11 @@ def run_cmd(
             timeout=timeout,
         )
         end_time = time.time()
+        duration_seconds = time.monotonic() - start_monotonic
         exit_code = result.returncode
     except subprocess.TimeoutExpired as exc:
         end_time = time.time()
+        duration_seconds = time.monotonic() - start_monotonic
         exit_code = 124
         result = subprocess.CompletedProcess(
             args=cmd,
@@ -208,6 +211,7 @@ def run_cmd(
             command=command_label(cmd),
             start_time=start_time,
             end_time=end_time,
+            duration_seconds=duration_seconds,
             exit_code=exit_code,
         )
     except Exception as telemetry_exc:

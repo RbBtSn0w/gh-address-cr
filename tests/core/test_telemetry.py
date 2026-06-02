@@ -293,6 +293,22 @@ class TestTelemetry(unittest.TestCase):
 
         self.assertIsNone(mock_run.call_args.kwargs["timeout"])
 
+    @patch("subprocess.run")
+    def test_run_cmd_uses_monotonic_duration_when_wall_clock_moves_backwards(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
+
+        from gh_address_cr.core.cr_loop import run_cmd
+
+        with patch("time.time", side_effect=[1000.0, 900.0]), patch("time.monotonic", side_effect=[10.0, 12.0]):
+            run_cmd(["ls"])
+
+        tracker = SessionTelemetry.get_instance()
+        self.assertEqual(len(tracker.metrics), 1)
+        metric = tracker.metrics[0]
+        self.assertEqual(metric.start_time, 1000.0)
+        self.assertEqual(metric.end_time, 900.0)
+        self.assertEqual(metric.duration, 2.0)
+
     @patch("sys.stderr")
     @patch("gh_address_cr.core.telemetry.SessionTelemetry.record")
     @patch("subprocess.run")
