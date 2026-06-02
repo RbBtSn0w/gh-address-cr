@@ -521,15 +521,15 @@ gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
 
 ## Local AI Review Ingestion
 
-Use `gh-address-cr adapter` to feed local AI findings into the PR session:
+Use `gh-address-cr findings --input -` to feed local AI findings into the PR session without requiring GitHub thread preflight:
 
 ```bash
-gh-address-cr adapter owner/repo 123 ./adapter.sh --base main --head HEAD
+./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
 ```
 
-Adapter contract:
+Producer contract:
 
-- adapter prints a JSON array to stdout
+- the producer prints a JSON array to stdout
 - each finding should include `title`, `body`, `path`, `line`
 - optional fields: `severity`, `category`, `confidence`
 - `severity` is accepted only when it is an explicit `P0`, `P1`, `P2`, `P3`, or `P4`; missing or non-P-scale values do not create a session severity.

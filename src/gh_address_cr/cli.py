@@ -59,7 +59,6 @@ PUBLIC_COMMANDS = {
     "agent",
     "doctor",
     "final-gate",
-    "superpowers",
 }
 UNSUPPORTED_LEGACY_COMMANDS = {
     "audit-report",

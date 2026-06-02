@@ -7,7 +7,7 @@
                    |
                    v
 +-------------------------------------+      (Fetch PR threads, sync session)
-|          1. gh-address-cr address/review       | <-----------------------------------------+
+| 1. gh-address-cr address or gh-address-cr review | <---------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
                    v [Generates Snapshot, Syncs Session, Lists Work]              |
@@ -29,9 +29,9 @@
          |                   |                       |                            |
          v                   v                       v                            |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
-| 4a. agent       | | 4b. agent       |     | 4c. agent       |                   |
-|     submit/fix  | |     submit     |     |     submit      |                   |
-|     evidence    | |     clarify    |     |     defer       |                   |
+| 4a. agent       | | 4b. submit-    |     | 4c. submit-    |                   |
+|     fix/submit  | |     action     |     |     action     |                   |
+|     evidence    | |     clarify    |     |     defer      |                   |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
          |                   |                       |                            |
          +---------+---------+-----------------------+                            |
@@ -152,7 +152,7 @@ Use this when you want to run local AI review without waiting for GitHub or Copi
 Example:
 
 ```bash
-gh-address-cr adapter owner/repo 123 ./adapter.sh
+./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
 
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Implemented fix." --why "Confirmed locally." --validation "python3 -m unittest=passed"
