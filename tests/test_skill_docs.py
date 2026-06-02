@@ -115,6 +115,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`gh-address-cr agent submit`", combined)
         self.assertIn("`gh-address-cr agent submit-batch`", combined)
         self.assertIn("`gh-address-cr agent publish`", combined)
+        self.assertIn("per-thread summary/why", combined)
+        self.assertIn("homogeneous repeated", combined)
 
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -143,6 +145,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertIn(f"`{field}`", combined)
         self.assertIn("Lean output keeps only", protocol_text)
         self.assertIn("agent fix-all", protocol_text)
+        self.assertIn("`--input <batch-response.json>`", protocol_text)
+        self.assertIn("`--homogeneous-reason <why>`", protocol_text)
         self.assertIn("agent resolve-stale", protocol_text)
 
     def test_skill_uses_references_for_advanced_dispatch_details(self):
@@ -220,6 +224,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
         self.assertIn("`summary`", matrix_text)
         self.assertIn("`commit_hash`", matrix_text)
@@ -234,8 +239,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`test_command`", protocol_text)
         self.assertIn("`test_result`", protocol_text)
         self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
-        self.assertIn("Reviewer priority:", cli_text)
-        self.assertIn("Reviewer priority:", protocol_text)
+        self.assertIn("Review signal:", cli_text)
+        self.assertIn("Review signal:", protocol_text)
+        self.assertNotIn("Published fix replies should surface that signal as `Reviewer priority:`", skill_text)
+        self.assertNotIn("shown in published fix replies as `Reviewer priority:`", protocol_text)
 
     def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
         fix_cases = {
@@ -431,7 +438,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = (ROOT / "skill" / "references" / "status-action-map.md").read_text(encoding="utf-8")
         self.assertIn("commands", text)
         self.assertIn("gh-address-cr address <owner/repo> <pr_number> --lean", text)
+        self.assertIn("gh-address-cr agent submit-batch", text)
         self.assertIn("gh-address-cr agent fix-all", text)
+        self.assertIn("--homogeneous-reason", text)
         self.assertIn("gh-address-cr agent resolve-stale", text)
         self.assertIn("NO_ACTIVE_PR", text)
         self.assertIn("AMBIGUOUS_ACTIVE_PR", text)

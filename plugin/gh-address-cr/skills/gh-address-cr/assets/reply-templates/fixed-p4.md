@@ -1,6 +1,6 @@
 Fixed in `<commit_hash>`.
 
-Severity: `P4` 🔘
+Review signal: `P4`
 
 What I changed:
 - `<file_path>`: `<nit fix>`

@@ -33,13 +33,15 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
-  - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common commit/files/validation evidence.
+  - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common commit/files/validation evidence while preserving per-thread summary/why.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
 - `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix.
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish] [--include-stale]`
-  - Classifies, claims, and submits safe batches for matching GitHub-thread items already present in the runtime session.
+- `gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json> [--publish]`
+  - Routes explicit per-thread batch evidence through the same lease and validation contract as `agent submit-batch`.
+- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
+  - Classifies, claims, and submits the homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session.
 - `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
@@ -55,7 +57,7 @@ Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `r
 
 For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Submitting a plain string may pass `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as default validation evidence. For `P0` and `P1` severities, `why` SHOULD contain a rich technical rationale (at least two paragraphs or 150+ characters).
 
-Severity is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or `P4` only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Missing severity remains unknown, and published fix replies omit the `Severity:` line. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence, are not mapped to P-scale severity, and are shown in published fix replies as `Reviewer priority:`. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
+Review signal is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or `P4` severity only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence and are not mapped to P-scale severity. Published fix replies show exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
 Clarify, defer, and reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid. The `efficiency_summary` is automatically managed and appended by the control plane telemetry layer to final published comments; agents must not manually record or format this summary.
 
@@ -63,6 +65,6 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent fix-all` when one commit/files/validation set addresses multiple already-synced GitHub threads.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent submit-batch` when one commit/files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Use `agent fix-all` only with `--input <batch-response.json>` or with `--homogeneous-reason <why>` for a homogeneous repeated concern.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.

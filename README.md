@@ -113,6 +113,13 @@ High-level commands emit machine-readable JSON summaries by default. Use
 `--human` when a person needs narrative output and `--lean` where supported for
 low-token agent context.
 
+For GitHub review-thread replies, shared commit/files/validation evidence is
+not the same as a shared reviewer answer. Use `agent submit-batch` with
+per-thread summary/why entries for ordinary multi-thread handling. Use
+`agent fix-all --input <batch-response.json>` to route explicit per-thread batch
+evidence, or `agent fix-all --homogeneous-reason <why>` only for a homogeneous
+repeated concern.
+
 ## Runtime and adapter boundary
 
 The deterministic implementation belongs to the Python runtime package:

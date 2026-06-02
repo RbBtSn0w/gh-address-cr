@@ -15,6 +15,14 @@ REVIEW_PRIORITY_RISK_NOTES = {
     "low": "Low-priority reviewer signal addressed as a non-breaking cleanup or clarity improvement.",
 }
 
+SEVERITY_SIGNAL_LABELS = {
+    "P0": "`P0`",
+    "P1": "`P1`",
+    "P2": "`P2`",
+    "P3": "`P3`",
+    "P4": "`P4`",
+}
+
 DEFAULT_FILE_SUMMARY = "updated per CR scope"
 
 def _normalize_severity(severity: str | None) -> str | None:
@@ -44,6 +52,14 @@ def _normalize_review_priority(priority: str | None) -> str | None:
 
 def _review_priority_label(priority: str) -> str:
     return f"{priority.title()} Priority"
+
+
+def _review_signal_label(severity: str | None, review_priority: str | None) -> str | None:
+    if severity:
+        return SEVERITY_SIGNAL_LABELS[severity]
+    if review_priority:
+        return f"`{_review_priority_label(review_priority)}`"
+    return None
 
 
 def _format_rationale(text: str) -> list[str]:
@@ -95,27 +111,15 @@ def fix_reply(
     files = [item.strip() for item in files_csv.split(",") if item.strip()]
     file_summary = str(summary or DEFAULT_FILE_SUMMARY).strip()
     
-    severity_label = normalized_severity
-    if normalized_severity == "P0":
-        severity_label = "`P0` 🛑"
-    elif normalized_severity == "P1":
-        severity_label = "`P1` 🔴"
-    elif normalized_severity == "P2":
-        severity_label = "`P2` 🟠"
-    elif normalized_severity == "P3":
-        severity_label = "`P3` 🟡"
-    elif normalized_severity == "P4":
-        severity_label = "`P4` 🔘"
+    review_signal = _review_signal_label(normalized_severity, normalized_review_priority)
 
     lines = [
         f"Fixed in `{commit_hash}`.",
         "",
         "What I changed:",
     ]
-    if normalized_severity:
-        lines[2:2] = [f"Severity: {severity_label}", ""]
-    elif normalized_review_priority:
-        lines[2:2] = [f"Reviewer priority: `{_review_priority_label(normalized_review_priority)}`", ""]
+    if review_signal:
+        lines[2:2] = [f"Review signal: {review_signal}", ""]
     
     lines.extend([f"- `{path}`: {file_summary}" for path in files] or ["- No file list provided."])
     

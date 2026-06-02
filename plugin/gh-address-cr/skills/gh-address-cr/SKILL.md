@@ -34,7 +34,8 @@ Agent protocol commands:
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
 /gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
 /gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
-/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed>
+/gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json>
+/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
 /gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files
 /gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>
 /gh-address-cr agent publish <owner/repo> <pr_number>
@@ -91,7 +92,7 @@ If the runtime is missing, execution must fail loudly before session mutation. D
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely. For shared commit/files/validation evidence, keep per-thread summary/why entries in the batch; use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern.
 
 If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
 
@@ -100,7 +101,7 @@ If an external producer result is already available, `findings --input <path>|- 
 - Do not infer state from human prose or logs. Use only structured machine fields and the status-action map.
 - Do not post GitHub replies or resolve review threads directly. The runtime records evidence and performs deterministic side effects.
 - Do not treat `STALE` or outdated GitHub threads as clean. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
-- Do not invent severity. Only explicit `P0`, `P1`, `P2`, `P3`, or `P4` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping. Published fix replies should surface that signal as `Reviewer priority:` so the reply addresses the reviewer-provided priority without mislabeling it as P-scale severity.
+- Do not invent severity. Only explicit `P0`, `P1`, `P2`, `P3`, or `P4` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping. Published fix replies should surface exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
 - Do not override first-scene severity silently. If `agent fix`, `agent fix-all`, `agent resolve-stale`, or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
 - Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed.
 - Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.

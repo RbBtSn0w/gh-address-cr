@@ -27,6 +27,17 @@ Follow this order of precedence:
 
 ## Infrastructure Guidelines
 
+### Compatibility Policy
+- Preserve or explicitly version public CLI, machine-readable, and packaged-skill contracts when changing behavior.
+- Remove deprecated or legacy compatibility paths only when the replacement contract is documented, tested, and versioned as public behavior, or when direct instructions explicitly require removal.
+- Prefer a clean current contract over hidden shims, aliases, or fallback branches kept only for historical behavior.
+
+### CLI and Skill Evolution Policy
+- Treat this CLI as local-first tooling while keeping public CLI and machine-readable contracts stable or explicitly versioned.
+- Treat the published `skill/` payload with the same standard: current guidance may evolve, but public agent-facing behavior must remain documented and tested.
+- Do not spend maintenance effort on hidden historical compatibility unless a preserved or versioned public contract requires it.
+- When CLI or skill behavior is modernized, update obsolete flags, pathways, references, and compatibility glue in the same documented contract change.
+
 ### Python Environment
 - **Version**: Python 3.10+ (enforced by `pyproject.toml`).
 - **Install for dev**: `pip install -e .`
@@ -82,9 +93,11 @@ A task is complete only when:
 - Consolidated verification commands to match `pyproject.toml`.
 - Added Conventional Commits guideline.
 - Simplified "Execution Discipline" to focus on repository-root behavior.
+- Added explicit public-contract preservation and versioning guidance for feature updates.
+- Added local-first CLI and skill evolution guidance for documented compatibility cleanup.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/013-remove-legacy-compat/plan.md](specs/013-remove-legacy-compat/plan.md)
+  [specs/014-fix-all-thread-replies/plan.md](specs/014-fix-all-thread-replies/plan.md)
 <!-- SPECKIT END -->

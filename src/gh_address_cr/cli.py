@@ -1091,9 +1091,10 @@ def _summary_commands(repo: str, pr_number: str) -> dict[str, str]:
         "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
         "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
         "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
-        "fix_all": (
+        "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
+        "fix_all_homogeneous": (
             f"gh-address-cr agent fix-all {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed>"
+            "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
         ),
         "resolve_stale": (
             f"gh-address-cr agent resolve-stale {repo} {pr_number} "
@@ -1179,6 +1180,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
             "Use per-thread ActionResponse evidence, or agent submit-batch when one commit/files/validation set addresses multiple threads.",
             "For each actionable GitHub thread, run agent classify and agent next to acquire leases before submitting evidence.",
             "When common commit, file, and validation evidence applies, submit one BatchActionResponse with per-thread summary/why entries.",
+            "Use agent fix-all only with --input batch-response.json, or with --homogeneous-reason for a homogeneous repeated concern.",
             "After accepted evidence is present, run agent publish.",
         ],
         "commands": _summary_commands(repo, pr_number),
@@ -1875,14 +1877,20 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
 def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent fix-all",
-        description="Classify, claim, and submit shared fix evidence for matching GitHub review threads.",
+        description=(
+            "Submit per-thread batch evidence for matching GitHub review threads, or use an explicit "
+            "homogeneous repeated-concern shortcut."
+        ),
     )
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--agent-id", default="agent")
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--input", help="BatchActionResponse JSON with per-thread summary/why evidence.")
+    parser.add_argument("--commit")
     parser.add_argument("--files")
     parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--homogeneous-reason", help="Required rationale for the homogeneous repeated-concern shortcut.")
+    parser.add_argument("--concern-label", help="Short label for the homogeneous repeated concern.")
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
     parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
@@ -1894,6 +1902,54 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        if parsed.input:
+            conflicting_flags = []
+            if parsed.commit:
+                conflicting_flags.append("--commit")
+            if parsed.files:
+                conflicting_flags.append("--files")
+            if parsed.file:
+                conflicting_flags.append("--file")
+            if parsed.validation:
+                conflicting_flags.append("--validation")
+            if parsed.severity:
+                conflicting_flags.append("--severity")
+            if parsed.severity_note:
+                conflicting_flags.append("--severity-note")
+            if parsed.homogeneous_reason:
+                conflicting_flags.append("--homogeneous-reason")
+            if parsed.concern_label:
+                conflicting_flags.append("--concern-label")
+            if parsed.include_stale:
+                conflicting_flags.append("--include-stale")
+            if conflicting_flags:
+                raise workflow.WorkflowError(
+                    status="FAST_FIX_ALL_REJECTED",
+                    reason_code="CONFLICTING_FIX_ALL_INPUT",
+                    waiting_on="fast_fix_input",
+                    exit_code=2,
+                    message=(
+                        "agent fix-all accepts either --input or evidence flags, not both. "
+                        f"Move {', '.join(conflicting_flags)} into the BatchActionResponse."
+                    ),
+                )
+            payload = workflow.fast_fix_from_batch_input(
+                parsed.repo,
+                parsed.pr_number,
+                batch_path=parsed.input,
+                publish=parsed.publish,
+                now=now_dt,
+            )
+            sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            return 0
+        if not parsed.commit:
+            raise workflow.WorkflowError(
+                status="FAST_FIX_ALL_REJECTED",
+                reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+                waiting_on="fast_fix_input",
+                exit_code=2,
+                message="agent fix-all requires --commit unless --input supplies a BatchActionResponse.",
+            )
         files = _parse_agent_files(parsed.files, parsed.file)
         if not files:
             files = _changed_files_for_commit(parsed.commit)
@@ -1907,6 +1963,8 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
             include_stale=parsed.include_stale,
             severity=parsed.severity,
             severity_note=parsed.severity_note,
+            homogeneous_reason=parsed.homogeneous_reason,
+            concern_label=parsed.concern_label,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -2532,9 +2590,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
             "Runtime commands:\n"
             "  gh-address-cr agent manifest\n"
-            "  gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed>\n"
-            "  gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --match-files\n"
             "  gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json\n"
+            "  gh-address-cr agent fix-all owner/repo 123 --input batch-response.json\n"
+            "  gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>\n"
+            "  gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --match-files\n"
             "  gh-address-cr final-gate owner/repo 123\n"
         ),
     )

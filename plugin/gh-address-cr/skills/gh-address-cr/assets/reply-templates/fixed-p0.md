@@ -1,6 +1,6 @@
 Fixed in `<commit_hash>`.
 
-Severity: `P0` 🛑
+Review signal: `P0`
 
 What I changed:
 - `<file_path>`: `<blocker fix>`

@@ -19,18 +19,20 @@ class TestReplyTemplates(unittest.TestCase):
         # Long enough for P0
         long_why = "Critical fix rationale.\n\nMulti-line explanation that is long enough to pass the validation rule."
         result = fix_reply("P0", ["sha123", "src/file.py", "pytest", "Passed", long_why])
-        self.assertIn("Severity: `P0` 🛑", result)
+        self.assertIn("Review signal: `P0`", result)
+        self.assertNotIn("Severity:", result)
+        self.assertNotIn("Reviewer priority:", result)
         self.assertIn("Critical fix rationale.", result)
         self.assertIn("Multi-line explanation", result)
 
     def test_fix_reply_p1_rendering(self):
         # Two paragraphs should pass
         result = fix_reply("P1", ["sha123", "src/file.py", "pytest", "Passed", "Para one.\n\nPara two."])
-        self.assertIn("Severity: `P1` 🔴", result)
+        self.assertIn("Review signal: `P1`", result)
 
     def test_fix_reply_p4_rendering(self):
         result = fix_reply("P4", ["sha123", "src/file.py", "pytest", "Passed", "Minor nit."])
-        self.assertIn("Severity: `P4` 🔘", result)
+        self.assertIn("Review signal: `P4`", result)
         self.assertIn("Nit/Suggestion path verified", result)
 
     def test_fix_reply_with_efficiency_summary(self):
@@ -48,7 +50,8 @@ class TestReplyTemplates(unittest.TestCase):
         )
 
         self.assertNotIn("Severity:", result)
-        self.assertIn("Reviewer priority: `Medium Priority`", result)
+        self.assertNotIn("Reviewer priority:", result)
+        self.assertIn("Review signal: `Medium Priority`", result)
         self.assertIn("Reviewer-provided priority from the original review comment.", result)
         self.assertIn("Medium-priority reviewer signal", result)
 
