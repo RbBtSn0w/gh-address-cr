@@ -1,5 +1,9 @@
 # Quickstart: Thin Skill Orchestration
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 ## Goal
 
 Validate the next-stage contract manually without introducing a custom autonomous runner. The dry run uses the high-level runtime interface, role boundaries, leases, structured evidence, and final gate.

@@ -1,5 +1,9 @@
 # Implementation Plan: Agent Control Plane
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 **Branch**: `001-agent-control-plane` | **Date**: 2026-04-24 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/001-agent-control-plane/spec.md`
 

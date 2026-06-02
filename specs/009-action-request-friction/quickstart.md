@@ -1,5 +1,9 @@
 # Quickstart: Action Request Friction Repair
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 ## 1. Verify helper accepts runtime ActionRequest
 
 1. Create a PR-session fixture with one classified item.

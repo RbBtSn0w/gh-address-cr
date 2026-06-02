@@ -1,5 +1,9 @@
 # Quickstart: Orchestrator MVP
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 ## 1. Start Orchestration
 ```bash
 python3 skill/scripts/cli.py agent orchestrate start owner/repo 123

@@ -1,88 +1,82 @@
-# Implementation Plan: CLI and Skill Synchronization (Phase 2)
+# Implementation Plan: CLI and Skill Synchronization (Phase 3 Closeout)
 
-**Branch**: `011-agent-efficiency-metrics` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
+**Branch**: `012-skill2cli` | **Date**: 2026-06-02 | **Spec**: [spec.md](./spec.md)
 
 ## Goal Description
 
-Refactor the compatibility scripts in `src/gh_address_cr/legacy_scripts/` to be minimalist proxies/delegates ("极简代理化") by completely moving their business logic ("彻底下沉逻辑") to a internal package package `src/gh_address_cr/legacy_handlers/`.
+Close the CLI/skill migration by making the current artifacts match the
+implemented runtime boundary: the packaged skill is a thin adapter, the runtime
+CLI owns executable work, and historical shim instructions are clearly marked as
+superseded.
 
-This achieves:
-1. Pure thin proxy scripts mapped to the skill payload (`skill/scripts/`).
-2. Reduced payload size for the skill (since bulky files like `python_common.py` will not be in `legacy_scripts/` and thus will not be synced to `skill/scripts/`).
-3. Logic isolation, clean packaging, and testability.
+## Architecture
 
-## User Review Required
+The runtime implementation remains in `src/gh_address_cr/` and exposes the
+public console command `gh-address-cr`. The packaged skill under `skill/` carries
+behavioral policy, references, and assistant hints only. The plugin payload under
+`plugin/gh-address-cr/` is generated from `skill/` and does not contain a Python
+execution surface.
 
-> [!NOTE]
-> All business logic is moved into the `gh_address_cr` package namespace.
-> Bulky utilities (like `python_common.py`) will be completely removed from `skill/scripts/` but remain inside the package namespace (`gh_address_cr.legacy_handlers.python_common`).
+Package-internal `src/gh_address_cr/legacy_scripts/` files may remain for
+backward-compatible low-level command dispatch, but high-level public commands
+must run through native runtime code and tests must prove that boundary.
+
+## Constitution Check
+
+- **Control plane ownership**: PASS. State transitions, GitHub side effects,
+  leases, telemetry, and final-gate logic remain runtime-owned.
+- **Public CLI contract**: PASS. Current execution instructions target
+  `gh-address-cr` and `python3 -m gh_address_cr`.
+- **Evidence-first handling**: PASS. The migration does not bypass
+  reply/resolve evidence or final-gate requirements.
+- **Packaged skill boundary**: PASS. `skill/` is policy/reference payload only;
+  no packaged Python scripts remain.
+- **External intake replaceability**: PASS. Review producers still feed
+  normalized findings into the runtime.
+- **Testable contracts**: PASS. Regression tests cover docs, payload packaging,
+  native high-level command routing, and superseded historical shim references.
 
 ## Proposed Changes
 
-### Core Package
+### Current Feature Artifacts
 
-#### [NEW] [__init__.py](file:///Users/snow/Documents/GitHub/gh-address-cr-skill/src/gh_address_cr/legacy_handlers/__init__.py)
-- Create empty package initializer for internal legacy handlers package.
+- Update `specs/012-cli-skill-sync/spec.md` to mark Phase 3 complete and replace
+  obsolete sync-era requirements with current CLI-owned requirements.
+- Update this plan so the verification path is the current closeout gate, not a
+  removed shim-sync workflow.
+- Update `specs/012-cli-skill-sync/tasks.md` with a closeout audit phase and
+  current verification evidence.
 
-#### [NEW] [python_common.py](file:///Users/snow/Documents/GitHub/gh-address-cr-skill/src/gh_address_cr/legacy_handlers/python_common.py)
-- Move all helper functions and classes from legacy `python_common.py`.
+### Historical Specs
 
-#### [NEW] [All implementation scripts in legacy_handlers/](file:///Users/snow/Documents/GitHub/gh-address-cr-skill/src/gh_address_cr/legacy_handlers/)
-- Move the original script files from `legacy_scripts/` here:
-  - `audit_report.py`
-  - `batch_github_execute.py`
-  - `batch_resolve.py`
-  - `clean_state.py`
-  - `code_review_adapter.py`
-  - `generate_reply.py`
-  - `ingest_findings.py`
-  - `list_threads.py`
-  - `mark_handled.py`
-  - `post_reply.py`
-  - `prepare_code_review.py`
-  - `publish_finding.py`
-  - `resolve_thread.py`
-  - `review_to_findings.py`
-  - `run_local_review.py`
-  - `run_once.py`
-  - `submit_action.py`
-  - `submit_feedback.py`
-- Modify imports inside these files: replace `from python_common import ...` and `import python_common` with package-relative `from . import python_common`.
+- Mark older specs that still mention `skill/scripts` or `scripts/cli.py` as
+  superseded by `specs/012-cli-skill-sync`.
+- Keep the historical text intact where it documents old behavior, but make the
+  current authority explicit so agents do not treat those examples as runnable
+  instructions.
 
-### Legacy Scripts (Proxies)
+### Executable Guardrails
 
-#### [MODIFY] [All scripts in legacy_scripts/](file:///Users/snow/Documents/GitHub/gh-address-cr-skill/src/gh_address_cr/legacy_scripts/)
-- Replace the contents of the following files with minimalist delegation templates that call their corresponding logic from `gh_address_cr.legacy_handlers`:
-  - `audit_report.py`
-  - `batch_github_execute.py`
-  - `batch_resolve.py`
-  - `clean_state.py`
-  - `code_review_adapter.py`
-  - `generate_reply.py`
-  - `ingest_findings.py`
-  - `list_threads.py`
-  - `mark_handled.py`
-  - `post_reply.py`
-  - `prepare_code_review.py`
-  - `publish_finding.py`
-  - `resolve_thread.py`
-  - `review_to_findings.py`
-  - `run_local_review.py`
-  - `run_once.py`
-  - `submit_action.py`
-  - `submit_feedback.py`
-
-#### [DELETE] [python_common.py](file:///Users/snow/Documents/GitHub/gh-address-cr-skill/src/gh_address_cr/legacy_scripts/python_common.py)
-- Delete the file so it is no longer mapped to the skill payload.
-
-### Packaging & Syncing
-
-- Run `python3 scripts/sync_scripts.py` to synchronize thin proxies to `skill/scripts/` and clean up `skill/scripts/python_common.py`.
-- Run `python3 scripts/build_plugin_payload.py` to regenerate the plugin payload under `plugin/`.
+- Add an artifact contract test that checks:
+  - `012` artifacts name the current branch and completed closeout state.
+  - The current plan no longer references removed sync tooling.
+  - Hard-coded historical unit-test counts are not used as success criteria.
+  - Any older spec with skill-script paths contains the superseded marker.
+- Preserve existing guards in `tests/test_skill_docs.py`,
+  `tests/test_plugin_packaging.py`, and `tests/test_native_runtime_boundary.py`.
 
 ## Verification Plan
 
-### Automated Tests
-- Run `ruff check src tests` to ensure Ruff linting passes.
-- Run `python3 -m unittest discover -s tests` to ensure all 544 unit tests pass successfully.
-- Run `python3 scripts/sync_scripts.py --check` to ensure no drift in packaging.
+Run the local verification gate with Python 3.10+:
+
+```bash
+ruff check src tests
+python3 -m unittest discover -s tests
+python3 -m gh_address_cr --help
+python3 -m gh_address_cr agent manifest
+python3 scripts/build_plugin_payload.py --check
+git diff --check
+```
+
+The unit-test assertion is intentionally count-agnostic: the current suite count
+may change as tests are added or removed, but the full suite must pass.

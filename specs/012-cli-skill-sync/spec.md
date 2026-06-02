@@ -1,82 +1,139 @@
 # Feature Specification: CLI and Skill Synchronization
 
-**Feature Branch**: `011-agent-efficiency-metrics`
+**Feature Branch**: `012-skill2cli`
 **Created**: 2026-05-30
-**Status**: In Progress
-**Input**: User description: "开发CLI，同时维护skill，毕竟他们的代码分离，一不小心丢失就出错，非常低下。从系统化思考，第一性原理给出复盘和修复方案。短期修复（阶段一）：建立兼容脚本的单一可信源、实现同步逻辑与集成校验以防漂移。中期重构（阶段二）：脚本“极简代理化”（彻底下沉逻辑）。长期重构（阶段三）：彻底消除 skill/scripts/ 脚本，全量使用 CLI 代理。"
+**Status**: Complete
+**Last Audited**: 2026-06-02
+**Input**: Three-phase migration from duplicated skill-layer Python shims to a
+single runtime-owned CLI execution surface. Phase 1 introduced a temporary sync
+guard, Phase 2 moved implementation logic into package handlers, and Phase 3
+removed Python scripts from the packaged skill payload so agents execute
+`gh-address-cr` directly.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Script Single Source of Truth and Sync (Phase 1 - Complete)
+### User Story 1 - Runtime CLI Is The Skill Execution Surface (Phase 3 - Complete)
 
-As a developer of `gh-address-cr`, I want to maintain compatibility scripts in a single directory (`src/gh_address_cr/legacy_scripts/`) and have a tool copy them to `skill/scripts/` while automatically injecting required local-development bootstrap path logic, so that I do not have to maintain duplicate, formatted-drifted files manually.
+As a developer/maintainer, I want the packaged skill and Codex plugin to route
+all executable work through the installed `gh-address-cr` CLI, so that the skill
+cannot drift into a second implementation of review handling, GitHub side
+effects, or completion gating.
 
 **Acceptance Scenarios**:
-1. **Given** a script is modified or added in `src/gh_address_cr/legacy_scripts/`, **When** I run `python3 scripts/sync_scripts.py`, **Then** the corresponding file in `skill/scripts/` is written with an injected `bootstrap_runtime_path()` helper.
-2. **Given** a file in `skill/scripts/` has drifted or a file is missing, **When** I run `python3 scripts/sync_scripts.py --check`, **Then** the script reports a failure and returns a non-zero exit code.
+1. **Given** the plugin payload is built, **When** I inspect the packaged skill,
+   **Then** it contains no `scripts/` directory or Python shim entrypoints.
+2. **Given** `skill/SKILL.md` and `skill/agents/openai.yaml`, **When** they
+   describe execution, **Then** they point to `gh-address-cr` and
+   `python3 -m gh_address_cr` instead of skill-local scripts.
+3. **Given** an agent receives an `ActionRequest`, **When** it follows the
+   `resume_command`, **Then** the command targets the runtime CLI and not a
+   removed skill shim.
 
 ---
 
-### User Story 2 - Minimalist Delegation of Legacy Scripts (Phase 2 - Complete)
+### User Story 2 - Runtime Package Keeps Compatibility Without Owning Skill Logic (Phase 3 - Complete)
 
-As a developer, I want all compatibility scripts in the packaged skill payload to be thin proxies/shims that contain no business logic and delegate entirely to the core `gh_address_cr` Python package. This eliminates duplication, ensures logic is fully packaged and testable, and prevents bulky shared utilities (like `python_common.py`) from bloat-loading the skill's script payload.
+As a runtime maintainer, I want any remaining compatibility files to live inside
+the Python package and delegate to runtime-owned handlers, so that old low-level
+entrypoints remain explicit implementation details while public high-level
+commands stay native.
 
 **Acceptance Scenarios**:
-1. **Given** a command (e.g., `post-reply`) is run via the CLI or a legacy script wrapper, **When** it executes, **Then** the execution flows through a minimalist shim script that delegates to a handler inside the package, maintaining exact original behavior.
-2. **Given** the sync script is run, **When** it maps files, **Then** only the thin proxies are synced to `skill/scripts/`, and bulky helper files like `python_common.py` are cleaned up/removed from `skill/scripts/`.
+1. **Given** high-level commands such as `review`, `address`, `threads`,
+   `findings`, and `adapter`, **When** they run, **Then** they do not require
+   `src/gh_address_cr/legacy_scripts/`.
+2. **Given** package-internal legacy command surfaces are invoked, **When** they
+   execute, **Then** they delegate to native package modules and do not duplicate
+   state-machine logic in the skill payload.
+3. **Given** current public docs and skill references, **When** they mention
+   removed skill-shim paths, **Then** the mention is limited to upgrade or
+   superseded-history context and not presented as a runnable path.
 
 ---
 
-### User Story 3 - Complete Elimination of Skill Scripts in Payload (Phase 3 - Active)
+### User Story 3 - Distribution And CI Guard Against Regression (Phase 3 - Complete)
 
-As a developer/maintainer, I want to completely remove compatibility shim python scripts from the packaged skill's `scripts/` directory and configure the Codex plugin and agent instructions to execute the installed `gh-address-cr` CLI directly. This eliminates python shims entirely from the skill packaging boundary and routes all agent execution directly to the installed python package runtime.
+As a release maintainer, I want the plugin payload, tests, and workflows to prove
+that the skill remains a thin adapter, so that future changes cannot
+accidentally restore duplicated skill scripts or stale execution instructions.
 
 **Acceptance Scenarios**:
-1. **Given** the plugin payload is built, **When** I inspect the `skill/scripts/` directory, **Then** it contains no python scripts (the directory can be deleted).
-2. **Given** the Codex plugin configuration (`plugin/gh-address-cr/plugin.json`), `skill/SKILL.md`, and `skill/agents/openai.yaml` are compiled, **When** they instruct the agent on command execution, **Then** all instructions point directly to `gh-address-cr` CLI instead of `python3 scripts/cli.py` or other python shim scripts.
-3. **Given** the unit tests and CI workflows run, **When** they execute, **Then** all checks pass successfully without expecting local python wrapper scripts under the skill payload.
+1. **Given** the repo-local plugin builder runs in check mode, **When** the
+   committed payload matches `skill/`, **Then** it exits successfully.
+2. **Given** CI or release workflows run, **When** they validate the repo,
+   **Then** they check the plugin payload and do not run obsolete script-sync
+   guards.
+3. **Given** the full local verification suite runs, **When** it completes,
+   **Then** linting, unit tests, CLI smoke, manifest smoke, payload check, and
+   whitespace checks all pass using the current test suite.
 
----
+## Edge Cases
 
-### Edge Cases
-
-- **__init__.py presence**: The package initialization file `__init__.py` must not be copied to `skill/scripts/`.
-- **Imports without gh_address_cr**: If a script does not import `gh_address_cr`, the sync tool must not inject the bootstrap header.
-- **Ruff compliance**: Sync script must append `# noqa: E402` to imports of `gh_address_cr` that follow path injection.
-- **Circular Imports**: Package handlers must load cleanly without module-level circular dependencies.
+- **Legacy runtime compatibility**: `src/gh_address_cr/legacy_scripts/` may
+  remain as package-internal compatibility shims, but high-level public commands
+  must not depend on that directory.
+- **Removed skill-shim usage**: Upgrade docs may mention
+  `python3 skill/scripts/cli.py` only to say that path has been removed and users
+  must install/run the runtime CLI.
+- **Historical specs**: Older feature specs may retain old shim examples only
+  when they are explicitly marked as superseded by this feature.
+- **Plugin payload drift**: Generated plugin files must stay reproducible from
+  `skill/` via `scripts/build_plugin_payload.py --check`.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: System MUST establish `src/gh_address_cr/legacy_scripts/` as the single source of truth for python compatibility scripts.
-- **FR-002**: System MUST provide a synchronization command `python3 scripts/sync_scripts.py` that copies scripts from the source directory to `skill/scripts/`.
-- **FR-003**: Synchronization MUST automatically inject the path-bootstrapping helper `bootstrap_runtime_path()` before any imports of `gh_address_cr` in the destination files (except `cli.py`).
-- **FR-004**: System MUST append `  # noqa: E402` to any import lines of `gh_address_cr` that follow the injected bootstrapping helper to comply with Ruff linting.
-- **FR-005**: System MUST support a `--check` flag that performs a dry-run check, returning exit code `1` if any file in `skill/scripts/` is missing, orphaned, or has content/formatting drift.
-- **FR-006**: The synchronization check MUST be integrated into unit tests and CI workflow suites to enforce a zero-drift guardrail.
-- **FR-007**: System MUST move all business logic from `src/gh_address_cr/legacy_scripts/` scripts to `src/gh_address_cr/legacy_handlers/` internal package directory.
-- **FR-008**: System MUST make each script in `src/gh_address_cr/legacy_scripts/` (except `__init__.py` and `cli.py`) a minimal shim that only imports its entry point from `gh_address_cr.legacy_handlers` and calls it.
-- **FR-009**: The sync tool (`sync_scripts.py`) MUST delete `python_common.py` from `skill/scripts/` during synchronization as it is no longer present in `legacy_scripts/`.
-- **FR-010**: System MUST completely eliminate python compatibility scripts from the packaged skill's `scripts/` directory.
-- **FR-011**: All packaged skill documentation (`skill/SKILL.md`) and agent instructions (`skill/agents/openai.yaml`) MUST reference `gh-address-cr` CLI directly for execution, instead of `python3 scripts/cli.py` or other python shim scripts.
-- **FR-012**: System MUST remove the synchronization command `sync_scripts.py` and clean up all CI and unit test suites that verify local compatibility shims.
+- **FR-001**: The packaged skill payload MUST NOT contain a `scripts/` directory
+  or Python execution shims.
+- **FR-002**: `skill/SKILL.md`, `skill/agents/openai.yaml`, and skill-owned
+  references MUST use `gh-address-cr` CLI commands as the execution surface.
+- **FR-003**: The Codex plugin payload under `plugin/gh-address-cr/` MUST be
+  generated from `skill/` and MUST include exactly one packaged skill named
+  `gh-address-cr`.
+- **FR-004**: CI and release workflows MUST validate the generated plugin
+  payload and MUST NOT require obsolete skill-script synchronization.
+- **FR-005**: High-level public commands (`review`, `address`, `threads`,
+  `findings`, and `adapter`) MUST run through native runtime code without
+  requiring package-internal legacy script files.
+- **FR-006**: `ActionRequest.resume_command` values MUST reject removed
+  skill-local shim paths and target the runtime CLI instead.
+- **FR-007**: Current public docs MUST NOT present `skill/scripts` or
+  `scripts/cli.py` as runnable command paths. Upgrade docs may mention the old
+  path only as removed.
+- **FR-008**: Historical specs that still contain old shim paths MUST be marked
+  as superseded by `specs/012-cli-skill-sync`.
+- **FR-009**: Verification MUST use the current unit-test suite result instead
+  of a hard-coded historical test count.
 
 ### Constitution Alignment *(mandatory)*
 
-- **Control Plane Impact**: Preserves the deterministic nature of compatibility scripts by making sure they only delegate to `src/gh_address_cr/` core code.
-- **CLI / Agent Contract Impact**: No impact on the CLI command contract.
-- **Evidence Requirements**: The `--check` command output and exit code serve as evidence of packaging consistency.
-- **Packaged Skill Boundary**: Synchronization copies the clean, formatted python source files into the packaged skill's `scripts/` directory, maintaining clean boundaries.
+- **Control Plane Impact**: Preserves deterministic ownership by keeping
+  runtime state, GitHub side effects, leases, telemetry, and final-gate logic in
+  the CLI/runtime package.
+- **CLI / Agent Contract Impact**: Confirms that the stable public agent surface
+  is `gh-address-cr` plus structured `ActionRequest`/`ActionResponse` protocol
+  commands.
+- **Evidence Requirements**: Completion evidence comes from runtime CLI smoke,
+  manifest output, payload check, lint, unit tests, and `git diff --check`.
+- **Packaged Skill Boundary**: The installed skill remains a thin adapter and
+  behavioral policy layer under `skill/`.
+- **External Intake Replaceability**: The migration does not couple the runtime
+  to any specific review producer.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: 100% of python files in `skill/scripts/` (except `__init__.py`) are generated and updated automatically by the synchronization tool. (Obsoleted in Phase 3)
-- **SC-002**: All compatibility scripts under `skill/scripts/` are minimal proxies with zero business logic. (Obsoleted in Phase 3)
-- **SC-003**: The unit test suite detects any manual modification to `skill/scripts/` files and fails. (Obsoleted in Phase 3)
-- **SC-004**: All 544 unit tests pass successfully after the refactor.
-- **SC-005**: The `skill/scripts/` directory is completely removed from the packaged skill payload.
-- **SC-006**: All CI checks and semantic release configurations pass successfully without requiring or running script synchronization.
-- **SC-007**: 100% of references in `SKILL.md` and `openai.yaml` target `gh-address-cr` CLI directly.
+- **SC-001**: `git ls-files skill plugin/gh-address-cr` shows no packaged
+  `scripts/` Python shim paths.
+- **SC-002**: `skill/SKILL.md` and `skill/agents/openai.yaml` contain runtime
+  CLI instructions and no `scripts/cli.py` execution path.
+- **SC-003**: `python3 scripts/build_plugin_payload.py --check` reports the
+  plugin payload is up to date.
+- **SC-004**: The current full unit-test suite passes without relying on a fixed
+  historical test count.
+- **SC-005**: `python3 -m gh_address_cr --help` and
+  `python3 -m gh_address_cr agent manifest` run successfully.
+- **SC-006**: Public docs and current feature artifacts no longer direct agents
+  to removed skill-local scripts.

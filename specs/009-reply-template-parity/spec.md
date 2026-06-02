@@ -1,5 +1,9 @@
 # Feature Specification: Reply Template Parity
 
+> **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
+> skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
+> describe the earlier shim-era contract and are not current runnable paths.
+
 **Feature Branch**: `009-reply-template-parity`  
 **Created**: 2026-04-30  
 **Status**: Verified
