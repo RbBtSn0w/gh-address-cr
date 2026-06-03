@@ -428,6 +428,31 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("source" in diagnostic for diagnostic in private_source["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_source_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent\n- injected",
+                "source_session_id": "run-1",
+                "event_id": "source-control",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertNotIn("- injected", json.dumps(result))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_redacts_unsafe_declared_source_in_summary(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -439,6 +464,21 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
             self.assertEqual(result["source"], "[redacted]")
             self.assertNotIn("/home/alice", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_redacts_unsafe_unsupported_format_in_summary(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="/home/alice/telemetry.jsonl", raw=""
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+            self.assertEqual(result["format"], "[redacted]")
+            self.assertNotIn("/home/alice", json.dumps(result))
+            self.assertNotIn("/home/alice", json.dumps(report))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_ambiguous_source_sessions(self, state_dir):
@@ -682,6 +722,56 @@ class TestTelemetry(unittest.TestCase):
             self.assertNotIn("ghp_secret", json.dumps(result))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_identity_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0\n- injected",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "schema-control",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "kind-control",
+                    "kind": "tool_call\n- injected",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "status-control",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success\n- injected",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 3)
+            self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertNotIn("- injected", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_fails_unsafe_partial_without_persisting(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -736,6 +826,54 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
             self.assertTrue(any("timestamp timezone" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_nonstandard_json_constants(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            raw = (
+                '{"schema_version":"1.0","source":"generic-agent","source_session_id":"run-1",'
+                '"event_id":"nan-duration","kind":"tool_call","operation":"exec_command",'
+                '"duration_ms":NaN,"status":"success"}'
+            )
+
+            result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=raw)
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 1)
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_non_integer_duration_values(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            base = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "status": "success",
+            }
+            payloads = [
+                {**base, "event_id": "bool-duration", "duration_ms": True},
+                {**base, "event_id": "float-duration", "duration_ms": 1.5},
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertTrue(all("duration_ms must be an integer" in diagnostic for diagnostic in result["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_report_deduplicates_runtime_and_external_events_by_correlation(self, state_dir):

@@ -377,6 +377,7 @@ class SessionTelemetry:
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     if fmt != "agent-jsonl":
+        reported_format = _reported_format_label(fmt)
         summary = _import_summary(
             repo,
             pr_number,
@@ -389,7 +390,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_count=0,
             accepted_fingerprints=[],
             duplicate_fingerprints=[],
-            diagnostics=[f"Unsupported telemetry format: {fmt}"],
+            diagnostics=[f"Unsupported telemetry format: {reported_format}"],
         )
         _append_import_summary(repo, pr_number, summary)
         return summary
@@ -428,11 +429,16 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         if not line.strip():
             continue
         try:
-            payload = json.loads(line)
+            payload = _json_loads_strict(line)
         except json.JSONDecodeError as exc:
             malformed_seen = True
             rejected_count += 1
             diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        except ValueError as exc:
+            malformed_seen = True
+            rejected_count += 1
+            diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
             continue
         try:
             event = _normalize_external_event(payload, declared_source=source)
@@ -712,9 +718,8 @@ def _event_fingerprint(event: ExternalTelemetryEvent) -> str:
 
 def _event_duration_ms(payload: dict[str, Any]) -> int:
     if payload.get("duration_ms") is not None:
-        try:
-            value = int(payload["duration_ms"])
-        except (TypeError, ValueError):
+        value = payload["duration_ms"]
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError("duration_ms must be an integer") from None
         if value < 0:
             raise ValueError("duration_ms must be non-negative")
@@ -782,6 +787,8 @@ def _safe_operation(operation: str) -> str:
 def _safe_source_label(source: str) -> str:
     if source == "runtime":
         raise ValueError("UNSAFE:reserved source label: runtime")
+    if _contains_control_character(source):
+        raise ValueError("UNSAFE:unsafe control character in source label")
     if _contains_token_marker(source):
         raise ValueError("UNSAFE:unsafe source label")
     if _contains_private_identifier(source):
@@ -810,6 +817,8 @@ def _safe_correlation_id(correlation_id: str) -> str:
 
 
 def _safe_identity_label(value: str, *, field: str) -> str:
+    if _contains_control_character(value):
+        raise ValueError(f"UNSAFE:unsafe control character in {field}")
     if _contains_token_marker(value):
         raise ValueError(f"UNSAFE:unsafe {field}")
     if _contains_private_identifier(value):
@@ -910,6 +919,14 @@ def _contains_private_identifier(value: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def _json_loads_strict(raw: str) -> Any:
+    return json.loads(raw, parse_constant=_reject_json_constant)
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
 def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
     events, _diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
     return events
@@ -929,7 +946,7 @@ def _load_external_events_with_diagnostics(repo: str, pr_number: str) -> tuple[l
         if not line.strip():
             continue
         try:
-            payload = json.loads(line)
+            payload = _json_loads_strict(line)
             if not isinstance(payload, dict):
                 raise ValueError("record must be a JSON object")
             events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
@@ -1035,7 +1052,7 @@ def _import_summary(
         "repo": repo,
         "pr_number": str(pr_number),
         "source": _reported_source_label(source),
-        "format": fmt,
+        "format": _reported_format_label(fmt),
         "accepted_count": accepted_count,
         "rejected_count": rejected_count,
         "duplicate_count": duplicate_count,
@@ -1055,6 +1072,12 @@ def _reported_source_label(source: str) -> str:
     if _looks_like_unnecessary_absolute_path(source):
         return "[redacted]"
     return source
+
+
+def _reported_format_label(fmt: str) -> str:
+    if _contains_control_character(fmt):
+        return "[redacted]"
+    return _reported_source_label(fmt)
 
 
 def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:

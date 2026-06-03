@@ -2447,13 +2447,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
 
 def _reported_telemetry_source(source: str) -> str:
-    if core_telemetry._contains_token_marker(source):
-        return "[redacted]"
-    if core_telemetry._contains_private_identifier(source):
-        return "[redacted]"
-    if core_telemetry._looks_like_unnecessary_absolute_path(source):
-        return "[redacted]"
-    return source
+    return core_telemetry._reported_source_label(source)
 
 
 def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:

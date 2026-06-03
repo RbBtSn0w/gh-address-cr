@@ -85,6 +85,12 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertNotIn("run-once", result.stdout)
         self.assertNotIn("session-engine", result.stdout)
 
+    def test_cli_telemetry_source_redaction_delegates_to_core(self):
+        source = CLI_PY.read_text(encoding="utf-8")
+
+        self.assertIn("return core_telemetry._reported_source_label(source)", source)
+        self.assertNotIn("core_telemetry._contains_token_marker(source)", source)
+
     def test_cli_review_help_uses_high_level_alias_text(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
