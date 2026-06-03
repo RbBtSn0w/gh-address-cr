@@ -120,7 +120,7 @@ def validate_action_response(
                         f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
                     )
     else:
-        if payload.get("validation_commands"):
+        if "validation_commands" in payload:
             _validate_validation_commands(payload["validation_commands"])
         code = f"missing_{resolution}_reply_markdown"
         _require_non_empty(payload, "reply_markdown", code)

@@ -2610,6 +2610,8 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
             if publish_error:
                 return publish_error
     else:
+        if "validation_commands" in response and not _normalize_validation_command_records(response.get("validation_commands")):
+            return "INVALID_VALIDATION_COMMANDS"
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
     return None

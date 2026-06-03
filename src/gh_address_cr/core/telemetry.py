@@ -43,6 +43,8 @@ def command_label(cmd: list[str]) -> str:
             continue
         if _contains_token_marker(token):
             continue
+        if _contains_private_identifier(token):
+            continue
         label_tokens.append(token)
         break
 
@@ -175,11 +177,8 @@ UNSAFE_METADATA_KEY_MARKERS = (
     "secret",
     "credential",
     "prompt",
-    "user",
-    "machine",
-    "host",
 )
-TOKEN_MARKERS = ("ghp_", "github_pat_", "Bearer ", "sk-", "xoxb-", "token=")
+TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
 
 
 class SessionTelemetry:
@@ -769,6 +768,8 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
 
 
 def _safe_operation(operation: str) -> str:
+    if _contains_control_character(operation):
+        raise ValueError("UNSAFE:unsafe control character in operation label")
     if _contains_token_marker(operation):
         raise ValueError("UNSAFE:unsafe operation label")
     if _contains_private_identifier(operation):
@@ -779,6 +780,8 @@ def _safe_operation(operation: str) -> str:
 
 
 def _safe_source_label(source: str) -> str:
+    if source == "runtime":
+        raise ValueError("UNSAFE:reserved source label: runtime")
     if _contains_token_marker(source):
         raise ValueError("UNSAFE:unsafe source label")
     if _contains_private_identifier(source):
@@ -834,7 +837,12 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
 
 
 def _safe_runtime_operation(operation: str) -> str:
-    if _contains_token_marker(operation) or _looks_like_unnecessary_absolute_path(operation):
+    if (
+        _contains_token_marker(operation)
+        or _contains_private_identifier(operation)
+        or _contains_control_character(operation)
+        or _looks_like_unnecessary_absolute_path(operation)
+    ):
         try:
             return command_label(shlex.split(operation)) or "runtime command"
         except ValueError:
@@ -873,11 +881,15 @@ def _is_unsafe_metadata_key(key: str) -> bool:
 
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
-    if "ghp_" in lowered or "github_pat_" in lowered or "xoxb-" in lowered or "token=" in lowered:
+    if any(marker in lowered for marker in TOKEN_MARKERS):
         return True
     if re.search(r"(^|[^a-z0-9])bearer\s+", lowered):
         return True
     return bool(re.search(r"(^|[^a-z0-9])sk-[a-z0-9]", lowered))
+
+
+def _contains_control_character(value: str) -> bool:
+    return any(character in value for character in ("\n", "\r", "\t"))
 
 
 def _contains_private_identifier(value: str) -> bool:
@@ -1038,6 +1050,8 @@ def _import_summary(
 def _reported_source_label(source: str) -> str:
     if _contains_token_marker(source):
         return "[redacted]"
+    if _contains_private_identifier(source):
+        return "[redacted]"
     if _looks_like_unnecessary_absolute_path(source):
         return "[redacted]"
     return source
@@ -1078,7 +1092,7 @@ def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
     path = core_paths.telemetry_imports_file(repo, pr_number)
     if not path.is_file():
         return False
-    unrecovered = False
+    unrecovered_by_source: dict[str, bool] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -1092,15 +1106,16 @@ def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
             return True
         if not isinstance(payload, dict):
             return True
+        source = str(payload.get("source") or "unknown")
         status = payload.get("status")
         reason_code = payload.get("reason_code")
         if status == "SUCCESS":
-            unrecovered = False
+            unrecovered_by_source[source] = False
         elif reason_code == "DUPLICATE_TELEMETRY_IMPORT":
             continue
         else:
-            unrecovered = True
-    return unrecovered
+            unrecovered_by_source[source] = True
+    return any(unrecovered_by_source.values())
 
 
 def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
