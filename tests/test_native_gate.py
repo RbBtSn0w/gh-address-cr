@@ -235,6 +235,34 @@ class NativeGateTests(unittest.TestCase):
         self.assertEqual(item["severity_evidence"]["source"], "github_first_comment")
         self.assertEqual(item["severity_evidence"]["observed_from"], "https://example.test/thread/p1")
 
+    def test_remote_thread_refresh_records_explicit_review_priority_payload(self):
+        from gh_address_cr.core import gate
+
+        merged = gate.session_with_remote_threads(
+            {"repo": "owner/repo", "pr_number": "123", "items": {}},
+            [
+                {
+                    "id": "THREAD_HIGH",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/priority.py",
+                    "line": 12,
+                    "body": "Copilot comment body without a textual priority marker.",
+                    "url": "https://example.test/thread/high",
+                    "first_body": "Copilot comment body without a textual priority marker.",
+                    "first_url": "https://example.test/thread/high",
+                    "first_author_login": "Copilot",
+                    "review_priority": "High",
+                }
+            ],
+        )
+
+        item = merged["items"]["github-thread:THREAD_HIGH"]
+        self.assertNotIn("severity", item)
+        self.assertEqual(item["first_author_login"], "Copilot")
+        self.assertEqual(item["review_priority_evidence"]["value"], "high")
+        self.assertEqual(item["review_priority_evidence"]["source"], "github_payload")
+
     def test_remote_thread_refresh_drops_legacy_unbacked_severity(self):
         from gh_address_cr.core import gate
 

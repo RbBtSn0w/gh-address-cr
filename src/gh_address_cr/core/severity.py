@@ -90,6 +90,26 @@ def extract_review_priority_evidence(
     return evidence
 
 
+def review_priority_evidence(
+    value: Any,
+    *,
+    source: str,
+    raw_marker: str | None = None,
+    observed_from: str | None = None,
+) -> dict[str, str] | None:
+    priority = str(value or "").strip().lower()
+    if priority not in {"high", "medium", "low"}:
+        return None
+    evidence = {
+        "value": priority,
+        "source": source,
+        "raw_marker": str(raw_marker or priority).strip() or priority,
+    }
+    if observed_from:
+        evidence["observed_from"] = observed_from
+    return evidence
+
+
 def apply_severity_evidence(item: dict[str, Any], evidence: dict[str, str] | None) -> None:
     if not evidence:
         item.pop("severity", None)

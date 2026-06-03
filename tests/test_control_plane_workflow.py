@@ -782,6 +782,52 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(item["state"], "publish_ready")
         self.assertEqual(item["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
 
+    def test_agent_fix_fast_path_records_raw_review_priority(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/example.py",
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix",
+            self.repo,
+            self.pr,
+            "github-thread:abc",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/example.py",
+            "--summary",
+            "Added the guard.",
+            "--why",
+            "The guarded path now covers the review case.",
+            "--review-priority",
+            "high",
+            "--validation",
+            "python3 -m unittest tests.test_example=passed",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.load_session()["items"]["github-thread:abc"]
+        self.assertEqual(
+            item["review_priority_evidence"],
+            {
+                "value": "high",
+                "source": "agent_fix",
+                "raw_marker": "high",
+            },
+        )
+
     def test_agent_fix_fast_path_accepts_explicit_severity_override(self):
         self.write_session(
             items=[

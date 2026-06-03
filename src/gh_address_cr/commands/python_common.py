@@ -1031,8 +1031,8 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
             pageInfo{ hasNextPage endCursor }
             nodes{ url author{ login } }
           }
-          firstComment: comments(first:1){ nodes{ url body } }
-          latestComment: comments(last:1){ nodes{ url body } }
+          firstComment: comments(first:1){ nodes{ url body author{ login } } }
+          latestComment: comments(last:1){ nodes{ url body author{ login } } }
         }
       }
     }
@@ -1068,29 +1068,41 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
             first_node = first[0] if first else {}
             viewer_reply_checked = bool(viewer_login) and has_comment_connection
             viewer_replied, viewer_reply_url = _viewer_reply_evidence(comments, viewer_login)
-            threads.append(
-                {
-                    "id": node["id"],
-                    "isResolved": node["isResolved"],
-                    "isOutdated": node["isOutdated"],
-                    "path": node.get("path"),
-                    "line": node.get("line"),
-                    "url": latest_node.get("url") or first_node.get("url"),
-                    "body": latest_node.get("body") or first_node.get("body"),
-                    "comment_source": "latest" if latest else ("first" if first else "none"),
-                    "first_url": first_node.get("url"),
-                    "latest_url": latest_node.get("url"),
-                    "first_body": first_node.get("body"),
-                    "latest_body": latest_node.get("body"),
-                    "viewer_reply_checked": viewer_reply_checked,
-                    "viewer_replied": viewer_replied,
-                    "viewer_reply_url": viewer_reply_url,
-                }
-            )
+            row = {
+                "id": node["id"],
+                "isResolved": node["isResolved"],
+                "isOutdated": node["isOutdated"],
+                "path": node.get("path"),
+                "line": node.get("line"),
+                "url": latest_node.get("url") or first_node.get("url"),
+                "body": latest_node.get("body") or first_node.get("body"),
+                "comment_source": "latest" if latest else ("first" if first else "none"),
+                "first_url": first_node.get("url"),
+                "latest_url": latest_node.get("url"),
+                "first_body": first_node.get("body"),
+                "latest_body": latest_node.get("body"),
+                "viewer_reply_checked": viewer_reply_checked,
+                "viewer_replied": viewer_replied,
+                "viewer_reply_url": viewer_reply_url,
+            }
+            first_author_login = _comment_author_login(first_node)
+            latest_author_login = _comment_author_login(latest_node)
+            if first_author_login:
+                row["first_author_login"] = first_author_login
+            if latest_author_login:
+                row["latest_author_login"] = latest_author_login
+            threads.append(row)
         if not review_threads["pageInfo"]["hasNextPage"]:
             break
         cursor = review_threads["pageInfo"]["endCursor"]
     return threads
+
+
+def _comment_author_login(comment: dict) -> str | None:
+    author = comment.get("author")
+    if isinstance(author, dict) and isinstance(author.get("login"), str):
+        return author["login"]
+    return None
 
 
 VALID_MODES = {"remote", "local", "mixed", "ingest"}

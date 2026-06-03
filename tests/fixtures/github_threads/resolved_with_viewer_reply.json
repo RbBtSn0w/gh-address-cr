@@ -44,6 +44,8 @@
       "first_url": "https://example.test/thread/resolved",
       "latest_body": "Handled in the latest patch.",
       "latest_url": "https://example.test/thread/resolved#reply",
+      "first_author_login": "reviewer",
+      "latest_author_login": "agent-login",
       "comment_source": "latest",
       "is_resolved": true,
       "is_outdated": false,

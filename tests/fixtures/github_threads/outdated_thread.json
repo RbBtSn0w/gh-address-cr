@@ -37,6 +37,8 @@
       "first_url": "https://example.test/thread/outdated",
       "latest_body": "This older comment still needs explicit handling.",
       "latest_url": "https://example.test/thread/outdated",
+      "first_author_login": "reviewer",
+      "latest_author_login": "reviewer",
       "comment_source": "first",
       "is_resolved": false,
       "is_outdated": true,

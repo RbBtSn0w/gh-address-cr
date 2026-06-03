@@ -39,7 +39,12 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
+from gh_address_cr.core.severity import (
+    first_scene_item_severity,
+    normalize_severity,
+    review_priority_evidence,
+    review_priority_for_publish,
+)
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -761,6 +766,7 @@ def fast_fix_item(
     why: str,
     severity: str | None = None,
     severity_note: str | None = None,
+    review_priority: str | None = None,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -821,6 +827,20 @@ def fast_fix_item(
                 waiting_on="fast_fix_input",
                 payload={"item_id": item_id},
             )
+    requested_priority_evidence = review_priority_evidence(
+        review_priority,
+        source="agent_fix",
+        raw_marker=review_priority,
+    )
+    if review_priority and requested_priority_evidence is None:
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="INVALID_REVIEW_PRIORITY",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix --review-priority must be high, medium, or low.",
+            payload={"item_id": item_id},
+        )
 
     try:
         classification = record_classification(
@@ -839,6 +859,12 @@ def fast_fix_item(
             item_id=item_id,
             now=now,
         )
+        if requested_priority_evidence:
+            session = session_store.load_session(repo, pr_number)
+            item = _items(session).get(item_id)
+            if isinstance(item, dict):
+                item["review_priority_evidence"] = requested_priority_evidence
+                session_store.save_session(repo, pr_number, session)
         request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
         response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
         fix_reply = {

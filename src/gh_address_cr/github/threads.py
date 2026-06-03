@@ -60,7 +60,7 @@ def normalize_thread(node: dict[str, Any], *, viewer_login: str | None = None) -
     latest_body = latest_comment.get("body") or ""
     first_url = first_comment.get("url")
     latest_url = latest_comment.get("url")
-    return {
+    row = {
         "item_id": f"github-thread:{thread_id}",
         "item_kind": "github_thread",
         "source": "github",
@@ -79,6 +79,13 @@ def normalize_thread(node: dict[str, Any], *, viewer_login: str | None = None) -
         "is_outdated": bool(node.get("isOutdated", node.get("is_outdated", False))),
         "reply_evidence": _viewer_reply_evidence(comments, viewer_login),
     }
+    first_author_login = _author_login(first_comment)
+    latest_author_login = _author_login(latest_comment)
+    if first_author_login:
+        row["first_author_login"] = first_author_login
+    if latest_author_login:
+        row["latest_author_login"] = latest_author_login
+    return row
 
 
 def normalize_threads(

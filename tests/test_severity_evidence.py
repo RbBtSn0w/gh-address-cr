@@ -4,6 +4,7 @@ from gh_address_cr.core.severity import (
     extract_review_priority_evidence,
     extract_severity_evidence,
     normalize_severity,
+    review_priority_evidence,
     review_priority_for_publish,
 )
 
@@ -58,6 +59,25 @@ class SeverityEvidenceTests(unittest.TestCase):
     def test_review_priority_for_publish_tolerates_missing_item(self):
         self.assertEqual(review_priority_for_publish(None), (None, None))
         self.assertEqual(review_priority_for_publish([]), (None, None))
+
+    def test_review_priority_evidence_accepts_explicit_payload_values(self):
+        evidence = review_priority_evidence(
+            "High",
+            source="github_payload",
+            raw_marker="High",
+            observed_from="https://example.test/thread",
+        )
+
+        self.assertEqual(
+            evidence,
+            {
+                "value": "high",
+                "source": "github_payload",
+                "raw_marker": "High",
+                "observed_from": "https://example.test/thread",
+            },
+        )
+        self.assertIsNone(review_priority_evidence("urgent", source="github_payload"))
 
 
 if __name__ == "__main__":

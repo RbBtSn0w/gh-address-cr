@@ -18,6 +18,7 @@ from gh_address_cr.core.severity import (
     extract_review_priority_evidence,
     extract_severity_evidence,
     normalize_severity,
+    review_priority_evidence,
     severity_evidence,
 )
 from gh_address_cr.intake.findings import EMPTY_FINDINGS_INPUT_MESSAGE, normalize_finding
@@ -440,11 +441,16 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
             source="github_first_comment",
             observed_from=first_url,
         )
-    priority_evidence = (
-        extract_review_priority_evidence(first_body, source="github_first_comment", observed_from=first_url)
-        if first_body is not None
-        else None
+    priority_evidence = review_priority_evidence(
+        row.get("review_priority") or row.get("priority"),
+        source="github_payload",
+        raw_marker=str(row.get("review_priority") or row.get("priority") or "").strip() or None,
+        observed_from=row.get("url") or first_url,
     )
+    if priority_evidence is None and first_body is not None:
+        priority_evidence = extract_review_priority_evidence(
+            first_body, source="github_first_comment", observed_from=first_url
+        )
     payload = {
         "item_id": item_id,
         "item_kind": "github_thread",
@@ -502,6 +508,12 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         payload["review_priority_evidence"] = priority_evidence
     elif first_body is None and existing and isinstance(existing.get("review_priority_evidence"), dict):
         payload["review_priority_evidence"] = dict(existing["review_priority_evidence"])
+    first_author_login = row.get("first_author_login") or row.get("author_login")
+    latest_author_login = row.get("latest_author_login")
+    if first_author_login:
+        payload["first_author_login"] = first_author_login
+    if latest_author_login:
+        payload["latest_author_login"] = latest_author_login
     if first_body is not None:
         payload["first_body"] = first_body
     if row.get("latest_body") is not None:

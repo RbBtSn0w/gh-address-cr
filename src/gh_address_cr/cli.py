@@ -1899,6 +1899,7 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--why", required=True)
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
     parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
+    parser.add_argument("--review-priority", choices=["high", "medium", "low"])
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
@@ -1919,6 +1920,7 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
             why=parsed.why,
             severity=parsed.severity,
             severity_note=parsed.severity_note,
+            review_priority=parsed.review_priority,
             publish=parsed.publish,
             now=now_dt,
         )

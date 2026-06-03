@@ -19,6 +19,7 @@ from gh_address_cr.core.severity import (
     extract_review_priority_evidence,
     extract_severity_evidence,
     first_scene_item_severity,
+    review_priority_evidence,
     severity_evidence,
 )
 from gh_address_cr.github.client import GitHubClient
@@ -295,6 +296,10 @@ def _session_with_remote_threads(
         item["line"] = thread.get("line") or item.get("line")
         item["url"] = thread.get("url") or item.get("url")
         item["body"] = thread.get("body") or item.get("body")
+        if thread.get("first_author_login"):
+            item["first_author_login"] = thread.get("first_author_login")
+        if thread.get("latest_author_login"):
+            item["latest_author_login"] = thread.get("latest_author_login")
         first_body = thread.get("first_body")
         if first_body is None and thread.get("comment_source") == "first":
             first_body = thread.get("body")
@@ -318,11 +323,16 @@ def _session_with_remote_threads(
             item["severity"] = first_scene_item_severity(item)
         else:
             apply_severity_evidence(item, None)
-        priority_evidence = (
-            extract_review_priority_evidence(first_body, source="github_first_comment", observed_from=first_url)
-            if first_body is not None
-            else None
+        priority_evidence = review_priority_evidence(
+            thread.get("review_priority") or thread.get("priority"),
+            source="github_payload",
+            raw_marker=str(thread.get("review_priority") or thread.get("priority") or "").strip() or None,
+            observed_from=thread.get("url") or first_url,
         )
+        if priority_evidence is None and first_body is not None:
+            priority_evidence = extract_review_priority_evidence(
+                first_body, source="github_first_comment", observed_from=first_url
+            )
         if priority_evidence:
             item["review_priority_evidence"] = priority_evidence
         elif first_body is not None:
