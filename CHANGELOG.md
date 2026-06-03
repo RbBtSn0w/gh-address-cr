@@ -1,3 +1,9 @@
+## [2.9.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.3...v2.9.4) (2026-06-03)
+
+### Bug Fixes
+
+* External Agent Telemetry Ingestion ([#76](https://github.com/RbBtSn0w/gh-address-cr/issues/76)) ([9c31ef2](https://github.com/RbBtSn0w/gh-address-cr/commit/9c31ef2cb2a81afd8fdf0617ef53a744d9f4cae5))
+
 ## [2.9.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.2...v2.9.3) (2026-06-03)
 
 ### Bug Fixes
