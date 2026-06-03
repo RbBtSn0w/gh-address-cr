@@ -19,6 +19,10 @@ class NativeFoundationTests(unittest.TestCase):
                 self.assertEqual(paths.session_file("owner/repo", "123").name, "session.json")
                 self.assertEqual(paths.audit_log_file("owner/repo", "123").name, "audit.jsonl")
                 self.assertEqual(paths.audit_summary_file("owner/repo", "123").name, "audit_summary.md")
+                self.assertEqual(paths.external_telemetry_file("owner/repo", "123").name, "external-telemetry.jsonl")
+                self.assertEqual(paths.telemetry_imports_file("owner/repo", "123").name, "telemetry-imports.jsonl")
+                self.assertEqual(paths.telemetry_fingerprints_file("owner/repo", "123").name, "telemetry-fingerprints.json")
+                self.assertEqual(paths.efficiency_report_file("owner/repo", "123").name, "efficiency-report.json")
 
     def test_core_types_define_session_item_lease_and_finding_shapes(self):
         from gh_address_cr.core.types import Finding, Item, Lease, Session

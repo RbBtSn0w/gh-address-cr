@@ -99,5 +99,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/014-fix-all-thread-replies/plan.md](specs/014-fix-all-thread-replies/plan.md)
+  [specs/015-external-agent-telemetry/plan.md](specs/015-external-agent-telemetry/plan.md)
 <!-- SPECKIT END -->

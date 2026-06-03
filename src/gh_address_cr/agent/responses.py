@@ -101,8 +101,8 @@ def validate_action_response(
     resolution = str(payload["resolution"])
     if resolution not in TERMINAL_RESOLUTIONS:
         raise ResponseValidationError("unsupported_resolution", f"Unsupported resolution: {resolution}.")
-    _validate_validation_commands(payload.get("validation_commands"))
     if resolution == "fix":
+        _validate_validation_commands(payload.get("validation_commands"))
         _require_non_empty(payload, "files")
         if item_kind == "github_thread":
             _require_non_empty(payload, "fix_reply")
@@ -120,6 +120,8 @@ def validate_action_response(
                         f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
                     )
     else:
+        if "validation_commands" in payload:
+            _validate_validation_commands(payload["validation_commands"])
         code = f"missing_{resolution}_reply_markdown"
         _require_non_empty(payload, "reply_markdown", code)
     try:

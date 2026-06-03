@@ -88,7 +88,6 @@ def fix_reply(
     payload: list[str], 
     *, 
     summary: str | None = None,
-    efficiency_summary: str | None = None,
     review_priority: str | None = None,
     review_priority_note: str | None = None,
 ) -> str:
@@ -143,13 +142,10 @@ def fix_reply(
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"
 
 
-def clarify_reply(payload: list[str], *, efficiency_summary: str | None = None) -> str:
+def clarify_reply(payload: list[str]) -> str:
     rationale = payload[0] if payload else "No code changes were made for this specific comment."
     lines = [
         "Thanks for the review.",
@@ -167,13 +163,10 @@ def clarify_reply(payload: list[str], *, efficiency_summary: str | None = None) 
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"
 
 
-def defer_reply(payload: list[str], *, efficiency_summary: str | None = None) -> str:
+def defer_reply(payload: list[str]) -> str:
     reason = payload[0] if payload else "Marking as deferred (non-blocking for this PR)."
     lines = [
         "Thanks, this is valid feedback.",
@@ -193,7 +186,4 @@ def defer_reply(payload: list[str], *, efficiency_summary: str | None = None) ->
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"

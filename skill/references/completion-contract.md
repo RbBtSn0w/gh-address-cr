@@ -9,6 +9,7 @@ Never output "done", "all resolved", "completed", or equivalent unless:
 - output includes `Verified: 0 Pending Reviews found`
 - unresolved GitHub threads = 0
 - session blocking items = 0
+- final-gate output includes a telemetry coverage label
 
 Final output must include:
 
@@ -17,9 +18,12 @@ Final output must include:
 3. `Verified: 0 Pending Reviews found`
 4. unresolved GitHub threads = 0
 5. session blocking items = 0
-6. audit summary path + sha256
+6. telemetry coverage label and efficiency report path
+7. audit summary path + sha256
 
 Use `audit_summary.md` or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed.
+
+Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
 
 For run-scoped diagnostics that must keep artifacts available after the gate, use:
 

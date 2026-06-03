@@ -21,6 +21,7 @@ from gh_address_cr import (
     __version__,
 )
 from gh_address_cr.core import gate as core_gate
+from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
     is_resolved_github_thread,
@@ -59,6 +60,7 @@ PUBLIC_COMMANDS = {
     "agent",
     "doctor",
     "final-gate",
+    "telemetry",
 }
 UNSUPPORTED_LEGACY_COMMANDS = {
     "audit-report",
@@ -2239,12 +2241,33 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
         return 5
 
-    summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
+    summary_path, telemetry_report = _write_native_final_gate_artifacts(
+        parsed.repo, parsed.pr_number, parsed.audit_id, result
+    )
     if result.passed and parsed.auto_clean:
+        workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
         archive_target = _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
         if archive_target is not None:
             summary_path = archive_target / summary_path.name
-    _emit_final_gate_result(result, summary_path=summary_path)
+            if telemetry_report is not None:
+                archived_report_path = archive_target / core_paths.efficiency_report_file(
+                    parsed.repo, parsed.pr_number
+                ).name
+                telemetry_report["report_artifact"] = str(archived_report_path)
+                telemetry_report = _replace_path_occurrences(
+                    telemetry_report,
+                    str(workspace_path),
+                    str(archive_target),
+                )
+                _rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
+                _rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
+                _rewrite_archived_audit_artifacts(
+                    archive_target,
+                    original_workspace=workspace_path,
+                    summary_path=summary_path,
+                    telemetry_report=telemetry_report,
+                )
+    _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
@@ -2252,7 +2275,209 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     return 0
 
 
-def _emit_final_gate_result(result: core_gate.GateResult, *, summary_path: Path | None = None) -> None:
+def _rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:
+    try:
+        lines = summary_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    updated = [
+        f"- efficiency_report_path: {report_artifact}" if line.startswith("- efficiency_report_path:") else line
+        for line in lines
+    ]
+    try:
+        summary_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: dict) -> None:
+    try:
+        current = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        current = {}
+    current.update(telemetry_report)
+    current["report_artifact"] = str(report_path)
+    try:
+        if report_path.is_dir():
+            shutil.rmtree(report_path)
+        report_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _rewrite_archived_audit_artifacts(
+    archive_target: Path,
+    *,
+    original_workspace: Path,
+    summary_path: Path,
+    telemetry_report: dict,
+) -> None:
+    summary_sha256 = _read_file_sha256(summary_path)
+    for path in (archive_target / "audit.jsonl", archive_target / "trace.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        updated_lines: list[str] = []
+        changed = False
+        for line in lines:
+            if not line.strip():
+                updated_lines.append(line)
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                updated_lines.append(line)
+                continue
+            rewritten = _replace_path_occurrences(entry, str(original_workspace), str(archive_target))
+            if isinstance(rewritten, dict):
+                if path.name == "audit.jsonl":
+                    details = rewritten.get("details")
+                    if isinstance(details, dict):
+                        details["summary_file"] = str(summary_path)
+                        details["summary_sha256"] = summary_sha256
+                        details["efficiency_report"] = dict(telemetry_report)
+                elif path.name == "trace.jsonl":
+                    rewritten["efficiency_report_path"] = telemetry_report["report_artifact"]
+            changed = changed or rewritten != entry
+            updated_lines.append(json.dumps(rewritten, sort_keys=True))
+        if changed:
+            try:
+                path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+            except OSError:
+                continue
+
+
+def _replace_path_occurrences(value: object, original_path: str, archived_path: str) -> object:
+    if isinstance(value, str):
+        return value.replace(original_path, archived_path)
+    if isinstance(value, list):
+        return [_replace_path_occurrences(item, original_path, archived_path) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_path_occurrences(nested, original_path, archived_path) for key, nested in value.items()}
+    return value
+
+
+def _read_file_sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "unavailable"
+
+
+def handle_telemetry_command(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
+    if repo in {"-h", "--help"}:
+        print(
+            "usage: gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-\n"
+            "       gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]"
+        )
+        return 0
+    if not repo:
+        print("telemetry requires a subcommand: ingest or summary", file=sys.stderr)
+        return 2
+
+    subcommand = repo
+    args = _prepend_optional(pr_number, passthrough)
+    if subcommand == "ingest":
+        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry ingest")
+        parser.add_argument("repo")
+        parser.add_argument("pr_number")
+        parser.add_argument("--source", required=True)
+        parser.add_argument("--format", default="agent-jsonl")
+        parser.add_argument("--input", required=True)
+        parsed = parser.parse_args(args)
+        if parsed.input == "-":
+            raw = sys.stdin.read()
+        else:
+            try:
+                raw = Path(parsed.input).read_text(encoding="utf-8")
+            except OSError:
+                payload = core_telemetry.input_unavailable_import_summary(
+                    parsed.repo,
+                    parsed.pr_number,
+                    source=parsed.source,
+                    fmt=parsed.format,
+                )
+                print(json.dumps(payload, sort_keys=True))
+                return 2
+        summary = core_telemetry.import_external_telemetry(
+            parsed.repo,
+            parsed.pr_number,
+            source=parsed.source,
+            fmt=parsed.format,
+            raw=raw,
+        )
+        print(json.dumps(summary, sort_keys=True))
+        return 0 if summary["status"] in {"SUCCESS", "PARTIAL"} else 2
+
+    if subcommand == "summary":
+        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry summary")
+        parser.add_argument("repo")
+        parser.add_argument("pr_number")
+        parser.add_argument("--format", choices=("json", "markdown"), default="json")
+        parsed = parser.parse_args(args)
+        report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
+        if _telemetry_report_has_storage_diagnostics(report):
+            payload = {
+                **report,
+                "status": "FAILED",
+                "reason_code": "TELEMETRY_REPORT_UNAVAILABLE",
+                "next_action": "FIX_TELEMETRY_STORAGE",
+            }
+            _write_telemetry_report_payload(payload)
+            print(json.dumps(payload, sort_keys=True))
+            return 2
+        if parsed.format == "markdown":
+            print(core_telemetry.efficiency_report_markdown(report), end="")
+        else:
+            print(json.dumps(report, sort_keys=True))
+        return 0
+
+    print(f"Unknown telemetry command: {subcommand}", file=sys.stderr)
+    return 2
+
+
+def _reported_telemetry_source(source: str) -> str:
+    return core_telemetry._reported_source_label(source)
+
+
+def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:
+    diagnostics = report.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return False
+    return any(
+        isinstance(diagnostic, str)
+        and (
+            diagnostic.startswith("external telemetry line ")
+            or diagnostic.startswith("external telemetry unreadable:")
+            or diagnostic.startswith("external telemetry store is not a regular file:")
+            or diagnostic.startswith("telemetry import summary line ")
+            or diagnostic.startswith("telemetry import summary unreadable:")
+            or diagnostic.startswith("telemetry import summary is not a regular file:")
+            or diagnostic.startswith("efficiency report artifact unavailable:")
+        )
+        for diagnostic in diagnostics
+    )
+
+
+def _write_telemetry_report_payload(payload: dict) -> None:
+    report_artifact = payload.get("report_artifact")
+    if not isinstance(report_artifact, str) or not report_artifact:
+        return
+    path = Path(report_artifact)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _emit_final_gate_result(
+    result: core_gate.GateResult,
+    *,
+    summary_path: Path | None = None,
+    telemetry_report: dict | None = None,
+) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
     print(f"Pending review count: {result.counts['pending_current_login_review_count']}")
@@ -2280,6 +2505,20 @@ def _emit_final_gate_result(result: core_gate.GateResult, *, summary_path: Path 
         print(f"{key}={result.counts[key]}")
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
+    if telemetry_report is None:
+        telemetry_report = core_telemetry.build_efficiency_report(result.repo, result.pr_number)
+    print()
+    print("== Agent Efficiency Summary ==")
+    print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
+    print(f"telemetry_total_events={telemetry_report['total_events']}")
+    print(f"telemetry_success_rate={telemetry_report['success_rate']:.1f}")
+    print(f"telemetry_sources={_telemetry_sources_summary(telemetry_report)}")
+    print(f"telemetry_diagnostics={_telemetry_diagnostics_summary(telemetry_report)}")
+    if telemetry_report["inefficiency_flags"]:
+        print("telemetry_inefficiency_flags=" + "; ".join(telemetry_report["inefficiency_flags"]))
+    else:
+        print("telemetry_inefficiency_flags=none")
+    print(f"Efficiency report path: {telemetry_report['report_artifact']}")
     if summary_path is not None:
         print(f"Audit summary path: {summary_path}")
         try:
@@ -2294,7 +2533,7 @@ def _write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> Path:
+) -> tuple[Path, dict]:
     workspace = session_store.workspace_dir(repo, pr_number)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
@@ -2313,6 +2552,20 @@ def _write_native_final_gate_artifacts(
         f"- check_requirement: {result.check_requirement or 'none'}",
     ]
     summary_lines.extend(f"- {key}: {result.counts[key]}" for key in core_gate.COUNT_KEYS)
+    telemetry_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    summary_lines.extend(
+        [
+            "",
+            "## Agent Efficiency Summary",
+            f"- telemetry_coverage_label: {telemetry_report['coverage_label']}",
+            f"- telemetry_total_events: {telemetry_report['total_events']}",
+            f"- telemetry_success_rate: {telemetry_report['success_rate']:.1f}",
+            f"- efficiency_report_path: {telemetry_report['report_artifact']}",
+            f"- telemetry_sources: {_telemetry_sources_summary(telemetry_report)}",
+            f"- telemetry_diagnostics: {_telemetry_diagnostics_summary(telemetry_report)}",
+            f"- telemetry_inefficiency_flags: {', '.join(telemetry_report['inefficiency_flags']) if telemetry_report['inefficiency_flags'] else 'none'}",
+        ]
+    )
     if result.failure_codes:
         summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -2336,6 +2589,7 @@ def _write_native_final_gate_artifacts(
             "check_requirement": result.check_requirement,
             "summary_file": str(summary_path),
             "summary_sha256": summary_sha256,
+            "efficiency_report": telemetry_report,
         },
     }
     trace_entry = {
@@ -2348,11 +2602,36 @@ def _write_native_final_gate_artifacts(
         "reason_code": result.reason_code or "PASSED",
         "counts": dict(result.counts),
         "check_requirement": result.check_requirement,
+        "telemetry_coverage_label": telemetry_report["coverage_label"],
+        "efficiency_report_path": telemetry_report["report_artifact"],
     }
     for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
-    return summary_path
+    return summary_path, telemetry_report
+
+
+def _telemetry_sources_summary(telemetry_report: dict) -> str:
+    sources = telemetry_report.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return "none"
+    rows: list[str] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        name = source.get("source", "unknown")
+        source_type = source.get("source_type", "unknown")
+        event_count = source.get("event_count", 0)
+        coverage = source.get("coverage_status", "unknown")
+        rows.append(f"{name} ({source_type}): {event_count} events, {coverage}")
+    return "; ".join(rows) if rows else "none"
+
+
+def _telemetry_diagnostics_summary(telemetry_report: dict) -> str:
+    diagnostics = telemetry_report.get("diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics:
+        return "none"
+    return "; ".join(str(diagnostic) for diagnostic in diagnostics)
 
 
 def _final_gate_failure_message(result: core_gate.GateResult) -> str:
@@ -2624,7 +2903,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -2651,6 +2930,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>\n"
             "  gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --match-files\n"
             "  gh-address-cr final-gate owner/repo 123\n"
+            "  gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl\n"
+            "  gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]\n"
         ),
     )
     parser.add_argument("repo", nargs="?", help="Owner/repo name.")
@@ -2687,6 +2968,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return handle_final_gate(args.repo, args.pr_number, args.args)
+
+    if args.command == "telemetry":
+        if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
+            print(
+                "--machine, --human, --lean, and --summary are not supported for telemetry commands.",
+                file=sys.stderr,
+            )
+            return 2
+        return handle_telemetry_command(args.repo, args.pr_number, args.args)
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")

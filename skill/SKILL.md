@@ -20,6 +20,8 @@ Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runt
 /gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-
 /gh-address-cr doctor [<owner/repo> [<pr_number>]]
 /gh-address-cr final-gate <owner/repo> <pr_number>
+/gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-
+/gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]
 /gh-address-cr submit-action <action-request.json> --resolution <fix|clarify|defer|reject> ...
 /gh-address-cr submit-feedback --category <category> --title <title> --summary <summary> ...
 /gh-address-cr version
@@ -75,6 +77,16 @@ The packaged skill must not be treated as the implementation owner for workflow 
 - Compatibility check: `gh-address-cr adapter check-runtime`
 
 If the runtime is missing, execution must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
+
+## Telemetry Coverage
+
+When the surrounding agent host can export safe PR-scoped telemetry, import it before the final gate:
+
+```text
+gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-
+```
+
+Use `gh-address-cr telemetry summary <owner/repo> <pr_number> --format markdown` when run-scoped efficiency evidence is needed. Completion evidence from `final-gate` must report the telemetry coverage label: `complete`, `partial`, `runtime-only`, or `unavailable`. Host telemetry is optional; missing host telemetry must be reported as coverage, not treated as review-resolution evidence. Imported telemetry is deduplicated by runtime-owned `event_fingerprint`; duplicate or overlapping imports must be reported via `accepted_fingerprints` and `duplicate_fingerprints`, not manually merged by the agent.
 
 ## Execution Ladder
 

@@ -1304,10 +1304,10 @@ def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, it
         "item_id": str(item.get("item_id") or ""),
         "resolution": resolution,
         "note": "",
-        "validation_commands": [{"command": "", "result": ""}],
     }
     if role == "fixer" and resolution == "fix":
         skeleton["files"] = []
+        skeleton["validation_commands"] = [{"command": "", "result": ""}]
     if item.get("item_kind") == "github_thread":
         if role == "fixer" and resolution == "fix":
             skeleton["fix_reply"] = {
@@ -2216,19 +2216,13 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
     resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
 
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
-    except Exception:
-        efficiency_summary = None
-
     if resolution != "fix":
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
             return None, "MISSING_PUBLISH_REPLY"
         if resolution == "clarify":
-            return render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
+            return render_clarify_reply([reply_markdown.strip()]), None
         if resolution == "defer":
-            return render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
+            return render_defer_reply([reply_markdown.strip()]), None
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
@@ -2257,7 +2251,6 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=summary,
-            efficiency_summary=efficiency_summary,
             review_priority=review_priority,
             review_priority_note=review_priority_note,
         ), None
@@ -2576,12 +2569,16 @@ def _has_classification_evidence(item: dict[str, Any]) -> bool:
 
 
 def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
+    evidence = item.get("classification_evidence")
+    classification = evidence.get("classification") if isinstance(evidence, dict) else None
+    if classification in TERMINAL_RESOLUTIONS and classification != "fix":
+        return ["note", "reply_markdown"]
     if role == "fixer":
         fields = ["note", "files", "validation_commands"]
         if item.get("item_kind") == "github_thread":
             fields.append("fix_reply")
         return fields
-    return ["note", "reply_markdown", "validation_commands"]
+    return ["note", "reply_markdown"]
 
 
 def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
@@ -2613,10 +2610,10 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
             if publish_error:
                 return publish_error
     else:
+        if "validation_commands" in response and not _normalize_validation_command_records(response.get("validation_commands")):
+            return "INVALID_VALIDATION_COMMANDS"
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
-        if not response.get("validation_commands"):
-            return "MISSING_VALIDATION_COMMANDS"
     return None
 
 

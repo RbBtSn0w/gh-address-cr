@@ -265,13 +265,25 @@ class ActionResponseSchemaTests(ActionProtocolTestCase):
             validate_action_response(payload, item_kind="github_thread")
         self.assertEqual(caught.exception.code, "invalid_fix_reply")
 
-    def test_clarify_defer_reject_require_reply_markdown_and_validation_evidence(self):
+    def test_clarify_defer_reject_require_reply_markdown_and_accept_optional_validation_evidence(self):
         for resolution in ("clarify", "defer", "reject"):
             with self.subTest(resolution=resolution):
                 response = validate_action_response(self.response_payload(resolution))
                 self.assertEqual(response.resolution, resolution)
                 self.assertIn("terminal handling rationale", response.reply_markdown)
                 self.assertEqual(response.validation_commands[0]["result"], "passed")
+
+    def test_clarify_defer_reject_accept_missing_validation_evidence(self):
+        for resolution in ("clarify", "defer", "reject"):
+            with self.subTest(resolution=resolution):
+                payload = self.response_payload(resolution)
+                payload.pop("validation_commands")
+
+                response = validate_action_response(payload)
+
+                self.assertEqual(response.resolution, resolution)
+                self.assertEqual(response.validation_commands, ())
+                self.assertIn("terminal handling rationale", response.reply_markdown)
 
     def test_terminal_response_missing_reply_markdown_is_rejected_by_resolution(self):
         for resolution in ("clarify", "defer", "reject"):

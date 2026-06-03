@@ -6,7 +6,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
+from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core.telemetry import (
+    SessionTelemetry,
+    build_efficiency_report,
+    command_label,
+    import_external_telemetry,
+    is_inline_env_assignment,
+)
 
 
 class TestTelemetry(unittest.TestCase):
@@ -103,6 +110,23 @@ class TestTelemetry(unittest.TestCase):
         self.assertIn("hung", timeout_flags[0])
         self.assertNotIn("Hanged", timeout_flags[0])
 
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_finite_persisted_runtime_metric_is_ignored_in_report(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            telemetry_path = core_paths.workspace_dir("octo/example", "77") / "telemetry.jsonl"
+            telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+            telemetry_path.write_text(
+                '{"command":"pytest","start_time":NaN,"end_time":1.0,"exit_code":0}\n',
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+
     def test_command_label_sanitizes_sensitive_arguments(self):
         label = command_label(
             [
@@ -138,8 +162,1645 @@ class TestTelemetry(unittest.TestCase):
         ])
         self.assertEqual(label, "curl")
         self.assertNotIn("Bearer", label)
-        self.assertNotIn("ghp_secret", label)
-        self.assertNotIn("https://", label)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_only_efficiency_report_has_coverage_and_artifact(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "runtime-only")
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["sources"][0]["source"], "runtime")
+            self.assertTrue(Path(report["report_artifact"]).exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_success_rate_ignores_unknown_status(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "known-success",
+                    "kind": "tool_call",
+                    "operation": "run unit tests",
+                    "duration_ms": 1000,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unknown-status",
+                    "kind": "tool_call",
+                    "operation": "inspect local state",
+                    "duration_ms": 1000,
+                    "status": "unknown",
+                },
+            ]
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 2)
+            self.assertEqual(report["success_rate"], 100.0)
+
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            write_text.side_effect = OSError("disk full")
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["reason_code"], "TELEMETRY_REPORT_READY")
+            self.assertEqual(report["total_events"], 1)
+            self.assertTrue(
+                any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
+            )
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_no_telemetry_efficiency_report_is_unavailable(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(Path(report["report_artifact"]).exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_deduplicates_and_combines_report(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "source": "generic-agent",
+                            "source_session_id": "run-1",
+                            "event_id": "e1",
+                            "kind": "tool_call",
+                            "operation": "run unit tests",
+                            "duration_ms": 89105,
+                            "status": "success",
+                            "metadata": {"command_label": "python3 -m unittest discover -s tests"},
+                        }
+                    ),
+                    "",
+                ]
+            )
+
+            first = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
+            )
+            second = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(first["status"], "SUCCESS")
+            self.assertEqual(first["accepted_count"], 1)
+            self.assertEqual(len(first["accepted_fingerprints"]), 1)
+            self.assertEqual(first["duplicate_fingerprints"], [])
+            self.assertEqual(second["reason_code"], "DUPLICATE_TELEMETRY_IMPORT")
+            self.assertEqual(second["duplicate_count"], 1)
+            self.assertEqual(second["accepted_fingerprints"], [])
+            self.assertEqual(second["duplicate_fingerprints"], first["accepted_fingerprints"])
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["coverage_label"], "partial")
+            self.assertEqual(report["diagnostics"], [])
+            self.assertEqual(report["slowest_operations"][0]["operation"], "run unit tests")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_overlapping_external_imports_are_deduped_by_event_fingerprint(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            first = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "event-from-host-a",
+                "kind": "tool_call",
+                "operation": "run unit tests",
+                "started_at": "2026-06-03T06:00:00Z",
+                "ended_at": "2026-06-03T06:01:29Z",
+                "status": "success",
+                "correlation_id": "validation:unit-tests",
+            }
+            overlap = {**first, "event_id": "event-from-host-b"}
+
+            accepted = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first)
+            )
+            duplicate = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(overlap)
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(accepted["accepted_count"], 1)
+            self.assertEqual(duplicate["reason_code"], "DUPLICATE_TELEMETRY_IMPORT")
+            self.assertEqual(duplicate["duplicate_fingerprints"], accepted["accepted_fingerprints"])
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["total_observed_duration_ms"], 89000)
+
+            stored_events = [
+                json.loads(line)
+                for line in core_paths.external_telemetry_file("octo/example", "77").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(stored_events[0]["event_fingerprint"], accepted["accepted_fingerprints"][0])
+            self.assertTrue(core_paths.telemetry_fingerprints_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_same_correlation_duration_only_events_do_not_collide(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            first = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1000,
+                "status": "success",
+                "correlation_id": "shared-correlation",
+            }
+            second = {**first, "event_id": "e2"}
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(first), json.dumps(second)]),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["accepted_count"], 2)
+            self.assertEqual(result["duplicate_count"], 0)
+            self.assertEqual(report["total_events"], 2)
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_same_correlation_from_different_external_sources_is_not_report_deduped(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            base = {
+                "schema_version": "1.0",
+                "source_session_id": "run-1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1000,
+                "status": "success",
+                "correlation_id": "step-1",
+            }
+            first = {**base, "source": "generic-agent", "event_id": "agent-event"}
+            second = {**base, "source": "codex", "event_id": "codex-event"}
+
+            import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first)
+            )
+            import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=json.dumps(second))
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 2)
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+            self.assertFalse(any("correlated telemetry event ignored" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_missing_event_id_fingerprint_uses_canonical_fields_only(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            base = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1000,
+                "status": "success",
+                "correlation_id": "tool-call-1",
+            }
+            first = {**base, "metadata": {"exit_code": 0}}
+            second = {**base, "metadata": {"exit_code": 0, "note": "safe extra context"}}
+
+            accepted = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first)
+            )
+            duplicate = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(second)
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(accepted["accepted_count"], 1)
+            self.assertEqual(duplicate["reason_code"], "DUPLICATE_TELEMETRY_IMPORT")
+            self.assertEqual(duplicate["duplicate_fingerprints"], accepted["accepted_fingerprints"])
+            self.assertEqual(report["total_events"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_source_labels(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "ghp_secret_source",
+                    "source_session_id": "run-1",
+                    "event_id": "source-token",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source_session_id": "run-1",
+                    "event_id": "declared-source-path",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "username-alice-laptop",
+                    "source_session_id": "run-1",
+                    "event_id": "source-private-id",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+            ]
+
+            inline_source = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payloads[0])
+            )
+            declared_source = import_external_telemetry(
+                "octo/example", "77", source="/home/alice/agent", fmt="agent-jsonl", raw=json.dumps(payloads[1])
+            )
+            private_source = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payloads[2])
+            )
+
+            self.assertEqual(inline_source["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(declared_source["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(private_source["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertTrue(any("source" in diagnostic for diagnostic in inline_source["diagnostics"]))
+            self.assertTrue(any("source" in diagnostic for diagnostic in declared_source["diagnostics"]))
+            self.assertTrue(any("source" in diagnostic for diagnostic in private_source["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_source_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent\n- injected",
+                "source_session_id": "run-1",
+                "event_id": "source-control",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertNotIn("- injected", json.dumps(result))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_redacts_unsafe_declared_source_in_summary(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="/home/alice/agent", fmt="agent-jsonl", raw="{not-json}\n"
+            )
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["source"], "[redacted]")
+            self.assertNotIn("/home/alice", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_redacts_unsafe_unsupported_format_in_summary(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="/home/alice/telemetry.jsonl", raw=""
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+            self.assertEqual(result["format"], "[redacted]")
+            self.assertNotIn("/home/alice", json.dumps(result))
+            self.assertNotIn("/home/alice", json.dumps(report))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_ambiguous_source_sessions(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "e1",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-2",
+                    "event_id": "e2",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "AMBIGUOUS_TELEMETRY_SESSION")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_ambiguous_sessions_with_duplicates(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            first = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            second = {**first, "source_session_id": "run-2", "event_id": "e2"}
+
+            import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first))
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in (first, second)),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["reason_code"], "AMBIGUOUS_TELEMETRY_SESSION")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(report["total_events"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_source_session_id(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "/Users/alice/.codex/session",
+                    "event_id": "path-session",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "machine-id-laptop",
+                    "event_id": "machine-session",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertTrue(any("source_session_id" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_event_id_and_timestamps(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "ghp_secret_event",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unsafe-started-at",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "started_at": "/home/alice/secret",
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unsafe-ended-at",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "ended_at": "ghp_secret",
+                    "status": "success",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 3)
+            self.assertTrue(any("event_id" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertTrue(any("started_at" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertTrue(any("ended_at" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_schema_kind_and_status(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "ghp_secret_schema",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "schema",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "kind",
+                    "kind": "ghp_secret_kind",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "status",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "ghp_secret_status",
+                },
+                {
+                    "schema_version": "username-alice-laptop",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "private-schema",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "private-kind",
+                    "kind": "machine-id-laptop",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "private-status",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "host-id-laptop",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 6)
+            self.assertNotIn("ghp_secret", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_identity_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0\n- injected",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "schema-control",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "kind-control",
+                    "kind": "tool_call\n- injected",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "status-control",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success\n- injected",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 3)
+            self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertNotIn("- injected", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_fails_unsafe_partial_without_persisting(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            valid = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "valid",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            unsafe = {**valid, "event_id": "unsafe", "metadata": {"token": "plain-secret"}}
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in (valid, unsafe)),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+            self.assertEqual(report["total_events"], 0)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_treats_mixed_timezone_timestamps_as_malformed(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "mixed-timezones",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "started_at": "2026-06-03T06:00:00",
+                    "ended_at": "2026-06-03T06:00:01Z",
+                    "status": "success",
+                }
+            )
+
+            result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload)
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertTrue(any("timestamp timezone" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_nonstandard_json_constants(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            raw = (
+                '{"schema_version":"1.0","source":"generic-agent","source_session_id":"run-1",'
+                '"event_id":"nan-duration","kind":"tool_call","operation":"exec_command",'
+                '"duration_ms":NaN,"status":"success"}'
+            )
+
+            result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=raw)
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 1)
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_non_integer_duration_values(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            base = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "status": "success",
+            }
+            payloads = [
+                {**base, "event_id": "bool-duration", "duration_ms": True},
+                {**base, "event_id": "float-duration", "duration_ms": 1.5},
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertTrue(all("duration_ms must be an integer" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_deduplicates_runtime_and_external_events_by_correlation(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0, execution_id="exec-1")
+            raw = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "codex",
+                    "source_session_id": "run-1",
+                    "event_id": "host-event-1",
+                    "kind": "command",
+                    "operation": "python3 -m unittest discover -s tests",
+                    "duration_ms": 2000,
+                    "status": "success",
+                    "correlation_id": "exec-1",
+                }
+            )
+
+            import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=raw)
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "complete")
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+            self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_deduplicates_correlated_runtime_and_external_events_with_duration_skew(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("exec_command", 0, 2, 0, execution_id="exec-skew")
+            raw = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "codex",
+                    "source_session_id": "run-1",
+                    "event_id": "host-event-skew",
+                    "kind": "command",
+                    "operation": "exec_command",
+                    "duration_ms": 2100,
+                    "status": "success",
+                    "correlation_id": "exec-skew",
+                }
+            )
+
+            import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=raw)
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+            self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_command_operations_are_sanitized_before_reporting(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("echo ghp_secret", 0, 1, 0, execution_id="unsafe-runtime-command")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["slowest_operations"][0]["operation"], "echo")
+            self.assertNotIn("ghp_secret", json.dumps(report))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_command_operations_scrub_private_identifiers(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("ssh username-alice-laptop", 0, 1, 0, execution_id="private-runtime-command")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["slowest_operations"][0]["operation"], "ssh")
+            self.assertNotIn("username-alice-laptop", json.dumps(report))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_redacts_private_source_in_early_failure(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="username-alice-laptop", fmt="xml", raw=""
+            )
+
+            self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+            self.assertEqual(result["source"], "[redacted]")
+            self.assertNotIn("username-alice-laptop", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_safe_metadata_keys_with_user_or_host_words(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "safe-user-agent",
+                "kind": "tool_call",
+                "operation": "collect browser telemetry",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {
+                    "user_agent": "Mozilla/5.0",
+                    "host_status": "available",
+                    "customer_id": "public-cohort-1",
+                },
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_reserved_runtime_source(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "runtime",
+                "source_session_id": "run-1",
+                "event_id": "external-runtime",
+                "kind": "command",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertTrue(any("reserved source label" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_operation_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "newline-operation",
+                "kind": "tool_call",
+                "operation": "exec_command\ninjected line",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_non_string_operation(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "array-operation",
+                "kind": "tool_call",
+                "operation": ["run", "tests"],
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertTrue(any("operation must be a string" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_deduplicates_stored_duplicate_fingerprints(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            event = {
+                "schema_version": "1.0",
+                "source": "codex",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1000,
+                "status": "success",
+                "correlation_id": "tool-call-1",
+            }
+            imported = import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=json.dumps(event))
+            stored_path = core_paths.external_telemetry_file("octo/example", "77")
+            stored_line = stored_path.read_text(encoding="utf-8")
+            stored_path.write_text(stored_line + stored_line, encoding="utf-8")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["total_observed_duration_ms"], 1000)
+            self.assertIn(f"duplicate event fingerprint ignored: {imported['accepted_fingerprints'][0]}", report["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_corrupted_external_telemetry_is_fail_open_with_diagnostics(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{not-json}\n", encoding="utf-8")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_object_stored_external_telemetry_is_fail_open_with_diagnostics(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("[]\n", encoding="utf-8")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("external telemetry line 1: record must be a JSON object" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_stored_external_telemetry_without_source_is_corrupted(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "source_session_id": "run-1",
+                        "event_id": "e1",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 1,
+                        "status": "success",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("missing required field(s): source" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_corrupted_external_store_blocks_new_import(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{not-json}\n", encoding="utf-8")
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertEqual(path.read_text(encoding="utf-8"), "{not-json}\n")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_external_store_directory_blocks_new_import(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.mkdir(parents=True)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertTrue(any("external telemetry store is not a regular file" in item for item in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_fingerprint_ledger_directory_blocks_import_without_appending_events(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            fingerprint_path = core_paths.telemetry_fingerprints_file("octo/example", "77")
+            fingerprint_path.mkdir(parents=True)
+            external_path = core_paths.external_telemetry_file("octo/example", "77")
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertTrue(any("telemetry fingerprint ledger is not a regular file" in item for item in result["diagnostics"]))
+            self.assertFalse(external_path.exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_corrupted_fingerprint_ledger_blocks_import_without_rewriting(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            fingerprint_path = core_paths.telemetry_fingerprints_file("octo/example", "77")
+            fingerprint_path.parent.mkdir(parents=True, exist_ok=True)
+            fingerprint_path.write_text("{not-json}\n", encoding="utf-8")
+            external_path = core_paths.external_telemetry_file("octo/example", "77")
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
+            self.assertTrue(any("telemetry fingerprint ledger invalid JSON" in item for item in result["diagnostics"]))
+            self.assertEqual(fingerprint_path.read_text(encoding="utf-8"), "{not-json}\n")
+            self.assertFalse(external_path.exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_file_import_ledger_is_reported_as_corrupted_storage(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            import_path = core_paths.telemetry_imports_file("octo/example", "77")
+            import_path.mkdir(parents=True)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertTrue(any("telemetry import summary is not a regular file" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_metadata(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "e1",
+                    "kind": "tool_call",
+                    "operation": "unsafe",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"token": "ghp_secret", "raw_prompt": "private prompt"},
+                }
+            )
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_private_metadata_values(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {"label": "username-alice-laptop"},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_private_operation_labels(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "machine-id-laptop",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_correlation_id(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+                "correlation_id": "username-alice-laptop",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_nested_secrets_and_linux_paths(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "secret-key",
+                    "kind": "tool_call",
+                    "operation": "safe operation",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"config": {"github_token": "plain-secret"}},
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "linux-path",
+                    "kind": "tool_call",
+                    "operation": "python /home/alice/work/repo/script.py",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"nested": [{"path": "/root/private/repo"}]},
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertTrue(any("github_token" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertTrue(any("absolute path" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_common_absolute_workspace_paths(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "workspace-path",
+                    "kind": "tool_call",
+                    "operation": "python /workspace/gh-address-cr/src/tool.py",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "tmp-path",
+                    "kind": "tool_call",
+                    "operation": "safe operation",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"log": "/tmp/agent/run.log"},
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_safe_labels_with_sk_substrings(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "disk-usage-agent",
+                "source_session_id": "run-1",
+                "event_id": "flask-tests",
+                "kind": "tool_call",
+                "operation": "run flask-tests",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {"suite": "flask-tests"},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="disk-usage-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+            report = build_efficiency_report("octo/example", "77")
+            self.assertIn("disk-usage-agent", json.dumps(report))
+            self.assertIn("flask-tests", json.dumps(report))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_public_api_routes(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "github-route",
+                "kind": "tool_call",
+                "operation": "GET /repos/owner/repo/pulls",
+                "duration_ms": 25,
+                "status": "success",
+                "metadata": {"endpoint": "/repos/owner/repo/pulls/76"},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["slowest_operations"][0]["operation"], "GET /repos/owner/repo/pulls")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_safe_metadata_keys_containing_key(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "safe-key-words",
+                "kind": "tool_call",
+                "operation": "collect input stats",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {"keyboard_layout": "us", "hotkey_count": 4},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_host_source_and_error_prone_operations_are_reported(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            raw = "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "source": "codex",
+                            "source_session_id": "run-1",
+                            "event_id": "e1",
+                            "kind": "tool_call",
+                            "operation": "exec_command",
+                            "duration_ms": 65000,
+                            "status": "timeout",
+                            "metadata": {"exit_code": 124},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "source": "codex",
+                            "source_session_id": "run-1",
+                            "event_id": "e2",
+                            "kind": "retry",
+                            "operation": "exec_command",
+                            "duration_ms": 1000,
+                            "status": "failure",
+                            "metadata": {"exit_code": 1},
+                        }
+                    ),
+                ]
+            )
+
+            imported = import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=raw)
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(imported["accepted_count"], 2)
+            self.assertEqual(report["sources"][0]["source"], "codex")
+            self.assertEqual(report["sources"][0]["source_type"], "host-adapter")
+            self.assertEqual(report["slowest_operations"][0]["operation"], "exec_command")
+            self.assertEqual(report["error_prone_operations"][0]["timeouts"], 1)
+            self.assertEqual(report["error_prone_operations"][0]["retries"], 1)
+            self.assertTrue(report["inefficiency_flags"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_error_prone_operations_respect_error_rate_threshold(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = []
+            for index in range(10):
+                payloads.append(
+                    {
+                        "schema_version": "1.0",
+                        "source": "codex",
+                        "source_session_id": "run-1",
+                        "event_id": f"event-{index}",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 100,
+                        "status": "failure" if index == 0 else "success",
+                    }
+                )
+
+            imported = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="codex",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(imported["accepted_count"], 10)
+            self.assertEqual(report["error_prone_operations"], [])
+            self.assertEqual(report["inefficiency_flags"], [])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_partial_import_diagnostics_are_carried_into_reports(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            valid = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            malformed = {**valid, "event_id": "e2", "kind": "unsafe-kind"}
+
+            imported = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(valid), json.dumps(malformed)]),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(imported["status"], "PARTIAL")
+            self.assertEqual(report["coverage_label"], "partial")
+            self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in imported["diagnostics"]))
+            self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_plus_partial_external_import_is_partial_coverage(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+            valid = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "accepted-event",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(valid), "{not-json}"]),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "partial")
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_successful_reimport_restores_complete_coverage_after_partial_import(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+            partial_event = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "partial-event",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            recovered_event = {**partial_event, "event_id": "recovered-event", "operation": "review"}
+
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(partial_event), "{not-json}"]),
+            )
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw=json.dumps(recovered_event),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "complete")
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_successful_import_from_other_source_does_not_recover_failed_source(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+            failed_event = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "accepted-event",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            recovered_other_source = {**failed_event, "source": "codex", "event_id": "codex-event"}
+
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(failed_event), "{not-json}"]),
+            )
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="codex",
+                fmt="agent-jsonl",
+                raw=json.dumps(recovered_other_source),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "partial")
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsupported_format(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="xml", raw="")
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+            self.assertTrue(core_paths.telemetry_imports_file("octo/example", "77").exists())
+            self.assertTrue(any("Unsupported telemetry format" in diagnostic for diagnostic in report["diagnostics"]))
 
     def test_command_label_strips_leading_inline_env_assignments(self):
         label = command_label(["GH_TOKEN=ghp_secret", "PYTHONPATH=src", "python", "-m", "adapter"])

@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from gh_address_cr.core.reply_templates import fix_reply, clarify_reply, defer_reply, _normalize_severity
 
@@ -35,11 +36,9 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertIn("Review signal: `P4`", result)
         self.assertIn("Nit/Suggestion path verified", result)
 
-    def test_fix_reply_with_efficiency_summary(self):
-        summary = "12 tools invoked, 45s duration."
-        result = fix_reply("P2", ["sha123", "src/file.py", "pytest", "Passed", "Fix."], efficiency_summary=summary)
-        self.assertIn("> **Agent Efficiency Summary**:", result)
-        self.assertIn(summary, result)
+    def test_reply_templates_do_not_accept_efficiency_summary_parameter(self):
+        for renderer in (fix_reply, clarify_reply, defer_reply):
+            self.assertNotIn("efficiency_summary", inspect.signature(renderer).parameters)
 
     def test_fix_reply_surfaces_reviewer_priority_without_p_scale_severity(self):
         result = fix_reply(
@@ -63,18 +62,6 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertNotIn("generate_reply.py", message)
         self.assertIn("gh-address-cr agent submit", message)
         self.assertIn("gh-address-cr submit-action", message)
-
-    def test_clarify_reply_with_efficiency_summary(self):
-        summary = "5 tools invoked, 10s duration."
-        result = clarify_reply(["Clarification note."], efficiency_summary=summary)
-        self.assertIn("> **Agent Efficiency Summary**:", result)
-        self.assertIn(summary, result)
-
-    def test_defer_reply_with_efficiency_summary(self):
-        summary = "8 tools invoked, 20s duration."
-        result = defer_reply(["Deferral note."], efficiency_summary=summary)
-        self.assertIn("> **Agent Efficiency Summary**:", result)
-        self.assertIn(summary, result)
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ FEATURE_DIR = ROOT / "specs" / "012-cli-skill-sync"
 SPEC_MD = FEATURE_DIR / "spec.md"
 PLAN_MD = FEATURE_DIR / "plan.md"
 TASKS_MD = FEATURE_DIR / "tasks.md"
+EXTERNAL_TELEMETRY_PLAN_MD = ROOT / "specs" / "015-external-agent-telemetry" / "plan.md"
 SUPERSEDED_MARKER = "Superseded by `specs/012-cli-skill-sync`"
 CURRENT_DOC_PATHS = [
     ROOT / "README.md",
@@ -63,6 +64,12 @@ class CliSkillSyncArtifactTest(unittest.TestCase):
                 violations.append(f"{path.relative_to(ROOT)}:{line_number}: {line}")
 
         self.assertEqual(violations, [])
+
+    def test_external_telemetry_plan_keeps_publish_reply_boundary_clear(self):
+        plan = EXTERNAL_TELEMETRY_PLAN_MD.read_text(encoding="utf-8")
+
+        self.assertIn("workflow.py                # validation command telemetry capture for workflow execution", plan)
+        self.assertNotIn("publish path continues to read runtime efficiency summary", plan)
 
 
 if __name__ == "__main__":

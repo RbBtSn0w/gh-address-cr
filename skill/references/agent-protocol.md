@@ -48,6 +48,20 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Inspects active and terminal claims.
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
   - Expires stale leases without deleting accepted evidence.
+- `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-`
+  - Imports safe PR-scoped telemetry from a generic agent or host-specific adapter. This does not mutate review item state.
+- `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
+  - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
+
+## Telemetry Event Contract
+
+Generic agent telemetry uses JSONL. Each line is one event with these required fields: `source`, `kind`, `operation`, `status`, and either `duration_ms` or both `started_at` and `ended_at`. Recommended fields are `schema_version`, `source_session_id`, `event_id`, `metadata`, and `correlation_id`.
+
+Supported `kind` values are `tool_call`, `command`, `wait`, `retry`, `validation`, and `agent_step`. Supported `status` values are `success`, `failure`, `timeout`, `cancelled`, and `unknown`.
+
+Telemetry must be public-safe before import. Do not include tokens, credentials, raw prompts, usernames, private machine identifiers, or unnecessary absolute local paths. The runtime computes `event_fingerprint` after canonical normalization and uses it as the authoritative duplicate key. Duplicate or overlapping imports must appear in `duplicate_fingerprints` and must not inflate report counts, durations, or slowest-operation rankings.
+
+Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default.
 
 ## Evidence Rules
 
@@ -59,7 +73,7 @@ For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Su
 
 Review signal is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or `P4` severity only when the marker is explicit in the producer payload or in the original GitHub review-thread comment. Reviewer `high`, `medium`, and `low priority` markers are preserved as raw priority evidence and are not mapped to P-scale severity. Published fix replies show exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present. A fix response may include explicit `fix_reply.severity`; if it conflicts with first-scene severity evidence, include `fix_reply.severity_note` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
-Clarify, defer, and reject responses require `reply_markdown` and validation evidence. GitHub side-effect claims from AI agents are invalid. The `efficiency_summary` is automatically managed and appended by the control plane telemetry layer to final published comments; agents must not manually record or format this summary.
+Clarify, defer, and reject responses require `reply_markdown`. GitHub side-effect claims from AI agents are invalid. Efficiency telemetry is reported through `final-gate`, `audit_summary.md`, and structured efficiency reports, not appended to individual GitHub review-thread replies; agents must not manually add telemetry summaries to PR thread comments.
 
 For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved.
 

@@ -1192,7 +1192,7 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 item = session["items"]["github-thread:THREAD_STALE"]
                 self.assertEqual(item["classification_evidence"]["classification"], "fix")
 
-    def test_publish_github_thread_responses_includes_efficiency_summary(self):
+    def test_publish_github_thread_responses_does_not_include_efficiency_summary(self):
         from gh_address_cr.core import workflow
         from gh_address_cr.core.telemetry import SessionTelemetry
 
@@ -1241,8 +1241,8 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 workflow.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertEqual(len(client.replies), 1)
-                self.assertIn("> **Agent Efficiency Summary**:", client.replies[0])
-                self.assertIn("1 tools invoked", client.replies[0])
+                self.assertNotIn("Agent Efficiency Summary", client.replies[0])
+                self.assertNotIn("1 tools invoked", client.replies[0])
 
 
 if __name__ == "__main__":
