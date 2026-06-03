@@ -1,3 +1,9 @@
+## [2.9.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.1...v2.9.2) (2026-06-02)
+
+### Bug Fixes
+
+* Constrain fix-all and restore one-to-one thread replies ([#73](https://github.com/RbBtSn0w/gh-address-cr/issues/73)) ([d864677](https://github.com/RbBtSn0w/gh-address-cr/commit/d864677f8937799cb22206ba36cbe74cd0d5bf5e))
+
 ## [2.9.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.0...v2.9.1) (2026-06-02)
 
 ### Bug Fixes
