@@ -1661,44 +1661,51 @@ def _accept_action_response_submission(
 
     _apply_response_to_item(item, response)
 
-    # FR-001/FR-002: Retrospectively record validation commands in telemetry.
+    # Record accepted validation evidence without leaking raw agent-provided commands.
     validation_cmds = response.get("validation_commands") or []
     if isinstance(validation_cmds, list):
         try:
             import shlex
             import time
             from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
             telemetry = SessionTelemetry.get_instance()
-            for val_cmd in _normalize_validation_command_records(validation_cmds):
-                cmd_name = val_cmd.get("command")
-                try:
-                    cmd_label = command_label(shlex.split(cmd_name))
-                except Exception:
-                    cmd_label = cmd_name
-                res = val_cmd.get("result", "passed")
-                exit_code = 0 if res in {"passed", "pass", "success", "succeeded", "ok"} else 1
-                dur = val_cmd.get("duration")
-                start = val_cmd.get("start_time")
-                end = val_cmd.get("end_time")
-
-                if start is not None and end is not None:
-                    start_val = float(start)
-                    end_val = float(end)
-                elif dur is not None:
-                    end_val = time.time()
-                    start_val = end_val - float(dur)
-                else:
-                    end_val = time.time()
-                    start_val = end_val
-
-                telemetry.record(
-                    command=cmd_label,
-                    start_time=start_val,
-                    end_time=end_val,
-                    exit_code=exit_code,
-                )
         except Exception:
-            pass
+            telemetry = None
+        if telemetry is not None:
+            for val_cmd in _normalize_validation_command_records(validation_cmds):
+                try:
+                    cmd_name = val_cmd.get("command")
+                    if not isinstance(cmd_name, str):
+                        continue
+                    try:
+                        cmd_label = command_label(shlex.split(cmd_name))
+                    except ValueError:
+                        continue
+                    res = val_cmd.get("result", "passed")
+                    exit_code = 0 if res in {"passed", "pass", "success", "succeeded", "ok"} else 1
+                    dur = val_cmd.get("duration")
+                    start = val_cmd.get("start_time")
+                    end = val_cmd.get("end_time")
+
+                    if start is not None and end is not None:
+                        start_val = float(start)
+                        end_val = float(end)
+                    elif dur is not None:
+                        end_val = time.time()
+                        start_val = end_val - float(dur)
+                    else:
+                        end_val = time.time()
+                        start_val = end_val
+
+                    telemetry.record(
+                        command=cmd_label,
+                        start_time=start_val,
+                        end_time=end_val,
+                        exit_code=exit_code,
+                    )
+                except Exception:
+                    continue
 
     return ledger.append_event(
         session_id=str(session["session_id"]),

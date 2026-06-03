@@ -2,6 +2,7 @@ import subprocess
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -335,6 +336,11 @@ class TestTelemetry(unittest.TestCase):
                     "duration": 5.5
                 },
                 {
+                    "command": "pytest 'unterminated --token ghp_secret",
+                    "result": "passed",
+                    "duration": 1.0
+                },
+                {
                     "command": "ruff check src",
                     "result": "failed",
                     "start_time": 1000.0,
@@ -357,16 +363,17 @@ class TestTelemetry(unittest.TestCase):
 
             _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
 
-            # We should have 2 metrics recorded
+            # We should have 2 metrics recorded; the malformed command is skipped.
             self.assertEqual(len(tracker.metrics), 2)
-            
-            # First one: pytest tests/core --token ghp_secret (should be sanitized to pytest tests/core)
-            self.assertEqual(tracker.metrics[0].command, "pytest tests/core")
+
+            # First one: pytest tests/core --token ghp_secret (should be sanitized to pytest)
+            self.assertEqual(tracker.metrics[0].command, "pytest")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertAlmostEqual(tracker.metrics[0].duration, 5.5)
+            self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
             # Second one: ruff check src, exit_code 1, duration 2.5
-            self.assertEqual(tracker.metrics[1].command, "ruff check src")
+            self.assertEqual(tracker.metrics[1].command, "ruff check")
             self.assertEqual(tracker.metrics[1].exit_code, 1)
             self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
             self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
@@ -391,9 +398,8 @@ class TestTelemetry(unittest.TestCase):
             self.assertIsNone(error)
             
             self.assertEqual(len(tracker.metrics), 1)
-            self.assertEqual(tracker.metrics[0].command, "my-adapter --fast")
+            self.assertEqual(tracker.metrics[0].command, "my-adapter")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
 
 if __name__ == "__main__":
-    from datetime import datetime, timezone
     unittest.main()

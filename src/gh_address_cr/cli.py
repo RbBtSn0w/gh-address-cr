@@ -1280,13 +1280,16 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     from gh_address_cr.core.telemetry import SessionTelemetry, command_label
 
     start_time = time.time()
+    result = None
+    error: str | None = None
+    exit_code = 1
     try:
         result = subprocess.run(argv, text=True, capture_output=True)
-        end_time = time.time()
         exit_code = result.returncode
     except Exception as exc:
+        error = str(exc)
+    finally:
         end_time = time.time()
-        exit_code = 1
         try:
             SessionTelemetry.get_instance().record(
                 command=command_label(argv),
@@ -1296,18 +1299,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
             )
         except Exception:
             pass
-        return None, str(exc)
 
-    try:
-        SessionTelemetry.get_instance().record(
-            command=command_label(argv),
-            start_time=start_time,
-            end_time=end_time,
-            exit_code=exit_code,
-        )
-    except Exception:
-        pass
-
+    if error is not None:
+        return None, error
+    if result is None:
+        return None, "Adapter command failed before producing a result."
     if result.returncode != 0:
         return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
     return result.stdout, None
