@@ -350,6 +350,11 @@ class TestTelemetry(unittest.TestCase):
                     "result": "failed",
                     "start_time": 1000.0,
                     "end_time": 1002.5
+                },
+                {
+                    "command": "ruff check src",
+                    "result": "failed",
+                    "duration": 0.0
                 }
             ]
         }
@@ -368,8 +373,8 @@ class TestTelemetry(unittest.TestCase):
 
             _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
 
-            # We should have 2 metrics recorded; the duplicate and malformed commands are skipped.
-            self.assertEqual(len(tracker.metrics), 2)
+            # We should have 3 metrics recorded; the duplicate and malformed commands are skipped.
+            self.assertEqual(len(tracker.metrics), 3)
 
             # First one: inline env + path + token should be sanitized to pytest.
             self.assertEqual(tracker.metrics[0].command, "pytest")
@@ -384,10 +389,13 @@ class TestTelemetry(unittest.TestCase):
             self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
             self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
             self.assertAlmostEqual(tracker.metrics[1].end_time, 1002.5)
+            self.assertEqual(tracker.metrics[2].command, "ruff check")
+            self.assertEqual(tracker.metrics[2].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[2].duration, 0.0)
             self.assertNotIn("_telemetry_validation_seen", session)
 
             _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
-            self.assertEqual(len(tracker.metrics), 4)
+            self.assertEqual(len(tracker.metrics), 6)
 
     @patch("gh_address_cr.core.workflow.submit_lease")
     @patch("gh_address_cr.core.workflow.accept_lease")

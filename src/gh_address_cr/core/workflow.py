@@ -1687,7 +1687,7 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
     except Exception:
         return
 
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
 
     for val_cmd in _normalize_validation_command_records(validation_cmds):
         try:
@@ -1705,10 +1705,10 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
             cmd_label = command_label(argv)
             dedupe_key = (
                 cmd_label,
-                str(val_cmd.get("result") or ""),
-                str(val_cmd.get("duration") or ""),
-                str(val_cmd.get("start_time") or ""),
-                str(val_cmd.get("end_time") or ""),
+                _dedupe_value(val_cmd.get("result")),
+                _dedupe_value(val_cmd.get("duration")),
+                _dedupe_value(val_cmd.get("start_time")),
+                _dedupe_value(val_cmd.get("end_time")),
             )
             if dedupe_key in seen:
                 continue
@@ -1742,6 +1742,10 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
 def _is_inline_env_assignment(token: str) -> bool:
     key, separator, value = token.partition("=")
     return bool(separator and key and value and key.replace("_", "").isalnum() and not key[0].isdigit())
+
+
+def _dedupe_value(value: Any) -> str:
+    return "" if value is None else str(value)
 
 
 def _validation_result_exit_code(result: Any) -> int:
