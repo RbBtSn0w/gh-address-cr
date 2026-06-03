@@ -17,9 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / "skill"
-PLUGIN_ROOT = ROOT / "plugin" / "gh-address-cr"
 DEFAULT_OUTPUT_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"
-PLUGIN_SKILL_ROOT = PLUGIN_ROOT / "skills" / "gh-address-cr"
 PYPROJECT = ROOT / "pyproject.toml"
 
 EXCLUDED_DIRS = {
@@ -134,6 +132,12 @@ def build_payload(destination: Path) -> None:
     (destination / ".codex-plugin" / "plugin.json").write_text(manifest_text, encoding="utf-8")
 
 
+def output_path(raw_path: Path) -> Path:
+    if raw_path.is_absolute():
+        return raw_path
+    return ROOT / raw_path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the gh-address-cr Codex plugin payload.")
     parser.add_argument(
@@ -158,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             print("plugin payload can be generated")
             return 0
 
-        destination = args.output
+        destination = output_path(args.output)
         if destination.exists():
             shutil.rmtree(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
