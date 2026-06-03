@@ -88,6 +88,9 @@ INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
 PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
+HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
+HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
+HOST_TELEMETRY_FORMAT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT"
 
 
 def _legacy_module(name: str):
@@ -2209,7 +2212,16 @@ def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
 
 
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="gh-address-cr final-gate")
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr final-gate",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Host telemetry hook:\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.\n"
+        ),
+    )
     auto_group = parser.add_mutually_exclusive_group()
     auto_group.add_argument("--auto-clean", dest="auto_clean", action="store_true")
     auto_group.add_argument("--no-auto-clean", dest="auto_clean", action="store_false")
@@ -2226,6 +2238,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parsed = parser.parse_args(_prepend_optional(repo, _prepend_optional(pr_number, passthrough)))
+    _ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number)
     try:
         result = core_gate.Gatekeeper().run(
             parsed.repo,
@@ -2273,6 +2286,22 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return result.exit_code
 
     return 0
+
+
+def _ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | None:
+    input_path = os.environ.get(HOST_TELEMETRY_INPUT_ENV)
+    if not input_path:
+        return None
+    source = os.environ.get(HOST_TELEMETRY_SOURCE_ENV) or "assistant-host"
+    fmt = os.environ.get(HOST_TELEMETRY_FORMAT_ENV) or "agent-jsonl"
+    try:
+        raw = Path(input_path).read_text(encoding="utf-8")
+    except OSError:
+        return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
+    try:
+        return core_telemetry.import_external_telemetry(repo, pr_number, source=source, fmt=fmt, raw=raw)
+    except OSError:
+        return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
 
 
 def _rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:

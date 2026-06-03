@@ -58,6 +58,19 @@ Required machine fields:
 - `report_artifact`
 - `diagnostics`
 
+### Final-Gate Host Telemetry Hook
+
+```text
+GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>
+```
+
+Behavior:
+- When `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` is set, final-gate imports that JSONL feed before writing `audit_summary.md` and `efficiency-report.json`.
+- `GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE` defaults to `assistant-host`.
+- `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`.
+- Hook ingestion uses the same normalization, safety, fingerprint, duplicate, and diagnostics contract as `telemetry ingest`.
+- Hook failures remain fail-open for final-gate and appear as telemetry diagnostics and coverage labels in final-gate evidence.
+
 ## Generic Agent Event Feed
 
 Each line is one JSON event.

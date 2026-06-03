@@ -53,6 +53,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
   - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
 
+Final-gate also supports a host integration hook. If `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` points to a safe JSONL feed, `gh-address-cr final-gate` imports that feed before writing `audit_summary.md` and `efficiency-report.json`. `GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE` defaults to `assistant-host`, and `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`.
+
 ## Telemetry Event Contract
 
 Generic agent telemetry uses JSONL. Each line is one event with these required fields: `source`, `kind`, `operation`, `status`, and either `duration_ms` or both `started_at` and `ended_at`. Recommended fields are `schema_version`, `source_session_id`, `event_id`, `metadata`, and `correlation_id`.

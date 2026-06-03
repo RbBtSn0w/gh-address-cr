@@ -16,6 +16,7 @@ REQUIRED_CATEGORIES = {
     "coverage",
     "statistics",
     "archive",
+    "host-hook",
 }
 
 

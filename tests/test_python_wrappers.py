@@ -3070,6 +3070,66 @@ else:
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
 
+    def test_final_gate_imports_host_telemetry_from_environment_hook(self):
+        self.install_fake_gh_for_threads([])
+        feed = Path(self.temp_dir.name) / "host-telemetry.jsonl"
+        feed.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "assistant-host",
+                    "source_session_id": "session-77",
+                    "event_id": "tool-1",
+                    "kind": "tool_call",
+                    "operation": "inspect issue",
+                    "duration_ms": 1250,
+                    "status": "success",
+                    "metadata": {"tool": "gh issue view"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"] = str(feed)
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("telemetry_coverage_label=partial", result.stdout)
+        self.assertIn("telemetry_sources=assistant-host (host-adapter): 1 events, available", result.stdout)
+        self.assertIn("telemetry_diagnostics=none", result.stdout)
+        summary_text = self.audit_summary_file().read_text(encoding="utf-8")
+        self.assertIn("- telemetry_coverage_label: partial", summary_text)
+        self.assertIn("- telemetry_sources: assistant-host (host-adapter): 1 events, available", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        self.assertEqual(report["total_events"], 1)
+        self.assertEqual(report["slowest_operations"][0]["operation"], "inspect issue")
+        self.assertEqual(report["sources"][0]["source"], "assistant-host")
+
+    def test_final_gate_host_telemetry_hook_missing_input_is_fail_open(self):
+        self.install_fake_gh_for_threads([])
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"] = str(Path(self.temp_dir.name) / "missing-host-telemetry.jsonl")
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("telemetry_diagnostics=telemetry import assistant-host: telemetry input unavailable", result.stdout)
+        summary_text = self.audit_summary_file().read_text(encoding="utf-8")
+        self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
+        self.assertIn("- telemetry_diagnostics: telemetry import assistant-host: telemetry input unavailable", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        self.assertEqual(report["total_events"], 0)
+        self.assertIn("telemetry import assistant-host: telemetry input unavailable", report["diagnostics"])
+
     def test_final_gate_python_fails_on_resolved_thread_without_viewer_reply(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

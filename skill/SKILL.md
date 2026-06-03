@@ -86,6 +86,8 @@ When the surrounding agent host can export safe PR-scoped telemetry, import it b
 gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-
 ```
 
+If the host can only hand the runtime a safe JSONL file, set `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` before running `final-gate`. Optional `GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE` and `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` override the default `assistant-host` and `agent-jsonl` values. The runtime ingests that file before writing final-gate efficiency artifacts.
+
 Use `gh-address-cr telemetry summary <owner/repo> <pr_number> --format markdown` when run-scoped efficiency evidence is needed. Completion evidence from `final-gate` must report the telemetry coverage label: `complete`, `partial`, `runtime-only`, or `unavailable`. Host telemetry is optional; missing host telemetry must be reported as coverage, not treated as review-resolution evidence. Imported telemetry is deduplicated by runtime-owned `event_fingerprint`; duplicate or overlapping imports must be reported via `accepted_fingerprints` and `duplicate_fingerprints`, not manually merged by the agent.
 
 ## Execution Ladder
