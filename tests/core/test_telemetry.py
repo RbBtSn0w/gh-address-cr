@@ -818,6 +818,34 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("external telemetry line 1: record must be a JSON object" in item for item in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_stored_external_telemetry_without_source_is_corrupted(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "source_session_id": "run-1",
+                        "event_id": "e1",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 1,
+                        "status": "success",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("missing required field(s): source" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_metadata(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -842,6 +870,30 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
             self.assertEqual(result["accepted_count"], 0)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_correlation_id(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+                "correlation_id": "username-alice-laptop",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_nested_secrets_and_linux_paths(self, state_dir):
@@ -1140,6 +1192,44 @@ class TestTelemetry(unittest.TestCase):
             report = build_efficiency_report("octo/example", "77")
 
             self.assertEqual(report["coverage_label"], "partial")
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_successful_reimport_restores_complete_coverage_after_partial_import(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+            partial_event = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "partial-event",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            recovered_event = {**partial_event, "event_id": "recovered-event", "operation": "review"}
+
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(partial_event), "{not-json}"]),
+            )
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw=json.dumps(recovered_event),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "complete")
             self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")

@@ -507,7 +507,8 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     events, correlation_dedupe_diagnostics = _dedupe_correlated_events(events)
     diagnostics.extend(correlation_dedupe_diagnostics)
     sources = _source_rows(runtime_events, external_events)
-    coverage_label = _coverage_label(runtime_events, external_events, import_diagnostics)
+    coverage_diagnostics = import_diagnostics if _has_unrecovered_import_diagnostics(repo, pr_number) else []
+    coverage_label = _coverage_label(runtime_events, external_events, coverage_diagnostics)
     total_events = len(events)
     known_status_events = [event for event in events if event.status != "unknown"]
     success_count = sum(1 for event in known_status_events if event.status == "success")
@@ -586,11 +587,14 @@ def efficiency_report_markdown(report: dict[str, Any]) -> str:
 def _normalize_external_event(payload: object, *, declared_source: str) -> ExternalTelemetryEvent:
     if not isinstance(payload, dict):
         raise ValueError("record must be a JSON object")
-    source = _safe_source_label(str(payload.get("source") or declared_source))
+    source_text = str(payload.get("source") or declared_source)
     required = ("kind", "operation", "status")
     missing = [key for key in required if not payload.get(key)]
+    if not source_text:
+        missing.insert(0, "source")
     if missing:
         raise ValueError(f"missing required field(s): {', '.join(missing)}")
+    source = _safe_source_label(source_text)
     schema_version = _safe_identity_label(str(payload.get("schema_version") or "1.0"), field="schema_version")
     kind = _safe_identity_label(str(payload["kind"]), field="kind")
     status = _safe_identity_label(str(payload["status"]), field="status")
@@ -604,7 +608,7 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     operation = _safe_operation(str(payload["operation"]))
     started_at = _safe_optional_timestamp(payload.get("started_at"), field="started_at")
     ended_at = _safe_optional_timestamp(payload.get("ended_at"), field="ended_at")
-    correlation_id = _safe_identity_label(str(payload["correlation_id"]), field="correlation_id") if payload.get("correlation_id") else None
+    correlation_id = _safe_correlation_id(str(payload["correlation_id"])) if payload.get("correlation_id") else None
     event_id = str(
         (_safe_identity_label(str(payload["event_id"]), field="event_id") if payload.get("event_id") else None)
         or _derive_event_id(
@@ -764,6 +768,14 @@ def _safe_source_session_id(source_session_id: str) -> str:
     if _looks_like_unnecessary_absolute_path(source_session_id):
         raise ValueError("UNSAFE:unsafe absolute path in source_session_id")
     return source_session_id
+
+
+def _safe_correlation_id(correlation_id: str) -> str:
+    try:
+        return _safe_source_session_id(correlation_id)
+    except ValueError as exc:
+        message = str(exc).replace("source_session_id", "correlation_id")
+        raise ValueError(message) from None
 
 
 def _safe_identity_label(value: str, *, field: str) -> str:
@@ -1003,9 +1015,42 @@ def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
             continue
         if payload.get("status") == "SUCCESS" or payload.get("reason_code") == "DUPLICATE_TELEMETRY_IMPORT":
             continue
-        for diagnostic in payload.get("diagnostics") or []:
+        raw_diagnostics = payload.get("diagnostics") or []
+        if not isinstance(raw_diagnostics, list):
+            diagnostics.append(f"telemetry import summary line {line_number}: diagnostics must be a list")
+            continue
+        for diagnostic in raw_diagnostics:
             diagnostics.append(f"telemetry import {payload.get('source', 'unknown')}: {diagnostic}")
     return diagnostics
+
+
+def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
+    path = core_paths.telemetry_imports_file(repo, pr_number)
+    if not path.is_file():
+        return False
+    unrecovered = False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return True
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return True
+        if not isinstance(payload, dict):
+            return True
+        status = payload.get("status")
+        reason_code = payload.get("reason_code")
+        if status == "SUCCESS":
+            unrecovered = False
+        elif reason_code == "DUPLICATE_TELEMETRY_IMPORT":
+            continue
+        else:
+            unrecovered = True
+    return unrecovered
 
 
 def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:

@@ -191,6 +191,32 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertNotIn("fix_reply", skeleton)
         self.assertNotIn("files", skeleton)
 
+    def test_agent_next_fixer_for_clarify_classification_requires_reply_markdown(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    classification_evidence={"classification": "clarify", "record_id": "ev_classified"},
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        request = json.loads(Path(payload["request_path"]).read_text(encoding="utf-8"))
+        skeleton = json.loads(Path(payload["response_skeleton_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(request["required_evidence"], ["note", "reply_markdown"])
+        self.assertEqual(skeleton["resolution"], "clarify")
+        self.assertIn("reply_markdown", skeleton)
+        self.assertNotIn("validation_commands", skeleton)
+        self.assertNotIn("fix_reply", skeleton)
+        self.assertNotIn("files", skeleton)
+
     def test_agent_next_response_skeleton_for_github_fix_uses_empty_required_fields(self):
         self.write_session(
             items=[
