@@ -3485,6 +3485,74 @@ else:
             )
         )
 
+    def test_final_gate_auto_clean_archives_in_memory_efficiency_report_when_artifact_write_fails(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        report_artifact = self.workspace_dir() / "efficiency-report.json"
+        report_artifact.mkdir(parents=True)
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.workspace_dir().exists())
+
+        archived_workspace = self.archive_root() / "artifact-fail"
+        archived_summary = archived_workspace / "audit_summary.md"
+        archived_report = archived_workspace / "efficiency-report.json"
+        self.assertTrue(archived_summary.exists())
+        self.assertTrue(archived_report.is_file())
+        self.assertIn(f"Efficiency report path: {archived_report}", result.stdout)
+
+        summary_text = archived_summary.read_text(encoding="utf-8")
+        self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
+        report = json.loads(archived_report.read_text(encoding="utf-8"))
+        self.assertEqual(report["report_artifact"], str(archived_report))
+        self.assertTrue(
+            any("efficiency report artifact unavailable" in diagnostic for diagnostic in report["diagnostics"])
+        )
+
+        audit_entries = [
+            json.loads(line)
+            for line in (archived_workspace / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(entry) for entry in audit_entries))
+        self.assertTrue(
+            any(
+                entry.get("details", {}).get("efficiency_report", {}).get("report_artifact") == str(archived_report)
+                for entry in audit_entries
+            )
+        )
+
     def test_mark_handled_requires_explicit_repo_and_pr(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

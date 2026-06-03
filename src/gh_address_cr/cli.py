@@ -2241,17 +2241,26 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
         return 5
 
-    summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
-    telemetry_report = _load_efficiency_report(parsed.repo, parsed.pr_number)
+    summary_path, telemetry_report = _write_native_final_gate_artifacts(
+        parsed.repo, parsed.pr_number, parsed.audit_id, result
+    )
     if result.passed and parsed.auto_clean:
         workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
         archive_target = _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
         if archive_target is not None:
             summary_path = archive_target / summary_path.name
             if telemetry_report is not None:
-                telemetry_report["report_artifact"] = str(archive_target / core_paths.efficiency_report_file(parsed.repo, parsed.pr_number).name)
+                archived_report_path = archive_target / core_paths.efficiency_report_file(
+                    parsed.repo, parsed.pr_number
+                ).name
+                telemetry_report["report_artifact"] = str(archived_report_path)
+                telemetry_report = _replace_path_prefix(
+                    telemetry_report,
+                    str(workspace_path),
+                    str(archive_target),
+                )
                 _rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
-                _rewrite_archived_efficiency_report_artifact(Path(telemetry_report["report_artifact"]), telemetry_report)
+                _rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
                 _rewrite_archived_audit_artifacts(
                     archive_target,
                     original_workspace=workspace_path,
@@ -2289,6 +2298,8 @@ def _rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_re
     current.update(telemetry_report)
     current["report_artifact"] = str(report_path)
     try:
+        if report_path.is_dir():
+            shutil.rmtree(report_path)
         report_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError:
         return
@@ -2339,7 +2350,7 @@ def _rewrite_archived_audit_artifacts(
 
 def _replace_path_prefix(value: object, original_prefix: str, archived_prefix: str) -> object:
     if isinstance(value, str):
-        return archived_prefix + value[len(original_prefix) :] if value.startswith(original_prefix) else value
+        return value.replace(original_prefix, archived_prefix)
     if isinstance(value, list):
         return [_replace_path_prefix(item, original_prefix, archived_prefix) for item in value]
     if isinstance(value, dict):
@@ -2472,14 +2483,6 @@ def _write_telemetry_report_payload(payload: dict) -> None:
         return
 
 
-def _load_efficiency_report(repo: str, pr_number: str) -> dict | None:
-    path = core_paths.efficiency_report_file(repo, pr_number)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
 def _emit_final_gate_result(
     result: core_gate.GateResult,
     *,
@@ -2541,7 +2544,7 @@ def _write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> Path:
+) -> tuple[Path, dict]:
     workspace = session_store.workspace_dir(repo, pr_number)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
@@ -2616,7 +2619,7 @@ def _write_native_final_gate_artifacts(
     for path, entry in ((audit_path, audit_entry), (trace_path, trace_entry)):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
-    return summary_path
+    return summary_path, telemetry_report
 
 
 def _telemetry_sources_summary(telemetry_report: dict) -> str:
