@@ -2254,7 +2254,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                     parsed.repo, parsed.pr_number
                 ).name
                 telemetry_report["report_artifact"] = str(archived_report_path)
-                telemetry_report = _replace_path_prefix(
+                telemetry_report = _replace_path_occurrences(
                     telemetry_report,
                     str(workspace_path),
                     str(archive_target),
@@ -2329,7 +2329,7 @@ def _rewrite_archived_audit_artifacts(
             except json.JSONDecodeError:
                 updated_lines.append(line)
                 continue
-            rewritten = _replace_path_prefix(entry, str(original_workspace), str(archive_target))
+            rewritten = _replace_path_occurrences(entry, str(original_workspace), str(archive_target))
             if isinstance(rewritten, dict):
                 if path.name == "audit.jsonl":
                     details = rewritten.get("details")
@@ -2348,13 +2348,13 @@ def _rewrite_archived_audit_artifacts(
                 continue
 
 
-def _replace_path_prefix(value: object, original_prefix: str, archived_prefix: str) -> object:
+def _replace_path_occurrences(value: object, original_path: str, archived_path: str) -> object:
     if isinstance(value, str):
-        return value.replace(original_prefix, archived_prefix)
+        return value.replace(original_path, archived_path)
     if isinstance(value, list):
-        return [_replace_path_prefix(item, original_prefix, archived_prefix) for item in value]
+        return [_replace_path_occurrences(item, original_path, archived_path) for item in value]
     if isinstance(value, dict):
-        return {key: _replace_path_prefix(nested, original_prefix, archived_prefix) for key, nested in value.items()}
+        return {key: _replace_path_occurrences(nested, original_path, archived_path) for key, nested in value.items()}
     return value
 
 
