@@ -1,3 +1,9 @@
+## [2.9.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.4...v2.9.5) (2026-06-03)
+
+### Bug Fixes
+
+* add final-gate host telemetry hook ([#79](https://github.com/RbBtSn0w/gh-address-cr/issues/79)) ([5ce6f41](https://github.com/RbBtSn0w/gh-address-cr/commit/5ce6f41371c7c5f3dba54608d22674a48f081987))
+
 ## [2.9.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.3...v2.9.4) (2026-06-03)
 
 ### Bug Fixes
