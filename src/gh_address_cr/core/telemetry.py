@@ -574,6 +574,25 @@ def input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, 
     return summary
 
 
+def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict[str, Any]:
+    summary = _import_summary(
+        repo,
+        pr_number,
+        source=source,
+        fmt=fmt,
+        status="FAILED",
+        reason_code="TELEMETRY_HOOK_UNAVAILABLE",
+        accepted_count=0,
+        rejected_count=0,
+        duplicate_count=0,
+        accepted_fingerprints=[],
+        duplicate_fingerprints=[],
+        diagnostics=["host telemetry hook import unavailable"],
+    )
+    _append_import_summary(repo, pr_number, summary)
+    return summary
+
+
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     runtime_events = _runtime_events(repo, pr_number)
     external_events, diagnostics = _load_external_events_with_diagnostics(repo, pr_number)

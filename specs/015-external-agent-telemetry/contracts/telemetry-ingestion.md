@@ -70,6 +70,7 @@ Behavior:
 - `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`.
 - Hook ingestion uses the same normalization, safety, fingerprint, duplicate, and diagnostics contract as `telemetry ingest`.
 - Hook failures remain fail-open for final-gate and appear as telemetry diagnostics and coverage labels in final-gate evidence.
+- Hook import failures that occur after the input feed is readable use `TELEMETRY_HOOK_UNAVAILABLE` with a generic diagnostic; the hook remains fail-open if the diagnostic ledger itself is unavailable.
 
 ## Generic Agent Event Feed
 
@@ -133,6 +134,7 @@ for telemetry-specific failures.
 - `UNSAFE_TELEMETRY_CONTENT`
 - `UNSUPPORTED_TELEMETRY_FORMAT`
 - `TELEMETRY_INPUT_UNAVAILABLE`
+- `TELEMETRY_HOOK_UNAVAILABLE`
 - `AMBIGUOUS_TELEMETRY_SESSION`
 - `DUPLICATE_TELEMETRY_IMPORT`
 - `TELEMETRY_REPORT_UNAVAILABLE`

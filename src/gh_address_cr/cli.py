@@ -2289,15 +2289,15 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
 
 
 def _ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | None:
+    input_path = os.environ.get(HOST_TELEMETRY_INPUT_ENV)
+    if not input_path:
+        return None
+    source = os.environ.get(HOST_TELEMETRY_SOURCE_ENV) or "assistant-host"
+    fmt = os.environ.get(HOST_TELEMETRY_FORMAT_ENV) or "agent-jsonl"
     try:
-        input_path = os.environ.get(HOST_TELEMETRY_INPUT_ENV)
-        if not input_path:
-            return None
-        source = os.environ.get(HOST_TELEMETRY_SOURCE_ENV) or "assistant-host"
-        fmt = os.environ.get(HOST_TELEMETRY_FORMAT_ENV) or "agent-jsonl"
         return _ingest_host_telemetry_input(repo, pr_number, input_path=input_path, source=source, fmt=fmt)
     except Exception:
-        return None
+        return _safe_hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
 
 
 def _ingest_host_telemetry_input(
@@ -2318,6 +2318,13 @@ def _ingest_host_telemetry_input(
 def _safe_input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
     try:
         return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
+    except Exception:
+        return None
+
+
+def _safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
+    try:
+        return core_telemetry.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
     except Exception:
         return None
 

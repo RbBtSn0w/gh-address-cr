@@ -179,7 +179,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
 
         self.assertIsNone(result)
 
-    def test_final_gate_host_hook_import_storage_error_is_not_reported_as_input_unavailable(self):
+    def test_final_gate_host_hook_import_storage_error_reports_hook_diagnostic(self):
         import gh_address_cr.cli as cli
 
         feed = Path(self.temp_dir.name) / "host.jsonl"
@@ -198,8 +198,14 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         ):
             result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
 
-        self.assertIsNone(result)
+        self.assertEqual(result["reason_code"], "TELEMETRY_HOOK_UNAVAILABLE")
+        self.assertEqual(result["diagnostics"], ["host telemetry hook import unavailable"])
         unavailable.assert_not_called()
+        report = cli.core_telemetry.build_efficiency_report(self.repo, self.pr)
+        self.assertIn(
+            "telemetry import assistant-host: host telemetry hook import unavailable",
+            report["diagnostics"],
+        )
 
     def test_python_helper_command_normalization_resolves_relative_paths(self):
         command = [
