@@ -40,6 +40,8 @@ def command_label(cmd: list[str]) -> str:
             continue
         if "/" in token or "\\" in token or "=" in token:
             continue
+        if any(marker.lower() in token.lower() for marker in TOKEN_MARKERS):
+            continue
         label_tokens.append(token)
         break
 
@@ -589,8 +591,11 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     metadata = _safe_metadata(payload.get("metadata") or {})
     session_id = _safe_source_session_id(str(payload.get("source_session_id") or "unknown-session"))
     operation = _safe_operation(str(payload["operation"]))
+    started_at = _safe_optional_timestamp(payload.get("started_at"), field="started_at")
+    ended_at = _safe_optional_timestamp(payload.get("ended_at"), field="ended_at")
+    correlation_id = _safe_identity_label(str(payload["correlation_id"]), field="correlation_id") if payload.get("correlation_id") else None
     event_id = str(
-        payload.get("event_id")
+        (_safe_identity_label(str(payload["event_id"]), field="event_id") if payload.get("event_id") else None)
         or _derive_event_id(
             source=source,
             source_session_id=session_id,
@@ -598,9 +603,9 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
             operation=operation,
             status=status,
             duration_ms=duration_ms,
-            started_at=str(payload["started_at"]) if payload.get("started_at") else None,
-            ended_at=str(payload["ended_at"]) if payload.get("ended_at") else None,
-            correlation_id=str(payload["correlation_id"]) if payload.get("correlation_id") else None,
+            started_at=started_at,
+            ended_at=ended_at,
+            correlation_id=correlation_id,
         )
     )
     event = ExternalTelemetryEvent(
@@ -612,10 +617,10 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         operation=operation,
         status=status,
         duration_ms=duration_ms,
-        started_at=str(payload["started_at"]) if payload.get("started_at") else None,
-        ended_at=str(payload["ended_at"]) if payload.get("ended_at") else None,
+        started_at=started_at,
+        ended_at=ended_at,
         metadata=metadata,
-        correlation_id=str(payload["correlation_id"]) if payload.get("correlation_id") else None,
+        correlation_id=correlation_id,
     )
     return ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
 
@@ -753,6 +758,41 @@ def _safe_source_session_id(source_session_id: str) -> str:
     return source_session_id
 
 
+def _safe_identity_label(value: str, *, field: str) -> str:
+    lowered = value.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+        raise ValueError(f"UNSAFE:unsafe {field}")
+    if _looks_like_unnecessary_absolute_path(value):
+        raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
+    return value
+
+
+def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
+    if not value:
+        return None
+    text = str(value)
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+        raise ValueError(f"UNSAFE:unsafe {field}")
+    if _looks_like_unnecessary_absolute_path(text):
+        raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{field} must be an ISO timestamp") from None
+    return text
+
+
+def _safe_runtime_operation(operation: str) -> str:
+    lowered = operation.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS) or _looks_like_unnecessary_absolute_path(operation):
+        try:
+            return command_label(shlex.split(operation)) or "runtime command"
+        except ValueError:
+            return "runtime command"
+    return operation
+
+
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
     return (
@@ -825,7 +865,7 @@ def _correlation_dedupe_key(event: ExternalTelemetryEvent) -> str | None:
     correlation = event.correlation_id or (event.event_id if event.source == "runtime" else None)
     if not correlation:
         return None
-    return f"{correlation}:{event.operation}:{event.status}:{event.duration_ms}"
+    return f"{correlation}:{event.operation}:{event.status}"
 
 
 def _load_fingerprint_set(repo: str, pr_number: str) -> set[str]:
@@ -947,7 +987,7 @@ def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
             source_session_id=f"{repo}#{pr_number}",
             event_id=event_id,
             kind="command",
-            operation=metric.command,
+            operation=_safe_runtime_operation(metric.command),
             status="success" if metric.is_success else ("timeout" if metric.exit_code == 124 else "failure"),
             duration_ms=max(0, int(metric.duration * 1000)),
             metadata={"exit_code": metric.exit_code, "is_retry": metric.is_retry},

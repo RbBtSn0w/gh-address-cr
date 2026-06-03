@@ -447,6 +447,59 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("source_session_id" in diagnostic for diagnostic in result["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_unsafe_event_id_and_timestamps(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "ghp_secret_event",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unsafe-started-at",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "started_at": "/home/alice/secret",
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unsafe-ended-at",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "ended_at": "ghp_secret",
+                    "status": "success",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["rejected_count"], 3)
+            self.assertTrue(any("event_id" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertTrue(any("started_at" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertTrue(any("ended_at" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_treats_mixed_timezone_timestamps_as_malformed(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -498,6 +551,47 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["total_events"], 1)
             self.assertEqual(report["total_observed_duration_ms"], 2000)
             self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_deduplicates_correlated_runtime_and_external_events_with_duration_skew(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("exec_command", 0, 2, 0, execution_id="exec-skew")
+            raw = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "codex",
+                    "source_session_id": "run-1",
+                    "event_id": "host-event-skew",
+                    "kind": "command",
+                    "operation": "exec_command",
+                    "duration_ms": 2100,
+                    "status": "success",
+                    "correlation_id": "exec-skew",
+                }
+            )
+
+            import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=raw)
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+            self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_command_operations_are_sanitized_before_reporting(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("echo ghp_secret", 0, 1, 0, execution_id="unsafe-runtime-command")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["slowest_operations"][0]["operation"], "echo")
+            self.assertNotIn("ghp_secret", json.dumps(report))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_report_deduplicates_stored_duplicate_fingerprints(self, state_dir):
