@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -160,6 +161,51 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     rc = cli.main([command, *args])
 
                 self.assertEqual(rc, 0)
+
+    def test_final_gate_host_hook_fallback_summary_failure_is_fail_open(self):
+        import gh_address_cr.cli as cli
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": str(Path(self.temp_dir.name) / "missing-host.jsonl"),
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
+                },
+            ),
+            patch.object(cli.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
+        ):
+            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+
+        self.assertIsNone(result)
+
+    def test_final_gate_host_hook_import_storage_error_reports_hook_diagnostic(self):
+        import gh_address_cr.cli as cli
+
+        feed = Path(self.temp_dir.name) / "host.jsonl"
+        feed.write_text("{}\n", encoding="utf-8")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": str(feed),
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
+                },
+            ),
+            patch.object(cli.core_telemetry, "import_external_telemetry", side_effect=OSError("disk full")),
+            patch.object(cli.core_telemetry, "input_unavailable_import_summary") as unavailable,
+        ):
+            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+
+        self.assertEqual(result["reason_code"], "TELEMETRY_HOOK_UNAVAILABLE")
+        self.assertEqual(result["diagnostics"], ["host telemetry hook import unavailable"])
+        unavailable.assert_not_called()
+        report = cli.core_telemetry.build_efficiency_report(self.repo, self.pr)
+        self.assertIn(
+            "telemetry import assistant-host: host telemetry hook import unavailable",
+            report["diagnostics"],
+        )
 
     def test_python_helper_command_normalization_resolves_relative_paths(self):
         command = [
@@ -3069,6 +3115,66 @@ else:
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
+
+    def test_final_gate_imports_host_telemetry_from_environment_hook(self):
+        self.install_fake_gh_for_threads([])
+        feed = Path(self.temp_dir.name) / "host-telemetry.jsonl"
+        feed.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "assistant-host",
+                    "source_session_id": "session-77",
+                    "event_id": "tool-1",
+                    "kind": "tool_call",
+                    "operation": "inspect issue",
+                    "duration_ms": 1250,
+                    "status": "success",
+                    "metadata": {"tool": "gh issue view"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"] = str(feed)
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("telemetry_coverage_label=partial", result.stdout)
+        self.assertIn("telemetry_sources=assistant-host (host-adapter): 1 events, available", result.stdout)
+        self.assertIn("telemetry_diagnostics=none", result.stdout)
+        summary_text = self.audit_summary_file().read_text(encoding="utf-8")
+        self.assertIn("- telemetry_coverage_label: partial", summary_text)
+        self.assertIn("- telemetry_sources: assistant-host (host-adapter): 1 events, available", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        self.assertEqual(report["total_events"], 1)
+        self.assertEqual(report["slowest_operations"][0]["operation"], "inspect issue")
+        self.assertEqual(report["sources"][0]["source"], "assistant-host")
+
+    def test_final_gate_host_telemetry_hook_missing_input_is_fail_open(self):
+        self.install_fake_gh_for_threads([])
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"] = str(Path(self.temp_dir.name) / "missing-host-telemetry.jsonl")
+        self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("telemetry_diagnostics=telemetry import assistant-host: telemetry input unavailable", result.stdout)
+        summary_text = self.audit_summary_file().read_text(encoding="utf-8")
+        self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
+        self.assertIn("- telemetry_diagnostics: telemetry import assistant-host: telemetry input unavailable", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        self.assertEqual(report["total_events"], 0)
+        self.assertIn("telemetry import assistant-host: telemetry input unavailable", report["diagnostics"])
 
     def test_final_gate_python_fails_on_resolved_thread_without_viewer_reply(self):
         gh = self.bin_dir / "gh"

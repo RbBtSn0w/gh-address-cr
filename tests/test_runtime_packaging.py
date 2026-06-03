@@ -195,6 +195,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 result = self.run_runtime_module(*command)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("usage:", result.stdout)
+                if command[0] == "final-gate":
+                    self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", result.stdout)
+                    self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE", result.stdout)
 
     def test_legacy_root_commands_fail_without_session_mutation(self):
         legacy_commands = ["cr-loop", "session-engine", "clean-state"]

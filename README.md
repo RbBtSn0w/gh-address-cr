@@ -124,6 +124,17 @@ gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format ag
 gh-address-cr telemetry summary owner/repo 123 --format markdown
 ```
 
+Assistant hosts can also provide a final-gate ingestion hook by setting:
+
+```bash
+export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=agent-telemetry.jsonl
+export GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE=assistant-host
+gh-address-cr final-gate owner/repo 123
+```
+
+`GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`. The hook uses
+the same telemetry ingestion contract before final-gate artifacts are written.
+
 Every final efficiency summary reports one coverage label: `complete`,
 `partial`, `runtime-only`, or `unavailable`. Imported events are normalized to
 runtime-owned `event_fingerprint` values; duplicate or overlapping imports are
