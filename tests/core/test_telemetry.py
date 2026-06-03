@@ -408,6 +408,36 @@ class TestTelemetry(unittest.TestCase):
             self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_ambiguous_sessions_with_duplicates(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            first = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            second = {**first, "source_session_id": "run-2", "event_id": "e2"}
+
+            import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first))
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in (first, second)),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["reason_code"], "AMBIGUOUS_TELEMETRY_SESSION")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(report["total_events"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_source_session_id(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -785,9 +815,12 @@ class TestTelemetry(unittest.TestCase):
             state_dir.return_value = Path(tmp)
 
             result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="xml", raw="")
+            report = build_efficiency_report("octo/example", "77")
 
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+            self.assertTrue(core_paths.telemetry_imports_file("octo/example", "77").exists())
+            self.assertTrue(any("Unsupported telemetry format" in diagnostic for diagnostic in report["diagnostics"]))
 
     def test_command_label_strips_leading_inline_env_assignments(self):
         label = command_label(["GH_TOKEN=ghp_secret", "PYTHONPATH=src", "python", "-m", "adapter"])

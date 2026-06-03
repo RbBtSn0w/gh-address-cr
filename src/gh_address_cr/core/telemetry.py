@@ -378,7 +378,7 @@ class SessionTelemetry:
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     if fmt != "agent-jsonl":
-        return _import_summary(
+        summary = _import_summary(
             repo,
             pr_number,
             source=source,
@@ -392,6 +392,8 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_fingerprints=[],
             diagnostics=[f"Unsupported telemetry format: {fmt}"],
         )
+        _append_import_summary(repo, pr_number, summary)
+        return summary
 
     existing = _load_external_events(repo, pr_number)
     existing_fingerprints = _load_fingerprint_set(repo, pr_number)
@@ -400,7 +402,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     accepted_fingerprints: list[str] = []
     duplicate_fingerprints: list[str] = []
     diagnostics: list[str] = []
-    accepted_sessions: set[str] = set()
+    observed_sessions: set[str] = set()
     rejected_count = 0
     duplicate_count = 0
     unsafe_seen = False
@@ -428,16 +430,16 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
                 diagnostics.append(f"line {line_number}: {message}")
             rejected_count += 1
             continue
+        observed_sessions.add(event.source_session_id)
         if event.identity in existing_fingerprints:
             duplicate_count += 1
             duplicate_fingerprints.append(event.identity)
             continue
         existing_fingerprints.add(event.identity)
         accepted_fingerprints.append(event.identity)
-        accepted_sessions.add(event.source_session_id)
         accepted.append(event)
 
-    ambiguous_seen = len(accepted_sessions) > 1
+    ambiguous_seen = len(observed_sessions) > 1
     if ambiguous_seen:
         diagnostics.append("ambiguous telemetry session: multiple source_session_id values in one import")
         rejected_count += len(accepted)
