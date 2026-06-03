@@ -2642,6 +2642,8 @@ else:
         summary_text = summary_file.read_text(encoding="utf-8")
         self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
         self.assertIn("- efficiency_report_path:", summary_text)
+        self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
+        self.assertIn("- telemetry_diagnostics: none", summary_text)
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report_path = Path(report_path_line.partition(": ")[2])
         self.assertTrue(report_path.exists())
@@ -2847,9 +2849,10 @@ else:
         self.assertIn("== Agent Efficiency Summary ==", result.stdout)
         self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
         summary_file = self.workspace_dir() / "audit_summary.md"
-        report_path_line = next(
-            line for line in summary_file.read_text(encoding="utf-8").splitlines() if line.startswith("- efficiency_report_path:")
-        )
+        summary_text = summary_file.read_text(encoding="utf-8")
+        self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
+        self.assertIn("- telemetry_diagnostics: external telemetry line 1: invalid JSON", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
 
@@ -3370,6 +3373,8 @@ else:
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")
         self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
+        report = json.loads(archived_report.read_text(encoding="utf-8"))
+        self.assertEqual(report["report_artifact"], str(archived_report))
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)

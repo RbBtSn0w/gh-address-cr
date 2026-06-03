@@ -561,7 +561,7 @@ def efficiency_report_markdown(report: dict[str, Any]) -> str:
 def _normalize_external_event(payload: object, *, declared_source: str) -> ExternalTelemetryEvent:
     if not isinstance(payload, dict):
         raise ValueError("record must be a JSON object")
-    source = str(payload.get("source") or declared_source)
+    source = _safe_source_label(str(payload.get("source") or declared_source))
     required = ("kind", "operation", "status")
     missing = [key for key in required if not payload.get(key)]
     if missing:
@@ -574,15 +574,29 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         raise ValueError(f"unsupported status: {status}")
     duration_ms = _event_duration_ms(payload)
     metadata = _safe_metadata(payload.get("metadata") or {})
-    session_id = str(payload.get("source_session_id") or "unknown-session")
-    event_id = str(payload.get("event_id") or uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(payload, sort_keys=True)).hex)
+    session_id = _safe_source_session_id(str(payload.get("source_session_id") or "unknown-session"))
+    operation = _safe_operation(str(payload["operation"]))
+    event_id = str(
+        payload.get("event_id")
+        or _derive_event_id(
+            source=source,
+            source_session_id=session_id,
+            kind=kind,
+            operation=operation,
+            status=status,
+            duration_ms=duration_ms,
+            started_at=str(payload["started_at"]) if payload.get("started_at") else None,
+            ended_at=str(payload["ended_at"]) if payload.get("ended_at") else None,
+            correlation_id=str(payload["correlation_id"]) if payload.get("correlation_id") else None,
+        )
+    )
     event = ExternalTelemetryEvent(
         schema_version=str(payload.get("schema_version") or "1.0"),
         source=source,
         source_session_id=session_id,
         event_id=event_id,
         kind=kind,
-        operation=_safe_operation(str(payload["operation"])),
+        operation=operation,
         status=status,
         duration_ms=duration_ms,
         started_at=str(payload["started_at"]) if payload.get("started_at") else None,
@@ -591,6 +605,32 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         correlation_id=str(payload["correlation_id"]) if payload.get("correlation_id") else None,
     )
     return ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
+
+
+def _derive_event_id(
+    *,
+    source: str,
+    source_session_id: str,
+    kind: str,
+    operation: str,
+    status: str,
+    duration_ms: int,
+    started_at: str | None,
+    ended_at: str | None,
+    correlation_id: str | None,
+) -> str:
+    canonical = {
+        "source": source,
+        "source_session_id": source_session_id,
+        "kind": kind,
+        "operation": operation,
+        "status": status,
+        "duration_ms": duration_ms,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "correlation_id": correlation_id,
+    }
+    return uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(canonical, sort_keys=True, separators=(",", ":"))).hex
 
 
 def _event_fingerprint(event: ExternalTelemetryEvent) -> str:
@@ -633,7 +673,12 @@ def _event_duration_ms(payload: dict[str, Any]) -> int:
         end_dt = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
     except ValueError:
         raise ValueError("started_at and ended_at must be ISO timestamps") from None
-    duration = int((end_dt - start_dt).total_seconds() * 1000)
+    if (start_dt.tzinfo is None) != (end_dt.tzinfo is None):
+        raise ValueError("timestamp timezone awareness must match")
+    try:
+        duration = int((end_dt - start_dt).total_seconds() * 1000)
+    except TypeError:
+        raise ValueError("timestamp timezone awareness must match") from None
     if duration < 0:
         raise ValueError("event duration must be non-negative")
     return duration
@@ -673,6 +718,26 @@ def _safe_operation(operation: str) -> str:
     if _looks_like_unnecessary_absolute_path(operation):
         raise ValueError("UNSAFE:unsafe absolute path in operation label")
     return operation
+
+
+def _safe_source_label(source: str) -> str:
+    lowered = source.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+        raise ValueError("UNSAFE:unsafe source label")
+    if _looks_like_unnecessary_absolute_path(source):
+        raise ValueError("UNSAFE:unsafe absolute path in source label")
+    return source
+
+
+def _safe_source_session_id(source_session_id: str) -> str:
+    lowered = source_session_id.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+        raise ValueError("UNSAFE:unsafe source_session_id")
+    if any(marker in lowered for marker in ("username", "user-", "machine", "host_id", "host-")):
+        raise ValueError("UNSAFE:unsafe source_session_id")
+    if _looks_like_unnecessary_absolute_path(source_session_id):
+        raise ValueError("UNSAFE:unsafe absolute path in source_session_id")
+    return source_session_id
 
 
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:

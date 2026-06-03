@@ -2250,6 +2250,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             if telemetry_report is not None:
                 telemetry_report["report_artifact"] = str(archive_target / core_paths.efficiency_report_file(parsed.repo, parsed.pr_number).name)
                 _rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
+                _rewrite_archived_efficiency_report_artifact(Path(telemetry_report["report_artifact"]), telemetry_report)
     _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
@@ -2269,6 +2270,19 @@ def _rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact
     ]
     try:
         summary_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: dict) -> None:
+    try:
+        current = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        current = {}
+    current.update(telemetry_report)
+    current["report_artifact"] = str(report_path)
+    try:
+        report_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError:
         return
 
@@ -2462,6 +2476,8 @@ def _write_native_final_gate_artifacts(
             f"- telemetry_total_events: {telemetry_report['total_events']}",
             f"- telemetry_success_rate: {telemetry_report['success_rate']:.1f}",
             f"- efficiency_report_path: {telemetry_report['report_artifact']}",
+            f"- telemetry_sources: {_telemetry_sources_summary(telemetry_report)}",
+            f"- telemetry_diagnostics: {_telemetry_diagnostics_summary(telemetry_report)}",
             f"- telemetry_inefficiency_flags: {', '.join(telemetry_report['inefficiency_flags']) if telemetry_report['inefficiency_flags'] else 'none'}",
         ]
     )
@@ -2508,6 +2524,29 @@ def _write_native_final_gate_artifacts(
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
     return summary_path
+
+
+def _telemetry_sources_summary(telemetry_report: dict) -> str:
+    sources = telemetry_report.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return "none"
+    rows: list[str] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        name = source.get("source", "unknown")
+        source_type = source.get("source_type", "unknown")
+        event_count = source.get("event_count", 0)
+        coverage = source.get("coverage_status", "unknown")
+        rows.append(f"{name} ({source_type}): {event_count} events, {coverage}")
+    return "; ".join(rows) if rows else "none"
+
+
+def _telemetry_diagnostics_summary(telemetry_report: dict) -> str:
+    diagnostics = telemetry_report.get("diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics:
+        return "none"
+    return "; ".join(str(diagnostic) for diagnostic in diagnostics)
 
 
 def _final_gate_failure_message(result: core_gate.GateResult) -> str:
