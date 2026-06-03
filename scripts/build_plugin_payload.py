@@ -133,53 +133,36 @@ def build_payload(destination: Path) -> None:
     (destination / ".codex-plugin" / "plugin.json").write_text(manifest_text, encoding="utf-8")
 
 
-def iter_files(root: Path) -> list[Path]:
-    if not root.exists():
-        return []
-    return sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
-
-
-def check_payload(expected_root: Path, actual_root: Path) -> list[str]:
-    expected_files = iter_files(expected_root)
-    actual_files = iter_files(actual_root)
-    messages: list[str] = []
-    if expected_files != actual_files:
-        expected_set = set(expected_files)
-        actual_set = set(actual_files)
-        for path in sorted(expected_set - actual_set):
-            messages.append(f"missing: {path}")
-        for path in sorted(actual_set - expected_set):
-            messages.append(f"extra: {path}")
-    for path in sorted(set(expected_files) & set(actual_files)):
-        if (expected_root / path).read_bytes() != (actual_root / path).read_bytes():
-            messages.append(f"changed: {path}")
-    return messages
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the gh-address-cr Codex plugin payload.")
-    parser.add_argument("--check", action="store_true", help="Verify the generated plugin payload is up to date.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=PLUGIN_ROOT,
+        help="Directory where the plugin payload should be generated.",
+    )
+    parser.add_argument("--check", action="store_true", help="Verify the plugin payload can be generated.")
     args = parser.parse_args(argv)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         expected_root = Path(temp_dir) / "gh-address-cr"
         build_payload(expected_root)
         if args.check:
-            messages = check_payload(expected_root, PLUGIN_ROOT)
-            if messages:
-                print("plugin payload is out of date:", file=sys.stderr)
-                for message in messages[:50]:
-                    print(f"- {message}", file=sys.stderr)
-                if len(messages) > 50:
-                    print(f"- ... {len(messages) - 50} more differences", file=sys.stderr)
+            if not (expected_root / ".codex-plugin" / "plugin.json").exists():
+                print("plugin payload manifest was not generated", file=sys.stderr)
                 return 1
-            print("plugin payload is up to date")
+            if not (expected_root / "skills" / "gh-address-cr" / "SKILL.md").exists():
+                print("plugin skill payload was not generated", file=sys.stderr)
+                return 1
+            print("plugin payload can be generated")
             return 0
 
-        if PLUGIN_ROOT.exists():
-            shutil.rmtree(PLUGIN_ROOT)
-        shutil.copytree(expected_root, PLUGIN_ROOT)
-        print(f"built plugin payload at {PLUGIN_ROOT.relative_to(ROOT)}")
+        destination = args.output
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(expected_root, destination)
+        display_path = destination.relative_to(ROOT) if destination.is_relative_to(ROOT) else destination
+        print(f"built plugin payload at {display_path}")
         return 0
 
 

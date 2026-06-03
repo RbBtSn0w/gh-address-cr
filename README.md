@@ -30,18 +30,19 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 npx skills check
 ```
 
-Install the Codex community plugin:
+Build the Codex community plugin payload:
 
 ```bash
-codex plugin marketplace add RbBtSn0w/gh-address-cr --ref main
-codex plugin marketplace upgrade
-codex plugin add gh-address-cr@gh-address-cr-community
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 ```
 
-For released plugin installs, prefer pinning a tag:
+Then install from the generated marketplace path when working from a built
+checkout or release artifact:
 
 ```bash
-codex plugin marketplace add RbBtSn0w/gh-address-cr --ref v2.5.1
+codex plugin marketplace add .agents/plugins/marketplace.json
+codex plugin marketplace upgrade
+codex plugin add gh-address-cr@gh-address-cr-community
 ```
 
 ## When to use it
@@ -134,17 +135,17 @@ The packaged skill remains under `skill/` and acts as a thin adapter:
 - `skill/runtime-requirements.json` declares runtime compatibility
 - `skill/agents/` and `skill/references/` provide hints and reference docs
 
-The repo-local Codex plugin payload is generated from `skill/` into
-`plugin/gh-address-cr/`:
+The Codex plugin payload is generated from `skill/` into a build artifact such
+as `dist/plugin/gh-address-cr`:
 
 ```bash
-python3 scripts/build_plugin_payload.py
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
 
 The OpenAI curated Plugin Directory is not a self-service publish target in this
-repository. The committed `.agents/plugins/marketplace.json` is the community
-distribution path.
+repository. The committed `.agents/plugins/marketplace.json` points at the
+generated community distribution artifact.
 
 ## Documentation
 
@@ -167,6 +168,7 @@ ruff check src tests scripts/build_plugin_payload.py
 python3 -m unittest discover -s tests
 python3 -m gh_address_cr --help
 python3 -m gh_address_cr agent manifest
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
 

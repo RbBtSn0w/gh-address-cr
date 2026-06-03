@@ -87,40 +87,34 @@ gh-address-cr --help
 gh-address-cr adapter check-runtime
 ```
 
-### Repo-local Codex Plugin package
+### Generated Codex Plugin package
 
-The repo-local plugin wrapper is generated from `skill/` and lives at
-`plugin/gh-address-cr/`. It packages the existing skill instructions for Codex
-Plugin installation surfaces and does not add MCP servers, ChatGPT UI, or runtime
-business logic.
+The plugin wrapper is generated from `skill/` as a CI/release artifact, usually
+under `dist/plugin/gh-address-cr`. It packages the existing skill instructions
+for Codex Plugin installation surfaces and does not add MCP servers, ChatGPT UI,
+or runtime business logic.
 
 ```bash
-python3 scripts/build_plugin_payload.py
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
 
 ### Community Codex Marketplace install
 
 This repository includes a repo marketplace at `.agents/plugins/marketplace.json`.
-After the plugin payload is committed to `main`, developers can add the
-marketplace and install `gh-address-cr` from Codex:
+After CI or release generation has produced `dist/plugin/gh-address-cr`,
+developers can add the marketplace and install `gh-address-cr` from Codex:
 
 ```bash
-codex plugin marketplace add RbBtSn0w/gh-address-cr --ref main
+codex plugin marketplace add .agents/plugins/marketplace.json
 codex plugin marketplace upgrade
-```
-
-For releases, prefer pinning a tag:
-
-```bash
-codex plugin marketplace add RbBtSn0w/gh-address-cr --ref v2.5.1
 ```
 
 The OpenAI curated Plugin Directory is not a self-service publish target in this
 repository. Use this marketplace file as the community distribution path and
-prepare a curated-review packet with the repository URL, plugin path
-(`plugin/gh-address-cr`), privacy/terms/security links, screenshots, and current
-verification output.
+prepare a curated-review packet with the repository URL, generated plugin path
+(`dist/plugin/gh-address-cr`), privacy/terms/security links, screenshots, and
+current verification output.
 
 ### Upgrade from skill-shim usage
 
@@ -173,11 +167,11 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 ## Build the repo-local Codex Plugin
 
 ```bash
-python3 scripts/build_plugin_payload.py
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
 
-The generated plugin package is `plugin/gh-address-cr/`. It contains
+The generated plugin package is `dist/plugin/gh-address-cr/`. It contains
 `.codex-plugin/plugin.json`, one bundled skill at `skills/gh-address-cr/`, and
 presentation assets. It intentionally does not include `.app.json`, `.mcp.json`,
 or any ChatGPT Apps SDK server metadata.

@@ -74,7 +74,6 @@ jobs:
         if: steps.publish-target.outputs.target != 'pypi'
         run: |
           python3 scripts/set_package_version.py --version "0.0.0.dev${GITHUB_RUN_NUMBER}"
-          python3 scripts/build_plugin_payload.py
 
       - name: Resolve package version
         id: package-version
@@ -102,11 +101,6 @@ jobs:
       - name: Install package build dependencies
         if: steps.package-version.outputs.released == 'true'
         run: python -m pip install --upgrade pip build twine
-
-      - name: Plugin payload check
-        if: steps.package-version.outputs.released == 'true'
-        run: python scripts/build_plugin_payload.py --check
-
 
       - name: Package build
         if: steps.package-version.outputs.released == 'true'
@@ -147,6 +141,10 @@ jobs:
         if: steps.package-version.outputs.released == 'true'
         run: twine check dist/*
 
+      - name: Generate plugin payload
+        if: steps.package-version.outputs.released == 'true'
+        run: python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
+
       - name: Render Homebrew formula from local sdist
         if: steps.package-version.outputs.released == 'true'
         env:
@@ -163,7 +161,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gh-address-cr-dist
-          path: dist/*
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Upload plugin payload artifact
+        if: steps.package-version.outputs.released == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-address-cr-plugin
+          path: dist/plugin/gh-address-cr
 
   publish-testpypi:
     needs: build-release-package

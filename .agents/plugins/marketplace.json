@@ -8,7 +8,7 @@
       "name": "gh-address-cr",
       "source": {
         "source": "local",
-        "path": "./plugin/gh-address-cr"
+        "path": "./dist/plugin/gh-address-cr"
       },
       "policy": {
         "installation": "AVAILABLE",
