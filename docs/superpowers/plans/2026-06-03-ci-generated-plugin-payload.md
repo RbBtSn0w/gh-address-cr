@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `skill/` the single maintained source for the Codex plugin payload and have CI/release generate `plugin/gh-address-cr` instead of requiring developers to keep a copied tree in sync.
+**Goal:** Make `skill/` the single maintained source for the Codex plugin payload and have CI/release generate `dist/plugin/gh-address-cr` instead of requiring developers to keep a copied tree in sync.
 
 **Architecture:** `scripts/build_plugin_payload.py` remains the deterministic builder for plugin manifests, assets, and bundled skill content. CI and release workflows generate the plugin payload into an ignored build directory, validate that generated directory, and upload or publish it as the deployable product artifact. Repository docs and tests describe `skill/` as the source and the generated plugin directory as a build output.
 

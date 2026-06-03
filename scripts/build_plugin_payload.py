@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / "skill"
 PLUGIN_ROOT = ROOT / "plugin" / "gh-address-cr"
+DEFAULT_OUTPUT_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"
 PLUGIN_SKILL_ROOT = PLUGIN_ROOT / "skills" / "gh-address-cr"
 PYPROJECT = ROOT / "pyproject.toml"
 
@@ -138,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=PLUGIN_ROOT,
+        default=DEFAULT_OUTPUT_ROOT,
         help="Directory where the plugin payload should be generated.",
     )
     parser.add_argument("--check", action="store_true", help="Verify the plugin payload can be generated.")
@@ -160,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         destination = args.output
         if destination.exists():
             shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(expected_root, destination)
         display_path = destination.relative_to(ROOT) if destination.is_relative_to(ROOT) else destination
         print(f"built plugin payload at {display_path}")
