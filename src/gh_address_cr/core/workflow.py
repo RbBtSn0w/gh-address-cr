@@ -1304,10 +1304,10 @@ def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, it
         "item_id": str(item.get("item_id") or ""),
         "resolution": resolution,
         "note": "",
-        "validation_commands": [{"command": "", "result": ""}],
     }
     if role == "fixer" and resolution == "fix":
         skeleton["files"] = []
+        skeleton["validation_commands"] = [{"command": "", "result": ""}]
     if item.get("item_kind") == "github_thread":
         if role == "fixer" and resolution == "fix":
             skeleton["fix_reply"] = {
@@ -2574,7 +2574,7 @@ def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
         if item.get("item_kind") == "github_thread":
             fields.append("fix_reply")
         return fields
-    return ["note", "reply_markdown", "validation_commands"]
+    return ["note", "reply_markdown"]
 
 
 def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
@@ -2608,8 +2608,6 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     else:
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
-        if not response.get("validation_commands"):
-            return "MISSING_VALIDATION_COMMANDS"
     return None
 
 

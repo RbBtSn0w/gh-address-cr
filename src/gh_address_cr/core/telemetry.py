@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import uuid
 from hashlib import sha256
@@ -40,7 +41,7 @@ def command_label(cmd: list[str]) -> str:
             continue
         if "/" in token or "\\" in token or "=" in token:
             continue
-        if any(marker.lower() in token.lower() for marker in TOKEN_MARKERS):
+        if _contains_token_marker(token):
             continue
         label_tokens.append(token)
         break
@@ -495,7 +496,8 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     runtime_events = _runtime_events(repo, pr_number)
     external_events, diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
-    diagnostics.extend(_load_import_diagnostics(repo, pr_number))
+    import_diagnostics = _load_import_diagnostics(repo, pr_number)
+    diagnostics.extend(import_diagnostics)
     runtime_events, runtime_dedupe_diagnostics = _dedupe_events(runtime_events)
     external_events, external_dedupe_diagnostics = _dedupe_events(external_events)
     diagnostics.extend(runtime_dedupe_diagnostics)
@@ -506,7 +508,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     events, correlation_dedupe_diagnostics = _dedupe_correlated_events(events)
     diagnostics.extend(correlation_dedupe_diagnostics)
     sources = _source_rows(runtime_events, external_events)
-    coverage_label = _coverage_label(runtime_events, external_events)
+    coverage_label = _coverage_label(runtime_events, external_events, import_diagnostics)
     total_events = len(events)
     known_status_events = [event for event in events if event.status != "unknown"]
     success_count = sum(1 for event in known_status_events if event.status == "success")
@@ -733,15 +735,14 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
             _validate_safe_metadata_value(item, key_path=f"{key_path}[{index}]")
         return
     value_text = str(value)
-    lowered_value = value_text.lower()
-    if any(marker.lower() in lowered_value for marker in TOKEN_MARKERS):
+    if _contains_token_marker(value_text):
         raise ValueError(f"UNSAFE:unsafe metadata value at {key_path}")
     if _looks_like_unnecessary_absolute_path(value_text):
         raise ValueError(f"UNSAFE:unsafe absolute path in metadata value at {key_path}")
 
 
 def _safe_operation(operation: str) -> str:
-    if any(marker.lower() in operation.lower() for marker in TOKEN_MARKERS):
+    if _contains_token_marker(operation):
         raise ValueError("UNSAFE:unsafe operation label")
     if _looks_like_unnecessary_absolute_path(operation):
         raise ValueError("UNSAFE:unsafe absolute path in operation label")
@@ -749,8 +750,7 @@ def _safe_operation(operation: str) -> str:
 
 
 def _safe_source_label(source: str) -> str:
-    lowered = source.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+    if _contains_token_marker(source):
         raise ValueError("UNSAFE:unsafe source label")
     if _looks_like_unnecessary_absolute_path(source):
         raise ValueError("UNSAFE:unsafe absolute path in source label")
@@ -759,7 +759,7 @@ def _safe_source_label(source: str) -> str:
 
 def _safe_source_session_id(source_session_id: str) -> str:
     lowered = source_session_id.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+    if _contains_token_marker(source_session_id):
         raise ValueError("UNSAFE:unsafe source_session_id")
     if any(marker in lowered for marker in ("username", "user-", "machine", "host_id", "host-")):
         raise ValueError("UNSAFE:unsafe source_session_id")
@@ -769,8 +769,7 @@ def _safe_source_session_id(source_session_id: str) -> str:
 
 
 def _safe_identity_label(value: str, *, field: str) -> str:
-    lowered = value.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+    if _contains_token_marker(value):
         raise ValueError(f"UNSAFE:unsafe {field}")
     if _looks_like_unnecessary_absolute_path(value):
         raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
@@ -781,8 +780,7 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
     if not value:
         return None
     text = str(value)
-    lowered = text.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+    if _contains_token_marker(text):
         raise ValueError(f"UNSAFE:unsafe {field}")
     if _looks_like_unnecessary_absolute_path(text):
         raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
@@ -794,8 +792,7 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
 
 
 def _safe_runtime_operation(operation: str) -> str:
-    lowered = operation.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS) or _looks_like_unnecessary_absolute_path(operation):
+    if _contains_token_marker(operation) or _looks_like_unnecessary_absolute_path(operation):
         try:
             return command_label(shlex.split(operation)) or "runtime command"
         except ValueError:
@@ -805,13 +802,26 @@ def _safe_runtime_operation(operation: str) -> str:
 
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
-    return (
+    if (
         "/users/" in lowered
         or "/private/" in lowered
         or "/home/" in lowered
         or "/root/" in lowered
         or "c:\\users\\" in lowered
-    )
+    ):
+        return True
+    if re.search(r"(^|\s)/(?!/)[^\s]+", value):
+        return True
+    return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
+
+
+def _contains_token_marker(value: str) -> bool:
+    lowered = value.lower()
+    if "ghp_" in lowered or "github_pat_" in lowered or "xoxb-" in lowered or "token=" in lowered:
+        return True
+    if re.search(r"(^|[^a-z0-9])bearer\s+", lowered):
+        return True
+    return bool(re.search(r"(^|[^a-z0-9])sk-[a-z0-9]", lowered))
 
 
 def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
@@ -834,6 +844,8 @@ def _load_external_events_with_diagnostics(repo: str, pr_number: str) -> tuple[l
             continue
         try:
             payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError("record must be a JSON object")
             events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
         except json.JSONDecodeError as exc:
             diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
@@ -950,8 +962,7 @@ def _import_summary(
 
 
 def _reported_source_label(source: str) -> str:
-    lowered = source.lower()
-    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+    if _contains_token_marker(source):
         return "[redacted]"
     if _looks_like_unnecessary_absolute_path(source):
         return "[redacted]"
@@ -974,6 +985,9 @@ def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
             payload = json.loads(line)
         except json.JSONDecodeError as exc:
             diagnostics.append(f"telemetry import summary line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        if not isinstance(payload, dict):
+            diagnostics.append(f"telemetry import summary line {line_number}: record must be a JSON object")
             continue
         if payload.get("status") == "SUCCESS" or payload.get("reason_code") == "DUPLICATE_TELEMETRY_IMPORT":
             continue
@@ -1006,8 +1020,14 @@ def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
     return events
 
 
-def _coverage_label(runtime_events: list[ExternalTelemetryEvent], external_events: list[ExternalTelemetryEvent]) -> str:
+def _coverage_label(
+    runtime_events: list[ExternalTelemetryEvent],
+    external_events: list[ExternalTelemetryEvent],
+    import_diagnostics: list[str] | None = None,
+) -> str:
     if runtime_events and external_events:
+        if import_diagnostics:
+            return "partial"
         return "complete"
     if external_events:
         return "partial"

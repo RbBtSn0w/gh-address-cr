@@ -803,6 +803,21 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_object_stored_external_telemetry_is_fail_open_with_diagnostics(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("[]\n", encoding="utf-8")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("external telemetry line 1: record must be a JSON object" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_metadata(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -871,6 +886,74 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["rejected_count"], 2)
             self.assertTrue(any("github_token" in diagnostic for diagnostic in result["diagnostics"]))
             self.assertTrue(any("absolute path" in diagnostic for diagnostic in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_common_absolute_workspace_paths(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "workspace-path",
+                    "kind": "tool_call",
+                    "operation": "python /workspace/gh-address-cr/src/tool.py",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "tmp-path",
+                    "kind": "tool_call",
+                    "operation": "safe operation",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"log": "/tmp/agent/run.log"},
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertEqual(result["rejected_count"], 2)
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_safe_labels_with_sk_substrings(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "disk-usage-agent",
+                "source_session_id": "run-1",
+                "event_id": "flask-tests",
+                "kind": "tool_call",
+                "operation": "run flask-tests",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {"suite": "flask-tests"},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="disk-usage-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+            report = build_efficiency_report("octo/example", "77")
+            self.assertIn("disk-usage-agent", json.dumps(report))
+            self.assertIn("flask-tests", json.dumps(report))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_host_source_and_error_prone_operations_are_reported(self, state_dir):
@@ -944,8 +1027,39 @@ class TestTelemetry(unittest.TestCase):
             report = build_efficiency_report("octo/example", "77")
 
             self.assertEqual(imported["status"], "PARTIAL")
+            self.assertEqual(report["coverage_label"], "partial")
             self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in imported["diagnostics"]))
             self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_plus_partial_external_import_is_partial_coverage(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+            valid = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "accepted-event",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(valid), "{not-json}"]),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "partial")
+            self.assertTrue(any("invalid JSON" in diagnostic for diagnostic in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsupported_format(self, state_dir):

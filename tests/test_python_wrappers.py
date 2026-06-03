@@ -2851,6 +2851,31 @@ else:
         self.assertEqual(payload["source"], "[redacted]")
         self.assertNotIn("/home/alice", result.stdout)
 
+    def test_cli_telemetry_ingest_unavailable_input_keeps_safe_sk_substring_source(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "disk-usage-agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["source"], "disk-usage-agent")
+
     def test_cli_telemetry_summary_fails_loud_when_external_telemetry_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
@@ -2865,6 +2890,33 @@ else:
         artifact = json.loads(Path(payload["report_artifact"]).read_text(encoding="utf-8"))
         self.assertEqual(artifact["status"], "FAILED")
         self.assertEqual(artifact["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
+
+    def test_cli_telemetry_summary_fails_loud_when_import_ledger_is_corrupted(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "telemetry-imports.jsonl").write_text("{not-json}\n", encoding="utf-8")
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr])
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
+        self.assertTrue(any("telemetry import summary line 1" in item for item in payload["diagnostics"]))
+
+    def test_cli_telemetry_summary_treats_report_artifact_write_failure_as_unavailable(self):
+        from gh_address_cr.cli import _telemetry_report_has_storage_diagnostics
+
+        self.assertTrue(
+            _telemetry_report_has_storage_diagnostics(
+                {
+                    "diagnostics": [
+                        "efficiency report artifact unavailable: OSError: disk full",
+                        "telemetry import summary line 1: invalid JSON: Expecting property name",
+                        "telemetry import summary line 2: record must be a JSON object",
+                    ]
+                }
+            )
+        )
 
     def test_final_gate_fail_open_when_external_telemetry_is_corrupted(self):
         self.install_fake_gh_for_threads([])

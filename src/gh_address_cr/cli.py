@@ -2436,12 +2436,9 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
 
 def _reported_telemetry_source(source: str) -> str:
-    lowered = source.lower()
-    token_markers = ("ghp_", "github_pat_", "bearer ", "sk-", "xoxb-", "token=")
-    if any(marker in lowered for marker in token_markers):
+    if core_telemetry._contains_token_marker(source):
         return "[redacted]"
-    local_path_markers = ("/users/", "/private/", "/home/", "/root/", "c:\\users\\")
-    if any(marker in lowered for marker in local_path_markers):
+    if core_telemetry._looks_like_unnecessary_absolute_path(source):
         return "[redacted]"
     return source
 
@@ -2455,6 +2452,9 @@ def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:
         and (
             diagnostic.startswith("external telemetry line ")
             or diagnostic.startswith("external telemetry unreadable:")
+            or diagnostic.startswith("telemetry import summary line ")
+            or diagnostic.startswith("telemetry import summary unreadable:")
+            or diagnostic.startswith("efficiency report artifact unavailable:")
         )
         for diagnostic in diagnostics
     )

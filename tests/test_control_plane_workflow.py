@@ -182,9 +182,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
+        request = json.loads(Path(payload["request_path"]).read_text(encoding="utf-8"))
         skeleton = json.loads(Path(payload["response_skeleton_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(request["required_evidence"], ["note", "reply_markdown"])
         self.assertEqual(skeleton["resolution"], "<fix|clarify|defer|reject>")
         self.assertIn("reply_markdown", skeleton)
+        self.assertNotIn("validation_commands", skeleton)
         self.assertNotIn("fix_reply", skeleton)
         self.assertNotIn("files", skeleton)
 
@@ -259,6 +262,39 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertTrue(session["items"]["local-finding:1"]["handled"])
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "accepted")
         self.assertIn("response_accepted", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_accepts_clarify_response_without_validation_commands(self):
+        self.write_session(items=[open_item()])
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "triage", "--agent-id", "triage-1"
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
+        response_path = self.workspace_dir() / "clarify-action-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "lease_id": request["lease_id"],
+                    "agent_id": "triage-1",
+                    "resolution": "clarify",
+                    "note": "Needs product confirmation rather than a code change.",
+                    "reply_markdown": "Please confirm the intended behavior before changing this path.",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ACTION_ACCEPTED")
+        session = self.load_session()
+        self.assertEqual(session["items"]["local-finding:1"]["state"], "clarify")
+        self.assertEqual(session["items"]["local-finding:1"]["status"], "CLARIFIED")
+        self.assertFalse(session["items"]["local-finding:1"]["blocking"])
 
     def test_agent_submit_rejects_response_with_stale_request_id(self):
         self.write_session(
