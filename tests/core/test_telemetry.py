@@ -956,6 +956,55 @@ class TestTelemetry(unittest.TestCase):
             self.assertIn("flask-tests", json.dumps(report))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_public_api_routes(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "github-route",
+                "kind": "tool_call",
+                "operation": "GET /repos/owner/repo/pulls",
+                "duration_ms": 25,
+                "status": "success",
+                "metadata": {"endpoint": "/repos/owner/repo/pulls/76"},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(report["slowest_operations"][0]["operation"], "GET /repos/owner/repo/pulls")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_allows_safe_metadata_keys_containing_key(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "safe-key-words",
+                "kind": "tool_call",
+                "operation": "collect input stats",
+                "duration_ms": 1,
+                "status": "success",
+                "metadata": {"keyboard_layout": "us", "hotkey_count": 4},
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["accepted_count"], 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_host_source_and_error_prone_operations_are_reported(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -1000,6 +1049,38 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["error_prone_operations"][0]["timeouts"], 1)
             self.assertEqual(report["error_prone_operations"][0]["retries"], 1)
             self.assertTrue(report["inefficiency_flags"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_error_prone_operations_respect_error_rate_threshold(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = []
+            for index in range(10):
+                payloads.append(
+                    {
+                        "schema_version": "1.0",
+                        "source": "codex",
+                        "source_session_id": "run-1",
+                        "event_id": f"event-{index}",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 100,
+                        "status": "failure" if index == 0 else "success",
+                    }
+                )
+
+            imported = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="codex",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(imported["accepted_count"], 10)
+            self.assertEqual(report["error_prone_operations"], [])
+            self.assertEqual(report["inefficiency_flags"], [])
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_partial_import_diagnostics_are_carried_into_reports(self, state_dir):

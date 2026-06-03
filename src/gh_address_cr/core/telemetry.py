@@ -170,7 +170,6 @@ UNSAFE_METADATA_KEYS = {
 }
 UNSAFE_METADATA_KEY_MARKERS = (
     "token",
-    "key",
     "authorization",
     "password",
     "secret",
@@ -725,8 +724,7 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
     if isinstance(value, dict):
         for key, nested in value.items():
             key_text = str(key)
-            lowered_key = key_text.lower()
-            if lowered_key in UNSAFE_METADATA_KEYS or any(marker in lowered_key for marker in UNSAFE_METADATA_KEY_MARKERS):
+            if _is_unsafe_metadata_key(key_text):
                 raise ValueError(f"UNSAFE:unsafe metadata field: {key_text}")
             _validate_safe_metadata_value(nested, key_path=f"{key_path}.{key_text}")
         return
@@ -807,12 +805,26 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
         or "/private/" in lowered
         or "/home/" in lowered
         or "/root/" in lowered
+        or "/workspace/" in lowered
+        or "/tmp/" in lowered
+        or "/var/" in lowered
+        or "/opt/" in lowered
+        or "/mnt/" in lowered
+        or "/builds/" in lowered
+        or "/runner/work/" in lowered
         or "c:\\users\\" in lowered
     ):
         return True
-    if re.search(r"(^|\s)/(?!/)[^\s]+", value):
-        return True
     return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
+
+
+def _is_unsafe_metadata_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in UNSAFE_METADATA_KEYS:
+        return True
+    if any(marker in lowered for marker in UNSAFE_METADATA_KEY_MARKERS):
+        return True
+    return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
 
 
 def _contains_token_marker(value: str) -> bool:
@@ -1094,7 +1106,9 @@ def _error_prone_operations(events: list[ExternalTelemetryEvent]) -> list[dict[s
             row["retries"] += 1
     result: list[dict[str, Any]] = []
     for row in grouped.values():
-        if row["failures"] or row["retries"] or row["timeouts"]:
+        problem_count = row["failures"] + row["retries"] + row["timeouts"]
+        problem_rate = (problem_count / row["events"]) * 100.0 if row["events"] else 0.0
+        if problem_rate > MAX_ERROR_RATE_PERCENT:
             result.append(
                 {
                     "operation": row["operation"],
