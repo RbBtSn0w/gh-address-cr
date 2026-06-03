@@ -2263,9 +2263,8 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         if archive_target is not None:
             summary_path = archive_target / summary_path.name
             if telemetry_report is not None:
-                archived_report_path = archive_target / core_paths.efficiency_report_file(
-                    parsed.repo, parsed.pr_number
-                ).name
+                paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
+                archived_report_path = archive_target / paths.efficiency_report_file.name
                 telemetry_report["report_artifact"] = str(archived_report_path)
                 telemetry_report = _replace_path_occurrences(
                     telemetry_report,
@@ -2589,10 +2588,11 @@ def _write_native_final_gate_artifacts(
     result: core_gate.GateResult,
 ) -> tuple[Path, dict]:
     workspace = session_store.workspace_dir(repo, pr_number)
+    paths = core_paths.SessionPaths(repo, pr_number)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
-    summary_path = workspace / core_paths.audit_summary_file(repo, pr_number).name
-    audit_path = workspace / core_paths.audit_log_file(repo, pr_number).name
+    summary_path = workspace / paths.audit_summary_file.name
+    audit_path = workspace / paths.audit_log_file.name
     trace_path = workspace / "trace.jsonl"
     status = "ok" if result.passed else "failed"
     summary_lines = [
