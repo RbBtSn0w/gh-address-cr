@@ -2,8 +2,15 @@
 
 **Feature Branch**: `016-external-agent-telemetry`  
 **Created**: 2026-06-03  
-**Status**: Draft  
+**Status**: Verified
 **Input**: User description: "External Agent Telemetry Ingestion，按照探究方案来构建spec"
+
+## Clarifications
+
+### Session 2026-06-03
+
+- Q: How must duplicate or overlapping telemetry imports remain idempotent? -> A: Compute and persist a deterministic event fingerprint hash from canonical source, source session identity, event identity when present, event kind, operation, timing, status, and correlation id when present; report calculations must use this fingerprint to prevent duplicate or overlapping imports from inflating metrics.
+- Q: How should telemetry failures affect the core PR review workflow? -> A: Telemetry-specific commands and report requests fail loud with telemetry reason codes, but review, address, publish, reply, resolve, and final-gate flows remain fail-open for telemetry damage and must continue with runtime-only or unavailable coverage labels.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -73,8 +80,9 @@ As a team lead reviewing agent performance, I want the final report to identify 
 
 - What happens when an external telemetry feed is malformed? The import must fail loudly for that feed, identify the invalid record or missing required field, and preserve existing PR session state.
 - What happens when an external telemetry feed contains sensitive paths, usernames, tokens, or raw prompts? The import must reject or sanitize unsafe fields before they can appear in public summaries.
-- How does the system handle duplicate imports of the same telemetry feed? Duplicate events must not inflate counts, durations, retries, or slowest-operation rankings.
+- How does the system handle duplicate imports of the same telemetry feed? Duplicate events must not inflate counts, durations, retries, or slowest-operation rankings. The runtime must compute a stable event fingerprint hash after canonical normalization and use it as the deduplication key across repeated imports.
 - How does the system handle overlapping runtime and external telemetry for the same command? The final report must preserve source attribution and avoid double-counting when events can be correlated.
+- What happens when stored external telemetry is malformed, corrupted, or unreadable after import? Telemetry report requests must fail loudly or label coverage as unavailable, while core PR review, address, publish, reply, resolve, and final-gate behavior must continue without treating telemetry damage as review-resolution failure.
 - What happens when host telemetry is only partially available? The final report must label the coverage as partial and continue to provide runtime metrics.
 - How does the system handle telemetry from multiple agent hosts for one PR? The report must group or attribute metrics by source while still producing an overall workflow summary.
 
@@ -83,19 +91,19 @@ As a team lead reviewing agent performance, I want the final report to identify 
 ### Functional Requirements
 
 - **FR-001**: System MUST allow a PR session to accept external agent telemetry from generic agent sources and known host-specific adapters.
-- **FR-002**: System MUST define a canonical event model for external agent telemetry that captures source, agent session identity, event type, operation name, start time, end time or duration, status, and safe metadata.
+- **FR-002**: System MUST define a canonical event model for external agent telemetry that captures source, agent session identity, event type, operation name, start time, end time or duration, status, safe metadata, optional correlation id, and a deterministic event fingerprint hash.
 - **FR-003**: System MUST normalize all accepted external telemetry into the same reportable model used by the efficiency report.
 - **FR-004**: System MUST preserve source attribution for each imported telemetry event so reports can distinguish runtime telemetry, generic agent telemetry, and host-specific adapter telemetry.
 - **FR-005**: System MUST reject malformed external telemetry with actionable diagnostics and without mutating unrelated PR session state.
 - **FR-006**: System MUST sanitize or reject sensitive telemetry fields, including tokens, credentials, raw prompts, usernames, private machine identifiers, and unnecessary absolute local paths.
-- **FR-007**: System MUST detect duplicate imported events and prevent duplicate imports from inflating report metrics.
+- **FR-007**: System MUST detect duplicate imported events using the deterministic event fingerprint hash and prevent duplicate or overlapping imports from inflating report metrics.
 - **FR-008**: System MUST combine runtime telemetry and imported external agent telemetry into one human-readable efficiency summary for the active PR session.
 - **FR-009**: System MUST produce a structured efficiency report artifact that includes source coverage, event counts, success rate, observed duration, slowest operations, error-prone operations, and inefficiency flags.
 - **FR-010**: System MUST include a coverage label in every final efficiency summary: complete, partial, runtime-only, or unavailable.
 - **FR-011**: System MUST include external telemetry status in final-gate evidence so users can tell whether host-agent metrics were imported before completion.
 - **FR-012**: System MUST support generic AI agents without requiring vendor-specific behavior, while still allowing source-specific adapters to provide richer imports.
 - **FR-013**: System MUST allow users to share the structured report for optimization discussions without exposing private or unsafe telemetry content.
-- **FR-014**: System MUST keep telemetry failures fail-open for the core PR review workflow while failing loudly for the specific telemetry import or report request that could not be completed.
+- **FR-014**: System MUST keep telemetry failures fail-open for the core PR review workflow while failing loudly for the specific telemetry import or report request that could not be completed; damaged, missing, duplicate-only, or unsafe telemetry must not block review, address, publish, reply, resolve, or final-gate flows.
 - **FR-015**: System MUST keep the existing runtime-owned review, reply, resolve, and final-gate behavior authoritative; imported telemetry must not change review item state by itself.
 - **FR-016**: System MUST repair the existing efficiency-metrics summary gap by including runtime telemetry metrics in final-gate output, audit summaries, and structured efficiency report artifacts even when no external host telemetry has been imported.
 - **FR-017**: System MUST treat `repair-telemetry-metrics` as part of this feature scope: existing runtime metrics must no longer be limited to published review-thread reply bodies.
@@ -111,9 +119,9 @@ As a team lead reviewing agent performance, I want the final report to identify 
 
 ### Key Entities *(include if feature involves data)*
 
-- **External Telemetry Event**: A single observed agent-host event, such as a tool call, wait, retry, command execution, or validation step. Key attributes include source, session identity, event type, operation name, timing, status, and safe metadata.
+- **External Telemetry Event**: A single observed agent-host event, such as a tool call, wait, retry, command execution, or validation step. Key attributes include source, session identity, event type, operation name, timing, status, safe metadata, optional correlation id, and deterministic event fingerprint hash.
 - **Telemetry Source**: The origin of telemetry, such as runtime, generic agent, host-specific adapter, or manual report. It determines source attribution and coverage confidence.
-- **Telemetry Import**: A PR-scoped batch of external telemetry events, including import status, source, deduplication identity, validation diagnostics, and safety results.
+- **Telemetry Import**: A PR-scoped batch of external telemetry events, including import status, source, accepted event fingerprint hashes, duplicate fingerprint hashes, validation diagnostics, and safety results.
 - **Coverage Report**: A statement describing which observation surfaces were available for the PR session, what was imported, what was missing, and how much confidence users should place in the efficiency summary.
 - **Efficiency Report**: A combined runtime and external telemetry summary containing counts, success rate, duration, slowest operations, error-prone operations, inefficiency flags, and source coverage.
 

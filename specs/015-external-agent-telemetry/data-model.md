@@ -17,12 +17,14 @@ Fields:
 - `status`: `success`, `failure`, `timeout`, `cancelled`, or `unknown`.
 - `metadata`: sanitized optional key/value context.
 - `correlation_id`: optional id that links external events to runtime validation or command records.
+- `event_fingerprint`: deterministic hash generated after canonical normalization from source, source session identity, event id when present, kind, operation, timing, status, and correlation id when present.
 
 Validation rules:
 - `source`, `kind`, `operation`, and `status` are required.
 - At least one of `duration_ms` or both `started_at` and `ended_at` is required for timing-based reporting.
 - Unsafe metadata is rejected or sanitized before storage.
-- Duplicate `source` + `source_session_id` + `event_id` combinations do not create additional report events.
+- Duplicate `event_fingerprint` values do not create additional report events, even when overlapping imported logs use different source-provided event ids.
+- When `event_id` is absent, the fingerprint must still be stable for repeated imports of the same canonical event.
 
 ## TelemetryImport
 
@@ -38,6 +40,8 @@ Fields:
 - `accepted_count`: number of accepted events.
 - `rejected_count`: number of rejected events.
 - `duplicate_count`: number of duplicate events.
+- `accepted_fingerprints`: event fingerprints accepted by the import.
+- `duplicate_fingerprints`: event fingerprints rejected as already seen.
 - `diagnostics`: actionable messages for rejected or sanitized records.
 - `created_at`: import timestamp.
 
@@ -46,6 +50,7 @@ State transitions:
 - `received` -> `partial` when some records are accepted and some rejected.
 - `received` -> `rejected` when no records can be accepted.
 - `received` -> `duplicate` when all records were already imported.
+- Telemetry import failures do not transition or mutate review item state.
 
 ## TelemetrySource
 
@@ -90,3 +95,5 @@ Validation rules:
 - Reports must include a coverage label even when no events are available.
 - Runtime-only reports are valid and must be explicit.
 - Reports must not expose unsafe metadata.
+- Reports must aggregate by event fingerprint so duplicate or overlapping imports do not inflate counts, durations, retry counts, or slowest-operation rankings.
+- Damaged or unreadable external telemetry must fail loudly for telemetry report requests or be represented as `unavailable` coverage without blocking core PR review workflows.

@@ -32,12 +32,12 @@
 
 ## 6. Duplicate And Overlap Handling
 
-- **Decision**: Compute deterministic event identities from stable source fields and reject or ignore duplicate events during import. Preserve source attribution and avoid double-counting correlated runtime and external events when a correlation id is available.
+- **Decision**: Compute and persist a deterministic event fingerprint hash after canonical normalization. The fingerprint is derived from canonical source, source session identity, source event identity when present, event kind, operation, timing, status, and correlation id when present. Reject or ignore duplicate fingerprints during import and report generation. Preserve source attribution and avoid double-counting correlated runtime and external events when a correlation id is available.
 - **Rationale**: Agents may retry ingestion or import the same session log more than once. Counts, durations, and retry rates must remain stable across repeated imports.
-- **Alternatives considered**: Allow duplicate imports and rely on users to notice inflated metrics. Rejected because it undermines the report's credibility.
+- **Alternatives considered**: Allow duplicate imports and rely on users to notice inflated metrics. Rejected because it undermines the report's credibility. Use only source-provided `event_id`. Rejected because many agent hosts do not provide stable event IDs and overlapping logs may use different event IDs for the same observed work.
 
 ## 7. Failure Semantics
 
-- **Decision**: Telemetry command failures fail loudly for the telemetry action, but they do not block review handling, publish, or final-gate unless the user explicitly requires external telemetry coverage.
+- **Decision**: Telemetry command failures fail loudly for the telemetry action, but they do not block review handling, address, publish, reply, resolve, or final-gate unless the user explicitly requires external telemetry coverage. Damaged, missing, duplicate-only, or unsafe telemetry must surface as telemetry diagnostics and a coverage label such as `runtime-only` or `unavailable`.
 - **Rationale**: The core product is PR review resolution. Metrics are important evidence, but telemetry availability should not make review closure impossible by default.
 - **Alternatives considered**: Make host telemetry mandatory for final-gate. Rejected because many agents cannot export host telemetry yet.

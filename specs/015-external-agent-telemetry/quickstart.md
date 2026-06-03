@@ -44,7 +44,8 @@ Run the same ingest command twice.
 
 Expected:
 - second import reports duplicates.
-- total event count and observed duration do not change.
+- duplicate handling is based on deterministic event fingerprint hashes.
+- total event count, observed duration, retry count, and slowest-operation rankings do not change.
 
 ## Scenario 4: Unsafe Telemetry Rejection
 
@@ -67,3 +68,17 @@ Expected:
 - final-gate includes telemetry coverage.
 - audit summary includes report artifact metadata.
 - final-gate remains authoritative for review-thread and pending-review completion.
+
+## Scenario 6: Corrupted Telemetry Does Not Block Core Workflow
+
+Corrupt or remove the external telemetry artifact after a PR session exists, then run:
+
+```bash
+gh-address-cr final-gate owner/repo 123
+```
+
+Expected:
+- final-gate still evaluates unresolved threads, pending reviews, blocking items, and validation evidence.
+- telemetry coverage is reported as `runtime-only` or `unavailable`.
+- telemetry diagnostics are visible through telemetry-specific report commands.
+- review, address, publish, reply, resolve, and final-gate behavior is not blocked by telemetry damage.

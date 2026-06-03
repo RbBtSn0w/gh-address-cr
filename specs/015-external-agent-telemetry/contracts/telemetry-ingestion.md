@@ -12,6 +12,7 @@ Behavior:
 - Accepts a PR-scoped external telemetry feed.
 - Normalizes accepted events into the runtime telemetry store.
 - Fails loudly for malformed or unsafe feeds without changing review item state.
+- Computes a deterministic event fingerprint hash for each canonical event and uses it for idempotent duplicate detection.
 - Returns a machine-readable import summary.
 
 Required machine fields:
@@ -24,6 +25,8 @@ Required machine fields:
 - `accepted_count`
 - `rejected_count`
 - `duplicate_count`
+- `accepted_fingerprints`
+- `duplicate_fingerprints`
 - `diagnostics`
 - `next_action`
 
@@ -37,6 +40,7 @@ Behavior:
 - Combines runtime telemetry and imported external telemetry.
 - Emits coverage label and report metadata.
 - Does not mutate review item state.
+- Aggregates by event fingerprint so duplicate or overlapping imports do not inflate metrics.
 
 Required machine fields:
 - `status`
@@ -52,6 +56,7 @@ Required machine fields:
 - `error_prone_operations`
 - `inefficiency_flags`
 - `report_artifact`
+- `diagnostics`
 
 ## Generic Agent Event Feed
 
@@ -80,7 +85,8 @@ Rules:
 - `duration_ms` may replace `started_at` plus `ended_at`.
 - Metadata must be public-safe.
 - Unknown metadata keys may be preserved only if safe.
-- Duplicate event identities are ignored or reported as duplicates.
+- Duplicate event fingerprints are ignored or reported as duplicates.
+- The runtime computes `event_fingerprint` after canonical normalization; producers may provide `event_id`, but the runtime fingerprint is the authoritative deduplication key.
 
 ## Coverage Labels
 
@@ -100,11 +106,20 @@ Final-gate output and `audit_summary.md` must include:
 
 Existing final-gate counts and reason codes remain stable.
 
+Telemetry damage is fail-open for the core PR review workflow. Review, address,
+publish, reply, resolve, and final-gate commands must continue when external
+telemetry is missing or corrupted, reporting `runtime-only` or `unavailable`
+coverage as appropriate. Telemetry ingest and summary commands remain fail-loud
+for telemetry-specific failures.
+
 ## Failure Reasons
 
+- `TELEMETRY_IMPORTED`
+- `TELEMETRY_PARTIAL`
 - `MALFORMED_TELEMETRY`
 - `UNSAFE_TELEMETRY_CONTENT`
 - `UNSUPPORTED_TELEMETRY_FORMAT`
+- `TELEMETRY_INPUT_UNAVAILABLE`
 - `AMBIGUOUS_TELEMETRY_SESSION`
 - `DUPLICATE_TELEMETRY_IMPORT`
 - `TELEMETRY_REPORT_UNAVAILABLE`
