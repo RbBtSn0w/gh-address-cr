@@ -440,19 +440,21 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         accepted.append(event)
 
     ambiguous_seen = len(observed_sessions) > 1
+    if unsafe_seen:
+        accepted = []
+        accepted_fingerprints = []
     if ambiguous_seen:
         diagnostics.append("ambiguous telemetry session: multiple source_session_id values in one import")
         rejected_count += len(accepted)
         accepted = []
         accepted_fingerprints = []
 
-    if accepted:
-        _append_external_events(repo, pr_number, accepted)
-        _write_fingerprint_set(repo, pr_number, existing_fingerprints)
-
     if ambiguous_seen:
         status = "FAILED"
         reason_code = "AMBIGUOUS_TELEMETRY_SESSION"
+    elif unsafe_seen:
+        status = "FAILED"
+        reason_code = "UNSAFE_TELEMETRY_CONTENT"
     elif accepted:
         status = "SUCCESS" if rejected_count == 0 else "PARTIAL"
         reason_code = "TELEMETRY_IMPORTED" if rejected_count == 0 else "TELEMETRY_PARTIAL"
@@ -460,9 +462,6 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         status = "FAILED"
         reason_code = "DUPLICATE_TELEMETRY_IMPORT"
         diagnostics.append("All telemetry events were duplicates.")
-    elif unsafe_seen:
-        status = "FAILED"
-        reason_code = "UNSAFE_TELEMETRY_CONTENT"
     elif malformed_seen:
         status = "FAILED"
         reason_code = "MALFORMED_TELEMETRY"
@@ -470,6 +469,10 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         status = "FAILED"
         reason_code = "MALFORMED_TELEMETRY"
         diagnostics.append("No telemetry events were provided.")
+
+    if accepted and status in {"SUCCESS", "PARTIAL"}:
+        _append_external_events(repo, pr_number, accepted)
+        _write_fingerprint_set(repo, pr_number, existing_fingerprints)
 
     summary = _import_summary(
         repo,
@@ -583,8 +586,9 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     missing = [key for key in required if not payload.get(key)]
     if missing:
         raise ValueError(f"missing required field(s): {', '.join(missing)}")
-    kind = str(payload["kind"])
-    status = str(payload["status"])
+    schema_version = _safe_identity_label(str(payload.get("schema_version") or "1.0"), field="schema_version")
+    kind = _safe_identity_label(str(payload["kind"]), field="kind")
+    status = _safe_identity_label(str(payload["status"]), field="status")
     if kind not in SAFE_KINDS:
         raise ValueError(f"unsupported kind: {kind}")
     if status not in SAFE_STATUSES:
@@ -611,7 +615,7 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         )
     )
     event = ExternalTelemetryEvent(
-        schema_version=str(payload.get("schema_version") or "1.0"),
+        schema_version=schema_version,
         source=source,
         source_session_id=session_id,
         event_id=event_id,

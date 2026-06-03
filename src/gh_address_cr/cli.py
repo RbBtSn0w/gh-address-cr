@@ -2386,7 +2386,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
                     "reason_code": "TELEMETRY_INPUT_UNAVAILABLE",
                     "repo": parsed.repo,
                     "pr_number": parsed.pr_number,
-                    "source": parsed.source,
+                    "source": _reported_telemetry_source(parsed.source),
                     "format": parsed.format,
                     "accepted_count": 0,
                     "rejected_count": 0,
@@ -2433,6 +2433,17 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
     print(f"Unknown telemetry command: {subcommand}", file=sys.stderr)
     return 2
+
+
+def _reported_telemetry_source(source: str) -> str:
+    lowered = source.lower()
+    token_markers = ("ghp_", "github_pat_", "bearer ", "sk-", "xoxb-", "token=")
+    if any(marker in lowered for marker in token_markers):
+        return "[redacted]"
+    local_path_markers = ("/users/", "/private/", "/home/", "/root/", "c:\\users\\")
+    if any(marker in lowered for marker in local_path_markers):
+        return "[redacted]"
+    return source
 
 
 def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:

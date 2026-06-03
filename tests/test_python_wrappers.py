@@ -2825,6 +2825,32 @@ else:
         self.assertEqual(payload["accepted_fingerprints"], [])
         self.assertEqual(payload["duplicate_fingerprints"], [])
 
+    def test_cli_telemetry_ingest_unavailable_input_redacts_unsafe_source(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "/home/alice/agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["source"], "[redacted]")
+        self.assertNotIn("/home/alice", result.stdout)
+
     def test_cli_telemetry_summary_fails_loud_when_external_telemetry_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
