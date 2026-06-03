@@ -2824,6 +2824,8 @@ else:
         self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
         self.assertEqual(payload["accepted_fingerprints"], [])
         self.assertEqual(payload["duplicate_fingerprints"], [])
+        self.assertEqual(payload["diagnostics"], ["telemetry input unavailable"])
+        self.assertNotIn(str(missing_feed), result.stdout)
 
     def test_cli_telemetry_ingest_unavailable_input_redacts_unsafe_source(self):
         missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
@@ -2850,6 +2852,33 @@ else:
         self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
         self.assertEqual(payload["source"], "[redacted]")
         self.assertNotIn("/home/alice", result.stdout)
+        self.assertEqual(payload["diagnostics"], ["telemetry input unavailable"])
+
+    def test_cli_telemetry_ingest_unavailable_input_redacts_private_source_identifier(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "username-alice-laptop",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["source"], "[redacted]")
+        self.assertNotIn("username-alice-laptop", result.stdout)
 
     def test_cli_telemetry_ingest_unavailable_input_keeps_safe_sk_substring_source(self):
         missing_feed = Path(self.temp_dir.name) / "missing.jsonl"

@@ -395,7 +395,24 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         _append_import_summary(repo, pr_number, summary)
         return summary
 
-    existing = _load_external_events(repo, pr_number)
+    existing, storage_diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+    if storage_diagnostics:
+        summary = _import_summary(
+            repo,
+            pr_number,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="CORRUPTED_TELEMETRY_STORE",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=storage_diagnostics,
+        )
+        _append_import_summary(repo, pr_number, summary)
+        return summary
     existing_fingerprints = _load_fingerprint_set(repo, pr_number)
     existing_fingerprints.update(event.identity for event in existing)
     accepted: list[ExternalTelemetryEvent] = []
@@ -441,6 +458,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
 
     ambiguous_seen = len(observed_sessions) > 1
     if unsafe_seen:
+        rejected_count += len(accepted)
         accepted = []
         accepted_fingerprints = []
     if ambiguous_seen:
@@ -495,6 +513,9 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     runtime_events = _runtime_events(repo, pr_number)
     external_events, diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+    storage_diagnostics = list(diagnostics)
+    if storage_diagnostics:
+        external_events = []
     import_diagnostics = _load_import_diagnostics(repo, pr_number)
     diagnostics.extend(import_diagnostics)
     runtime_events, runtime_dedupe_diagnostics = _dedupe_events(runtime_events)
@@ -507,7 +528,9 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     events, correlation_dedupe_diagnostics = _dedupe_correlated_events(events)
     diagnostics.extend(correlation_dedupe_diagnostics)
     sources = _source_rows(runtime_events, external_events)
-    coverage_diagnostics = import_diagnostics if _has_unrecovered_import_diagnostics(repo, pr_number) else []
+    coverage_diagnostics = list(storage_diagnostics)
+    if _has_unrecovered_import_diagnostics(repo, pr_number):
+        coverage_diagnostics.extend(import_diagnostics)
     coverage_label = _coverage_label(runtime_events, external_events, coverage_diagnostics)
     total_events = len(events)
     known_status_events = [event for event in events if event.status != "unknown"]
@@ -739,6 +762,8 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
     value_text = str(value)
     if _contains_token_marker(value_text):
         raise ValueError(f"UNSAFE:unsafe metadata value at {key_path}")
+    if _contains_private_identifier(value_text):
+        raise ValueError(f"UNSAFE:unsafe private identifier in metadata value at {key_path}")
     if _looks_like_unnecessary_absolute_path(value_text):
         raise ValueError(f"UNSAFE:unsafe absolute path in metadata value at {key_path}")
 
@@ -746,6 +771,8 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
 def _safe_operation(operation: str) -> str:
     if _contains_token_marker(operation):
         raise ValueError("UNSAFE:unsafe operation label")
+    if _contains_private_identifier(operation):
+        raise ValueError("UNSAFE:unsafe private identifier in operation label")
     if _looks_like_unnecessary_absolute_path(operation):
         raise ValueError("UNSAFE:unsafe absolute path in operation label")
     return operation
@@ -754,16 +781,17 @@ def _safe_operation(operation: str) -> str:
 def _safe_source_label(source: str) -> str:
     if _contains_token_marker(source):
         raise ValueError("UNSAFE:unsafe source label")
+    if _contains_private_identifier(source):
+        raise ValueError("UNSAFE:unsafe private identifier in source label")
     if _looks_like_unnecessary_absolute_path(source):
         raise ValueError("UNSAFE:unsafe absolute path in source label")
     return source
 
 
 def _safe_source_session_id(source_session_id: str) -> str:
-    lowered = source_session_id.lower()
     if _contains_token_marker(source_session_id):
         raise ValueError("UNSAFE:unsafe source_session_id")
-    if any(marker in lowered for marker in ("username", "user-", "machine", "host_id", "host-")):
+    if _contains_private_identifier(source_session_id):
         raise ValueError("UNSAFE:unsafe source_session_id")
     if _looks_like_unnecessary_absolute_path(source_session_id):
         raise ValueError("UNSAFE:unsafe absolute path in source_session_id")
@@ -781,6 +809,8 @@ def _safe_correlation_id(correlation_id: str) -> str:
 def _safe_identity_label(value: str, *, field: str) -> str:
     if _contains_token_marker(value):
         raise ValueError(f"UNSAFE:unsafe {field}")
+    if _contains_private_identifier(value):
+        raise ValueError(f"UNSAFE:unsafe private identifier in {field}")
     if _looks_like_unnecessary_absolute_path(value):
         raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
     return value
@@ -792,6 +822,8 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
     text = str(value)
     if _contains_token_marker(text):
         raise ValueError(f"UNSAFE:unsafe {field}")
+    if _contains_private_identifier(text):
+        raise ValueError(f"UNSAFE:unsafe private identifier in {field}")
     if _looks_like_unnecessary_absolute_path(text):
         raise ValueError(f"UNSAFE:unsafe absolute path in {field}")
     try:
@@ -846,6 +878,24 @@ def _contains_token_marker(value: str) -> bool:
     if re.search(r"(^|[^a-z0-9])bearer\s+", lowered):
         return True
     return bool(re.search(r"(^|[^a-z0-9])sk-[a-z0-9]", lowered))
+
+
+def _contains_private_identifier(value: str) -> bool:
+    lowered = value.lower()
+    markers = (
+        "username",
+        "user-id",
+        "user_id",
+        "machine-id",
+        "machine_id",
+        "machine-name",
+        "machine_name",
+        "host-id",
+        "host_id",
+        "host-name",
+        "host_name",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:

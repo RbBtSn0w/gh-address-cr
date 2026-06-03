@@ -2391,7 +2391,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         else:
             try:
                 raw = Path(parsed.input).read_text(encoding="utf-8")
-            except OSError as exc:
+            except OSError:
                 payload = {
                     "status": "FAILED",
                     "reason_code": "TELEMETRY_INPUT_UNAVAILABLE",
@@ -2404,7 +2404,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
                     "duplicate_count": 0,
                     "accepted_fingerprints": [],
                     "duplicate_fingerprints": [],
-                    "diagnostics": [str(exc)],
+                    "diagnostics": ["telemetry input unavailable"],
                     "next_action": "FIX_TELEMETRY_INPUT",
                 }
                 print(json.dumps(payload, sort_keys=True))
@@ -2448,6 +2448,8 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
 def _reported_telemetry_source(source: str) -> str:
     if core_telemetry._contains_token_marker(source):
+        return "[redacted]"
+    if core_telemetry._contains_private_identifier(source):
         return "[redacted]"
     if core_telemetry._looks_like_unnecessary_absolute_path(source):
         return "[redacted]"
