@@ -143,9 +143,6 @@ def fix_reply(
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"
 
 
@@ -167,9 +164,6 @@ def clarify_reply(payload: list[str], *, efficiency_summary: str | None = None) 
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"
 
 
@@ -193,7 +187,4 @@ def defer_reply(payload: list[str], *, efficiency_summary: str | None = None) ->
         ]
     )
     
-    if efficiency_summary:
-        lines.extend(["", "---", f"> **Agent Efficiency Summary**: {efficiency_summary}"])
-        
     return "\n".join(lines) + "\n"

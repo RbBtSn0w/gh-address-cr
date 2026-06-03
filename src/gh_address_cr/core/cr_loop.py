@@ -627,20 +627,11 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
         return None, "GitHub fix actions require fix_reply.test_result or a derivable validation result."
 
     try:
-        try:
-            from gh_address_cr.core.telemetry import SessionTelemetry
-            efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
-        except Exception as telemetry_exc:
-            if telemetry_debug_enabled():
-                sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
-            efficiency_summary = None
-
         review_priority, review_priority_note = review_priority_for_publish(item)
         reply_markdown = render_fix_reply(
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=str(fix_reply.get("summary") or "").strip() or None,
-            efficiency_summary=efficiency_summary,
             review_priority=review_priority,
             review_priority_note=review_priority_note,
         )
@@ -881,18 +872,10 @@ def handle_batch(
             else:
                 reply_markdown = action.get("reply_markdown")
                 if isinstance(reply_markdown, str) and reply_markdown.strip():
-                    try:
-                        from gh_address_cr.core.telemetry import SessionTelemetry
-                        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
-                    except Exception as telemetry_exc:
-                        if telemetry_debug_enabled():
-                            sys.stderr.write(f"Telemetry summary retrieval failed: {telemetry_exc}\n")
-                        efficiency_summary = None
-
                     if resolution == "clarify":
-                        reply_markdown = render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
+                        reply_markdown = render_clarify_reply([reply_markdown.strip()])
                     elif resolution == "defer":
-                        reply_markdown = render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary)
+                        reply_markdown = render_defer_reply([reply_markdown.strip()])
                 error = ""
             if not reply_markdown:
                 error = error or "GitHub thread actions require reply_markdown."

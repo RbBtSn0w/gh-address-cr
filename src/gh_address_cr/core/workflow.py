@@ -2216,19 +2216,13 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
     resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
 
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        efficiency_summary = SessionTelemetry.get_instance().get_summary_string()
-    except Exception:
-        efficiency_summary = None
-
     if resolution != "fix":
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
             return None, "MISSING_PUBLISH_REPLY"
         if resolution == "clarify":
-            return render_clarify_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
+            return render_clarify_reply([reply_markdown.strip()]), None
         if resolution == "defer":
-            return render_defer_reply([reply_markdown.strip()], efficiency_summary=efficiency_summary), None
+            return render_defer_reply([reply_markdown.strip()]), None
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
@@ -2257,7 +2251,6 @@ def _publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple
             severity,
             [commit_hash, ",".join(files), test_command, test_result, why],
             summary=summary,
-            efficiency_summary=efficiency_summary,
             review_priority=review_priority,
             review_priority_note=review_priority_note,
         ), None
