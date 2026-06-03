@@ -14,6 +14,12 @@
 
 ## User Scenarios & Testing *(mandatory)*
 
+Executable acceptance coverage is tracked in
+[`acceptance-matrix.md`](acceptance-matrix.md). Changes to telemetry safety,
+failure handling, idempotence, coverage, statistics, or final-gate archive
+behavior must update that matrix and keep
+`tests/test_telemetry_acceptance_matrix.py` passing.
+
 ### User Story 1 - Import Host Agent Telemetry (Priority: P1)
 
 As an engineer using `gh-address-cr` to close pull request review work, I want to import telemetry from the surrounding AI agent host so the final efficiency report reflects both runtime-managed work and outer agent tool usage.
