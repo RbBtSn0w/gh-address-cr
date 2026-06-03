@@ -476,6 +476,7 @@ def submit_batch_action_response(
                 )
             prepared_rows.append((response, prepared))
 
+        telemetry_seen: set[tuple[str, str, str, str, str]] = set()
         accepted = [
             _batch_acceptance_payload(
                 response,
@@ -487,6 +488,7 @@ def submit_batch_action_response(
                     prepared,
                     now=now,
                     rejected_status="BATCH_ACTION_REJECTED",
+                    telemetry_seen=telemetry_seen,
                 ),
             )
             for response, prepared in prepared_rows
@@ -1610,6 +1612,7 @@ def _accept_action_response_submission(
     *,
     now: datetime,
     rejected_status: str = "ACTION_REJECTED",
+    telemetry_seen: set[tuple[str, str, str, str, str]] | None = None,
 ) -> Any:
     lease_id = str(prepared["lease_id"])
     lease = prepared["lease"]
@@ -1638,7 +1641,7 @@ def _accept_action_response_submission(
         ) from exc
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
-        _record_validation_command_telemetry(session, response.get("validation_commands") or [])
+        _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
         item["state"] = "open"
         item["blocking"] = True
         item["verification_rejection_note"] = response["note"]
@@ -1662,7 +1665,7 @@ def _accept_action_response_submission(
 
     _apply_response_to_item(item, response)
 
-    _record_validation_command_telemetry(session, response.get("validation_commands") or [])
+    _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
 
     return ledger.append_event(
         session_id=str(session["session_id"]),
@@ -1675,7 +1678,12 @@ def _accept_action_response_submission(
     )
 
 
-def _record_validation_command_telemetry(session: dict[str, Any], validation_cmds: Any) -> None:
+def _record_validation_command_telemetry(
+    session: dict[str, Any],
+    validation_cmds: Any,
+    *,
+    seen: set[tuple[str, str, str, str, str]] | None = None,
+) -> None:
     if not isinstance(validation_cmds, list):
         return
     try:
@@ -1687,7 +1695,8 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
     except Exception:
         return
 
-    seen: set[tuple[str, str, str, str, str]] = set()
+    if seen is None:
+        seen = set()
 
     for val_cmd in _normalize_validation_command_records(validation_cmds):
         try:

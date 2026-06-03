@@ -141,6 +141,13 @@ class TestTelemetry(unittest.TestCase):
         self.assertNotIn("ghp_secret", label)
         self.assertNotIn("https://", label)
 
+    def test_command_label_strips_leading_inline_env_assignments(self):
+        label = command_label(["GH_TOKEN=ghp_secret", "PYTHONPATH=src", "python", "-m", "adapter"])
+
+        self.assertEqual(label, "python -m adapter")
+        self.assertNotIn("GH_TOKEN", label)
+        self.assertNotIn("ghp_secret", label)
+
     def test_json_serialization(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("cmd", 0, 1, 0)
@@ -399,6 +406,59 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("gh_address_cr.core.workflow.submit_lease")
     @patch("gh_address_cr.core.workflow.accept_lease")
+    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        response = {
+            "agent_id": "test-agent",
+            "resolution": "fix",
+            "note": "my fix note",
+            "validation_commands": [
+                {
+                    "command": "ruff check src",
+                    "result": "passed",
+                    "duration": 1.0
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "fixer"},
+            "item_id": "github-thread:one",
+            "item": {"item_kind": "github_thread"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+            telemetry_seen = set()
+
+            _accept_action_response_submission(
+                session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
+            )
+            _accept_action_response_submission(
+                session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
+            )
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertNotIn("_telemetry_validation_seen", session)
+
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
     def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
         from gh_address_cr.core.workflow import WorkflowError, _accept_action_response_submission
         from unittest.mock import MagicMock
@@ -460,7 +520,7 @@ class TestTelemetry(unittest.TestCase):
             tracker = SessionTelemetry.get_instance()
             tracker.configure_file(telemetry_file)
 
-            stdout, error = _run_adapter_command(["my-adapter", "--fast"])
+            stdout, error = _run_adapter_command(["GH_TOKEN=ghp_secret", "my-adapter", "--fast"])
 
             self.assertEqual(stdout, "findings JSON")
             self.assertIsNone(error)
@@ -468,6 +528,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(len(tracker.metrics), 1)
             self.assertEqual(tracker.metrics[0].command, "my-adapter")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
+            self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
 if __name__ == "__main__":
     unittest.main()

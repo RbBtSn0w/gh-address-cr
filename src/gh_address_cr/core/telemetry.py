@@ -13,6 +13,7 @@ from gh_address_cr.core import paths as core_paths
 
 def command_label(cmd: list[str]) -> str:
     """Return a public-safe command label for telemetry summaries."""
+    cmd = _strip_inline_env_assignments(cmd)
     if not cmd:
         return ""
 
@@ -41,6 +42,18 @@ def command_label(cmd: list[str]) -> str:
         break
 
     return shlex.join(label_tokens)
+
+
+def _strip_inline_env_assignments(cmd: list[str]) -> list[str]:
+    index = 0
+    while index < len(cmd) and _is_inline_env_assignment(cmd[index]):
+        index += 1
+    return cmd[index:]
+
+
+def _is_inline_env_assignment(token: str) -> bool:
+    key, separator, value = token.partition("=")
+    return bool(separator and key and value and key.replace("_", "").isalnum() and not key[0].isdigit())
 
 
 @dataclass
