@@ -52,8 +52,8 @@ def _strip_inline_env_assignments(cmd: list[str]) -> list[str]:
 
 
 def _is_inline_env_assignment(token: str) -> bool:
-    key, separator, value = token.partition("=")
-    return bool(separator and key and value and key.replace("_", "").isalnum() and not key[0].isdigit())
+    key, separator, _value = token.partition("=")
+    return bool(separator and key and key.replace("_", "").isalnum() and not key[0].isdigit())
 
 
 @dataclass

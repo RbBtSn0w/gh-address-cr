@@ -1682,7 +1682,7 @@ def _record_validation_command_telemetry(
     session: dict[str, Any],
     validation_cmds: Any,
     *,
-    seen: set[tuple[str, str, str, str, str]] | None = None,
+    seen: set[tuple[str, str, str, str, str, str]] | None = None,
 ) -> None:
     if not isinstance(validation_cmds, list):
         return
@@ -1714,6 +1714,7 @@ def _record_validation_command_telemetry(
             cmd_label = command_label(argv)
             dedupe_key = (
                 cmd_label,
+                _validation_command_fingerprint(cmd_name),
                 _dedupe_value(val_cmd.get("result")),
                 _dedupe_value(val_cmd.get("duration")),
                 _dedupe_value(val_cmd.get("start_time")),
@@ -1749,12 +1750,16 @@ def _record_validation_command_telemetry(
 
 
 def _is_inline_env_assignment(token: str) -> bool:
-    key, separator, value = token.partition("=")
-    return bool(separator and key and value and key.replace("_", "").isalnum() and not key[0].isdigit())
+    key, separator, _value = token.partition("=")
+    return bool(separator and key and key.replace("_", "").isalnum() and not key[0].isdigit())
 
 
 def _dedupe_value(value: Any) -> str:
     return "" if value is None else str(value)
+
+
+def _validation_command_fingerprint(command: str) -> str:
+    return hashlib.sha256(command.encode("utf-8", errors="replace")).hexdigest()
 
 
 def _validation_result_exit_code(result: Any) -> int:
