@@ -1703,16 +1703,12 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
             if not argv:
                 continue
             cmd_label = command_label(argv)
-            dedupe_key = json.dumps(
-                {
-                    "command": cmd_label,
-                    "result": str(val_cmd.get("result") or ""),
-                    "duration": val_cmd.get("duration"),
-                    "start_time": val_cmd.get("start_time"),
-                    "end_time": val_cmd.get("end_time"),
-                },
-                sort_keys=True,
-                default=str,
+            dedupe_key = (
+                cmd_label,
+                str(val_cmd.get("result") or ""),
+                str(val_cmd.get("duration") or ""),
+                str(val_cmd.get("start_time") or ""),
+                str(val_cmd.get("end_time") or ""),
             )
             if dedupe_key in seen:
                 continue
