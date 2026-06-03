@@ -2,7 +2,7 @@
 
 **Feature Branch**: `016-external-agent-telemetry`  
 **Created**: 2026-06-03  
-**Status**: Verified
+**Status**: In Review
 **Input**: User description: "External Agent Telemetry Ingestion，按照探究方案来构建spec"
 
 ## Clarifications
