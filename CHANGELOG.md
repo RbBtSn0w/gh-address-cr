@@ -1,3 +1,9 @@
+## [2.9.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.2...v2.9.3) (2026-06-03)
+
+### Bug Fixes
+
+* **review:** record telemetry and reviewer priority evidence ([#74](https://github.com/RbBtSn0w/gh-address-cr/issues/74)) ([644678d](https://github.com/RbBtSn0w/gh-address-cr/commit/644678d8b95950270a2b5d1019c15849ae7a1241))
+
 ## [2.9.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.1...v2.9.2) (2026-06-02)
 
 ### Bug Fixes
