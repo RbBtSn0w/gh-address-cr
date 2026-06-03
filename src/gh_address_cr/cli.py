@@ -1287,7 +1287,14 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     error: str | None = None
     exit_code = 1
     try:
-        result = subprocess.run(argv, text=True, capture_output=True)
+        run_argv, inline_env = _split_inline_env_assignments(argv)
+        if not run_argv:
+            return None, "adapter requires an executable after inline environment assignments."
+        run_env = None
+        if inline_env:
+            run_env = os.environ.copy()
+            run_env.update(inline_env)
+        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env)
         exit_code = result.returncode
     except Exception as exc:
         error = str(exc)
@@ -1310,6 +1317,18 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if result.returncode != 0:
         return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
     return result.stdout, None
+
+
+def _split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, str]]:
+    from gh_address_cr.core.telemetry import is_inline_env_assignment
+
+    index = 0
+    inline_env: dict[str, str] = {}
+    while index < len(argv) and is_inline_env_assignment(argv[index]):
+        key, _separator, value = argv[index].partition("=")
+        inline_env[key] = value
+        index += 1
+    return argv[index:], inline_env
 
 
 def handle_native_high_level(command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:

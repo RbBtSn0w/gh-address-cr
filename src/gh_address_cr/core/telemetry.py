@@ -46,12 +46,12 @@ def command_label(cmd: list[str]) -> str:
 
 def _strip_inline_env_assignments(cmd: list[str]) -> list[str]:
     index = 0
-    while index < len(cmd) and _is_inline_env_assignment(cmd[index]):
+    while index < len(cmd) and is_inline_env_assignment(cmd[index]):
         index += 1
     return cmd[index:]
 
 
-def _is_inline_env_assignment(token: str) -> bool:
+def is_inline_env_assignment(token: str) -> bool:
     key, separator, _value = token.partition("=")
     return bool(separator and key and key.replace("_", "").isalnum() and not key[0].isdigit())
 

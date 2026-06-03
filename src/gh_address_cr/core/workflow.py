@@ -1689,7 +1689,7 @@ def _record_validation_command_telemetry(
     try:
         import shlex
         import time
-        from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+        from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
 
         telemetry = SessionTelemetry.get_instance()
     except Exception:
@@ -1707,7 +1707,7 @@ def _record_validation_command_telemetry(
                 argv = shlex.split(cmd_name)
             except ValueError:
                 continue
-            while argv and _is_inline_env_assignment(argv[0]):
+            while argv and is_inline_env_assignment(argv[0]):
                 argv.pop(0)
             if not argv:
                 continue
@@ -1747,11 +1747,6 @@ def _record_validation_command_telemetry(
             )
         except Exception:
             continue
-
-
-def _is_inline_env_assignment(token: str) -> bool:
-    key, separator, _value = token.partition("=")
-    return bool(separator and key and key.replace("_", "").isalnum() and not key[0].isdigit())
 
 
 def _dedupe_value(value: Any) -> str:

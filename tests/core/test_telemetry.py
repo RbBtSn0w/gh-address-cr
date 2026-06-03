@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
 
 
 class TestTelemetry(unittest.TestCase):
@@ -153,6 +153,12 @@ class TestTelemetry(unittest.TestCase):
 
         self.assertEqual(label, "python -m adapter")
         self.assertNotIn("GH_TOKEN", label)
+
+    def test_is_inline_env_assignment_accepts_empty_values(self):
+        self.assertTrue(is_inline_env_assignment("GH_TOKEN="))
+        self.assertTrue(is_inline_env_assignment("PYTHONPATH=src"))
+        self.assertFalse(is_inline_env_assignment("1BAD=value"))
+        self.assertFalse(is_inline_env_assignment("A-B=value"))
 
     def test_json_serialization(self):
         tracker = SessionTelemetry.get_instance()
@@ -540,6 +546,9 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(stdout, "findings JSON")
             self.assertIsNone(error)
+            mock_run.assert_called_once()
+            self.assertEqual(mock_run.call_args.args[0], ["my-adapter", "--fast"])
+            self.assertEqual(mock_run.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
             
             self.assertEqual(len(tracker.metrics), 1)
             self.assertEqual(tracker.metrics[0].command, "my-adapter")
