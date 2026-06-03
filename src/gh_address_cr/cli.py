@@ -2392,21 +2392,12 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
             try:
                 raw = Path(parsed.input).read_text(encoding="utf-8")
             except OSError:
-                payload = {
-                    "status": "FAILED",
-                    "reason_code": "TELEMETRY_INPUT_UNAVAILABLE",
-                    "repo": parsed.repo,
-                    "pr_number": parsed.pr_number,
-                    "source": _reported_telemetry_source(parsed.source),
-                    "format": parsed.format,
-                    "accepted_count": 0,
-                    "rejected_count": 0,
-                    "duplicate_count": 0,
-                    "accepted_fingerprints": [],
-                    "duplicate_fingerprints": [],
-                    "diagnostics": ["telemetry input unavailable"],
-                    "next_action": "FIX_TELEMETRY_INPUT",
-                }
+                payload = core_telemetry.input_unavailable_import_summary(
+                    parsed.repo,
+                    parsed.pr_number,
+                    source=parsed.source,
+                    fmt=parsed.format,
+                )
                 print(json.dumps(payload, sort_keys=True))
                 return 2
         summary = core_telemetry.import_external_telemetry(

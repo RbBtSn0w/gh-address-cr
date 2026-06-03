@@ -413,6 +413,24 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         )
         _append_import_summary(repo, pr_number, summary)
         return summary
+    write_diagnostics = _telemetry_write_target_diagnostics(repo, pr_number)
+    if write_diagnostics:
+        summary = _import_summary(
+            repo,
+            pr_number,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="CORRUPTED_TELEMETRY_STORE",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=write_diagnostics,
+        )
+        _append_import_summary_if_available(repo, pr_number, summary)
+        return summary
     existing_fingerprints = _load_fingerprint_set(repo, pr_number)
     existing_fingerprints.update(event.identity for event in existing)
     accepted: list[ExternalTelemetryEvent] = []
@@ -494,8 +512,8 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         diagnostics.append("No telemetry events were provided.")
 
     if accepted and status in {"SUCCESS", "PARTIAL"}:
-        _append_external_events(repo, pr_number, accepted)
         _write_fingerprint_set(repo, pr_number, existing_fingerprints)
+        _append_external_events(repo, pr_number, accepted)
 
     summary = _import_summary(
         repo,
@@ -510,6 +528,25 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         accepted_fingerprints=accepted_fingerprints,
         duplicate_fingerprints=duplicate_fingerprints,
         diagnostics=diagnostics,
+    )
+    _append_import_summary(repo, pr_number, summary)
+    return summary
+
+
+def input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict[str, Any]:
+    summary = _import_summary(
+        repo,
+        pr_number,
+        source=source,
+        fmt=fmt,
+        status="FAILED",
+        reason_code="TELEMETRY_INPUT_UNAVAILABLE",
+        accepted_count=0,
+        rejected_count=0,
+        duplicate_count=0,
+        accepted_fingerprints=[],
+        duplicate_fingerprints=[],
+        diagnostics=["telemetry input unavailable"],
     )
     _append_import_summary(repo, pr_number, summary)
     return summary
@@ -934,8 +971,10 @@ def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEv
 
 def _load_external_events_with_diagnostics(repo: str, pr_number: str) -> tuple[list[ExternalTelemetryEvent], list[str]]:
     path = core_paths.external_telemetry_file(repo, pr_number)
-    if not path.is_file():
+    if not path.exists():
         return [], []
+    if not path.is_file():
+        return [], [f"external telemetry store is not a regular file: {path.name}"]
     events: list[ExternalTelemetryEvent] = []
     diagnostics: list[str] = []
     try:
@@ -977,13 +1016,17 @@ def _dedupe_correlated_events(events: list[ExternalTelemetryEvent]) -> tuple[lis
     diagnostics: list[str] = []
     for event in events:
         key = _correlation_dedupe_key(event)
-        if key and key in seen and seen[key].source != event.source:
+        if key and key in seen and _is_runtime_external_overlap(seen[key], event):
             diagnostics.append(f"correlated telemetry event ignored: {event.source}:{event.event_id}")
             continue
         if key:
             seen[key] = event
         deduped.append(event)
     return deduped, diagnostics
+
+
+def _is_runtime_external_overlap(first: ExternalTelemetryEvent, second: ExternalTelemetryEvent) -> bool:
+    return first.source != second.source and "runtime" in {first.source, second.source}
 
 
 def _correlation_dedupe_key(event: ExternalTelemetryEvent) -> str | None:
@@ -1029,6 +1072,28 @@ def _append_import_summary(repo: str, pr_number: str, summary: dict[str, Any]) -
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(summary, sort_keys=True) + "\n")
+
+
+def _append_import_summary_if_available(repo: str, pr_number: str, summary: dict[str, Any]) -> None:
+    try:
+        _append_import_summary(repo, pr_number, summary)
+    except OSError:
+        return
+
+
+def _telemetry_write_target_diagnostics(repo: str, pr_number: str) -> list[str]:
+    diagnostics: list[str] = []
+    targets = (
+        ("external telemetry store", core_paths.external_telemetry_file(repo, pr_number)),
+        ("telemetry fingerprint ledger", core_paths.telemetry_fingerprints_file(repo, pr_number)),
+        ("telemetry import ledger", core_paths.telemetry_imports_file(repo, pr_number)),
+    )
+    for label, path in targets:
+        if path.exists() and not path.is_file():
+            diagnostics.append(f"{label} is not a regular file: {path.name}")
+        if path.parent.exists() and not path.parent.is_dir():
+            diagnostics.append(f"{label} parent is not a directory: {path.parent.name}")
+    return diagnostics
 
 
 def _import_summary(

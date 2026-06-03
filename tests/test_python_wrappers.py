@@ -2832,6 +2832,9 @@ else:
         self.assertEqual(payload["duplicate_fingerprints"], [])
         self.assertEqual(payload["diagnostics"], ["telemetry input unavailable"])
         self.assertNotIn(str(missing_feed), result.stdout)
+        import_lines = (self.workspace_dir() / "telemetry-imports.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(import_lines), 1)
+        self.assertEqual(json.loads(import_lines[0])["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
 
     def test_cli_telemetry_ingest_unavailable_input_redacts_unsafe_source(self):
         missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
@@ -2858,6 +2861,32 @@ else:
         self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
         self.assertEqual(payload["source"], "[redacted]")
         self.assertNotIn("/home/alice", result.stdout)
+
+    def test_cli_telemetry_ingest_unavailable_input_redacts_unsafe_format(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "ghp_secret_format",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["format"], "[redacted]")
+        self.assertNotIn("ghp_secret_format", result.stdout)
         self.assertEqual(payload["diagnostics"], ["telemetry input unavailable"])
 
     def test_cli_telemetry_ingest_unavailable_input_redacts_private_source_identifier(self):
