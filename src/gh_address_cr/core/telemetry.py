@@ -508,8 +508,9 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     sources = _source_rows(runtime_events, external_events)
     coverage_label = _coverage_label(runtime_events, external_events)
     total_events = len(events)
-    success_count = sum(1 for event in events if event.status == "success")
-    success_rate = (success_count / total_events) * 100.0 if total_events else 0.0
+    known_status_events = [event for event in events if event.status != "unknown"]
+    success_count = sum(1 for event in known_status_events if event.status == "success")
+    success_rate = (success_count / len(known_status_events)) * 100.0 if known_status_events else 0.0
     total_duration = sum(event.duration_ms for event in events)
     slowest = sorted(events, key=lambda event: event.duration_ms, reverse=True)[:3]
     error_prone = _error_prone_operations(events)
@@ -541,8 +542,11 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "report_artifact": str(report_path),
     }
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as exc:
+        report["diagnostics"].append(f"efficiency report artifact unavailable: {type(exc).__name__}: {exc}")
     return report
 
 

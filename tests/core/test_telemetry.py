@@ -162,6 +162,64 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(Path(report["report_artifact"]).exists())
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_success_rate_ignores_unknown_status(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "known-success",
+                    "kind": "tool_call",
+                    "operation": "run unit tests",
+                    "duration_ms": 1000,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "unknown-status",
+                    "kind": "tool_call",
+                    "operation": "inspect local state",
+                    "duration_ms": 1000,
+                    "status": "unknown",
+                },
+            ]
+            import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 2)
+            self.assertEqual(report["success_rate"], 100.0)
+
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            write_text.side_effect = OSError("disk full")
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["reason_code"], "TELEMETRY_REPORT_READY")
+            self.assertEqual(report["total_events"], 1)
+            self.assertTrue(
+                any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
+            )
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_no_telemetry_efficiency_report_is_unavailable(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
