@@ -2862,6 +2862,33 @@ else:
         self.assertEqual(payload["source"], "[redacted]")
         self.assertNotIn("/home/alice", result.stdout)
 
+    def test_cli_telemetry_ingest_unavailable_input_redacts_control_character_source(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic\n- injected",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["source"], "[redacted]")
+        import_lines = (self.workspace_dir() / "telemetry-imports.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(json.loads(import_lines[0])["source"], "[redacted]")
+
     def test_cli_telemetry_ingest_unavailable_input_redacts_unsafe_format(self):
         missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
 
@@ -2955,6 +2982,18 @@ else:
         self.assertEqual(artifact["status"], "FAILED")
         self.assertEqual(artifact["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
 
+    def test_cli_telemetry_summary_fails_loud_when_external_store_is_non_file(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "external-telemetry.jsonl").mkdir()
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr])
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
+        self.assertTrue(any("external telemetry store is not a regular file" in item for item in payload["diagnostics"]))
+
     def test_cli_telemetry_summary_fails_loud_when_import_ledger_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         (self.workspace_dir() / "telemetry-imports.jsonl").write_text("{not-json}\n", encoding="utf-8")
@@ -2966,6 +3005,18 @@ else:
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
         self.assertTrue(any("telemetry import summary line 1" in item for item in payload["diagnostics"]))
+
+    def test_cli_telemetry_summary_fails_loud_when_import_ledger_is_non_file(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "telemetry-imports.jsonl").mkdir()
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr])
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
+        self.assertTrue(any("telemetry import summary is not a regular file" in item for item in payload["diagnostics"]))
 
     def test_cli_telemetry_summary_fails_loud_when_import_diagnostics_shape_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)

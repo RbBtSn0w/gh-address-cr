@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -235,10 +236,14 @@ class SessionTelemetry:
         if not isinstance(payload, dict):
             return None
         try:
+            start_time = float(payload["start_time"])
+            end_time = float(payload["end_time"])
+            if not math.isfinite(start_time) or not math.isfinite(end_time):
+                return None
             return ExecutionMetric(
                 command=str(payload["command"]),
-                start_time=float(payload["start_time"]),
-                end_time=float(payload["end_time"]),
+                start_time=start_time,
+                end_time=end_time,
                 exit_code=int(payload["exit_code"]),
                 is_retry=bool(payload.get("is_retry", False)),
                 pid=int(payload.get("pid", 0)),
@@ -431,7 +436,24 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         )
         _append_import_summary_if_available(repo, pr_number, summary)
         return summary
-    existing_fingerprints = _load_fingerprint_set(repo, pr_number)
+    existing_fingerprints, fingerprint_diagnostics = _load_fingerprint_set_with_diagnostics(repo, pr_number)
+    if fingerprint_diagnostics:
+        summary = _import_summary(
+            repo,
+            pr_number,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="CORRUPTED_TELEMETRY_STORE",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=fingerprint_diagnostics,
+        )
+        _append_import_summary_if_available(repo, pr_number, summary)
+        return summary
     existing_fingerprints.update(event.identity for event in existing)
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
@@ -670,7 +692,10 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     duration_ms = _event_duration_ms(payload)
     metadata = _safe_metadata(payload.get("metadata") or {})
     session_id = _safe_source_session_id(str(payload.get("source_session_id") or "unknown-session"))
-    operation = _safe_operation(str(payload["operation"]))
+    operation_payload = payload["operation"]
+    if not isinstance(operation_payload, str):
+        raise ValueError("operation must be a string")
+    operation = _safe_operation(operation_payload)
     started_at = _safe_optional_timestamp(payload.get("started_at"), field="started_at")
     ended_at = _safe_optional_timestamp(payload.get("ended_at"), field="ended_at")
     correlation_id = _safe_correlation_id(str(payload["correlation_id"])) if payload.get("correlation_id") else None
@@ -1037,19 +1062,28 @@ def _correlation_dedupe_key(event: ExternalTelemetryEvent) -> str | None:
 
 
 def _load_fingerprint_set(repo: str, pr_number: str) -> set[str]:
+    fingerprints, _diagnostics = _load_fingerprint_set_with_diagnostics(repo, pr_number)
+    return fingerprints
+
+
+def _load_fingerprint_set_with_diagnostics(repo: str, pr_number: str) -> tuple[set[str], list[str]]:
     path = core_paths.telemetry_fingerprints_file(repo, pr_number)
+    if not path.exists():
+        return set(), []
     if not path.is_file():
-        return set()
+        return set(), [f"telemetry fingerprint ledger is not a regular file: {path.name}"]
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
+    except OSError as exc:
+        return set(), [f"telemetry fingerprint ledger unreadable: {exc}"]
+    except json.JSONDecodeError as exc:
+        return set(), [f"telemetry fingerprint ledger invalid JSON: {exc.msg}"]
     if not isinstance(payload, dict):
-        return set()
+        return set(), ["telemetry fingerprint ledger record must be a JSON object"]
     fingerprints = payload.get("event_fingerprints")
     if not isinstance(fingerprints, list):
-        return set()
-    return {str(value) for value in fingerprints if value}
+        return set(), ["telemetry fingerprint ledger event_fingerprints must be a list"]
+    return {str(value) for value in fingerprints if value}, []
 
 
 def _write_fingerprint_set(repo: str, pr_number: str, fingerprints: set[str]) -> None:
@@ -1130,6 +1164,8 @@ def _import_summary(
 
 
 def _reported_source_label(source: str) -> str:
+    if _contains_control_character(source):
+        return "[redacted]"
     if _contains_token_marker(source):
         return "[redacted]"
     if _contains_private_identifier(source):
@@ -1147,8 +1183,10 @@ def _reported_format_label(fmt: str) -> str:
 
 def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
     path = core_paths.telemetry_imports_file(repo, pr_number)
-    if not path.is_file():
+    if not path.exists():
         return []
+    if not path.is_file():
+        return [f"telemetry import summary is not a regular file: {path.name}"]
     diagnostics: list[str] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1178,8 +1216,10 @@ def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
 
 def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
     path = core_paths.telemetry_imports_file(repo, pr_number)
-    if not path.is_file():
+    if not path.exists():
         return False
+    if not path.is_file():
+        return True
     unrecovered_by_source: dict[str, bool] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()

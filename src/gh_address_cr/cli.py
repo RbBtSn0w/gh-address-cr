@@ -2450,8 +2450,10 @@ def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:
         and (
             diagnostic.startswith("external telemetry line ")
             or diagnostic.startswith("external telemetry unreadable:")
+            or diagnostic.startswith("external telemetry store is not a regular file:")
             or diagnostic.startswith("telemetry import summary line ")
             or diagnostic.startswith("telemetry import summary unreadable:")
+            or diagnostic.startswith("telemetry import summary is not a regular file:")
             or diagnostic.startswith("efficiency report artifact unavailable:")
         )
         for diagnostic in diagnostics

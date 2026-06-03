@@ -110,6 +110,23 @@ class TestTelemetry(unittest.TestCase):
         self.assertIn("hung", timeout_flags[0])
         self.assertNotIn("Hanged", timeout_flags[0])
 
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_finite_persisted_runtime_metric_is_ignored_in_report(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            telemetry_path = core_paths.workspace_dir("octo/example", "77") / "telemetry.jsonl"
+            telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+            telemetry_path.write_text(
+                '{"command":"pytest","start_time":NaN,"end_time":1.0,"exit_code":0}\n',
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+
     def test_command_label_sanitizes_sensitive_arguments(self):
         label = command_label(
             [
@@ -1069,6 +1086,30 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("control character" in diagnostic for diagnostic in result["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_non_string_operation(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "array-operation",
+                "kind": "tool_call",
+                "operation": ["run", "tests"],
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertTrue(any("operation must be a string" in diagnostic for diagnostic in result["diagnostics"]))
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_report_deduplicates_stored_duplicate_fingerprints(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -1233,6 +1274,48 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["accepted_count"], 0)
             self.assertTrue(any("telemetry fingerprint ledger is not a regular file" in item for item in result["diagnostics"]))
             self.assertFalse(external_path.exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_corrupted_fingerprint_ledger_blocks_import_without_rewriting(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            fingerprint_path = core_paths.telemetry_fingerprints_file("octo/example", "77")
+            fingerprint_path.parent.mkdir(parents=True, exist_ok=True)
+            fingerprint_path.write_text("{not-json}\n", encoding="utf-8")
+            external_path = core_paths.external_telemetry_file("octo/example", "77")
+            payload = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(payload)
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
+            self.assertTrue(any("telemetry fingerprint ledger invalid JSON" in item for item in result["diagnostics"]))
+            self.assertEqual(fingerprint_path.read_text(encoding="utf-8"), "{not-json}\n")
+            self.assertFalse(external_path.exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_non_file_import_ledger_is_reported_as_corrupted_storage(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            import_path = core_paths.telemetry_imports_file("octo/example", "77")
+            import_path.mkdir(parents=True)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertTrue(any("telemetry import summary is not a regular file" in item for item in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_metadata(self, state_dir):
