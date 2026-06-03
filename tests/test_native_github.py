@@ -54,12 +54,20 @@ class NativeGitHubClientTests(unittest.TestCase):
                                                 },
                                                 "firstComment": {
                                                     "nodes": [
-                                                        {"url": "https://github.test/original", "body": "Please fix."}
+                                                        {
+                                                            "url": "https://github.test/original",
+                                                            "body": "Please fix.",
+                                                            "author": {"login": "reviewer"},
+                                                        }
                                                     ]
                                                 },
                                                 "latestComment": {
                                                     "nodes": [
-                                                        {"url": "https://github.test/original", "body": "Please fix."}
+                                                        {
+                                                            "url": "https://github.test/original",
+                                                            "body": "Please fix.",
+                                                            "author": {"login": "reviewer"},
+                                                        }
                                                     ]
                                                 },
                                             }
@@ -90,6 +98,7 @@ class NativeGitHubClientTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["id"], "THREAD_1")
         self.assertEqual(rows[0]["body"], "Please fix.")
+        self.assertEqual(rows[0]["first_author_login"], "reviewer")
         self.assertTrue(rows[0]["viewer_reply_checked"])
         self.assertTrue(rows[0]["viewer_replied"])
         self.assertEqual(rows[0]["viewer_reply_url"], "https://github.test/reply")

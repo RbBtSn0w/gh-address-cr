@@ -844,11 +844,19 @@ def _utc_now() -> str:
 
 def _load_or_create_session(repo: str, pr_number: str) -> dict:
     manager = session_store.SessionManager(repo, str(pr_number))
+    created = False
     try:
         session = manager.load()
     except session_store.SessionError:
         session = manager.create(status="ACTIVE")
+        created = True
     _ensure_native_session_fields(session)
+    if created:
+        try:
+            from gh_address_cr.core.telemetry import SessionTelemetry
+            SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
+        except Exception:
+            pass
     return session
 
 
@@ -1271,10 +1279,56 @@ def _parse_native_high_level_args(command: str, args: list[str]) -> argparse.Nam
 def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if not argv:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
-    result = subprocess.run(argv, text=True, capture_output=True)
+    import time
+    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
+    start_time = time.time()
+    result = None
+    error: str | None = None
+    exit_code = 1
+    try:
+        run_argv, inline_env = _split_inline_env_assignments(argv)
+        if not run_argv:
+            return None, "adapter requires an executable after inline environment assignments."
+        run_env = None
+        if inline_env:
+            run_env = os.environ.copy()
+            run_env.update(inline_env)
+        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env)
+        exit_code = result.returncode
+    except Exception as exc:
+        error = str(exc)
+    finally:
+        end_time = time.time()
+        try:
+            SessionTelemetry.get_instance().record(
+                command=command_label(argv),
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+            )
+        except Exception:
+            pass
+
+    if error is not None:
+        return None, error
+    if result is None:
+        return None, "Adapter command failed before producing a result."
     if result.returncode != 0:
         return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
     return result.stdout, None
+
+
+def _split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, str]]:
+    from gh_address_cr.core.telemetry import is_inline_env_assignment
+
+    index = 0
+    inline_env: dict[str, str] = {}
+    while index < len(argv) and is_inline_env_assignment(argv[index]):
+        key, _separator, value = argv[index].partition("=")
+        inline_env[key] = value
+        index += 1
+    return argv[index:], inline_env
 
 
 def handle_native_high_level(command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
@@ -1845,6 +1899,7 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--why", required=True)
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
     parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
+    parser.add_argument("--review-priority", choices=["high", "medium", "low"])
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
@@ -1865,6 +1920,7 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
             why=parsed.why,
             severity=parsed.severity,
             severity_note=parsed.severity_note,
+            review_priority=parsed.review_priority,
             publish=parsed.publish,
             now=now_dt,
         )

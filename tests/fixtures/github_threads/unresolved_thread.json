@@ -37,6 +37,8 @@
       "first_url": "https://example.test/thread/unresolved",
       "latest_body": "Validate the input before use.",
       "latest_url": "https://example.test/thread/unresolved",
+      "first_author_login": "reviewer",
+      "latest_author_login": "reviewer",
       "comment_source": "first",
       "is_resolved": false,
       "is_outdated": false,

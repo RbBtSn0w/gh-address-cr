@@ -204,6 +204,41 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["review_priority_evidence"]["value"], "medium")
         self.assertEqual(item["review_priority_evidence"]["source"], "github_first_comment")
 
+    def test_sync_github_records_explicit_review_priority_payload(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_HIGH",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Copilot comment body without a textual priority marker.",
+                    "url": "https://example.test/thread/high",
+                    "first_body": "Copilot comment body without a textual priority marker.",
+                    "first_url": "https://example.test/thread/high",
+                    "first_author_login": "Copilot",
+                    "review_priority": "High",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        item = self.load_session()["items"]["github-thread:THREAD_HIGH"]
+        self.assertNotIn("severity", item)
+        self.assertEqual(item["first_author_login"], "Copilot")
+        self.assertEqual(
+            item["review_priority_evidence"],
+            {
+                "value": "high",
+                "source": "github_payload",
+                "raw_marker": "High",
+                "observed_from": "https://example.test/thread/high",
+            },
+        )
+
     def test_sync_github_does_not_promote_latest_comment_severity(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

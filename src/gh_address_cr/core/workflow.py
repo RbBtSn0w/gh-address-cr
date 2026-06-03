@@ -39,7 +39,12 @@ from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
     fix_reply as render_fix_reply,
 )
-from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity, review_priority_for_publish
+from gh_address_cr.core.severity import (
+    first_scene_item_severity,
+    normalize_severity,
+    review_priority_evidence,
+    review_priority_for_publish,
+)
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -476,6 +481,7 @@ def submit_batch_action_response(
                 )
             prepared_rows.append((response, prepared))
 
+        telemetry_seen: set[tuple[str, str, str, str, str, str]] = set()
         accepted = [
             _batch_acceptance_payload(
                 response,
@@ -487,6 +493,7 @@ def submit_batch_action_response(
                     prepared,
                     now=now,
                     rejected_status="BATCH_ACTION_REJECTED",
+                    telemetry_seen=telemetry_seen,
                 ),
             )
             for response, prepared in prepared_rows
@@ -759,6 +766,7 @@ def fast_fix_item(
     why: str,
     severity: str | None = None,
     severity_note: str | None = None,
+    review_priority: str | None = None,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -819,6 +827,20 @@ def fast_fix_item(
                 waiting_on="fast_fix_input",
                 payload={"item_id": item_id},
             )
+    requested_priority_evidence = review_priority_evidence(
+        review_priority,
+        source="agent_fix",
+        raw_marker=review_priority,
+    )
+    if review_priority and requested_priority_evidence is None:
+        raise WorkflowError(
+            status="FAST_FIX_REJECTED",
+            reason_code="INVALID_REVIEW_PRIORITY",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent fix --review-priority must be high, medium, or low.",
+            payload={"item_id": item_id},
+        )
 
     try:
         classification = record_classification(
@@ -837,6 +859,12 @@ def fast_fix_item(
             item_id=item_id,
             now=now,
         )
+        if requested_priority_evidence:
+            session = session_store.load_session(repo, pr_number)
+            item = _items(session).get(item_id)
+            if isinstance(item, dict):
+                item["review_priority_evidence"] = requested_priority_evidence
+                session_store.save_session(repo, pr_number, session)
         request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
         response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
         fix_reply = {
@@ -1610,6 +1638,7 @@ def _accept_action_response_submission(
     *,
     now: datetime,
     rejected_status: str = "ACTION_REJECTED",
+    telemetry_seen: set[tuple[str, str, str, str, str, str]] | None = None,
 ) -> Any:
     lease_id = str(prepared["lease_id"])
     lease = prepared["lease"]
@@ -1638,6 +1667,7 @@ def _accept_action_response_submission(
         ) from exc
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
+        _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
         item["state"] = "open"
         item["blocking"] = True
         item["verification_rejection_note"] = response["note"]
@@ -1660,6 +1690,9 @@ def _accept_action_response_submission(
         )
 
     _apply_response_to_item(item, response)
+
+    _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
+
     return ledger.append_event(
         session_id=str(session["session_id"]),
         item_id=item_id,
@@ -1669,6 +1702,91 @@ def _accept_action_response_submission(
         event_type="response_accepted",
         payload={"resolution": response["resolution"], "note": response["note"]},
     )
+
+
+def _record_validation_command_telemetry(
+    session: dict[str, Any],
+    validation_cmds: Any,
+    *,
+    seen: set[tuple[str, str, str, str, str, str]] | None = None,
+) -> None:
+    if not isinstance(validation_cmds, list):
+        return
+    try:
+        import shlex
+        import time
+        from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
+
+        telemetry = SessionTelemetry.get_instance()
+    except Exception:
+        return
+
+    if seen is None:
+        seen = set()
+
+    for val_cmd in _normalize_validation_command_records(validation_cmds):
+        try:
+            cmd_name = val_cmd.get("command")
+            if not isinstance(cmd_name, str):
+                continue
+            try:
+                argv = shlex.split(cmd_name)
+            except ValueError:
+                continue
+            while argv and is_inline_env_assignment(argv[0]):
+                argv.pop(0)
+            if not argv:
+                continue
+            cmd_label = command_label(argv)
+            dedupe_key = (
+                cmd_label,
+                _validation_command_fingerprint(cmd_name),
+                _dedupe_value(val_cmd.get("result")),
+                _dedupe_value(val_cmd.get("duration")),
+                _dedupe_value(val_cmd.get("start_time")),
+                _dedupe_value(val_cmd.get("end_time")),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            exit_code = _validation_result_exit_code(val_cmd.get("result"))
+            dur = val_cmd.get("duration")
+            start = val_cmd.get("start_time")
+            end = val_cmd.get("end_time")
+
+            if start is not None and end is not None:
+                start_val = float(start)
+                end_val = float(end)
+            elif dur is not None:
+                end_val = time.time()
+                start_val = end_val - float(dur)
+            else:
+                end_val = time.time()
+                start_val = end_val
+
+            telemetry.record(
+                command=cmd_label,
+                start_time=start_val,
+                end_time=end_val,
+                exit_code=exit_code,
+            )
+        except Exception:
+            continue
+
+
+def _dedupe_value(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def _validation_command_fingerprint(command: str) -> str:
+    return hashlib.sha256(command.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _validation_result_exit_code(result: Any) -> int:
+    normalized = str(result or "passed").strip().lower()
+    success_prefixes = ("passed", "pass", "success", "succeeded", "ok")
+    return 0 if normalized.startswith(success_prefixes) else 1
 
 
 def _validate_batch_fix_contract(
@@ -2169,24 +2287,36 @@ def _normalize_validation_commands(value: Any) -> list[str]:
     return commands
 
 
-def _normalize_validation_command_records(value: Any) -> list[dict[str, str]]:
+def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    commands: list[dict[str, str]] = []
+    commands: list[dict[str, Any]] = []
     for entry in value:
         if isinstance(entry, dict):
             command = str(entry.get("command") or "").strip()
             result = str(entry.get("result") or "").strip()
             summary = str(entry.get("summary") or "").strip()
+            duration = entry.get("duration")
+            start_time = entry.get("start_time")
+            end_time = entry.get("end_time")
         else:
             raw = str(entry or "").strip()
             command, result = _split_validation_command_record(raw)
             summary = ""
+            duration = None
+            start_time = None
+            end_time = None
         if not command or not result:
             continue
-        row = {"command": command, "result": result}
+        row: dict[str, Any] = {"command": command, "result": result}
         if summary:
             row["summary"] = summary
+        if duration is not None:
+            row["duration"] = duration
+        if start_time is not None:
+            row["start_time"] = start_time
+        if end_time is not None:
+            row["end_time"] = end_time
         commands.append(row)
     return commands
 

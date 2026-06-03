@@ -2,10 +2,11 @@ import subprocess
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
 
 
 class TestTelemetry(unittest.TestCase):
@@ -139,6 +140,25 @@ class TestTelemetry(unittest.TestCase):
         self.assertNotIn("Bearer", label)
         self.assertNotIn("ghp_secret", label)
         self.assertNotIn("https://", label)
+
+    def test_command_label_strips_leading_inline_env_assignments(self):
+        label = command_label(["GH_TOKEN=ghp_secret", "PYTHONPATH=src", "python", "-m", "adapter"])
+
+        self.assertEqual(label, "python -m adapter")
+        self.assertNotIn("GH_TOKEN", label)
+        self.assertNotIn("ghp_secret", label)
+
+    def test_command_label_strips_empty_inline_env_assignments(self):
+        label = command_label(["GH_TOKEN=", "python", "-m", "adapter"])
+
+        self.assertEqual(label, "python -m adapter")
+        self.assertNotIn("GH_TOKEN", label)
+
+    def test_is_inline_env_assignment_accepts_empty_values(self):
+        self.assertTrue(is_inline_env_assignment("GH_TOKEN="))
+        self.assertTrue(is_inline_env_assignment("PYTHONPATH=src"))
+        self.assertFalse(is_inline_env_assignment("1BAD=value"))
+        self.assertFalse(is_inline_env_assignment("A-B=value"))
 
     def test_json_serialization(self):
         tracker = SessionTelemetry.get_instance()
@@ -306,6 +326,234 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(res.stdout, "ok")
         self.assertEqual(res.stderr, "")
         mock_stderr.write.assert_not_called()
+
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
+    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        response = {
+            "agent_id": "test-agent",
+            "resolution": "fix",
+            "note": "my fix note",
+            "validation_commands": [
+                {
+                    "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
+                    "result": "Passed (528 tests)",
+                    "duration": 5.5
+                },
+                {
+                    "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
+                    "result": "Passed (528 tests)",
+                    "duration": 5.5
+                },
+                {
+                    "command": "pytest 'unterminated --token ghp_secret",
+                    "result": "passed",
+                    "duration": 1.0
+                },
+                {
+                    "command": "ruff check src",
+                    "result": "failed",
+                    "start_time": 1000.0,
+                    "end_time": 1002.5
+                },
+                {
+                    "command": "ruff check src",
+                    "result": "failed",
+                    "duration": 0.0
+                },
+                {
+                    "command": "pytest tests/unit",
+                    "result": "passed"
+                },
+                {
+                    "command": "pytest tests/integration",
+                    "result": "passed"
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "fixer"},
+            "item_id": "finding-1",
+            "item": {"item_kind": "local_finding"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+
+            # We should have 5 metrics recorded; only the exact duplicate and malformed command are skipped.
+            self.assertEqual(len(tracker.metrics), 5)
+
+            # First one: inline env + path + token should be sanitized to pytest.
+            self.assertEqual(tracker.metrics[0].command, "pytest")
+            self.assertEqual(tracker.metrics[0].exit_code, 0)
+            self.assertAlmostEqual(tracker.metrics[0].duration, 5.5)
+            self.assertNotIn("ghp_secret", tracker.metrics[0].command)
+            self.assertNotIn("GH_TOKEN", tracker.metrics[0].command)
+
+            # Second one: ruff check src, exit_code 1, duration 2.5
+            self.assertEqual(tracker.metrics[1].command, "ruff check")
+            self.assertEqual(tracker.metrics[1].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
+            self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
+            self.assertAlmostEqual(tracker.metrics[1].end_time, 1002.5)
+            self.assertEqual(tracker.metrics[2].command, "ruff check")
+            self.assertEqual(tracker.metrics[2].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[2].duration, 0.0)
+            self.assertEqual(tracker.metrics[3].command, "pytest")
+            self.assertEqual(tracker.metrics[4].command, "pytest")
+            self.assertNotIn("_telemetry_validation_seen", session)
+
+            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+            self.assertEqual(len(tracker.metrics), 10)
+
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
+    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        response = {
+            "agent_id": "test-agent",
+            "resolution": "fix",
+            "note": "my fix note",
+            "validation_commands": [
+                {
+                    "command": "ruff check src",
+                    "result": "passed",
+                    "duration": 1.0
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "fixer"},
+            "item_id": "github-thread:one",
+            "item": {"item_kind": "github_thread"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+            telemetry_seen = set()
+
+            _accept_action_response_submission(
+                session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
+            )
+            _accept_action_response_submission(
+                session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
+            )
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertNotIn("_telemetry_validation_seen", session)
+
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
+    def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import WorkflowError, _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        ledger.append_event.return_value.record_id = "ev-reject"
+        response = {
+            "agent_id": "test-verifier",
+            "resolution": "reject",
+            "note": "validation failed",
+            "validation_commands": [
+                {
+                    "command": "pytest tests/core",
+                    "result": "failed (1 failed)",
+                    "duration": 2.0
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "verifier"},
+            "item_id": "finding-1",
+            "item": {"item_kind": "local_finding"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            with self.assertRaises(WorkflowError):
+                _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "pytest")
+            self.assertEqual(tracker.metrics[0].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[0].duration, 2.0)
+
+    @patch("subprocess.run")
+    def test_run_adapter_command_records_telemetry(self, mock_run):
+        from gh_address_cr.cli import _run_adapter_command
+        import tempfile
+        from pathlib import Path
+
+        mock_run.return_value = subprocess.CompletedProcess(args=["my-adapter"], returncode=0, stdout="findings JSON", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            stdout, error = _run_adapter_command(["GH_TOKEN=ghp_secret", "my-adapter", "--fast"])
+
+            self.assertEqual(stdout, "findings JSON")
+            self.assertIsNone(error)
+            mock_run.assert_called_once()
+            self.assertEqual(mock_run.call_args.args[0], ["my-adapter", "--fast"])
+            self.assertEqual(mock_run.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
+            
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "my-adapter")
+            self.assertEqual(tracker.metrics[0].exit_code, 0)
+            self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
 if __name__ == "__main__":
     unittest.main()

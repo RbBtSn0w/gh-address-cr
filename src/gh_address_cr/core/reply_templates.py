@@ -55,8 +55,8 @@ def _review_priority_label(priority: str) -> str:
 
 
 def _review_signal_label(severity: str | None, review_priority: str | None) -> str | None:
-    if severity:
-        return SEVERITY_SIGNAL_LABELS[severity]
+    if severity is not None:
+        return SEVERITY_SIGNAL_LABELS.get(severity, "`unknown`")
     if review_priority:
         return f"`{_review_priority_label(review_priority)}`"
     return None
