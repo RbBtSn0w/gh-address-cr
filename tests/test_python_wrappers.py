@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -160,6 +161,45 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     rc = cli.main([command, *args])
 
                 self.assertEqual(rc, 0)
+
+    def test_final_gate_host_hook_fallback_summary_failure_is_fail_open(self):
+        import gh_address_cr.cli as cli
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": str(Path(self.temp_dir.name) / "missing-host.jsonl"),
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
+                },
+            ),
+            patch.object(cli.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
+        ):
+            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+
+        self.assertIsNone(result)
+
+    def test_final_gate_host_hook_import_storage_error_is_not_reported_as_input_unavailable(self):
+        import gh_address_cr.cli as cli
+
+        feed = Path(self.temp_dir.name) / "host.jsonl"
+        feed.write_text("{}\n", encoding="utf-8")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": str(feed),
+                    "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
+                },
+            ),
+            patch.object(cli.core_telemetry, "import_external_telemetry", side_effect=OSError("disk full")),
+            patch.object(cli.core_telemetry, "input_unavailable_import_summary") as unavailable,
+        ):
+            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+
+        self.assertIsNone(result)
+        unavailable.assert_not_called()
 
     def test_python_helper_command_normalization_resolves_relative_paths(self):
         command = [
