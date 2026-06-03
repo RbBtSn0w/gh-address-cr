@@ -165,6 +165,18 @@ UNSAFE_METADATA_KEYS = {
     "machine_id",
     "host_id",
 }
+UNSAFE_METADATA_KEY_MARKERS = (
+    "token",
+    "key",
+    "authorization",
+    "password",
+    "secret",
+    "credential",
+    "prompt",
+    "user",
+    "machine",
+    "host",
+)
 TOKEN_MARKERS = ("ghp_", "github_pat_", "Bearer ", "sk-", "xoxb-", "token=")
 
 
@@ -471,6 +483,8 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     events = [*runtime_events, *external_events]
     events, dedupe_diagnostics = _dedupe_events(events)
     diagnostics.extend(dedupe_diagnostics)
+    events, correlation_dedupe_diagnostics = _dedupe_correlated_events(events)
+    diagnostics.extend(correlation_dedupe_diagnostics)
     sources = _source_rows(runtime_events, external_events)
     coverage_label = _coverage_label(runtime_events, external_events)
     total_events = len(events)
@@ -580,7 +594,12 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
 
 
 def _event_fingerprint(event: ExternalTelemetryEvent) -> str:
-    event_identity = event.correlation_id or event.event_id
+    if event.correlation_id and event.started_at and event.ended_at:
+        event_identity = event.correlation_id
+    elif event.correlation_id:
+        event_identity = f"{event.correlation_id}:{event.event_id}"
+    else:
+        event_identity = event.event_id
     canonical = {
         "source": event.source,
         "source_session_id": event.source_session_id,
@@ -623,18 +642,29 @@ def _event_duration_ms(payload: dict[str, Any]) -> int:
 def _safe_metadata(metadata: object) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
-    safe: dict[str, Any] = {}
-    for key, value in metadata.items():
-        key_text = str(key)
-        value_text = str(value)
-        lowered_key = key_text.lower()
-        lowered_value = value_text.lower()
-        if lowered_key in UNSAFE_METADATA_KEYS or any(marker.lower() in lowered_value for marker in TOKEN_MARKERS):
-            raise ValueError(f"UNSAFE:unsafe metadata field: {key_text}")
-        if _looks_like_unnecessary_absolute_path(value_text):
-            raise ValueError(f"UNSAFE:unsafe absolute path in metadata field: {key_text}")
-        safe[key_text] = value
-    return safe
+    _validate_safe_metadata_value(metadata)
+    return {str(key): value for key, value in metadata.items()}
+
+
+def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_text = str(key)
+            lowered_key = key_text.lower()
+            if lowered_key in UNSAFE_METADATA_KEYS or any(marker in lowered_key for marker in UNSAFE_METADATA_KEY_MARKERS):
+                raise ValueError(f"UNSAFE:unsafe metadata field: {key_text}")
+            _validate_safe_metadata_value(nested, key_path=f"{key_path}.{key_text}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_safe_metadata_value(item, key_path=f"{key_path}[{index}]")
+        return
+    value_text = str(value)
+    lowered_value = value_text.lower()
+    if any(marker.lower() in lowered_value for marker in TOKEN_MARKERS):
+        raise ValueError(f"UNSAFE:unsafe metadata value at {key_path}")
+    if _looks_like_unnecessary_absolute_path(value_text):
+        raise ValueError(f"UNSAFE:unsafe absolute path in metadata value at {key_path}")
 
 
 def _safe_operation(operation: str) -> str:
@@ -646,7 +676,14 @@ def _safe_operation(operation: str) -> str:
 
 
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
-    return value.startswith("/Users/") or value.startswith("/private/") or value.startswith("C:\\Users\\")
+    lowered = value.lower()
+    return (
+        "/users/" in lowered
+        or "/private/" in lowered
+        or "/home/" in lowered
+        or "/root/" in lowered
+        or "c:\\users\\" in lowered
+    )
 
 
 def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
@@ -689,6 +726,28 @@ def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalT
         seen.add(fingerprint)
         deduped.append(event)
     return deduped, diagnostics
+
+
+def _dedupe_correlated_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:
+    seen: dict[str, ExternalTelemetryEvent] = {}
+    deduped: list[ExternalTelemetryEvent] = []
+    diagnostics: list[str] = []
+    for event in events:
+        key = _correlation_dedupe_key(event)
+        if key and key in seen and seen[key].source != event.source:
+            diagnostics.append(f"correlated telemetry event ignored: {event.source}:{event.event_id}")
+            continue
+        if key:
+            seen[key] = event
+        deduped.append(event)
+    return deduped, diagnostics
+
+
+def _correlation_dedupe_key(event: ExternalTelemetryEvent) -> str | None:
+    correlation = event.correlation_id or (event.event_id if event.source == "runtime" else None)
+    if not correlation:
+        return None
+    return f"{correlation}:{event.operation}:{event.status}:{event.duration_ms}"
 
 
 def _load_fingerprint_set(repo: str, pr_number: str) -> set[str]:

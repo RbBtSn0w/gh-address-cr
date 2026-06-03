@@ -2249,12 +2249,28 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             summary_path = archive_target / summary_path.name
             if telemetry_report is not None:
                 telemetry_report["report_artifact"] = str(archive_target / core_paths.efficiency_report_file(parsed.repo, parsed.pr_number).name)
+                _rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
     _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
 
     return 0
+
+
+def _rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:
+    try:
+        lines = summary_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    updated = [
+        f"- efficiency_report_path: {report_artifact}" if line.startswith("- efficiency_report_path:") else line
+        for line in lines
+    ]
+    try:
+        summary_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def handle_telemetry_command(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
@@ -2294,6 +2310,8 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
                     "accepted_count": 0,
                     "rejected_count": 0,
                     "duplicate_count": 0,
+                    "accepted_fingerprints": [],
+                    "duplicate_fingerprints": [],
                     "diagnostics": [str(exc)],
                     "next_action": "FIX_TELEMETRY_INPUT",
                 }
@@ -2316,6 +2334,15 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         parser.add_argument("--format", choices=("json", "markdown"), default="json")
         parsed = parser.parse_args(args)
         report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
+        if _telemetry_report_has_storage_diagnostics(report):
+            payload = {
+                **report,
+                "status": "FAILED",
+                "reason_code": "TELEMETRY_REPORT_UNAVAILABLE",
+                "next_action": "FIX_TELEMETRY_STORAGE",
+            }
+            print(json.dumps(payload, sort_keys=True))
+            return 2
         if parsed.format == "markdown":
             print(core_telemetry.efficiency_report_markdown(report), end="")
         else:
@@ -2324,6 +2351,20 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
     print(f"Unknown telemetry command: {subcommand}", file=sys.stderr)
     return 2
+
+
+def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:
+    diagnostics = report.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return False
+    return any(
+        isinstance(diagnostic, str)
+        and (
+            diagnostic.startswith("external telemetry line ")
+            or diagnostic.startswith("external telemetry unreadable:")
+        )
+        for diagnostic in diagnostics
+    )
 
 
 def _load_efficiency_report(repo: str, pr_number: str) -> dict | None:

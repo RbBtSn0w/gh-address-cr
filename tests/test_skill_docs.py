@@ -576,4 +576,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("source_session_id", protocol_text)
         self.assertIn("correlation_id", protocol_text)
         self.assertIn("Do not include tokens", protocol_text)
+        self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)
+        self.assertNotIn("Clarify, defer, and reject responses require `reply_markdown` and validation evidence.", protocol_text)
         self.assertIn("gh-address-cr telemetry ingest", openai_text)

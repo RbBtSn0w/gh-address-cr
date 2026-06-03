@@ -2796,6 +2796,44 @@ else:
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
 
+    def test_cli_telemetry_ingest_unavailable_input_keeps_machine_contract_fields(self):
+        missing_feed = Path(self.temp_dir.name) / "missing.jsonl"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(missing_feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_INPUT_UNAVAILABLE")
+        self.assertEqual(payload["accepted_fingerprints"], [])
+        self.assertEqual(payload["duplicate_fingerprints"], [])
+
+    def test_cli_telemetry_summary_fails_loud_when_external_telemetry_is_corrupted(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr])
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
+        self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in payload["diagnostics"]))
+
     def test_final_gate_fail_open_when_external_telemetry_is_corrupted(self):
         self.install_fake_gh_for_threads([])
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
@@ -3322,12 +3360,16 @@ else:
         self.assertEqual(len(archived_runs), 1)
         archived_workspace = archived_runs[0]
         archived_summary = archived_workspace / "audit_summary.md"
+        archived_report = archived_workspace / "efficiency-report.json"
         self.assertTrue((archived_workspace / "audit.jsonl").exists())
         self.assertTrue((archived_workspace / "trace.jsonl").exists())
         self.assertTrue(archived_summary.exists())
+        self.assertTrue(archived_report.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
         self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
+        summary_text = archived_summary.read_text(encoding="utf-8")
+        self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)
