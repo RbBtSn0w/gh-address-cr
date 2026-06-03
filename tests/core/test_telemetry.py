@@ -331,8 +331,13 @@ class TestTelemetry(unittest.TestCase):
             "note": "my fix note",
             "validation_commands": [
                 {
-                    "command": "pytest tests/core --token ghp_secret",
-                    "result": "passed",
+                    "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
+                    "result": "Passed (528 tests)",
+                    "duration": 5.5
+                },
+                {
+                    "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
+                    "result": "Passed (528 tests)",
                     "duration": 5.5
                 },
                 {
@@ -363,14 +368,15 @@ class TestTelemetry(unittest.TestCase):
 
             _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
 
-            # We should have 2 metrics recorded; the malformed command is skipped.
+            # We should have 2 metrics recorded; the duplicate and malformed commands are skipped.
             self.assertEqual(len(tracker.metrics), 2)
 
-            # First one: pytest tests/core --token ghp_secret (should be sanitized to pytest)
+            # First one: inline env + path + token should be sanitized to pytest.
             self.assertEqual(tracker.metrics[0].command, "pytest")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertAlmostEqual(tracker.metrics[0].duration, 5.5)
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
+            self.assertNotIn("GH_TOKEN", tracker.metrics[0].command)
 
             # Second one: ruff check src, exit_code 1, duration 2.5
             self.assertEqual(tracker.metrics[1].command, "ruff check")
@@ -378,6 +384,56 @@ class TestTelemetry(unittest.TestCase):
             self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
             self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
             self.assertAlmostEqual(tracker.metrics[1].end_time, 1002.5)
+
+    @patch("gh_address_cr.core.workflow.submit_lease")
+    @patch("gh_address_cr.core.workflow.accept_lease")
+    def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
+        from gh_address_cr.core.workflow import WorkflowError, _accept_action_response_submission
+        from unittest.mock import MagicMock
+        import tempfile
+        from pathlib import Path
+
+        session = {
+            "session_id": "owner/repo#123",
+            "repo": "owner/repo",
+            "pr_number": "123",
+            "items": {},
+            "leases": {}
+        }
+        ledger = MagicMock()
+        ledger.append_event.return_value.record_id = "ev-reject"
+        response = {
+            "agent_id": "test-verifier",
+            "resolution": "reject",
+            "note": "validation failed",
+            "validation_commands": [
+                {
+                    "command": "pytest tests/core",
+                    "result": "failed (1 failed)",
+                    "duration": 2.0
+                }
+            ]
+        }
+        prepared = {
+            "lease_id": "lease-123",
+            "lease": {"role": "verifier"},
+            "item_id": "finding-1",
+            "item": {"item_kind": "local_finding"},
+            "expected_request_hash": "hash-123"
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            with self.assertRaises(WorkflowError):
+                _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].command, "pytest")
+            self.assertEqual(tracker.metrics[0].exit_code, 1)
+            self.assertAlmostEqual(tracker.metrics[0].duration, 2.0)
 
     @patch("subprocess.run")
     def test_run_adapter_command_records_telemetry(self, mock_run):

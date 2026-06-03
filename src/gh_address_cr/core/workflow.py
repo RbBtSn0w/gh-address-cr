@@ -1638,6 +1638,7 @@ def _accept_action_response_submission(
         ) from exc
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
+        _record_validation_command_telemetry(session, response.get("validation_commands") or [])
         item["state"] = "open"
         item["blocking"] = True
         item["verification_rejection_note"] = response["note"]
@@ -1661,51 +1662,7 @@ def _accept_action_response_submission(
 
     _apply_response_to_item(item, response)
 
-    # Record accepted validation evidence without leaking raw agent-provided commands.
-    validation_cmds = response.get("validation_commands") or []
-    if isinstance(validation_cmds, list):
-        try:
-            import shlex
-            import time
-            from gh_address_cr.core.telemetry import SessionTelemetry, command_label
-
-            telemetry = SessionTelemetry.get_instance()
-        except Exception:
-            telemetry = None
-        if telemetry is not None:
-            for val_cmd in _normalize_validation_command_records(validation_cmds):
-                try:
-                    cmd_name = val_cmd.get("command")
-                    if not isinstance(cmd_name, str):
-                        continue
-                    try:
-                        cmd_label = command_label(shlex.split(cmd_name))
-                    except ValueError:
-                        continue
-                    res = val_cmd.get("result", "passed")
-                    exit_code = 0 if res in {"passed", "pass", "success", "succeeded", "ok"} else 1
-                    dur = val_cmd.get("duration")
-                    start = val_cmd.get("start_time")
-                    end = val_cmd.get("end_time")
-
-                    if start is not None and end is not None:
-                        start_val = float(start)
-                        end_val = float(end)
-                    elif dur is not None:
-                        end_val = time.time()
-                        start_val = end_val - float(dur)
-                    else:
-                        end_val = time.time()
-                        start_val = end_val
-
-                    telemetry.record(
-                        command=cmd_label,
-                        start_time=start_val,
-                        end_time=end_val,
-                        exit_code=exit_code,
-                    )
-                except Exception:
-                    continue
+    _record_validation_command_telemetry(session, response.get("validation_commands") or [])
 
     return ledger.append_event(
         session_id=str(session["session_id"]),
@@ -1716,6 +1673,88 @@ def _accept_action_response_submission(
         event_type="response_accepted",
         payload={"resolution": response["resolution"], "note": response["note"]},
     )
+
+
+def _record_validation_command_telemetry(session: dict[str, Any], validation_cmds: Any) -> None:
+    if not isinstance(validation_cmds, list):
+        return
+    try:
+        import shlex
+        import time
+        from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+
+        telemetry = SessionTelemetry.get_instance()
+    except Exception:
+        return
+
+    seen = session.setdefault("_telemetry_validation_seen", [])
+    if not isinstance(seen, list):
+        seen = []
+        session["_telemetry_validation_seen"] = seen
+
+    for val_cmd in _normalize_validation_command_records(validation_cmds):
+        try:
+            cmd_name = val_cmd.get("command")
+            if not isinstance(cmd_name, str):
+                continue
+            try:
+                argv = shlex.split(cmd_name)
+            except ValueError:
+                continue
+            while argv and _is_inline_env_assignment(argv[0]):
+                argv.pop(0)
+            if not argv:
+                continue
+            dedupe_key = json.dumps(
+                {
+                    "command": argv,
+                    "result": str(val_cmd.get("result") or ""),
+                    "duration": val_cmd.get("duration"),
+                    "start_time": val_cmd.get("start_time"),
+                    "end_time": val_cmd.get("end_time"),
+                },
+                sort_keys=True,
+                default=str,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.append(dedupe_key)
+
+            cmd_label = command_label(argv)
+            exit_code = _validation_result_exit_code(val_cmd.get("result"))
+            dur = val_cmd.get("duration")
+            start = val_cmd.get("start_time")
+            end = val_cmd.get("end_time")
+
+            if start is not None and end is not None:
+                start_val = float(start)
+                end_val = float(end)
+            elif dur is not None:
+                end_val = time.time()
+                start_val = end_val - float(dur)
+            else:
+                end_val = time.time()
+                start_val = end_val
+
+            telemetry.record(
+                command=cmd_label,
+                start_time=start_val,
+                end_time=end_val,
+                exit_code=exit_code,
+            )
+        except Exception:
+            continue
+
+
+def _is_inline_env_assignment(token: str) -> bool:
+    key, separator, value = token.partition("=")
+    return bool(separator and key and value and key.replace("_", "").isalnum() and not key[0].isdigit())
+
+
+def _validation_result_exit_code(result: Any) -> int:
+    normalized = str(result or "passed").strip().lower()
+    success_prefixes = ("passed", "pass", "success", "succeeded", "ok")
+    return 0 if normalized.startswith(success_prefixes) else 1
 
 
 def _validate_batch_fix_contract(
