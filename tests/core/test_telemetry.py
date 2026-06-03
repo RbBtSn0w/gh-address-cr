@@ -355,6 +355,59 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("source" in diagnostic for diagnostic in declared_source["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_redacts_unsafe_declared_source_in_summary(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            result = import_external_telemetry(
+                "octo/example", "77", source="/home/alice/agent", fmt="agent-jsonl", raw="{not-json}\n"
+            )
+
+            self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+            self.assertEqual(result["source"], "[redacted]")
+            self.assertNotIn("/home/alice", json.dumps(result))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_import_external_telemetry_rejects_ambiguous_source_sessions(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payloads = [
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "e1",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-2",
+                    "event_id": "e2",
+                    "kind": "tool_call",
+                    "operation": "exec_command",
+                    "duration_ms": 1,
+                    "status": "success",
+                },
+            ]
+
+            result = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join(json.dumps(payload) for payload in payloads),
+            )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["reason_code"], "AMBIGUOUS_TELEMETRY_SESSION")
+            self.assertEqual(result["accepted_count"], 0)
+            self.assertFalse(core_paths.external_telemetry_file("octo/example", "77").exists())
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_source_session_id(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
@@ -602,6 +655,35 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["error_prone_operations"][0]["timeouts"], 1)
             self.assertEqual(report["error_prone_operations"][0]["retries"], 1)
             self.assertTrue(report["inefficiency_flags"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_partial_import_diagnostics_are_carried_into_reports(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            valid = {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "exec_command",
+                "duration_ms": 1,
+                "status": "success",
+            }
+            malformed = {**valid, "event_id": "e2", "kind": "unsafe-kind"}
+
+            imported = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw="\n".join([json.dumps(valid), json.dumps(malformed)]),
+            )
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(imported["status"], "PARTIAL")
+            self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in imported["diagnostics"]))
+            self.assertTrue(any("unsupported kind" in diagnostic for diagnostic in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsupported_format(self, state_dir):

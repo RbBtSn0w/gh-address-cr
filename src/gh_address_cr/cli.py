@@ -2422,6 +2422,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
                 "reason_code": "TELEMETRY_REPORT_UNAVAILABLE",
                 "next_action": "FIX_TELEMETRY_STORAGE",
             }
+            _write_telemetry_report_payload(payload)
             print(json.dumps(payload, sort_keys=True))
             return 2
         if parsed.format == "markdown":
@@ -2446,6 +2447,18 @@ def _telemetry_report_has_storage_diagnostics(report: dict) -> bool:
         )
         for diagnostic in diagnostics
     )
+
+
+def _write_telemetry_report_payload(payload: dict) -> None:
+    report_artifact = payload.get("report_artifact")
+    if not isinstance(report_artifact, str) or not report_artifact:
+        return
+    path = Path(report_artifact)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def _load_efficiency_report(repo: str, pr_number: str) -> dict | None:
@@ -2496,6 +2509,8 @@ def _emit_final_gate_result(
     print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
     print(f"telemetry_total_events={telemetry_report['total_events']}")
     print(f"telemetry_success_rate={telemetry_report['success_rate']:.1f}")
+    print(f"telemetry_sources={_telemetry_sources_summary(telemetry_report)}")
+    print(f"telemetry_diagnostics={_telemetry_diagnostics_summary(telemetry_report)}")
     if telemetry_report["inefficiency_flags"]:
         print("telemetry_inefficiency_flags=" + "; ".join(telemetry_report["inefficiency_flags"]))
     else:

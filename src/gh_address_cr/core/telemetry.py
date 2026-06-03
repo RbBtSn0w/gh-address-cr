@@ -398,6 +398,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     accepted_fingerprints: list[str] = []
     duplicate_fingerprints: list[str] = []
     diagnostics: list[str] = []
+    accepted_sessions: set[str] = set()
     rejected_count = 0
     duplicate_count = 0
     unsafe_seen = False
@@ -431,13 +432,24 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             continue
         existing_fingerprints.add(event.identity)
         accepted_fingerprints.append(event.identity)
+        accepted_sessions.add(event.source_session_id)
         accepted.append(event)
+
+    ambiguous_seen = len(accepted_sessions) > 1
+    if ambiguous_seen:
+        diagnostics.append("ambiguous telemetry session: multiple source_session_id values in one import")
+        rejected_count += len(accepted)
+        accepted = []
+        accepted_fingerprints = []
 
     if accepted:
         _append_external_events(repo, pr_number, accepted)
         _write_fingerprint_set(repo, pr_number, existing_fingerprints)
 
-    if accepted:
+    if ambiguous_seen:
+        status = "FAILED"
+        reason_code = "AMBIGUOUS_TELEMETRY_SESSION"
+    elif accepted:
         status = "SUCCESS" if rejected_count == 0 else "PARTIAL"
         reason_code = "TELEMETRY_IMPORTED" if rejected_count == 0 else "TELEMETRY_PARTIAL"
     elif duplicate_count and not rejected_count:
@@ -476,6 +488,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     runtime_events = _runtime_events(repo, pr_number)
     external_events, diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+    diagnostics.extend(_load_import_diagnostics(repo, pr_number))
     runtime_events, runtime_dedupe_diagnostics = _dedupe_events(runtime_events)
     external_events, external_dedupe_diagnostics = _dedupe_events(external_events)
     diagnostics.extend(runtime_dedupe_diagnostics)
@@ -873,7 +886,7 @@ def _import_summary(
         "reason_code": reason_code,
         "repo": repo,
         "pr_number": str(pr_number),
-        "source": source,
+        "source": _reported_source_label(source),
         "format": fmt,
         "accepted_count": accepted_count,
         "rejected_count": rejected_count,
@@ -884,6 +897,39 @@ def _import_summary(
         "next_action": "RUN_TELEMETRY_SUMMARY" if status in {"SUCCESS", "PARTIAL"} else "FIX_TELEMETRY_INPUT",
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
     }
+
+
+def _reported_source_label(source: str) -> str:
+    lowered = source.lower()
+    if any(marker.lower() in lowered for marker in TOKEN_MARKERS):
+        return "[redacted]"
+    if _looks_like_unnecessary_absolute_path(source):
+        return "[redacted]"
+    return source
+
+
+def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
+    path = core_paths.telemetry_imports_file(repo, pr_number)
+    if not path.is_file():
+        return []
+    diagnostics: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return [f"telemetry import summary unreadable: {exc}"]
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            diagnostics.append(f"telemetry import summary line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        if payload.get("status") == "SUCCESS" or payload.get("reason_code") == "DUPLICATE_TELEMETRY_IMPORT":
+            continue
+        for diagnostic in payload.get("diagnostics") or []:
+            diagnostics.append(f"telemetry import {payload.get('source', 'unknown')}: {diagnostic}")
+    return diagnostics
 
 
 def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:

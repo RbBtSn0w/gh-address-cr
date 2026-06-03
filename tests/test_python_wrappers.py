@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -2835,6 +2836,9 @@ else:
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in payload["diagnostics"]))
+        artifact = json.loads(Path(payload["report_artifact"]).read_text(encoding="utf-8"))
+        self.assertEqual(artifact["status"], "FAILED")
+        self.assertEqual(artifact["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
 
     def test_final_gate_fail_open_when_external_telemetry_is_corrupted(self):
         self.install_fake_gh_for_threads([])
@@ -2848,6 +2852,8 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("== Agent Efficiency Summary ==", result.stdout)
         self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("telemetry_sources=telemetry (runtime): 0 events, unavailable", result.stdout)
+        self.assertIn("telemetry_diagnostics=external telemetry line 1: invalid JSON", result.stdout)
         summary_file = self.workspace_dir() / "audit_summary.md"
         summary_text = summary_file.read_text(encoding="utf-8")
         self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
@@ -3388,8 +3394,12 @@ else:
             for line in (archived_workspace / "audit.jsonl").read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+        archived_summary_sha256 = hashlib.sha256(archived_summary.read_bytes()).hexdigest()
         self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(entry) for entry in audit_entries))
         self.assertTrue(any(entry.get("details", {}).get("summary_file") == str(archived_summary) for entry in audit_entries))
+        self.assertTrue(
+            any(entry.get("details", {}).get("summary_sha256") == archived_summary_sha256 for entry in audit_entries)
+        )
         self.assertTrue(
             any(
                 entry.get("details", {}).get("efficiency_report", {}).get("report_artifact") == str(archived_report)
