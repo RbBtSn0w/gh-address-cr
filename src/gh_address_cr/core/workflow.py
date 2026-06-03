@@ -476,7 +476,7 @@ def submit_batch_action_response(
                 )
             prepared_rows.append((response, prepared))
 
-        telemetry_seen: set[tuple[str, str, str, str, str]] = set()
+        telemetry_seen: set[tuple[str, str, str, str, str, str]] = set()
         accepted = [
             _batch_acceptance_payload(
                 response,
@@ -1612,7 +1612,7 @@ def _accept_action_response_submission(
     *,
     now: datetime,
     rejected_status: str = "ACTION_REJECTED",
-    telemetry_seen: set[tuple[str, str, str, str, str]] | None = None,
+    telemetry_seen: set[tuple[str, str, str, str, str, str]] | None = None,
 ) -> Any:
     lease_id = str(prepared["lease_id"])
     lease = prepared["lease"]
