@@ -48,6 +48,20 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Inspects active and terminal claims.
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
   - Expires stale leases without deleting accepted evidence.
+- `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-`
+  - Imports safe PR-scoped telemetry from a generic agent or host-specific adapter. This does not mutate review item state.
+- `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
+  - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
+
+## Telemetry Event Contract
+
+Generic agent telemetry uses JSONL. Each line is one event with these required fields: `source`, `kind`, `operation`, `status`, and either `duration_ms` or both `started_at` and `ended_at`. Recommended fields are `schema_version`, `source_session_id`, `event_id`, `metadata`, and `correlation_id`.
+
+Supported `kind` values are `tool_call`, `command`, `wait`, `retry`, `validation`, and `agent_step`. Supported `status` values are `success`, `failure`, `timeout`, `cancelled`, and `unknown`.
+
+Telemetry must be public-safe before import. Do not include tokens, credentials, raw prompts, usernames, private machine identifiers, or unnecessary absolute local paths. The runtime computes `event_fingerprint` after canonical normalization and uses it as the authoritative duplicate key. Duplicate or overlapping imports must appear in `duplicate_fingerprints` and must not inflate report counts, durations, or slowest-operation rankings.
+
+Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default.
 
 ## Evidence Rules
 

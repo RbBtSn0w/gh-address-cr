@@ -2636,6 +2636,184 @@ else:
         self.assertIn("pending_current_login_review_count=0", result.stdout)
         summary_file = self.workspace_dir() / "audit_summary.md"
         self.assertTrue(summary_file.exists())
+        self.assertIn("== Agent Efficiency Summary ==", result.stdout)
+        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("Efficiency report path:", result.stdout)
+        summary_text = summary_file.read_text(encoding="utf-8")
+        self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
+        self.assertIn("- efficiency_report_path:", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report_path = Path(report_path_line.partition(": ")[2])
+        self.assertTrue(report_path.exists())
+
+    def test_cli_telemetry_ingest_and_summary_contract(self):
+        payload = json.dumps(
+            {
+                "schema_version": "1.0",
+                "source": "generic-agent",
+                "source_session_id": "run-1",
+                "event_id": "e1",
+                "kind": "tool_call",
+                "operation": "run unit tests",
+                "duration_ms": 89105,
+                "status": "success",
+                "metadata": {"command_label": "python3 -m unittest discover -s tests", "exit_code": 0},
+            }
+        )
+        feed = Path(self.temp_dir.name) / "agent-telemetry.jsonl"
+        feed.write_text(payload + "\n", encoding="utf-8")
+
+        ingest = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(feed),
+            ]
+        )
+        self.assertEqual(ingest.returncode, 0, ingest.stderr)
+        ingest_summary = json.loads(ingest.stdout)
+        self.assertEqual(ingest_summary["status"], "SUCCESS")
+        self.assertEqual(ingest_summary["reason_code"], "TELEMETRY_IMPORTED")
+        self.assertEqual(ingest_summary["accepted_count"], 1)
+        self.assertEqual(ingest_summary["duplicate_count"], 0)
+        self.assertEqual(len(ingest_summary["accepted_fingerprints"]), 1)
+        self.assertEqual(ingest_summary["duplicate_fingerprints"], [])
+
+        duplicate = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(feed),
+            ]
+        )
+        self.assertNotEqual(duplicate.returncode, 0)
+        duplicate_summary = json.loads(duplicate.stdout)
+        self.assertEqual(duplicate_summary["reason_code"], "DUPLICATE_TELEMETRY_IMPORT")
+        self.assertEqual(duplicate_summary["accepted_fingerprints"], [])
+        self.assertEqual(duplicate_summary["duplicate_fingerprints"], ingest_summary["accepted_fingerprints"])
+
+        summary = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr])
+        self.assertEqual(summary.returncode, 0, summary.stderr)
+        report = json.loads(summary.stdout)
+        self.assertEqual(report["status"], "SUCCESS")
+        self.assertEqual(report["coverage_label"], "partial")
+        self.assertEqual(report["total_events"], 1)
+        self.assertEqual(report["diagnostics"], [])
+        self.assertEqual(report["slowest_operations"][0]["operation"], "run unit tests")
+
+        markdown = self.run_cmd(
+            [sys.executable, str(CLI_PY), "telemetry", "summary", self.repo, self.pr, "--format", "markdown"]
+        )
+        self.assertEqual(markdown.returncode, 0, markdown.stderr)
+        self.assertIn("## Agent Efficiency Summary", markdown.stdout)
+        self.assertIn("coverage_label: partial", markdown.stdout)
+
+    def test_cli_telemetry_rejects_unsafe_feed_without_session_mutation(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps({"status": "OPEN", "items": {}}), encoding="utf-8")
+        before = self.session_file().read_text(encoding="utf-8")
+        feed = Path(self.temp_dir.name) / "unsafe.jsonl"
+        feed.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "e1",
+                    "kind": "tool_call",
+                    "operation": "unsafe",
+                    "duration_ms": 1,
+                    "status": "success",
+                    "metadata": {"token": "ghp_secret", "raw_prompt": "secret prompt"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "agent-jsonl",
+                "--input",
+                str(feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+        self.assertEqual(self.session_file().read_text(encoding="utf-8"), before)
+
+    def test_cli_telemetry_rejects_unsupported_format(self):
+        feed = Path(self.temp_dir.name) / "agent-telemetry.txt"
+        feed.write_text("", encoding="utf-8")
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "telemetry",
+                "ingest",
+                self.repo,
+                self.pr,
+                "--source",
+                "generic-agent",
+                "--format",
+                "xml",
+                "--input",
+                str(feed),
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
+
+    def test_final_gate_fail_open_when_external_telemetry_is_corrupted(self):
+        self.install_fake_gh_for_threads([])
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
+
+        result = self.run_cmd(
+            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("== Agent Efficiency Summary ==", result.stdout)
+        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        summary_file = self.workspace_dir() / "audit_summary.md"
+        report_path_line = next(
+            line for line in summary_file.read_text(encoding="utf-8").splitlines() if line.startswith("- efficiency_report_path:")
+        )
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
 
     def test_final_gate_python_fails_on_resolved_thread_without_viewer_reply(self):
         gh = self.bin_dir / "gh"

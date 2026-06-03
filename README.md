@@ -77,6 +77,7 @@ Completion means the latest final gate reports:
 - zero pending reviews for the authenticated login
 - no blocking session items
 - terminal GitHub threads have durable reply evidence
+- a telemetry coverage label and structured efficiency report path
 - an audit summary path with a sha256 hash
 
 A zero unresolved-thread count alone is not sufficient.
@@ -89,6 +90,8 @@ Primary commands:
 - `review`
 - `address`
 - `final-gate`
+- `telemetry ingest`
+- `telemetry summary`
 
 Advanced integration commands:
 
@@ -113,6 +116,21 @@ Advanced integration commands:
 High-level commands emit machine-readable JSON summaries by default. Use
 `--human` when a person needs narrative output and `--lean` where supported for
 low-token agent context.
+
+Telemetry commands are PR-scoped and do not mutate review item state:
+
+```bash
+gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input agent-telemetry.jsonl
+gh-address-cr telemetry summary owner/repo 123 --format markdown
+```
+
+Every final efficiency summary reports one coverage label: `complete`,
+`partial`, `runtime-only`, or `unavailable`. Imported events are normalized to
+runtime-owned `event_fingerprint` values; duplicate or overlapping imports are
+reported through `accepted_fingerprints` and `duplicate_fingerprints` without
+inflating counts, durations, or slowest-operation rankings. Corrupted external
+telemetry remains fail-open for review and final-gate flows, while telemetry
+commands fail loudly with reason codes and diagnostics.
 
 For GitHub review-thread replies, shared commit/files/validation evidence is
 not the same as a shared reviewer answer. Use `agent submit-batch` with

@@ -21,6 +21,7 @@ from gh_address_cr.commands.python_common import (
     session_file,
     sha256_of_file,
 )
+from gh_address_cr.core.paths import efficiency_report_file
 
 
 DEFAULT_TARGET_REPO = "RbBtSn0w/gh-address-cr"
@@ -287,6 +288,7 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict:
         "unresolved_github_threads_count": None,
         "needs_human_items_count": None,
         "audit_summary_sha256": None,
+        "efficiency_report_sha256": None,
     }
     if not repo or not pr_number:
         return context
@@ -329,6 +331,11 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict:
     if audit_path.exists():
         context["audit_summary_sha256"] = sha256_of_file(audit_path)
         context["artifacts"].append(str(audit_path))
+
+    efficiency_path = efficiency_report_file(repo, pr_number)
+    if efficiency_path.exists():
+        context["efficiency_report_sha256"] = sha256_of_file(efficiency_path)
+        context["artifacts"].append(str(efficiency_path))
 
     context["artifacts"] = unique_preserving_order(context["artifacts"])
     return context
@@ -388,6 +395,8 @@ def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
         values.append(f"- Needs-human items: `{context['needs_human_items_count']}`")
     if context.get("audit_summary_sha256"):
         values.append(f"- Audit summary SHA256: `{context['audit_summary_sha256']}`")
+    if context.get("efficiency_report_sha256"):
+        values.append(f"- Efficiency report SHA256: `{context['efficiency_report_sha256']}`")
     for error in context.get("errors", []):
         values.append(f"- Context load warning: {sanitize_text(error)}")
     return values or ["- Not provided."]

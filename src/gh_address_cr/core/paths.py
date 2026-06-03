@@ -52,3 +52,19 @@ def audit_summary_file(repo: str, pr_number: str) -> Path:
 
 def evidence_ledger_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "evidence.jsonl"
+
+
+def external_telemetry_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "external-telemetry.jsonl"
+
+
+def telemetry_imports_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "telemetry-imports.jsonl"
+
+
+def telemetry_fingerprints_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "telemetry-fingerprints.json"
+
+
+def efficiency_report_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "efficiency-report.json"

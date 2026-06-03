@@ -1,0 +1,1 @@
+{"schema_version":"1.0","source":"generic-agent","source_session_id":"run-1","event_id":"e1","kind":"tool_call","operation":"unsafe","duration_ms":1,"status":"success","metadata":{"token":"ghp_secret"}}
