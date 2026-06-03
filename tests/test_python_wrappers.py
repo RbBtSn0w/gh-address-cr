@@ -3378,7 +3378,24 @@ else:
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)
-        self.assertTrue(any(json.loads(line).get("run_id") == "archive-run" for line in trace_lines if line.strip()))
+        trace_entries = [json.loads(line) for line in trace_lines if line.strip()]
+        self.assertTrue(any(entry.get("run_id") == "archive-run" for entry in trace_entries))
+        self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(entry) for entry in trace_entries))
+        self.assertTrue(any(entry.get("efficiency_report_path") == str(archived_report) for entry in trace_entries))
+
+        audit_entries = [
+            json.loads(line)
+            for line in (archived_workspace / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(entry) for entry in audit_entries))
+        self.assertTrue(any(entry.get("details", {}).get("summary_file") == str(archived_summary) for entry in audit_entries))
+        self.assertTrue(
+            any(
+                entry.get("details", {}).get("efficiency_report", {}).get("report_artifact") == str(archived_report)
+                for entry in audit_entries
+            )
+        )
 
     def test_mark_handled_requires_explicit_repo_and_pr(self):
         gh = self.bin_dir / "gh"

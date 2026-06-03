@@ -56,7 +56,7 @@ src/gh_address_cr/
 ├── cli.py                         # telemetry command routing and final-gate output additions
 ├── core/
 │   ├── telemetry.py               # canonical events, fingerprinting, import validation, reports, coverage labels
-│   ├── workflow.py                # publish path continues to read runtime efficiency summary
+│   ├── workflow.py                # validation command telemetry capture for workflow execution
 │   ├── gate.py                    # final-gate session metrics and report status integration
 │   └── paths.py                   # PR-scoped telemetry artifact path helpers
 └── commands/

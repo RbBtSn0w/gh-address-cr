@@ -2244,6 +2244,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     summary_path = _write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
     telemetry_report = _load_efficiency_report(parsed.repo, parsed.pr_number)
     if result.passed and parsed.auto_clean:
+        workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
         archive_target = _archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
         if archive_target is not None:
             summary_path = archive_target / summary_path.name
@@ -2251,6 +2252,12 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                 telemetry_report["report_artifact"] = str(archive_target / core_paths.efficiency_report_file(parsed.repo, parsed.pr_number).name)
                 _rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
                 _rewrite_archived_efficiency_report_artifact(Path(telemetry_report["report_artifact"]), telemetry_report)
+                _rewrite_archived_audit_artifacts(
+                    archive_target,
+                    original_workspace=workspace_path,
+                    summary_path=summary_path,
+                    telemetry_report=telemetry_report,
+                )
     _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
@@ -2285,6 +2292,66 @@ def _rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_re
         report_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError:
         return
+
+
+def _rewrite_archived_audit_artifacts(
+    archive_target: Path,
+    *,
+    original_workspace: Path,
+    summary_path: Path,
+    telemetry_report: dict,
+) -> None:
+    summary_sha256 = _read_file_sha256(summary_path)
+    for path in (archive_target / "audit.jsonl", archive_target / "trace.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        updated_lines: list[str] = []
+        changed = False
+        for line in lines:
+            if not line.strip():
+                updated_lines.append(line)
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                updated_lines.append(line)
+                continue
+            rewritten = _replace_path_prefix(entry, str(original_workspace), str(archive_target))
+            if isinstance(rewritten, dict):
+                if path.name == "audit.jsonl":
+                    details = rewritten.get("details")
+                    if isinstance(details, dict):
+                        details["summary_file"] = str(summary_path)
+                        details["summary_sha256"] = summary_sha256
+                        details["efficiency_report"] = dict(telemetry_report)
+                elif path.name == "trace.jsonl":
+                    rewritten["efficiency_report_path"] = telemetry_report["report_artifact"]
+            changed = changed or rewritten != entry
+            updated_lines.append(json.dumps(rewritten, sort_keys=True))
+        if changed:
+            try:
+                path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+            except OSError:
+                continue
+
+
+def _replace_path_prefix(value: object, original_prefix: str, archived_prefix: str) -> object:
+    if isinstance(value, str):
+        return archived_prefix + value[len(original_prefix) :] if value.startswith(original_prefix) else value
+    if isinstance(value, list):
+        return [_replace_path_prefix(item, original_prefix, archived_prefix) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_path_prefix(nested, original_prefix, archived_prefix) for key, nested in value.items()}
+    return value
+
+
+def _read_file_sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "unavailable"
 
 
 def handle_telemetry_command(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
