@@ -1687,10 +1687,7 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
     except Exception:
         return
 
-    seen = session.setdefault("_telemetry_validation_seen", [])
-    if not isinstance(seen, list):
-        seen = []
-        session["_telemetry_validation_seen"] = seen
+    seen: set[str] = set()
 
     for val_cmd in _normalize_validation_command_records(validation_cmds):
         try:
@@ -1705,9 +1702,10 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
                 argv.pop(0)
             if not argv:
                 continue
+            cmd_label = command_label(argv)
             dedupe_key = json.dumps(
                 {
-                    "command": argv,
+                    "command": cmd_label,
                     "result": str(val_cmd.get("result") or ""),
                     "duration": val_cmd.get("duration"),
                     "start_time": val_cmd.get("start_time"),
@@ -1718,9 +1716,8 @@ def _record_validation_command_telemetry(session: dict[str, Any], validation_cmd
             )
             if dedupe_key in seen:
                 continue
-            seen.append(dedupe_key)
+            seen.add(dedupe_key)
 
-            cmd_label = command_label(argv)
             exit_code = _validation_result_exit_code(val_cmd.get("result"))
             dur = val_cmd.get("duration")
             start = val_cmd.get("start_time")

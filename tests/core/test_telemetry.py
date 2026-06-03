@@ -384,6 +384,10 @@ class TestTelemetry(unittest.TestCase):
             self.assertAlmostEqual(tracker.metrics[1].duration, 2.5)
             self.assertAlmostEqual(tracker.metrics[1].start_time, 1000.0)
             self.assertAlmostEqual(tracker.metrics[1].end_time, 1002.5)
+            self.assertNotIn("_telemetry_validation_seen", session)
+
+            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+            self.assertEqual(len(tracker.metrics), 4)
 
     @patch("gh_address_cr.core.workflow.submit_lease")
     @patch("gh_address_cr.core.workflow.accept_lease")

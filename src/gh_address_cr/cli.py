@@ -844,16 +844,19 @@ def _utc_now() -> str:
 
 def _load_or_create_session(repo: str, pr_number: str) -> dict:
     manager = session_store.SessionManager(repo, str(pr_number))
+    created = False
     try:
         session = manager.load()
     except session_store.SessionError:
         session = manager.create(status="ACTIVE")
+        created = True
     _ensure_native_session_fields(session)
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-    except Exception:
-        pass
+    if created:
+        try:
+            from gh_address_cr.core.telemetry import SessionTelemetry
+            SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
+        except Exception:
+            pass
     return session
 
 
