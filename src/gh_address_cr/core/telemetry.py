@@ -552,7 +552,25 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         return summary
     existing_fingerprints.update(event.identity for event in existing)
 
-    parse_result = adapter.parse(raw, source)
+    try:
+        parse_result = adapter.parse(raw, source)
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter parsing failed: {type(exc).__name__}: {exc}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
+
     accepted_events = parse_result.events
     rejected_count = parse_result.rejected_count
     unsafe_seen = parse_result.unsafe_seen
@@ -916,7 +934,12 @@ def _safe_metadata(metadata: object) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
     _validate_safe_metadata_value(metadata)
-    return {str(key): value for key, value in metadata.items()}
+    result = {str(key): value for key, value in metadata.items()}
+    try:
+        json.dumps(result)
+    except (TypeError, OverflowError) as exc:
+        raise ValueError(f"metadata contains non-JSON serializable values: {exc}") from None
+    return result
 
 
 def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") -> None:

@@ -2344,5 +2344,84 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["rejected_count"], 1)
                 self.assertTrue(any("unsafe key" in diag or "password" in diag for diag in result["diagnostics"]))
 
+    def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNonJsonMetadataAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return metadata with a non-serializable datetime object
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-non-json",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"created_at": datetime.now()}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-non-json", MockNonJsonMetadataAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-non-json"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-non-json",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("non-JSON serializable" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_parsing_exception_handling(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockCrashedAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Raise ValueError simulating a parsing crash
+                raise ValueError("Int conversion failed on dummy payload")
+
+        register_adapter("mock-crash", MockCrashedAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-crash"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-crash",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertTrue(any("Adapter parsing failed: ValueError: Int conversion failed" in diag for diag in result["diagnostics"]))
+
 if __name__ == "__main__":
     unittest.main()
