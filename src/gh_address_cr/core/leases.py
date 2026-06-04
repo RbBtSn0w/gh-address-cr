@@ -6,6 +6,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from gh_address_cr.core import session as session_store
+from gh_address_cr.core.github_thread_state import returned_claimable_state
+from gh_address_cr.evidence.ledger import EvidenceLedger
+
 try:
     from gh_address_cr.core.models import ClaimLease as _ModelClaimLease
 except ImportError:
@@ -214,6 +218,42 @@ def expire_leases(session: Any, *, now: datetime | None = None) -> list[Any]:
     return expired
 
 
+def list_leases(repo: str, pr_number: str) -> dict[str, Any]:
+    session = session_store.load_session(repo, pr_number)
+    return {
+        "status": "LEASES_READY",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "leases": [_json_ready(lease) for lease in session.get("leases", {}).values()],
+    }
+
+
+def reclaim_leases(repo: str, pr_number: str, *, now: datetime | None = None) -> dict[str, Any]:
+    current_time = _coerce_now(now)
+    session = session_store.load_session(repo, pr_number)
+    ledger = _ledger(session)
+    expired = expire_leases(session, now=current_time)
+    _return_expired_items_to_open(session, expired)
+    for lease in expired:
+        ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=str(_get(lease, "item_id")),
+            lease_id=str(_get(lease, "lease_id")),
+            agent_id=str(_get(lease, "agent_id")),
+            role=str(_get(lease, "role")),
+            event_type="lease_expired",
+            payload={"reason": "reclaimed"},
+        )
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "LEASES_RECLAIMED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "expired_count": len(expired),
+        "leases": [_json_ready(lease) for lease in expired],
+    }
+
+
 def reclaim_lease(
     session: Any,
     item: Any,
@@ -419,6 +459,35 @@ def _lease_events(session: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) -> None:
+    items = session.get("items")
+    if not isinstance(items, dict):
+        return
+    for lease in expired:
+        item_id = str(_get(lease, "item_id"))
+        item = items.get(item_id)
+        if not isinstance(item, dict):
+            continue
+        if item.get("active_lease_id") == _get(lease, "lease_id"):
+            _return_item_to_claimable_state(item)
+            item["claimed_by"] = None
+            item["claimed_at"] = None
+            item["lease_expires_at"] = None
+            item.pop("active_lease_id", None)
+
+
+def _return_item_to_claimable_state(item: dict[str, Any]) -> None:
+    state, status = returned_claimable_state(item)
+    item["state"] = state
+    item["status"] = status
+
+
+def _ledger(session: dict[str, Any]) -> EvidenceLedger:
+    return EvidenceLedger(
+        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
+    )
+
+
 def _append_lease_event(
     session: Any,
     lease: Any,
@@ -469,6 +538,18 @@ def _coerce_now(value: datetime | None) -> datetime:
         return datetime.now(timezone.utc)
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_ready(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_ready(inner) for inner in value]
+    if hasattr(value, "__dict__"):
+        return _json_ready(vars(value))
     return value
 
 

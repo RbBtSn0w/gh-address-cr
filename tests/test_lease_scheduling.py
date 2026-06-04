@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from gh_address_cr.core.session import SessionManager
-from gh_address_cr.core.workflow import WorkflowError
+from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.orchestrator.harness import handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import OrchestrationSession, LeaseConflictError, ExpiredLeaseError
 
@@ -117,7 +117,7 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         self.temp_dir.cleanup()
 
     @patch("gh_address_cr.orchestrator.harness.parse_and_validate_response", return_value={})
-    @patch("gh_address_cr.orchestrator.harness.workflow.submit_action_response")
+    @patch("gh_address_cr.orchestrator.harness.agent_protocol.submit_action_response")
     def test_lease_release_occurs_only_after_successful_runtime_submission(self, mock_submit, _mock_parse):
         from gh_address_cr.orchestrator.session import load_orchestration_session
 
