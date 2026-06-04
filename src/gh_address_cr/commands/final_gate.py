@@ -337,11 +337,8 @@ def build_completion_summary_guidance(
 
     audit_summary_line = f"- Audit Summary: {summary_path_str}"
     if include_sha256 and summary_path:
-        try:
-            summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
-            audit_summary_line += f" (sha256: {summary_sha256})"
-        except Exception:
-            audit_summary_line += " (sha256: unavailable)"
+        summary_sha256 = read_file_sha256(summary_path)
+        audit_summary_line += f" (sha256: {summary_sha256})"
 
     abnormal_implications = []
     abnormal_names = []
@@ -491,10 +488,7 @@ def emit_final_gate_result(
     print(f"Efficiency report path: {telemetry_report['report_artifact']}")
     if summary_path is not None:
         print(f"Audit summary path: {summary_path}")
-        try:
-            summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
-        except Exception:
-            summary_sha256 = "unavailable"
+        summary_sha256 = read_file_sha256(summary_path)
         print(f"Audit summary sha256: {summary_sha256}")
     print()
     print("== PR Completion Summary Guidance ==")
@@ -547,7 +541,7 @@ def write_native_final_gate_artifacts(
     )
     summary_lines.extend(["", "## PR Completion Summary Guidance", guidance_md])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-    summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    summary_sha256 = read_file_sha256(summary_path)
     audit_entry = {
         "ts": timestamp,
         "run_id": run_id,
