@@ -321,6 +321,7 @@ else:
                 "status",
                 "waiting_on",
                 "telemetry",
+                "completion_summary_guidance",
             },
         )
         self.assertEqual(summary["status"], "PASSED")

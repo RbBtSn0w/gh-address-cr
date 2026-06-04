@@ -211,3 +211,96 @@ class FinalGateTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
+
+    def test_build_completion_summary_guidance_clean(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 10,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete (10 events, 100.0%) | inefficiency: none]", guidance)
+        self.assertNotIn("Attention Items", guidance)
+        self.assertNotIn("IMPLICATION PROMPT", guidance)
+
+    def test_build_completion_summary_guidance_abnormal(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_OPEN", "isResolved": False}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 5,
+            "success_rate": 80.0,
+            "inefficiency_flags": ["excessive_loops"],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial (5 events, 80.0%) | inefficiency: excessive_loops]", guidance)
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
+        self.assertIn("Attention Items & Implications", guidance)
+        self.assertIn("IMPLICATION PROMPT", guidance)
+        self.assertIn("incomplete telemetry coverage (partial)", guidance)
+        self.assertIn("success rate below 100% (80.0%)", guidance)
+        self.assertIn("inefficiency flags present (excessive_loops)", guidance)
+        self.assertIn("unresolved threads/checks/blocking items (1 unresolved threads)", guidance)
+
+    def test_build_completion_summary_guidance_edge_cases(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        session = self.passing_session()
+        # Make a thread missing reply evidence
+        session["items"]["github-thread:THREAD_DONE"].pop("reply_evidence")
+        # Make a local finding missing validation evidence
+        session["items"]["local-finding:FIXED"].pop("validation_evidence")
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+
+        telemetry_report = {
+            "coverage_label": "unavailable",
+            "total_events": 0,
+            "success_rate": 0.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
+        self.assertNotIn("success rate below 100%", guidance)
+        self.assertIn("1 threads missing reply", guidance)
+        self.assertIn("1 local items missing validation", guidance)
+        self.assertIn("Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session.", guidance)
+        self.assertIn("PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed.", guidance)
+
+        # Test runtime-only coverage label
+        telemetry_report["coverage_label"] = "runtime-only"
+        guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
+
+    def test_build_completion_summary_guidance_none_telemetry_fields(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": None,
+            "total_events": None,
+            "success_rate": None,
+            "inefficiency_flags": None,
+            "report_artifact": None,
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]", guidance)

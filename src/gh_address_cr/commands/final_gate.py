@@ -127,6 +127,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                 "success_rate": telemetry_report.get("success_rate"),
                 "diagnostics": telemetry_report.get("diagnostics", []),
             }
+            machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
+                result, telemetry_report, summary_path=summary_path, include_sha256=True
+            )
         sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
     else:
         emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
@@ -198,10 +201,18 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
         lines = summary_path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return
-    updated = [
-        f"- efficiency_report_path: {report_artifact}" if line.startswith("- efficiency_report_path:") else line
-        for line in lines
-    ]
+    updated = []
+    for line in lines:
+        if line.startswith("- efficiency_report_path:"):
+            updated.append(f"- efficiency_report_path: {report_artifact}")
+        elif line.strip().startswith("- Efficiency Report:"):
+            leading = line[:line.find("-")]
+            updated.append(f"{leading}- Efficiency Report: {report_artifact}")
+        elif line.strip().startswith("- Audit Summary:"):
+            leading = line[:line.find("-")]
+            updated.append(f"{leading}- Audit Summary: {summary_path}")
+        else:
+            updated.append(line)
     try:
         summary_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
     except OSError:
@@ -283,6 +294,149 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
+def build_completion_summary_guidance(
+    result: core_gate.GateResult,
+    telemetry_report: dict,
+    summary_path: Path | None,
+    *,
+    include_sha256: bool = True,
+) -> str:
+    status_str = "PASSED" if result.passed else "FAILED"
+    unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
+    pending_reviews = result.counts.get("pending_current_login_review_count", 0)
+    blocking_local = result.counts.get("blocking_local_items_count", 0)
+    blocking_github = result.counts.get("blocking_github_items_count", 0)
+    missing_reply = result.counts.get("github_threads_missing_reply_count", 0)
+    missing_validation = result.counts.get("missing_validation_evidence_count", 0)
+    blocking_items = result.counts.get("blocking_items_count", 0)
+
+    checks_failed = result.counts.get("pr_checks_failed_count", 0)
+    checks_pending = result.counts.get("pr_checks_pending_count", 0)
+    checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
+    checks_concise = f"{checks_failed}/{checks_pending}" if result.check_requirement else "N/A"
+
+    coverage = telemetry_report.get("coverage_label") or "unavailable"
+    total_events = telemetry_report.get("total_events") or 0
+    success_rate = telemetry_report.get("success_rate")
+    if success_rate is None:
+        success_rate = 0.0
+    inefficiency_flags = telemetry_report.get("inefficiency_flags") or []
+    flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
+    report_artifact = telemetry_report.get("report_artifact") or "N/A"
+
+    summary_path_str = str(summary_path) if summary_path else "N/A"
+
+    metrics_line = (
+        f"[gh-address-cr: {status_str} | "
+        f"threads: {unresolved_threads} | "
+        f"reviews: {pending_reviews} | "
+        f"checks: {checks_concise} | "
+        f"telemetry: {coverage} ({total_events} events, {success_rate:.1f}%) | "
+        f"inefficiency: {flags_str}]"
+    )
+
+    audit_summary_line = f"- Audit Summary: {summary_path_str}"
+    if include_sha256 and summary_path:
+        summary_sha256 = read_file_sha256(summary_path)
+        audit_summary_line += f" (sha256: {summary_sha256})"
+
+    abnormal_implications = []
+    abnormal_names = []
+
+    if coverage != "complete":
+        abnormal_names.append(f"incomplete telemetry coverage ({coverage})")
+        if coverage == "runtime-only":
+            desc = (
+                "Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly "
+                "imported/ingested prior to the final gate check, meaning the metrics represent only command-level "
+                "events tracked by the local session runner."
+            )
+        elif coverage == "unavailable":
+            desc = "Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session."
+        else:
+            desc = (
+                f"Telemetry coverage is {coverage} (not complete). Some agent interactions or tool runs "
+                "were not fully recorded in telemetry, which might make efficiency tracking partially incomplete."
+            )
+        abnormal_implications.append(f"- {desc}")
+
+    if total_events > 0 and success_rate < 100.0:
+        abnormal_names.append(f"success rate below 100% ({success_rate:.1f}%)")
+        abnormal_implications.append(
+            f"- Telemetry success rate is {success_rate:.1f}% (below 100%). Some tool calls, actions, "
+            "or validation runs encountered errors or retries during the session."
+        )
+
+    if inefficiency_flags:
+        abnormal_names.append(f"inefficiency flags present ({flags_str})")
+        abnormal_implications.append(
+            f"- Inefficiency flags detected: {flags_str}. This indicates potential execution friction, "
+            "redundant tool calls, or loop behaviors that occurred during the session."
+        )
+
+    threads_checks_remain = (
+        unresolved_threads > 0 or
+        pending_reviews > 0 or
+        blocking_items > 0 or
+        blocking_local > 0 or
+        blocking_github > 0 or
+        missing_reply > 0 or
+        missing_validation > 0 or
+        checks_not_green > 0 or
+        checks_failed > 0
+    )
+    if threads_checks_remain:
+        remain_details = []
+        if unresolved_threads > 0:
+            remain_details.append(f"{unresolved_threads} unresolved threads")
+        if pending_reviews > 0:
+            remain_details.append(f"{pending_reviews} pending reviews")
+        if checks_not_green > 0:
+            remain_details.append(f"{checks_not_green} non-green checks ({checks_failed} failed, {checks_pending} pending)")
+        if blocking_items > 0:
+            remain_details.append(f"{blocking_items} blocking items")
+        if missing_reply > 0:
+            remain_details.append(f"{missing_reply} threads missing reply")
+        if missing_validation > 0:
+            remain_details.append(f"{missing_validation} local items missing validation")
+        remain_str = ", ".join(remain_details)
+        abnormal_names.append(f"unresolved threads/checks/blocking items ({remain_str})")
+        abnormal_implications.append(
+            f"- Session contains unresolved items: {remain_str}. "
+            "PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed."
+        )
+
+    header = (
+        "Recommended user-facing completion summary:"
+        if result.passed
+        else "Gate FAILED: Do not send completion summary. Recommended status update:"
+    )
+    lines = [
+        header,
+        "",
+        "```text",
+        f"{metrics_line}",
+        f"{audit_summary_line}",
+        f"- Efficiency Report: {report_artifact}",
+        "```",
+    ]
+
+    if abnormal_implications:
+        lines.extend([
+            "",
+            "### Attention Items & Implications",
+            *abnormal_implications,
+            "",
+            "> [!IMPORTANT]",
+            "> One or more metrics are abnormal. You MUST explain the implications of these metrics in your completion summary rather than just pasting raw fields.",
+            ">",
+            "> **IMPLICATION PROMPT**:",
+            f"> Please explain the impact of: {', '.join(abnormal_names)}."
+        ])
+
+    return "\n".join(lines)
+
+
 def emit_final_gate_result(
     result: core_gate.GateResult,
     *,
@@ -334,11 +488,11 @@ def emit_final_gate_result(
     print(f"Efficiency report path: {telemetry_report['report_artifact']}")
     if summary_path is not None:
         print(f"Audit summary path: {summary_path}")
-        try:
-            summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
-        except Exception:
-            summary_sha256 = "unavailable"
+        summary_sha256 = read_file_sha256(summary_path)
         print(f"Audit summary sha256: {summary_sha256}")
+    print()
+    print("== PR Completion Summary Guidance ==")
+    print(build_completion_summary_guidance(result, telemetry_report, summary_path=summary_path, include_sha256=True))
 
 
 def write_native_final_gate_artifacts(
@@ -382,8 +536,12 @@ def write_native_final_gate_artifacts(
     )
     if result.failure_codes:
         summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
+    guidance_md = build_completion_summary_guidance(
+        result, telemetry_report, summary_path=summary_path, include_sha256=False
+    )
+    summary_lines.extend(["", "## PR Completion Summary Guidance", guidance_md])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-    summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    summary_sha256 = read_file_sha256(summary_path)
     audit_entry = {
         "ts": timestamp,
         "run_id": run_id,
