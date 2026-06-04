@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
 
 
 TERMINAL_LOCAL_STATES = {"fixed", "closed", "verified", "published"}
-TERMINAL_GITHUB_STATES = {"fixed", "closed", "verified", "published", "resolved"}
+TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
 
 
 def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicValidationSignal]:
@@ -71,14 +72,38 @@ def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
     state = str(item.get("state") or "")
     if claim not in {"ready_to_publish", "fixed", "handled"}:
         return False
-    if state in {"closed", "fixed", "handled", "published", "verified"}:
+    terminal_states = TERMINAL_GITHUB_STATES if str(item.get("item_kind") or "") == "github_thread" else TERMINAL_LOCAL_STATES
+    if state in terminal_states or state == "handled":
         return False
     return True
 
 
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
-    evidence = item.get("validation_evidence") or item.get("validation_commands")
-    return bool(evidence)
+    for key in ("validation_evidence", "validation_commands", "validation_results"):
+        if _has_content(item.get(key)):
+            return True
+    evidence = item.get("evidence")
+    if isinstance(evidence, Mapping):
+        return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
+    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
+        "accept",
+        "manual",
+        "sync",
+    }:
+        return True
+    return False
+
+
+def _has_content(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return any(_has_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_content(item) for item in value)
+    return bool(value)
 
 
 def _requires_validation_evidence(item_kind: str, state: str) -> bool:

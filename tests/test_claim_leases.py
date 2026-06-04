@@ -614,6 +614,32 @@ class ClaimLeaseSubmissionTest(unittest.TestCase):
             )
         self.assertEqual(expired.status, "expired")
 
+        wrong_item_expired_session = make_session()
+        wrong_item = make_item("wrong-expired-item", path="src/wrong_expired.py")
+        wrong_item_expired_session["items"][wrong_item["item_id"]] = wrong_item
+        wrong_expired = claim_lease(
+            wrong_item_expired_session,
+            wrong_item,
+            agent_id="agent-w",
+            role="fixer",
+            request_hash="req-wrong-expired",
+            lease_id="lease-wrong-expired",
+            ttl_seconds=1,
+            now=NOW,
+        )
+
+        with self.assertRaisesRegex(LeaseSubmissionError, "WRONG_ITEM"):
+            submit_lease(
+                wrong_item_expired_session,
+                wrong_expired.lease_id,
+                agent_id="agent-w",
+                role="fixer",
+                item_id="different-item",
+                request_hash="req-wrong-expired",
+                now=NOW + timedelta(seconds=2),
+            )
+        self.assertEqual(wrong_expired.status, "active")
+
         cross_role_session = make_session()
         cross_role = claim_lease(
             cross_role_session,

@@ -42,6 +42,29 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(signals[0].signal_type, "missing_required_evidence")
         self.assertEqual(signals[0].gate_effect, "blocking")
 
+    def test_terminal_github_thread_accepts_final_gate_validation_shapes(self):
+        for key, value in (
+            ("validation_results", [{"command": "python3 -m unittest", "result": "passed"}]),
+            ("evidence", {"validation": {"command": "python3 -m unittest", "result": "passed"}}),
+            ("evidence", {"validation_evidence": [{"command": "python3 -m unittest", "result": "passed"}]}),
+        ):
+            with self.subTest(key=key, value=value):
+                session = {
+                    "items": {
+                        "github-thread:fixed": {
+                            "item_id": "github-thread:fixed",
+                            "item_kind": "github_thread",
+                            "state": "published",
+                            "reply_evidence": {"reply_url": "https://example.test/reply"},
+                            key: value,
+                        }
+                    }
+                }
+
+                signals = generate_logic_validation_signals(session)
+
+                self.assertEqual(signals, [])
+
     def test_state_contradiction_generates_blocking_signal(self):
         session = {
             "items": {
@@ -58,6 +81,25 @@ class LogicValidationSignalTest(unittest.TestCase):
 
         self.assertEqual(signals[0].signal_type, "state_contradiction")
         self.assertEqual(signals[0].gate_effect, "blocking")
+
+    def test_terminal_github_thread_states_do_not_contradict_handled_claims(self):
+        for state in ("resolved", "clarified", "deferred", "rejected"):
+            with self.subTest(state=state):
+                session = {
+                    "items": {
+                        f"github-thread:{state}": {
+                            "item_id": f"github-thread:{state}",
+                            "item_kind": "github_thread",
+                            "state": state,
+                            "completion_claim": "handled",
+                            "validation_evidence": [{"command": "python3 -m unittest", "result": "passed"}],
+                        }
+                    }
+                }
+
+                signals = generate_logic_validation_signals(session)
+
+                self.assertEqual(signals, [])
 
     def test_low_confidence_signal_is_advisory(self):
         session = {

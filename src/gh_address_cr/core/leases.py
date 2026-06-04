@@ -212,6 +212,18 @@ def submit_lease(
             request_hash=request_hash,
             now=now,
         )
+    if _get(lease, "item_id") != item_id:
+        _raise_submission_error(
+            session,
+            "WRONG_ITEM",
+            item_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if _is_expired(lease, now):
         recovery = calculate_lease_recovery_state(
             session,
@@ -225,18 +237,6 @@ def submit_lease(
         _append_lease_recovery_event(session, recovery, now=now)
         _expire_lease(session, lease, now)
         raise LeaseSubmissionError("EXPIRED_LEASE", lease_id, recovery_state=recovery)
-    if _get(lease, "item_id") != item_id:
-        _raise_submission_error(
-            session,
-            "WRONG_ITEM",
-            item_id,
-            lease=lease,
-            agent_id=agent_id,
-            role=role,
-            item_id=item_id,
-            request_hash=request_hash,
-            now=now,
-        )
     if _get(lease, "request_hash") != request_hash:
         _raise_submission_error(
             session,
