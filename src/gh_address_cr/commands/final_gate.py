@@ -397,8 +397,13 @@ def build_completion_summary_guidance(
             "PR completion is blocked until all threads are resolved, reviews submitted, and checks pass."
         )
 
+    header = (
+        "Recommended user-facing completion summary:"
+        if result.passed
+        else "Gate FAILED: Do not send completion summary. Recommended status update:"
+    )
     lines = [
-        "Recommended user-facing completion summary:",
+        header,
         "",
         "```text",
         f"{metrics_line}",

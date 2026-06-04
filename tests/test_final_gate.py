@@ -247,6 +247,7 @@ class FinalGateTestCase(unittest.TestCase):
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
         self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial (5 events, 80.0%) | inefficiency: excessive_loops]", guidance)
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
         self.assertIn("Attention Items & Implications", guidance)
         self.assertIn("IMPLICATION PROMPT", guidance)
         self.assertIn("incomplete telemetry coverage (partial)", guidance)
@@ -276,6 +277,7 @@ class FinalGateTestCase(unittest.TestCase):
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
         self.assertNotIn("success rate below 100%", guidance)
         self.assertIn("1 threads missing reply", guidance)
         self.assertIn("1 local items missing validation", guidance)
