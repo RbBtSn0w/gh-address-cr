@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.github_thread_state import returned_claimable_state
-from gh_address_cr.evidence.ledger import EvidenceLedger
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+    get_field as _get,
+    get_session_ledger as _ledger,
+    json_ready as _json_ready,
+    return_expired_items_to_open as _return_expired_items_to_open,
+    set_field as _set,
+)
 
 try:
     from gh_address_cr.core.models import ClaimLease as _ModelClaimLease
@@ -459,35 +465,6 @@ def _lease_events(session: Any) -> list[dict[str, Any]]:
     return events
 
 
-def _return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) -> None:
-    items = session.get("items")
-    if not isinstance(items, dict):
-        return
-    for lease in expired:
-        item_id = str(_get(lease, "item_id"))
-        item = items.get(item_id)
-        if not isinstance(item, dict):
-            continue
-        if item.get("active_lease_id") == _get(lease, "lease_id"):
-            _return_item_to_claimable_state(item)
-            item["claimed_by"] = None
-            item["claimed_at"] = None
-            item["lease_expires_at"] = None
-            item.pop("active_lease_id", None)
-
-
-def _return_item_to_claimable_state(item: dict[str, Any]) -> None:
-    state, status = returned_claimable_state(item)
-    item["state"] = state
-    item["status"] = status
-
-
-def _ledger(session: dict[str, Any]) -> EvidenceLedger:
-    return EvidenceLedger(
-        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
-    )
-
-
 def _append_lease_event(
     session: Any,
     lease: Any,
@@ -517,39 +494,6 @@ def _conflict_keys(lease: Any) -> set[str]:
 def _required(value: Any, field_name: str) -> Any:
     if value in (None, ""):
         raise ValueError(f"{field_name} is required")
-    return value
-
-
-def _get(obj: Any, field: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(field, default)
-    return getattr(obj, field, default)
-
-
-def _set(obj: Any, field: str, value: Any) -> None:
-    if isinstance(obj, dict):
-        obj[field] = value
-    else:
-        setattr(obj, field, value)
-
-
-def _coerce_now(value: datetime | None) -> datetime:
-    if value is None:
-        return datetime.now(timezone.utc)
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
-def _json_ready(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(key): _json_ready(inner) for key, inner in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_json_ready(inner) for inner in value]
-    if hasattr(value, "__dict__"):
-        return _json_ready(vars(value))
     return value
 
 

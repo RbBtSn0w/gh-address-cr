@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from gh_address_cr.core import session as session_store
@@ -10,8 +10,6 @@ from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
 from gh_address_cr.core.severity import (
-    first_scene_item_severity,
-    normalize_severity,
     review_priority_for_publish,
 )
 from gh_address_cr.core.errors import WorkflowError
@@ -19,6 +17,15 @@ from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+    format_timestamp as _format_timestamp,
+    get_session_items as _items,
+    get_session_ledger as _ledger,
+    normalize_string_list as _normalize_string_list,
+    normalize_validation_commands as _normalize_validation_commands,
+    fix_reply_severity_for_publish as _fix_reply_severity_for_publish,
+)
 
 
 def publish_github_thread_responses(
@@ -302,113 +309,7 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
     except SystemExit as exc:
         return None, str(exc) or "MISSING_PUBLISH_REPLY"
 
-def _normalize_string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [part.strip() for part in value.split(",") if part.strip()]
-    if isinstance(value, list):
-        return [str(part).strip() for part in value if str(part).strip()]
-    return []
 
-
-def _normalize_validation_commands(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if not isinstance(value, list):
-        return []
-    commands: list[str] = []
-    for entry in value:
-        command = entry.get("command") if isinstance(entry, dict) else entry
-        command_text = str(command or "").strip()
-        if command_text:
-            commands.append(command_text)
-    return commands
-
-
-def _normalize_optional_fix_reply_severity(value: Any) -> str | None:
-    if value in (None, ""):
-        return None
-    return normalize_severity(value)
-
-
-def _severity_override_note(fix_reply_or_note: dict[str, Any] | str | None) -> str:
-    if isinstance(fix_reply_or_note, dict):
-        return str(
-            fix_reply_or_note.get("severity_note")
-            or fix_reply_or_note.get("severity_override_note")
-            or ""
-        ).strip()
-    return str(fix_reply_or_note or "").strip()
-
-
-def _fix_reply_explicit_severity(fix_reply: dict[str, Any]) -> tuple[str | None, str | None]:
-    if "severity" not in fix_reply or fix_reply.get("severity") in (None, ""):
-        return None, None
-    severity = _normalize_optional_fix_reply_severity(fix_reply.get("severity"))
-    if not severity:
-        return None, "INVALID_FIX_REPLY_SEVERITY"
-    return severity, None
-
-
-def _fix_reply_severity_rejection_reason(fix_reply: dict[str, Any], item: dict[str, Any]) -> str | None:
-    explicit_severity, error = _fix_reply_explicit_severity(fix_reply)
-    if error:
-        return error
-    if not explicit_severity:
-        return None
-    first_scene_severity = first_scene_item_severity(item)
-    if (
-        first_scene_severity
-        and first_scene_severity != explicit_severity
-        and not _severity_override_note(fix_reply)
-    ):
-        return "SEVERITY_OVERRIDE_NOTE_REQUIRED"
-    return None
-
-
-def _fix_reply_severity_for_publish(fix_reply: dict[str, Any], item: dict[str, Any]) -> tuple[str | None, str | None]:
-    explicit_severity, error = _fix_reply_explicit_severity(fix_reply)
-    if error:
-        return None, error
-    if explicit_severity:
-        conflict = _fix_reply_severity_rejection_reason(fix_reply, item)
-        if conflict:
-            return None, conflict
-        return explicit_severity, None
-    return first_scene_item_severity(item), None
-
-
-def _items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    items = session.setdefault("items", {})
-    if isinstance(items, dict):
-        return {str(key): value for key, value in items.items() if isinstance(value, dict)}
-    raise WorkflowError(
-        status="INVALID_SESSION",
-        reason_code="INVALID_ITEMS_SHAPE",
-        waiting_on="session",
-        exit_code=5,
-        message="Session items must be a JSON object.",
-    )
-
-
-def _ledger(session: dict[str, Any]) -> EvidenceLedger:
-    return EvidenceLedger(
-        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
-    )
-
-
-def _coerce_now(value: datetime | str | None) -> datetime:
-    if value is None:
-        return datetime.now(timezone.utc)
-    if isinstance(value, str):
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
-def _format_timestamp(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _side_effect_key(session: dict[str, Any], item_id: str, side_effect_type: str) -> str:

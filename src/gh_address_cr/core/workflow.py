@@ -18,16 +18,18 @@ from gh_address_cr.core import agent_protocol
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _chunks,
-    _coerce_now,
-    _format_timestamp,
-    _items,
-    _json_ready,
-    _ledger,
     _load_response_json_object,
-    _normalize_string_list,
     _normalize_validation_command_records,
     _validate_requested_severity,
     _validate_severity_override_note,
+)
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+    format_timestamp as _format_timestamp,
+    json_ready as _json_ready,
+    get_session_items as _items,
+    get_session_ledger as _ledger,
+    normalize_string_list as _normalize_string_list,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
