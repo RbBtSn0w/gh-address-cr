@@ -46,6 +46,11 @@ The session state is stored in a PR-scoped workspace under the user cache direct
 - audit log: `audit.jsonl`
 - trace log: `trace.jsonl`
 - audit summary: `audit_summary.md`
+- runtime telemetry: `telemetry/runtime.jsonl`
+- imported external telemetry: `telemetry/agent.jsonl`
+- telemetry import ledger: `telemetry/imports.jsonl`
+- telemetry fingerprint ledger: `telemetry/fingerprints.json`
+- efficiency report: `efficiency_report.json`
 - findings: `findings-*.json` and `code-review-findings.json`
 - replies: `reply-*.md`
 - loop requests: `loop-request-*.json`
@@ -72,6 +77,30 @@ The session also tracks loop-safety metadata per item:
 - `repeat_count`: how many times the same local finding was re-ingested
 - `reopen_count`: how many times a previously closed/deferred/clarified item was reopened
 - claim lease fields so stale ownership can be reclaimed
+
+
+## Telemetry Evidence Boundary
+
+Telemetry is PR-scoped observed workflow evidence. It can enrich final-gate
+output, `audit_summary.md`, and `efficiency_report.json`, but it does not mutate
+review item state and does not replace reply, resolve, or final-gate proof.
+
+The runtime owns telemetry normalization and reporting:
+
+- runtime events are recorded by `gh-address-cr` itself
+- external agent events are imported through `gh-address-cr telemetry ingest`
+- final-gate may import host telemetry from `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT`
+- accepted events keep source attribution and runtime-computed `event_fingerprint`
+  values
+- duplicate or overlapping events are deduplicated before report statistics are
+  calculated
+- every efficiency summary reports `complete`, `partial`, `runtime-only`, or
+  `unavailable` coverage
+
+Telemetry commands fail loudly for malformed, unsafe, unsupported, or ambiguous
+telemetry input. Core review-resolution flows remain fail-open for missing or
+damaged telemetry and report the reduced coverage instead of blocking review
+completion.
 
 
 ## Runtime Package Layout

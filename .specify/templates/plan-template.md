@@ -47,6 +47,11 @@
 - **External intake replaceability**: Does the plan preserve the **Normalized
   Findings Contract** and avoid coupling the control plane to a specific
   review engine or agent vendor?
+- **Telemetry evidence boundary**: If the plan changes telemetry, does it keep
+  telemetry as attributed observed evidence rather than review-resolution state?
+  Does it define source attribution, coverage labels, privacy filtering,
+  deterministic event fingerprints, idempotent duplicate handling, and
+  fail-loud telemetry commands with fail-open core review workflows?
 - **Fail-fast verification**: Does the plan include tests or smoke checks for
   each changed public behavior, parser, session transition, or CLI surface?
 
