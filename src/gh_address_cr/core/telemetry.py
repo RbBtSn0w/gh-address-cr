@@ -582,7 +582,19 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     rejected_count = parse_result.rejected_count
     unsafe_seen = parse_result.unsafe_seen
     malformed_seen = parse_result.malformed_seen
-    diagnostics = [str(diag) for diag in parse_result.diagnostics]
+
+    diagnostics: list[str] = []
+    for diag in parse_result.diagnostics:
+        diag_str = str(diag)
+        if (
+            _contains_control_character(diag_str)
+            or _contains_token_marker(diag_str)
+            or _contains_private_identifier(diag_str)
+            or _looks_like_unnecessary_absolute_path(diag_str)
+        ):
+            diagnostics.append("[redacted]")
+        else:
+            diagnostics.append(diag_str)
 
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
@@ -590,17 +602,17 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     observed_sessions: set[str] = set()
     duplicate_count = 0
 
-    for event in accepted_events:
+    for idx, event in enumerate(accepted_events):
         try:
             normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
         except ValueError as exc:
             message = str(exc)
             if message.startswith("UNSAFE:"):
                 unsafe_seen = True
-                diagnostics.append(f"event {event.event_id or 'unknown'}: {message.removeprefix('UNSAFE:')}")
+                diagnostics.append(f"event index {idx}: {message.removeprefix('UNSAFE:')}")
             else:
                 malformed_seen = True
-                diagnostics.append(f"event {event.event_id or 'unknown'}: {message}")
+                diagnostics.append(f"event index {idx}: {message}")
             rejected_count += 1
             continue
 

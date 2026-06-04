@@ -2630,5 +2630,93 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["accepted_count"], 0)
                 self.assertTrue(any("TypeError: Adapter parse must return a TelemetryParseResult instance, got NoneType" in diag for diag in result["diagnostics"]))
 
+    def test_custom_telemetry_adapter_diagnostics_sanitization(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+        )
+
+        class MockSensitiveDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[
+                        "Safe diagnostic message",
+                        "Rejected secret token: github_token=123",
+                        "Path failure: /Users/alice/private/key.pem",
+                        "User info: username=bob",
+                    ]
+                )
+
+        register_adapter("mock-sensitive-diag", MockSensitiveDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-sensitive-diag"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-sensitive-diag",
+                    raw="dummy_payload",
+                )
+                self.assertIn("Safe diagnostic message", result["diagnostics"])
+                redacted_count = sum(1 for diag in result["diagnostics"] if diag == "[redacted]")
+                self.assertEqual(redacted_count, 3)
+
+    def test_import_external_telemetry_event_id_redaction_in_normalization_diagnostics(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockUnsafeEventIdAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[
+                        ExternalTelemetryEvent(
+                            schema_version="1.0",
+                            source="custom-source",
+                            source_session_id="run-1",
+                            event_id="unsafe-secret-token-sk-12345",
+                            kind="tool_call",
+                            operation="safe operation",
+                            duration_ms=10,
+                            status="invalid-status",
+                        )
+                    ],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-unsafe-event-id", MockUnsafeEventIdAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe-event-id"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe-event-id",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["rejected_count"], 1)
+                
+                self.assertFalse(any("unsafe-secret-token-sk-12345" in diag for diag in result["diagnostics"]))
+                self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
+
 if __name__ == "__main__":
     unittest.main()
