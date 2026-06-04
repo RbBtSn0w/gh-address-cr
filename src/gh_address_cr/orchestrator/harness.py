@@ -2,6 +2,7 @@ import argparse
 import sys
 import json
 import time
+import re
 from pathlib import Path
 from uuid import uuid4
 import os
@@ -281,7 +282,9 @@ def _looks_trivial(item: dict) -> bool:
     text = " ".join(str(item.get(key) or "") for key in ("title", "body", "first_body", "path")).lower()
     sensitive = ("security", "unsafe", "auth", "token", "secret", "api", "data loss", "performance")
     trivial = ("typo", "spelling", "grammar", "documentation", "docs", "readme", "comment", "wording")
-    return any(marker in text for marker in trivial) and not any(marker in text for marker in sensitive)
+    sensitive_pattern = r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in sensitive) + r")\b"
+    trivial_pattern = r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in trivial) + r")\b"
+    return bool(re.search(trivial_pattern, text)) and not bool(re.search(sensitive_pattern, text))
 
 
 def handle_start(args: List[str]) -> int:

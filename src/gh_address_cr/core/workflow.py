@@ -82,6 +82,12 @@ TRIVIAL_SENSITIVE_MARKERS = (
     "performance",
     "memory",
 )
+TRIVIAL_POSITIVE_MARKER_RE = re.compile(
+    r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_POSITIVE_MARKERS) + r")\b"
+)
+TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
+    r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS) + r")\b"
+)
 
 
 class WorkflowError(RuntimeError):
@@ -995,11 +1001,11 @@ def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]
         str(item.get(key) or "")
         for key in ("title", "body", "first_body", "path")
     ).lower()
-    if any(marker in text for marker in TRIVIAL_SENSITIVE_MARKERS):
+    if TRIVIAL_SENSITIVE_MARKER_RE.search(text):
         return False, "Thread contains non-trivial or sensitive review markers."
     path = str(item.get("path") or "").lower()
     path_trivial = path.endswith(".md") or path.startswith("docs/") or path in {"readme", "readme.md"}
-    text_trivial = any(marker in text for marker in TRIVIAL_POSITIVE_MARKERS)
+    text_trivial = bool(TRIVIAL_POSITIVE_MARKER_RE.search(text))
     if not (path_trivial or text_trivial):
         return False, "Thread does not look like a documentation or typo-only concern."
     return True, "Thread is eligible for documentation or typo fast path."

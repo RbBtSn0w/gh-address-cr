@@ -306,15 +306,27 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 def _hunk_overlap(candidate_keys: tuple[str, ...], existing_keys: set[str]) -> set[str]:
     overlaps: set[str] = set()
-    candidate_hunks = [_parse_hunk_key(key) for key in candidate_keys]
-    existing_hunks = [_parse_hunk_key(key) for key in existing_keys]
-    for candidate in candidate_hunks:
-        if candidate is None:
+    candidate_files = {key.removeprefix("file:") for key in candidate_keys if key.startswith("file:")}
+    existing_files = {key.removeprefix("file:") for key in existing_keys if key.startswith("file:")}
+    candidate_hunks = []
+    for key in candidate_keys:
+        parsed = _parse_hunk_key(key)
+        if parsed is None:
             continue
+        candidate_hunks.append(parsed)
+        if parsed[0] in existing_files:
+            overlaps.add(key)
+    existing_hunks = []
+    for key in existing_keys:
+        parsed = _parse_hunk_key(key)
+        if parsed is None:
+            continue
+        existing_hunks.append(parsed)
+        if parsed[0] in candidate_files:
+            overlaps.add(key)
+    for candidate in candidate_hunks:
         candidate_path, candidate_start, candidate_end = candidate
         for existing in existing_hunks:
-            if existing is None:
-                continue
             existing_path, existing_start, existing_end = existing
             if candidate_path != existing_path:
                 continue

@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import sys
@@ -5,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from gh_address_cr import cli as runtime_cli
 from gh_address_cr.agent.responses import ResponseValidationError, validate_workflow_decision
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.leases import LeaseConflictError, calculate_conflict_keys, claim_lease
@@ -14,9 +17,9 @@ from tests.helpers import CLI_PY, PythonScriptTestCase
 
 
 class Issue78ActiveScopeTests(PythonScriptTestCase):
-    def _write_session(self, repo="octo/example", pr="77"):
+    def _write_session(self, repo="octo/example", pr="77", status="ACTIVE"):
         manager = session_store.SessionManager(repo, pr)
-        payload = manager.create(status="ACTIVE")
+        payload = manager.create(status=status)
         manager.save(payload)
         return payload
 
@@ -121,6 +124,30 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "AMBIGUOUS_PR_SCOPE")
 
+    def test_high_level_command_ignores_inactive_cached_sessions(self):
+        self._write_session("octo/example", "77", status="ACTIVE")
+        self._write_session("octo/inactive", "12", status="PASSED")
+        self._install_fake_gh_for_threads()
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["repo"], "octo/example")
+        self.assertEqual(payload["pr_number"], "77")
+
+    def test_high_level_command_fails_loud_when_state_dir_scan_errors(self):
+        state_file = self.state_dir / "not-a-directory"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text("not a directory", encoding="utf-8")
+        self.env["GH_ADDRESS_CR_STATE_DIR"] = str(state_file)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "NO_ACTIVE_PR_SCOPE")
+
     def test_high_level_command_rejects_partial_explicit_scope_instead_of_using_cache(self):
         self._write_session("octo/example", "77")
 
@@ -195,6 +222,26 @@ class Issue78LeaseScopeTests(unittest.TestCase):
 
         self.assertIn("file:src/a.py", keys)
         self.assertNotIn("hunk:src/a.py", " ".join(keys))
+
+    def test_file_level_fallback_conflicts_with_hunk_scoped_lease(self):
+        file_level = {"item_id": "a", "path": "src/a.py"}
+        hunk_level = {"item_id": "b", "path": "src/a.py", "line": 10, "end_line": 12}
+        session = {"leases": {}}
+
+        claim_lease(session, file_level, agent_id="a1", role="fixer", request_hash="r1")
+
+        with self.assertRaises(LeaseConflictError):
+            claim_lease(session, hunk_level, agent_id="a2", role="fixer", request_hash="r2")
+
+    def test_hunk_scoped_lease_conflicts_with_existing_file_level_fallback(self):
+        file_level = {"item_id": "b", "path": "src/a.py"}
+        hunk_level = {"item_id": "a", "path": "src/a.py", "line": 10, "end_line": 12}
+        session = {"leases": {}}
+
+        claim_lease(session, hunk_level, agent_id="a1", role="fixer", request_hash="r1")
+
+        with self.assertRaises(LeaseConflictError):
+            claim_lease(session, file_level, agent_id="a2", role="fixer", request_hash="r2")
 
 
 class Issue78TelemetryAdapterTests(unittest.TestCase):
@@ -273,6 +320,33 @@ class Issue78CommandSessionTests(PythonScriptTestCase):
         self.assertNotEqual(payload["results"][0]["exit_code"], 0)
         self.assertEqual(payload["results"][1]["exit_code"], 0)
 
+    def test_command_session_continues_after_unhandled_operation_exception(self):
+        request = {
+            "operations": [
+                {"id": "raises", "argv": ["explode"]},
+                {"id": "ok", "argv": ["version"]},
+            ]
+        }
+        request_path = self.state_dir / "commands.json"
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+
+        def fake_main(argv):
+            if argv == ["explode"]:
+                raise RuntimeError("boom")
+            return 0
+
+        stdout = io.StringIO()
+        with patch.object(runtime_cli, "main", fake_main), contextlib.redirect_stdout(stdout):
+            exit_code = runtime_cli.handle_command_session(["--input", str(request_path)])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual([step["id"] for step in payload["results"]], ["raises", "ok"])
+        self.assertEqual(payload["results"][0]["exit_code"], 2)
+        self.assertIn("Unhandled exception: boom", payload["results"][0]["stderr"])
+        self.assertEqual(payload["results"][1]["exit_code"], 0)
+
 
 class Issue78AutopilotTests(PythonScriptTestCase):
     def test_autopilot_plan_is_dry_run_by_default(self):
@@ -299,6 +373,29 @@ class Issue78AutopilotTests(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "AUTOPILOT_PLAN_READY")
         self.assertFalse(payload["side_effects_enabled"])
         self.assertEqual(payload["steps"][0]["command"], "agent classify")
+
+    def test_autopilot_trivial_detection_uses_word_boundaries(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        session["items"] = {
+            "github-thread:1": {
+                "item_id": "github-thread:1",
+                "item_kind": "github_thread",
+                "path": "README.md",
+                "line": 4,
+                "blocking": True,
+                "handled": False,
+                "state": "open",
+                "body": "Author name typo in the README.",
+            }
+        }
+        manager.save(session)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "agent", "orchestrate", "autopilot", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["steps"][0]["classification"], "fix")
         self.assertTrue(payload["steps"][0]["side_effect"])
         self.assertTrue(payload["steps"][0]["runtime_state_effect"])
         self.assertFalse(payload["steps"][0]["github_side_effect"])
@@ -311,6 +408,49 @@ class Issue78AutopilotTests(PythonScriptTestCase):
 
 
 class Issue78TrivialFastPathTests(PythonScriptTestCase):
+    def test_trivial_docs_fast_path_accepts_words_containing_sensitive_substrings(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        session["items"] = {
+            "github-thread:1": {
+                "item_id": "github-thread:1",
+                "item_kind": "github_thread",
+                "path": "README.md",
+                "line": 4,
+                "blocking": True,
+                "handled": False,
+                "state": "open",
+                "body": "Author name typo in the README.",
+            }
+        }
+        manager.save(session)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "agent",
+                "trivial-fix",
+                self.repo,
+                self.pr,
+                "github-thread:1",
+                "--commit",
+                "abc123",
+                "--file",
+                "README.md",
+                "--summary",
+                "Fixed author typo.",
+                "--why",
+                "Documentation-only typo.",
+                "--validation",
+                "docs check=passed",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "TRIVIAL_FIX_ACCEPTED")
+
     def test_trivial_docs_fast_path_rejects_security_sensitive_thread(self):
         manager = session_store.SessionManager(self.repo, self.pr)
         session = manager.create(status="ACTIVE")

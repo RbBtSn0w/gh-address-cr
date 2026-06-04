@@ -3040,22 +3040,34 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
 def _active_cached_sessions() -> list[tuple[str, str, Path]]:
     try:
         root = core_paths.state_dir()
+        if not root.exists():
+            return []
+        sessions: list[tuple[str, str, Path]] = []
+        for owner_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            if owner_dir.name == "archive" or "__" not in owner_dir.name:
+                continue
+            owner, repo_name = owner_dir.name.split("__", 1)
+            repo = f"{owner}/{repo_name}"
+            for pr_dir in sorted(path for path in owner_dir.iterdir() if path.is_dir() and path.name.startswith("pr-")):
+                pr_number = pr_dir.name.removeprefix("pr-")
+                session_path = pr_dir / "session.json"
+                if pr_number and _cached_session_is_active(session_path):
+                    sessions.append((repo, pr_number, session_path))
+        return sessions
     except Exception:
         return []
-    if not root.exists():
-        return []
-    sessions: list[tuple[str, str, Path]] = []
-    for owner_dir in sorted(path for path in root.iterdir() if path.is_dir()):
-        if owner_dir.name == "archive" or "__" not in owner_dir.name:
-            continue
-        owner, repo_name = owner_dir.name.split("__", 1)
-        repo = f"{owner}/{repo_name}"
-        for pr_dir in sorted(path for path in owner_dir.iterdir() if path.is_dir() and path.name.startswith("pr-")):
-            pr_number = pr_dir.name.removeprefix("pr-")
-            session_path = pr_dir / "session.json"
-            if pr_number and session_path.is_file():
-                sessions.append((repo, pr_number, session_path))
-    return sessions
+
+
+def _cached_session_is_active(session_path: Path) -> bool:
+    if not session_path.is_file():
+        return False
+    try:
+        payload = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("status") == "ACTIVE"
 
 
 def _resolve_active_cached_scope() -> tuple[str, str] | dict:
@@ -3202,6 +3214,9 @@ def handle_command_session(passthrough: list[str]) -> int:
                 exit_code = main(list(argv))
             except SystemExit as exc:
                 exit_code = exc.code if isinstance(exc.code, int) else 2
+            except Exception as exc:
+                stderr.write(f"Unhandled exception: {exc}\n")
+                exit_code = 2
         results.append(
             {
                 "id": operation_id,
