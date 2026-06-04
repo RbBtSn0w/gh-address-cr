@@ -2628,7 +2628,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["status"], "FAILED")
                 self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
                 self.assertEqual(result["accepted_count"], 0)
-                self.assertTrue(any("TypeError: Adapter parse must return a TelemetryParseResult instance, got NoneType" in diag for diag in result["diagnostics"]))
+                self.assertTrue(any("Adapter parsing failed: TypeError" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_diagnostics_sanitization(self):
         from gh_address_cr.core.telemetry import (
@@ -2717,6 +2717,88 @@ class TestTelemetry(unittest.TestCase):
                 
                 self.assertFalse(any("unsafe-secret-token-sk-12345" in diag for diag in result["diagnostics"]))
                 self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_invalid_event_type_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+        )
+
+        class MockInvalidEventAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[{"kind": "tool_call", "operation": "safe", "status": "success"}],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-invalid-event", MockInvalidEventAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-event"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-event",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertTrue(any("Adapter event processing failed: TypeError" in diag for diag in result["diagnostics"]))
+
+    def test_import_external_telemetry_rejects_unsafe_metadata_keys(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockUnsafeMetadataKeyAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[
+                        ExternalTelemetryEvent(
+                            schema_version="1.0",
+                            source="custom-source",
+                            source_session_id="run-1",
+                            event_id="evt-1",
+                            kind="tool_call",
+                            operation="safe operation",
+                            duration_ms=10,
+                            status="success",
+                            metadata={"ghp_unsafe_token_as_key": "some_value"},
+                        )
+                    ],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-unsafe-meta-key", MockUnsafeMetadataKeyAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe-meta-key"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe-meta-key",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("unsafe token in metadata field key" in diag for diag in result["diagnostics"]))
 
 if __name__ == "__main__":
     unittest.main()

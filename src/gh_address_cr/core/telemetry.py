@@ -602,28 +602,47 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     observed_sessions: set[str] = set()
     duplicate_count = 0
 
-    for idx, event in enumerate(accepted_events):
-        try:
-            normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
-        except ValueError as exc:
-            message = str(exc)
-            if message.startswith("UNSAFE:"):
-                unsafe_seen = True
-                diagnostics.append(f"event index {idx}: {message.removeprefix('UNSAFE:')}")
-            else:
-                malformed_seen = True
-                diagnostics.append(f"event index {idx}: {message}")
-            rejected_count += 1
-            continue
+    try:
+        for idx, event in enumerate(accepted_events):
+            if not isinstance(event, ExternalTelemetryEvent):
+                raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
+            try:
+                normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("UNSAFE:"):
+                    unsafe_seen = True
+                    diagnostics.append(f"event index {idx}: {message.removeprefix('UNSAFE:')}")
+                else:
+                    malformed_seen = True
+                    diagnostics.append(f"event index {idx}: {message}")
+                rejected_count += 1
+                continue
 
-        observed_sessions.add(normalized_event.source_session_id)
-        if normalized_event.identity in existing_fingerprints:
-            duplicate_count += 1
-            duplicate_fingerprints.append(normalized_event.identity)
-            continue
-        existing_fingerprints.add(normalized_event.identity)
-        accepted_fingerprints.append(normalized_event.identity)
-        accepted.append(normalized_event)
+            observed_sessions.add(normalized_event.source_session_id)
+            if normalized_event.identity in existing_fingerprints:
+                duplicate_count += 1
+                duplicate_fingerprints.append(normalized_event.identity)
+                continue
+            existing_fingerprints.add(normalized_event.identity)
+            accepted_fingerprints.append(normalized_event.identity)
+            accepted.append(normalized_event)
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter event processing failed: {type(exc).__name__}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
 
     ambiguous_seen = len(observed_sessions) > 1
     if unsafe_seen:
@@ -967,6 +986,14 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
             key_text = str(key)
             if _is_unsafe_metadata_key(key_text):
                 raise ValueError(f"UNSAFE:unsafe metadata field: {key_text}")
+            if _contains_token_marker(key_text):
+                raise ValueError(f"UNSAFE:unsafe token in metadata field key: {key_text}")
+            if _contains_private_identifier(key_text):
+                raise ValueError(f"UNSAFE:unsafe private identifier in metadata field key: {key_text}")
+            if _looks_like_unnecessary_absolute_path(key_text):
+                raise ValueError(f"UNSAFE:unsafe absolute path in metadata field key: {key_text}")
+            if _contains_control_character(key_text):
+                raise ValueError(f"UNSAFE:unsafe control character in metadata field key: {key_text}")
             _validate_safe_metadata_value(nested, key_path=f"{key_path}.{key_text}")
         return
     if isinstance(value, list):
