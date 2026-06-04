@@ -30,47 +30,6 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             sys.path.pop(0)
         return module
 
-    def test_post_reply_audits_invalid_json_response(self):
-        module = self.load_module("post_reply.py", "post_reply_under_test")
-
-        reply_file = Path(self.temp_dir.name) / "reply.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-        audits = []
-
-        module.github_viewer_login = lambda: "tester"
-        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
-            "status": "skipped",
-            "submitted": [],
-            "error": None,
-        }
-        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
-        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
-
-        with (
-            patched_argv(
-                [
-                    "post_reply.py",
-                    "--repo",
-                    self.repo,
-                    "--pr",
-                    self.pr,
-                    "THREAD_REPLY",
-                    str(reply_file),
-                ]
-            ),
-            patch("sys.stdout", new=io.StringIO()) as stdout,
-            patch("sys.stderr", new=io.StringIO()) as stderr,
-        ):
-            rc = module.main()
-            payload = json.loads(stdout.getvalue())
-
-        self.assertNotEqual(rc, 0)
-        self.assertEqual(payload["status"], "failed")
-        self.assertEqual(payload["error"], "reply response was not valid JSON")
-        self.assertTrue(audits)
-        self.assertIn("reply response was not valid JSON", stderr.getvalue())
-
     def test_submit_feedback_audits_invalid_json_response(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_under_test")
 

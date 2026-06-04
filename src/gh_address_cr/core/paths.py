@@ -70,6 +70,14 @@ def efficiency_report_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "efficiency-report.json"
 
 
+def github_pr_cache_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "github_pr_cache.json"
+
+
+def last_machine_summary_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "last-machine-summary.json"
+
+
 class SessionPaths:
     def __init__(self, repo: str, pr_number: str | int) -> None:
         self.repo = repo

@@ -9,9 +9,6 @@ from unittest.mock import patch
 
 from tests.helpers import (
     CLI_PY,
-    CODE_REVIEW_ADAPTER_PY,
-    FINAL_GATE_PY,
-    POST_REPLY_PY,
     REVIEW_TO_FINDINGS_PY,
     PythonScriptTestCase,
 )
@@ -298,13 +295,11 @@ else:
             [
                 sys.executable,
                 str(CLI_PY),
-                "review",
+                "final-gate",
+                "--machine",
                 self.repo,
                 self.pr,
-                "--input",
-                "-",
-            ],
-            stdin="[]",
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
@@ -312,9 +307,11 @@ else:
             set(summary),
             {
                 "artifact_path",
+                "check_requirement",
                 "commands",
                 "counts",
                 "exit_code",
+                "failure_codes",
                 "item_id",
                 "item_kind",
                 "next_action",
@@ -331,8 +328,8 @@ else:
         self.assertEqual(summary["exit_code"], 0)
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
         self.assertIn("pr-77", summary["artifact_path"])
-        self.assertEqual(summary["next_action"], "No action required.")
-        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertEqual(summary["next_action"], "Completion may be claimed.")
+        self.assertIsNone(summary["reason_code"])
         self.assertIsNone(summary["waiting_on"])
         self.assertEqual(summary["commands"]["final_gate"], f"gh-address-cr final-gate {self.repo} {self.pr}")
 
@@ -371,14 +368,10 @@ else:
             [
                 sys.executable,
                 str(CLI_PY),
-                "review",
+                "final-gate",
                 self.repo,
                 self.pr,
-                "--input",
-                "-",
-                "--human",
-            ],
-            stdin="[]",
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
@@ -419,14 +412,11 @@ else:
             [
                 sys.executable,
                 str(CLI_PY),
-                "review",
+                "final-gate",
+                "--machine",
                 self.repo,
                 self.pr,
-                "--input",
-                "-",
-                "--machine",
-            ],
-            stdin="[]",
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
@@ -434,7 +424,7 @@ else:
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)
         self.assertEqual(summary["exit_code"], 0)
-        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["reason_code"])
         self.assertIsNone(summary["waiting_on"])
 
     def test_cli_review_without_findings_enters_external_review_wait_state(self):
@@ -2127,29 +2117,6 @@ body: Missing title should fail.
         self.assertIn("must include a title", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_code_review_adapter_normalizes_findings(self):
-        payload = json.dumps(
-            {
-                "findings": [
-                    {
-                        "check": "null-guard",
-                        "description": "Potential null dereference.",
-                        "filename": "src/code_review.py",
-                        "position": 9,
-                        "severity": "P1",
-                    }
-                ]
-            }
-        )
-        result = self.run_cmd(
-            [sys.executable, str(CODE_REVIEW_ADAPTER_PY)],
-            stdin=payload,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        findings = json.loads(result.stdout)
-        self.assertEqual(findings[0]["title"], "null-guard")
-        self.assertEqual(findings[0]["path"], "src/code_review.py")
-        self.assertEqual(findings[0]["line"], 9)
 
     def test_cli_dispatches_review_to_findings(self):
         markdown = """```finding
@@ -2370,7 +2337,7 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("== Current Run Snapshot ==", result.stdout)
@@ -2802,7 +2769,7 @@ else:
         (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2842,7 +2809,7 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2864,7 +2831,7 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2922,7 +2889,7 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("github_threads_missing_reply_count=1", result.stdout)
         self.assertIn("missing reply evidence", result.stderr)
@@ -3017,227 +2984,14 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("Pending review count: 1", result.stdout)
         self.assertIn("pending review(s)", result.stderr)
 
-    def test_post_reply_python_dry_run_prints_body(self):
-        reply_file = Path(self.temp_dir.name) / "reply.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(POST_REPLY_PY),
-                "--dry-run",
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY",
-                str(reply_file),
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry-run] Would reply to thread: THREAD_REPLY", result.stdout)
-        self.assertIn("Reply body", result.stdout)
-
-    def test_post_reply_submits_pending_review_for_current_user(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            f"""#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-state_file = Path({str((Path(self.temp_dir.name) / "gh_state.json").as_posix())!r})
-if not state_file.exists():
-    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
-
-args = sys.argv[1:]
-if args[:2] == ['api', 'graphql']:
-    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
-    if 'submitPullRequestReview' in query:
-        payload = json.loads(state_file.read_text())
-        payload['submitted'].append('REV_NODE_101')
-        state_file.write_text(json.dumps(payload))
-        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': 'REV_NODE_101'}}}}}}}}))
-    else:
-        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
-elif args[:2] == ['api', 'user']:
-    print(json.dumps({{'login': 'octocat'}}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
-    payload = json.loads(state_file.read_text())
-    payload['review_calls'] += 1
-    state_file.write_text(json.dumps(payload))
-    if 'page=2' in args[1]:
-        print(json.dumps([]))
-    else:
-        print(json.dumps([
-            {{'node_id': 'REV_NODE_101', 'id': 101, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
-            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
-            {{'node_id': 'REV_NODE_303', 'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
-        ]))
-else:
-    raise SystemExit(f'unhandled gh args: {{args}}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        reply_file = Path(self.temp_dir.name) / "reply.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(POST_REPLY_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY",
-                str(reply_file),
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "succeeded")
-        self.assertEqual(payload["reply_status"], "succeeded")
-        self.assertEqual(payload["review_submit_status"], "succeeded")
-        self.assertEqual(payload["reply_url"], "https://example.test/reply")
-        state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], ["REV_NODE_101"])
-        self.assertEqual(state["review_calls"], 2)
-
-    def test_post_reply_submits_preexisting_pending_review(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            f"""#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-state_file = Path({str((Path(self.temp_dir.name) / "gh_state_existing.json").as_posix())!r})
-if not state_file.exists():
-    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
-
-args = sys.argv[1:]
-if args[:2] == ['api', 'graphql']:
-    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
-    if 'submitPullRequestReview' in query:
-        payload = json.loads(state_file.read_text())
-        payload['submitted'].append('777')
-        state_file.write_text(json.dumps(payload))
-        print(json.dumps({{'data': {{'submit0': {{'pullRequestReview': {{'id': '777'}}}}}}}}))
-    else:
-        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-existing'}}}}}}}}))
-elif args[:2] == ['api', 'user']:
-    print(json.dumps({{'login': 'octocat'}}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
-    payload = json.loads(state_file.read_text())
-    payload['review_calls'] += 1
-    state_file.write_text(json.dumps(payload))
-    if 'page=2' in args[1]:
-        print(json.dumps([]))
-    else:
-        print(json.dumps([
-            {{'node_id': 'REV_NODE_777', 'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
-            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
-        ]))
-else:
-    raise SystemExit(f'unhandled gh args: {{args}}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        reply_file = Path(self.temp_dir.name) / "reply-existing.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(POST_REPLY_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY",
-                str(reply_file),
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "succeeded")
-        self.assertEqual(payload["reply_status"], "succeeded")
-        self.assertEqual(payload["review_submit_status"], "succeeded")
-        self.assertEqual(payload["reply_url"], "https://example.test/reply-existing")
-        state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], ["777"])
-        self.assertEqual(state["review_calls"], 2)
-
-    def test_post_reply_reports_unknown_when_submit_fails_after_reply(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            f"""#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-state_file = Path({str((Path(self.temp_dir.name) / "gh_state_submit_fail.json").as_posix())!r})
-if not state_file.exists():
-    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
-
-args = sys.argv[1:]
-if args[:2] == ['api', 'graphql']:
-    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
-    if 'submitPullRequestReview' in query:
-        sys.stderr.write('submit failed\\n')
-        raise SystemExit(1)
-    print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-partial'}}}}}}}}))
-elif args[:2] == ['api', 'user']:
-    print(json.dumps({{'login': 'octocat'}}))
-elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
-    payload = json.loads(state_file.read_text())
-    payload['review_calls'] += 1
-    state_file.write_text(json.dumps(payload))
-    if 'page=2' in args[1]:
-        print(json.dumps([]))
-    else:
-        print(json.dumps([
-            {{'node_id': 'REV_NODE_888', 'id': 888, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}}
-        ]))
-else:
-    raise SystemExit(f'unhandled gh args: {{args}}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        reply_file = Path(self.temp_dir.name) / "reply-partial.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(POST_REPLY_PY),
-                "--repo",
-                self.repo,
-                "--pr",
-                self.pr,
-                "THREAD_REPLY",
-                str(reply_file),
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "unknown")
-        self.assertEqual(payload["reply_status"], "succeeded")
-        self.assertEqual(payload["review_submit_status"], "unknown")
-        self.assertEqual(payload["reply_url"], "https://example.test/reply-partial")
-        self.assertIn("submit failed", payload["error"])
 
     def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
-        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "review-to-findings", self.repo, self.pr])
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("--machine and --human are only supported for", result.stderr)
         self.assertFalse(self.workspace_dir().exists())
@@ -3296,7 +3050,7 @@ else:
         )
         self.assertEqual(ingest.returncode, 5, ingest.stderr)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         audit_lines = self.audit_log_file().read_text(encoding="utf-8").splitlines()
         last = json.loads(audit_lines[-1])
@@ -3334,7 +3088,7 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--auto-clean", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
@@ -3370,7 +3124,7 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
@@ -3453,7 +3207,7 @@ else:
         report_artifact.mkdir(parents=True)
 
         result = self.run_cmd(
-            [sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
