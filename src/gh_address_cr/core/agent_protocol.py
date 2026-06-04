@@ -312,7 +312,7 @@ def submit_action_response(
     try:
         if publish:
             _validate_publish_shortcut_target(session, response)
-        prepared = _prepare_action_response_submission(session, ledger, response)
+        prepared = _prepare_action_response_submission(session, ledger, response, now=now)
         record = _accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
         session_store.save_session(repo, pr_number, session)
@@ -382,6 +382,7 @@ def submit_batch_action_response(
                 session,
                 ledger,
                 response,
+                now=now,
                 rejected_status="BATCH_ACTION_REJECTED",
             )
             item_id = str(prepared["item_id"])
@@ -784,6 +785,7 @@ def _prepare_action_response_submission(
     ledger: EvidenceLedger,
     response: dict[str, Any],
     *,
+    now: datetime,
     rejected_status: str = "ACTION_REJECTED",
 ) -> dict[str, Any]:
     lease_id = _required_response_field(response, "lease_id", status=rejected_status)
@@ -854,7 +856,7 @@ def _prepare_action_response_submission(
             lease,
             item_id=item_id,
             request_hash=str(response.get("request_id") or ""),
-            now=datetime.now(timezone.utc),
+            now=now,
         )
         _raise_response_rejected(
             session,

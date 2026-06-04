@@ -178,7 +178,10 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_VALIDATION_EVIDENCE")
-        self.assertEqual(result.failure_codes, ["FINAL_GATE_MISSING_VALIDATION_EVIDENCE"])
+        self.assertEqual(
+            result.failure_codes,
+            ["FINAL_GATE_MISSING_VALIDATION_EVIDENCE", "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"],
+        )
         self.assertEqual(result.counts["missing_validation_evidence_count"], 1)
         self.assertEqual(result.to_machine_summary()["waiting_on"], "validation_evidence")
 
@@ -194,6 +197,21 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.counts["logic_validation_blocking_count"], 1)
         summary = result.to_machine_summary()
         self.assertEqual(summary["logic_validation_signals"][0]["signal_type"], "state_contradiction")
+
+    def test_missing_required_evidence_counts_as_blocking_logic_validation(self):
+        session = self.passing_session()
+        session["items"]["local-finding:FIXED"].pop("validation_evidence")
+
+        result = self.evaluate(session, remote_threads=[{"id": "THREAD_DONE", "isResolved": True}])
+
+        blocking_signals = [
+            signal
+            for signal in result.to_machine_summary()["logic_validation_signals"]
+            if signal["gate_effect"] == "blocking"
+        ]
+        self.assertEqual(len(blocking_signals), 1)
+        self.assertEqual(blocking_signals[0]["signal_type"], "missing_required_evidence")
+        self.assertEqual(result.counts["logic_validation_blocking_count"], len(blocking_signals))
 
     def test_logic_validation_advisory_signal_does_not_block_final_gate(self):
         session = self.passing_session()
@@ -233,6 +251,7 @@ class FinalGateTestCase(unittest.TestCase):
                 "FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW",
                 "FINAL_GATE_BLOCKING_LOCAL_ITEMS",
                 "FINAL_GATE_MISSING_VALIDATION_EVIDENCE",
+                "FINAL_GATE_LOGIC_VALIDATION_BLOCKING",
             ],
         )
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")

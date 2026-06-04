@@ -221,7 +221,7 @@ def evaluate_final_gate(
     blocking_logic_validation_signals = [
         signal
         for signal in logic_validation_signals
-        if signal.get("gate_effect") == "blocking" and signal.get("signal_type") != "missing_required_evidence"
+        if signal.get("gate_effect") == "blocking"
     ]
     advisory_logic_validation_signals = [
         signal for signal in logic_validation_signals if signal.get("gate_effect") == "advisory"

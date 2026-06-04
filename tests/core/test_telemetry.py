@@ -236,7 +236,7 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3])
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_records_overhead_budget_diagnostics(self, state_dir, _perf_counter):
         with tempfile.TemporaryDirectory() as tmp:
@@ -246,6 +246,17 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["telemetry_overhead_budget_ms"], 250)
             self.assertEqual(report["telemetry_overhead_ms"], 300.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.1, 10.4])
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["telemetry_overhead_ms"], 400.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")

@@ -44,6 +44,8 @@ def select_handling_boundary(
 def boundary_summary_for_item(item: dict[str, Any], *, role: str) -> dict[str, Any]:
     boundary = select_handling_boundary(item, role=role)
     return {
+        "item_id": str(item.get("item_id") or ""),
+        "item_kind": str(item.get("item_kind") or ""),
         "boundary_id": boundary.boundary_id,
         "applicability": boundary.applicability,
         "required_evidence": list(boundary.required_evidence),

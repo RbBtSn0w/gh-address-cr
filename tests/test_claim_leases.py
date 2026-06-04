@@ -160,6 +160,69 @@ class ClaimLeaseLifecycleTest(unittest.TestCase):
 
 
 class LeaseRecoveryOutcomeTest(unittest.TestCase):
+    def test_active_valid_lease_reports_no_stale_recovery(self):
+        session = make_session()
+        item = make_item("active-item", path="src/active.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-active",
+            ttl_seconds=3600,
+            now=NOW,
+        )
+
+        recovery = calculate_lease_recovery_state(
+            session,
+            lease.lease_id,
+            agent_id="agent-a",
+            role="fixer",
+            item_id=item["item_id"],
+            request_hash="hash-current",
+            now=NOW + timedelta(seconds=1),
+        )
+
+        self.assertEqual(recovery.recovery_outcome, "stop")
+        self.assertEqual(recovery.reason_code, "LEASE_ACTIVE")
+
+    def test_falsy_lease_fields_fail_closed_without_collapsing_numeric_values(self):
+        session = make_session()
+        item = make_item("fallback-item", path="src/fallback.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        session["leases"]["lease-falsy"] = {
+            "lease_id": "lease-falsy",
+            "item_id": 0,
+            "agent_id": 0,
+            "role": "fixer",
+            "status": False,
+            "request_id": 0,
+            "request_hash": 0,
+            "expires_at": NOW + timedelta(hours=1),
+        }
+        session["items"]["0"] = make_item("0", path="src/zero.py")
+
+        recovery = calculate_lease_recovery_state(
+            session,
+            "lease-falsy",
+            agent_id="agent-a",
+            role="fixer",
+            item_id="fallback-item",
+            request_hash="hash-current",
+            now=NOW,
+        )
+
+        self.assertEqual(recovery.lease_status, "unknown")
+        self.assertEqual(recovery.item_id, "0")
+        self.assertEqual(recovery.agent_id, "0")
+        self.assertEqual(recovery.request_id, "0")
+        self.assertEqual(recovery.request_hash, "0")
+        self.assertEqual(recovery.reason_code, "LEASE_RECOVERY_STOP")
+
     def test_expired_active_submission_returns_renew_recovery(self):
         session = make_session()
         item = make_item("renew-item", path="src/renew.py")
@@ -191,6 +254,38 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
         self.assertEqual(caught.exception.reason_code, "EXPIRED_LEASE")
         self.assertEqual(recovery["recovery_outcome"], "renew")
         self.assertEqual(recovery["reason_code"], "EXPIRED_LEASE_RENEWABLE")
+        self.assertEqual(session["items"][item["item_id"]]["state"], "open")
+
+    def test_wrong_agent_expired_submission_stops_instead_of_renewing(self):
+        session = make_session()
+        item = make_item("wrong-agent-item", path="src/wrong.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-wrong-agent",
+            ttl_seconds=1,
+            now=NOW,
+        )
+
+        with self.assertRaises(LeaseSubmissionError) as caught:
+            submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="agent-b",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-current",
+                now=NOW + timedelta(seconds=2),
+            )
+
+        self.assertEqual(caught.exception.reason_code, "WRONG_AGENT")
+        self.assertEqual(caught.exception.recovery_state["recovery_outcome"], "stop")
+        self.assertEqual(caught.exception.recovery_state["reason_code"], "LEASE_RECOVERY_STOP")
 
     def test_stale_request_context_returns_refresh_state_recovery(self):
         session = make_session()

@@ -75,6 +75,8 @@ class WorkItemHandlingBoundaryTests(unittest.TestCase):
     def test_boundary_summary_is_public_safe_and_machine_readable(self):
         summary = boundary_summary_for_item(self.fixture("migrated_github_thread_fix"), role="fixer")
 
+        self.assertEqual(summary["item_id"], "github-thread:THREAD_1")
+        self.assertEqual(summary["item_kind"], "github_thread")
         self.assertEqual(summary["boundary_id"], "github-thread-fix")
         self.assertEqual(summary["applicability"], "matched")
         self.assertIn("MISSING_REQUIRED_EVIDENCE", summary["terminal_failure_reasons"])

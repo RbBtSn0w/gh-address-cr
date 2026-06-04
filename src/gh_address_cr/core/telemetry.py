@@ -914,8 +914,8 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
     report_path = paths.efficiency_report_file
-    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
-    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS:
+    pre_write_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
+    if pre_write_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS:
         diagnostics.append("TELEMETRY_OVERHEAD_EXCEEDED")
     report = {
         "status": "SUCCESS",
@@ -928,7 +928,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "success_rate": success_rate,
         "total_observed_duration_ms": total_duration,
         "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
-        "telemetry_overhead_ms": telemetry_overhead_ms,
+        "telemetry_overhead_ms": pre_write_overhead_ms,
         "host_metrics": host_metrics,
         "slowest_operations": [
             {
@@ -951,6 +951,10 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError as exc:
         report["diagnostics"].append(f"efficiency report artifact unavailable: {type(exc).__name__}: {exc}")
+    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
+    report["telemetry_overhead_ms"] = telemetry_overhead_ms
+    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
+        report["diagnostics"].append("TELEMETRY_OVERHEAD_EXCEEDED")
     return report
 
 
