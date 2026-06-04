@@ -68,3 +68,46 @@ def telemetry_fingerprints_file(repo: str, pr_number: str) -> Path:
 
 def efficiency_report_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "efficiency-report.json"
+
+
+class SessionPaths:
+    def __init__(self, repo: str, pr_number: str | int) -> None:
+        self.repo = repo
+        self.pr_number = str(pr_number)
+
+    @property
+    def workspace_dir(self) -> Path:
+        return workspace_dir(self.repo, self.pr_number)
+
+    @property
+    def session_file(self) -> Path:
+        return session_file(self.repo, self.pr_number)
+
+    @property
+    def audit_log_file(self) -> Path:
+        return audit_log_file(self.repo, self.pr_number)
+
+    @property
+    def audit_summary_file(self) -> Path:
+        return audit_summary_file(self.repo, self.pr_number)
+
+    @property
+    def evidence_ledger_file(self) -> Path:
+        return evidence_ledger_file(self.repo, self.pr_number)
+
+    @property
+    def external_telemetry_file(self) -> Path:
+        return external_telemetry_file(self.repo, self.pr_number)
+
+    @property
+    def telemetry_imports_file(self) -> Path:
+        return telemetry_imports_file(self.repo, self.pr_number)
+
+    @property
+    def telemetry_fingerprints_file(self) -> Path:
+        return telemetry_fingerprints_file(self.repo, self.pr_number)
+
+    @property
+    def efficiency_report_file(self) -> Path:
+        return efficiency_report_file(self.repo, self.pr_number)
+

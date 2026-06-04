@@ -189,6 +189,7 @@ class SessionTelemetry:
         self.metrics: list[ExecutionMetric] = []
         self.telemetry_file: Path | None = None
         self._loaded_files: set[Path] = set()
+        self.paths: core_paths.SessionPaths | None = None
 
     @classmethod
     def get_instance(cls) -> SessionTelemetry:
@@ -203,7 +204,8 @@ class SessionTelemetry:
     def configure_context(self, repo: str, pr_number: str) -> None:
         self.metrics.clear()
         self._loaded_files.clear()
-        path = core_paths.workspace_dir(repo, pr_number) / "telemetry.jsonl"
+        self.paths = core_paths.SessionPaths(repo, pr_number)
+        path = self.paths.workspace_dir / "telemetry.jsonl"
         self.configure_file(path)
 
     def configure_file(self, path: Path) -> None:
@@ -381,11 +383,11 @@ class SessionTelemetry:
 
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
+    paths = core_paths.SessionPaths(repo, pr_number)
     if fmt != "agent-jsonl":
         reported_format = _reported_format_label(fmt)
         summary = _import_summary(
-            repo,
-            pr_number,
+            paths,
             source=source,
             fmt=fmt,
             status="FAILED",
@@ -397,14 +399,13 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_fingerprints=[],
             diagnostics=[f"Unsupported telemetry format: {reported_format}"],
         )
-        _append_import_summary(repo, pr_number, summary)
+        _append_import_summary(paths, summary)
         return summary
 
-    existing, storage_diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+    existing, storage_diagnostics = _load_external_events_with_diagnostics(paths)
     if storage_diagnostics:
         summary = _import_summary(
-            repo,
-            pr_number,
+            paths,
             source=source,
             fmt=fmt,
             status="FAILED",
@@ -416,13 +417,12 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_fingerprints=[],
             diagnostics=storage_diagnostics,
         )
-        _append_import_summary(repo, pr_number, summary)
+        _append_import_summary(paths, summary)
         return summary
-    write_diagnostics = _telemetry_write_target_diagnostics(repo, pr_number)
+    write_diagnostics = _telemetry_write_target_diagnostics(paths)
     if write_diagnostics:
         summary = _import_summary(
-            repo,
-            pr_number,
+            paths,
             source=source,
             fmt=fmt,
             status="FAILED",
@@ -434,13 +434,12 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_fingerprints=[],
             diagnostics=write_diagnostics,
         )
-        _append_import_summary_if_available(repo, pr_number, summary)
+        _append_import_summary_if_available(paths, summary)
         return summary
-    existing_fingerprints, fingerprint_diagnostics = _load_fingerprint_set_with_diagnostics(repo, pr_number)
+    existing_fingerprints, fingerprint_diagnostics = _load_fingerprint_set_with_diagnostics(paths)
     if fingerprint_diagnostics:
         summary = _import_summary(
-            repo,
-            pr_number,
+            paths,
             source=source,
             fmt=fmt,
             status="FAILED",
@@ -452,7 +451,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_fingerprints=[],
             diagnostics=fingerprint_diagnostics,
         )
-        _append_import_summary_if_available(repo, pr_number, summary)
+        _append_import_summary_if_available(paths, summary)
         return summary
     existing_fingerprints.update(event.identity for event in existing)
     accepted: list[ExternalTelemetryEvent] = []
@@ -534,12 +533,11 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         diagnostics.append("No telemetry events were provided.")
 
     if accepted and status in {"SUCCESS", "PARTIAL"}:
-        _write_fingerprint_set(repo, pr_number, existing_fingerprints)
-        _append_external_events(repo, pr_number, accepted)
+        _write_fingerprint_set(paths, existing_fingerprints)
+        _append_external_events(paths, accepted)
 
     summary = _import_summary(
-        repo,
-        pr_number,
+        paths,
         source=source,
         fmt=fmt,
         status=status,
@@ -551,14 +549,14 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         duplicate_fingerprints=duplicate_fingerprints,
         diagnostics=diagnostics,
     )
-    _append_import_summary(repo, pr_number, summary)
+    _append_import_summary(paths, summary)
     return summary
 
 
 def input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict[str, Any]:
+    paths = core_paths.SessionPaths(repo, pr_number)
     summary = _import_summary(
-        repo,
-        pr_number,
+        paths,
         source=source,
         fmt=fmt,
         status="FAILED",
@@ -570,14 +568,14 @@ def input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, 
         duplicate_fingerprints=[],
         diagnostics=["telemetry input unavailable"],
     )
-    _append_import_summary(repo, pr_number, summary)
+    _append_import_summary(paths, summary)
     return summary
 
 
 def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict[str, Any]:
+    paths = core_paths.SessionPaths(repo, pr_number)
     summary = _import_summary(
-        repo,
-        pr_number,
+        paths,
         source=source,
         fmt=fmt,
         status="FAILED",
@@ -589,17 +587,18 @@ def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, f
         duplicate_fingerprints=[],
         diagnostics=["host telemetry hook import unavailable"],
     )
-    _append_import_summary(repo, pr_number, summary)
+    _append_import_summary(paths, summary)
     return summary
 
 
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
-    runtime_events = _runtime_events(repo, pr_number)
-    external_events, diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+    paths = core_paths.SessionPaths(repo, pr_number)
+    runtime_events = _runtime_events(paths)
+    external_events, diagnostics = _load_external_events_with_diagnostics(paths)
     storage_diagnostics = list(diagnostics)
     if storage_diagnostics:
         external_events = []
-    import_diagnostics = _load_import_diagnostics(repo, pr_number)
+    import_diagnostics = _load_import_diagnostics(paths)
     diagnostics.extend(import_diagnostics)
     runtime_events, runtime_dedupe_diagnostics = _dedupe_events(runtime_events)
     external_events, external_dedupe_diagnostics = _dedupe_events(external_events)
@@ -612,7 +611,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     diagnostics.extend(correlation_dedupe_diagnostics)
     sources = _source_rows(runtime_events, external_events)
     coverage_diagnostics = list(storage_diagnostics)
-    if _has_unrecovered_import_diagnostics(repo, pr_number):
+    if _has_unrecovered_import_diagnostics(paths):
         coverage_diagnostics.extend(import_diagnostics)
     coverage_label = _coverage_label(runtime_events, external_events, coverage_diagnostics)
     total_events = len(events)
@@ -623,7 +622,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     slowest = sorted(events, key=lambda event: event.duration_ms, reverse=True)[:3]
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
-    report_path = core_paths.efficiency_report_file(repo, pr_number)
+    report_path = paths.efficiency_report_file
     report = {
         "status": "SUCCESS",
         "reason_code": "TELEMETRY_REPORT_READY",
@@ -1008,13 +1007,13 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
 
 
-def _load_external_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
-    events, _diagnostics = _load_external_events_with_diagnostics(repo, pr_number)
+def _load_external_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEvent]:
+    events, _diagnostics = _load_external_events_with_diagnostics(paths)
     return events
 
 
-def _load_external_events_with_diagnostics(repo: str, pr_number: str) -> tuple[list[ExternalTelemetryEvent], list[str]]:
-    path = core_paths.external_telemetry_file(repo, pr_number)
+def _load_external_events_with_diagnostics(paths: core_paths.SessionPaths) -> tuple[list[ExternalTelemetryEvent], list[str]]:
+    path = paths.external_telemetry_file
     if not path.exists():
         return [], []
     if not path.is_file():
@@ -1080,13 +1079,13 @@ def _correlation_dedupe_key(event: ExternalTelemetryEvent) -> str | None:
     return f"{correlation}:{event.operation}:{event.status}"
 
 
-def _load_fingerprint_set(repo: str, pr_number: str) -> set[str]:
-    fingerprints, _diagnostics = _load_fingerprint_set_with_diagnostics(repo, pr_number)
+def _load_fingerprint_set(paths: core_paths.SessionPaths) -> set[str]:
+    fingerprints, _diagnostics = _load_fingerprint_set_with_diagnostics(paths)
     return fingerprints
 
 
-def _load_fingerprint_set_with_diagnostics(repo: str, pr_number: str) -> tuple[set[str], list[str]]:
-    path = core_paths.telemetry_fingerprints_file(repo, pr_number)
+def _load_fingerprint_set_with_diagnostics(paths: core_paths.SessionPaths) -> tuple[set[str], list[str]]:
+    path = paths.telemetry_fingerprints_file
     if not path.exists():
         return set(), []
     if not path.is_file():
@@ -1105,41 +1104,41 @@ def _load_fingerprint_set_with_diagnostics(repo: str, pr_number: str) -> tuple[s
     return {str(value) for value in fingerprints if value}, []
 
 
-def _write_fingerprint_set(repo: str, pr_number: str, fingerprints: set[str]) -> None:
-    path = core_paths.telemetry_fingerprints_file(repo, pr_number)
+def _write_fingerprint_set(paths: core_paths.SessionPaths, fingerprints: set[str]) -> None:
+    path = paths.telemetry_fingerprints_file
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"event_fingerprints": sorted(fingerprints)}
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _append_external_events(repo: str, pr_number: str, events: list[ExternalTelemetryEvent]) -> None:
-    path = core_paths.external_telemetry_file(repo, pr_number)
+def _append_external_events(paths: core_paths.SessionPaths, events: list[ExternalTelemetryEvent]) -> None:
+    path = paths.external_telemetry_file
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
             handle.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
 
 
-def _append_import_summary(repo: str, pr_number: str, summary: dict[str, Any]) -> None:
-    path = core_paths.telemetry_imports_file(repo, pr_number)
+def _append_import_summary(paths: core_paths.SessionPaths, summary: dict[str, Any]) -> None:
+    path = paths.telemetry_imports_file
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(summary, sort_keys=True) + "\n")
 
 
-def _append_import_summary_if_available(repo: str, pr_number: str, summary: dict[str, Any]) -> None:
+def _append_import_summary_if_available(paths: core_paths.SessionPaths, summary: dict[str, Any]) -> None:
     try:
-        _append_import_summary(repo, pr_number, summary)
+        _append_import_summary(paths, summary)
     except OSError:
         return
 
 
-def _telemetry_write_target_diagnostics(repo: str, pr_number: str) -> list[str]:
+def _telemetry_write_target_diagnostics(paths: core_paths.SessionPaths) -> list[str]:
     diagnostics: list[str] = []
     targets = (
-        ("external telemetry store", core_paths.external_telemetry_file(repo, pr_number)),
-        ("telemetry fingerprint ledger", core_paths.telemetry_fingerprints_file(repo, pr_number)),
-        ("telemetry import ledger", core_paths.telemetry_imports_file(repo, pr_number)),
+        ("external telemetry store", paths.external_telemetry_file),
+        ("telemetry fingerprint ledger", paths.telemetry_fingerprints_file),
+        ("telemetry import ledger", paths.telemetry_imports_file),
     )
     for label, path in targets:
         if path.exists() and not path.is_file():
@@ -1150,8 +1149,7 @@ def _telemetry_write_target_diagnostics(repo: str, pr_number: str) -> list[str]:
 
 
 def _import_summary(
-    repo: str,
-    pr_number: str,
+    paths: core_paths.SessionPaths,
     *,
     source: str,
     fmt: str,
@@ -1167,8 +1165,8 @@ def _import_summary(
     return {
         "status": status,
         "reason_code": reason_code,
-        "repo": repo,
-        "pr_number": str(pr_number),
+        "repo": paths.repo,
+        "pr_number": paths.pr_number,
         "source": _reported_source_label(source),
         "format": _reported_format_label(fmt),
         "accepted_count": accepted_count,
@@ -1200,8 +1198,8 @@ def _reported_format_label(fmt: str) -> str:
     return _reported_source_label(fmt)
 
 
-def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
-    path = core_paths.telemetry_imports_file(repo, pr_number)
+def _load_import_diagnostics(paths: core_paths.SessionPaths) -> list[str]:
+    path = paths.telemetry_imports_file
     if not path.exists():
         return []
     if not path.is_file():
@@ -1233,8 +1231,8 @@ def _load_import_diagnostics(repo: str, pr_number: str) -> list[str]:
     return diagnostics
 
 
-def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
-    path = core_paths.telemetry_imports_file(repo, pr_number)
+def _has_unrecovered_import_diagnostics(paths: core_paths.SessionPaths) -> bool:
+    path = paths.telemetry_imports_file
     if not path.exists():
         return False
     if not path.is_file():
@@ -1265,9 +1263,9 @@ def _has_unrecovered_import_diagnostics(repo: str, pr_number: str) -> bool:
     return any(unrecovered_by_source.values())
 
 
-def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
+def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEvent]:
     tracker = SessionTelemetry()
-    tracker.configure_file(core_paths.workspace_dir(repo, pr_number) / "telemetry.jsonl")
+    tracker.configure_file(paths.workspace_dir / "telemetry.jsonl")
     events: list[ExternalTelemetryEvent] = []
     for metric in tracker.metrics:
         event_id = metric.execution_id or uuid.uuid5(
@@ -1277,7 +1275,7 @@ def _runtime_events(repo: str, pr_number: str) -> list[ExternalTelemetryEvent]:
         event = ExternalTelemetryEvent(
             schema_version="1.0",
             source="runtime",
-            source_session_id=f"{repo}#{pr_number}",
+            source_session_id=f"{paths.repo}#{paths.pr_number}",
             event_id=event_id,
             kind="command",
             operation=_safe_runtime_operation(metric.command),
