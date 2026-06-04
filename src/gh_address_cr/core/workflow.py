@@ -83,10 +83,14 @@ TRIVIAL_SENSITIVE_MARKERS = (
     "memory",
 )
 TRIVIAL_POSITIVE_MARKER_RE = re.compile(
-    r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_POSITIVE_MARKERS) + r")\b"
+    r"(?<![A-Za-z0-9])("
+    + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_POSITIVE_MARKERS)
+    + r")(?![A-Za-z0-9])"
 )
 TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
-    r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS) + r")\b"
+    r"(?<![A-Za-z0-9])("
+    + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS)
+    + r")(?![A-Za-z0-9])"
 )
 
 

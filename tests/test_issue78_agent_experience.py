@@ -397,6 +397,30 @@ class Issue78AutopilotTests(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["steps"][0]["classification"], "fix")
 
+    def test_autopilot_trivial_detection_rejects_sensitive_identifiers(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        session["items"] = {
+            "github-thread:1": {
+                "item_id": "github-thread:1",
+                "item_kind": "github_thread",
+                "path": "README.md",
+                "line": 4,
+                "blocking": True,
+                "handled": False,
+                "state": "open",
+                "body": "Typo around auth_token documentation.",
+            }
+        }
+        manager.save(session)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "agent", "orchestrate", "autopilot", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertNotIn("classification", payload["steps"][0])
+        self.assertTrue(payload["steps"][0]["requires_decision"])
+
     def test_autopilot_non_trivial_plan_requires_valid_manual_classification_decision(self):
         manager = session_store.SessionManager(self.repo, self.pr)
         session = manager.create(status="ACTIVE")
@@ -433,6 +457,20 @@ class Issue78AutopilotTests(PythonScriptTestCase):
         self.assertTrue(payload["steps"][2]["side_effect"])
         self.assertTrue(payload["steps"][2]["runtime_state_effect"])
         self.assertFalse(payload["steps"][2]["github_side_effect"])
+
+    def test_autopilot_execute_rejection_reports_side_effects_disabled(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        manager.save(session)
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "agent", "orchestrate", "autopilot", self.repo, self.pr, "--execute"]
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "AUTOPILOT_EXECUTION_NOT_ENABLED")
+        self.assertFalse(payload["side_effects_enabled"])
 
 
 class Issue78TrivialFastPathTests(PythonScriptTestCase):
@@ -478,6 +516,49 @@ class Issue78TrivialFastPathTests(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "TRIVIAL_FIX_ACCEPTED")
+
+    def test_trivial_docs_fast_path_rejects_sensitive_identifiers(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        session["items"] = {
+            "github-thread:1": {
+                "item_id": "github-thread:1",
+                "item_kind": "github_thread",
+                "path": "README.md",
+                "line": 4,
+                "blocking": True,
+                "handled": False,
+                "state": "open",
+                "body": "Typo around secret_key documentation.",
+            }
+        }
+        manager.save(session)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "agent",
+                "trivial-fix",
+                self.repo,
+                self.pr,
+                "github-thread:1",
+                "--commit",
+                "abc123",
+                "--file",
+                "README.md",
+                "--summary",
+                "Fixed typo.",
+                "--why",
+                "Documentation-only typo.",
+                "--validation",
+                "docs check=passed",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TRIVIAL_THREAD_NOT_ELIGIBLE")
 
     def test_trivial_docs_fast_path_rejects_security_sensitive_thread(self):
         manager = session_store.SessionManager(self.repo, self.pr)

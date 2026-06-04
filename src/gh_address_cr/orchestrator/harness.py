@@ -268,7 +268,8 @@ def handle_autopilot(args: List[str]) -> int:
         "next_action": "Review the plan. Re-run with --execute only when side effects are intended.",
         "repo": parsed.repo,
         "pr_number": str(parsed.pr_number),
-        "side_effects_enabled": bool(parsed.execute),
+        "side_effects_enabled": False,
+        "execute_requested": bool(parsed.execute),
         "steps": steps,
     }
     if parsed.execute:
@@ -285,8 +286,18 @@ def _looks_trivial(item: dict) -> bool:
     text = " ".join(str(item.get(key) or "") for key in ("title", "body", "first_body", "path")).lower()
     sensitive = ("security", "unsafe", "auth", "token", "secret", "api", "data loss", "performance")
     trivial = ("typo", "spelling", "grammar", "documentation", "docs", "readme", "comment", "wording")
-    sensitive_pattern = r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in sensitive) + r")\b"
-    trivial_pattern = r"\b(" + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in trivial) + r")\b"
+    sensitive_pattern = (
+        r"(?<![A-Za-z0-9])"
+        + "("
+        + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in sensitive)
+        + r")(?![A-Za-z0-9])"
+    )
+    trivial_pattern = (
+        r"(?<![A-Za-z0-9])"
+        + "("
+        + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in trivial)
+        + r")(?![A-Za-z0-9])"
+    )
     return bool(re.search(trivial_pattern, text)) and not bool(re.search(sensitive_pattern, text))
 
 
