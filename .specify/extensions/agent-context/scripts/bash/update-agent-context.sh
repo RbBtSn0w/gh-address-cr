@@ -42,40 +42,54 @@ fi
 # Parse extension config once; emit three newline-separated fields:
 # context_file, context_markers.start, context_markers.end
 if ! _raw_opts="$("$_python" - "$EXT_CONFIG" <<'PY'
+import re
 import sys
-try:
-    import yaml
-except ImportError:
-    print(
-        "agent-context: PyYAML is required to parse extension config but is not available "
-        "in the current Python environment.\n"
-        "  To resolve: pip install pyyaml (or install it into the environment used by python3).\n"
-        "  Context file will not be updated until PyYAML is importable.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+
+def clean_scalar(value):
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0:1] in {"'", '"'} and value[-1:] == value[0]:
+        return value[1:-1]
+    return value
+
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+        lines = fh.readlines()
 except Exception as exc:
     print(
-        f"agent-context: unable to parse {sys.argv[1]} ({exc}); cannot update context.",
+        f"agent-context: unable to read {sys.argv[1]} ({exc}); cannot update context.",
         file=sys.stderr,
     )
     sys.exit(2)
-if not isinstance(data, dict):
-    data = {}
-def get_str(obj, *keys):
-    node = obj
-    for k in keys:
-        if isinstance(node, dict) and k in node:
-            node = node[k]
-        else:
-            return ""
-    return node if isinstance(node, str) else ""
-print(get_str(data, "context_file"))
-print(get_str(data, "context_markers", "start"))
-print(get_str(data, "context_markers", "end"))
+
+context_file = ""
+marker_start = ""
+marker_end = ""
+section = None
+for raw in lines:
+    line = raw.rstrip("\n")
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    indent = len(line) - len(line.lstrip(" "))
+    match = re.match(r"^([A-Za-z0-9_-]+):(?:\s*(.*))?$", stripped)
+    if not match:
+        continue
+    key, value = match.group(1), clean_scalar(match.group(2) or "")
+    if indent == 0:
+        section = key if value == "" else None
+        if key == "context_file":
+            context_file = value
+    elif section == "context_markers":
+        if key == "start":
+            marker_start = value
+        elif key == "end":
+            marker_end = value
+
+print(context_file)
+print(marker_start)
+print(marker_end)
 PY
 )"; then
   echo "agent-context: skipping update (see above for details)." >&2

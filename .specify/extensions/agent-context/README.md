@@ -38,15 +38,11 @@ context_markers:
 
 ## Requirements
 
-The bundled update scripts require **Python 3** with **PyYAML** for YAML/upsert processing (PowerShell can also use `ConvertFrom-Yaml` when available).
-
-PyYAML ships with the `specify` CLI and is normally available via the same `python3` interpreter. If a hook reports *"PyYAML is required … not available in the current Python environment"*, it means the system `python3` differs from the one used to install Spec Kit. To resolve, run:
-
-```bash
-pip install pyyaml
-# or target the specific interpreter Spec Kit uses:
-/path/to/speckit-python -m pip install pyyaml
-```
+The bundled Bash update script requires **Python 3** only. It parses the shipped
+`agent-context-config.yml` shape with the standard library, so a normal
+repository install does not need PyYAML for context refreshes. PowerShell can
+use `ConvertFrom-Yaml` when available and otherwise falls back to Python-based
+parsing.
 
 ## Disable
 

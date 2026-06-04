@@ -414,6 +414,7 @@ def calculate_lease_recovery_state(
     lease_request_hash = _recovery_field(_get(lease, "request_hash") if lease is not None else None, default=request_hash)
     item_state = _recovery_field(_get(item, "state") if item is not None else None, default="missing")
     item_claimed_by = _get(item, "claimed_by") if item is not None else None
+    item_active_lease_id = _get(item, "active_lease_id") if item is not None else None
 
     recovery_outcome = "refresh_state"
     reason_code = "STALE_REQUEST_CONTEXT"
@@ -424,6 +425,9 @@ def calculate_lease_recovery_state(
         recovery_outcome = "already_completed"
         reason_code = "LEASE_ALREADY_COMPLETED"
     elif lease is not None and (lease_agent_id != str(agent_id) or lease_role != str(role)):
+        recovery_outcome = "stop"
+        reason_code = "LEASE_RECOVERY_STOP"
+    elif item_active_lease_id and str(item_active_lease_id) != str(lease_id):
         recovery_outcome = "stop"
         reason_code = "LEASE_RECOVERY_STOP"
     elif item_claimed_by and str(item_claimed_by) != str(agent_id):

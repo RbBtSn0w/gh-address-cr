@@ -383,6 +383,45 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
         self.assertEqual(transferred_recovery.recovery_outcome, "stop")
         self.assertEqual(transferred_recovery.reason_code, "LEASE_RECOVERY_STOP")
 
+    def test_expired_lease_stops_when_item_has_new_active_lease_owner(self):
+        session = make_session()
+        item = make_item("transferred-active-item", path="src/transferred-active.py")
+        item.update({"state": "claimed", "active_lease_id": "lease-new"})
+        session["items"][item["item_id"]] = item
+        old = claim_lease(
+            session,
+            item,
+            agent_id="agent-old",
+            role="fixer",
+            request_hash="hash-old",
+            lease_id="lease-old",
+            ttl_seconds=1,
+            now=NOW,
+        )
+        expire_leases(session, now=NOW + timedelta(seconds=2))
+        claim_lease(
+            session,
+            item,
+            agent_id="agent-new",
+            role="fixer",
+            request_hash="hash-new",
+            lease_id="lease-new",
+            now=NOW + timedelta(seconds=3),
+        )
+
+        recovery = calculate_lease_recovery_state(
+            session,
+            old.lease_id,
+            agent_id="agent-old",
+            role="fixer",
+            item_id=item["item_id"],
+            request_hash="hash-old",
+            now=NOW + timedelta(seconds=4),
+        )
+
+        self.assertEqual(recovery.recovery_outcome, "stop")
+        self.assertEqual(recovery.reason_code, "LEASE_RECOVERY_STOP")
+
 
 class ClaimLeaseConflictTest(unittest.TestCase):
     def test_rejects_duplicate_active_lease_for_same_item(self):
