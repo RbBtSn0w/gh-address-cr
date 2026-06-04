@@ -2216,5 +2216,638 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
+    def test_custom_telemetry_adapter_registration(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockCustomAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                parts = raw.strip().split(":")
+                if len(parts) != 4:
+                    return TelemetryParseResult(
+                        events=[],
+                        rejected_count=1,
+                        unsafe_seen=False,
+                        malformed_seen=True,
+                        diagnostics=["malformed mock payload"],
+                    )
+                session_id, event_id, operation, duration_str = parts
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id=session_id,
+                    event_id=event_id,
+                    kind="tool_call",
+                    operation=operation,
+                    status="success",
+                    duration_ms=int(duration_str),
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-custom", MockCustomAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-custom"))
+        
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                raw_payload = "session-abc:event-123:custom_op:4500"
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-custom",
+                    raw=raw_payload,
+                )
+                self.assertEqual(result["status"], "SUCCESS")
+                self.assertEqual(result["accepted_count"], 1)
+                
+                report = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report["total_events"], 1)
+                self.assertEqual(report["total_observed_duration_ms"], 4500)
+                self.assertEqual(report["slowest_operations"][0]["operation"], "custom_op")
+
+    def test_custom_telemetry_adapter_registration_duplicate_fails(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockCustomAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                return TelemetryParseResult([], 0, False, False, [])
+
+        register_adapter("mock-dup", MockCustomAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-dup"))
+
+        with self.assertRaises(ValueError) as context:
+            register_adapter("mock-dup", MockCustomAdapter())
+        self.assertIn("already registered", str(context.exception))
+
+        # Check that registering the same format with a specific source also raises error on duplicate
+        register_adapter("mock-dup", MockCustomAdapter(), source="special-src")
+        self.addCleanup(lambda: unregister_adapter("mock-dup", source="special-src"))
+
+        with self.assertRaises(ValueError) as context_src:
+            register_adapter("mock-dup", MockCustomAdapter(), source="special-src")
+        self.assertIn("already registered", str(context_src.exception))
+
+    def test_custom_telemetry_adapter_source_override(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class DefaultMockAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-1",
+                    event_id="event-1",
+                    kind="tool_call",
+                    operation="op-default",
+                    status="success",
+                    duration_ms=1000,
+                )
+                return TelemetryParseResult([event], 0, False, False, [])
+
+        class SpecialMockAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-1",
+                    event_id="event-1",
+                    kind="tool_call",
+                    operation="op-override",
+                    status="success",
+                    duration_ms=2000,
+                )
+                return TelemetryParseResult([event], 0, False, False, [])
+
+        # Register format default adapter
+        register_adapter("multi-source", DefaultMockAdapter())
+        self.addCleanup(lambda: unregister_adapter("multi-source"))
+
+        # Register source-specific override adapter
+        register_adapter("multi-source", SpecialMockAdapter(), source="special-host")
+        self.addCleanup(lambda: unregister_adapter("multi-source", source="special-host"))
+
+        # 1. Verification with default fallback
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result_default = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="ordinary-host",
+                    fmt="multi-source",
+                    raw="dummy",
+                )
+                self.assertEqual(result_default["status"], "SUCCESS")
+                report_default = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report_default["slowest_operations"][0]["operation"], "op-default")
+
+        # 2. Verification with source override priority
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result_override = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="special-host",
+                    fmt="multi-source",
+                    raw="dummy",
+                )
+                self.assertEqual(result_override["status"], "SUCCESS")
+                report_override = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report_override["slowest_operations"][0]["operation"], "op-override")
+
+    def test_custom_telemetry_adapter_unsafe_normalization_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockUnsafeAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return an event containing unsafe metadata keys (e.g. password)
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-unsafe",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"password": "should_be_rejected"}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-unsafe", MockUnsafeAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("unsafe key" in diag or "password" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNonJsonMetadataAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return metadata with a non-serializable datetime object
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-non-json",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"created_at": datetime.now()}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-non-json", MockNonJsonMetadataAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-non-json"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-non-json",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("non-JSON serializable" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_parsing_exception_handling(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockCrashedAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Raise ValueError simulating a parsing crash
+                raise ValueError("Int conversion failed on dummy payload")
+
+        register_adapter("mock-crash", MockCrashedAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-crash"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-crash",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                # Confirm we only expose the exception type name and NOT the raw exception message for safety
+                self.assertTrue(any(diag == "Adapter parsing failed: ValueError" for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_nan_metadata_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNaNMetadataAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return metadata with a NaN float constant
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-nan",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"ratio": float("nan")}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-nan", MockNaNMetadataAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-nan"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-nan",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("non-finite" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_non_json_diagnostics_coercion(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNonJsonDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-diag-coerce",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                )
+                # Return a diagnostic item that is an Exception instance rather than a string
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[ValueError("Non-JSON error object")],
+                )
+
+        register_adapter("mock-diag-coerce", MockNonJsonDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-diag-coerce"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-diag-coerce",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "SUCCESS")
+                self.assertEqual(result["accepted_count"], 1)
+                # Ensure the ValueError diagnostic element was converted to a string and did not crash json.dumps
+                self.assertIn("Non-JSON error object", result["diagnostics"])
+
+    def test_custom_telemetry_adapter_invalid_return_type_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class MockInvalidReturnAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                # Invalid: returns None instead of a TelemetryParseResult instance
+                return None
+
+        register_adapter("mock-invalid-ret", MockInvalidReturnAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-ret"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-ret",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertTrue(any("Adapter parsing failed: TypeError" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_diagnostics_sanitization(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+        )
+
+        class MockSensitiveDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[
+                        "Safe diagnostic message",
+                        "Rejected secret token: github_token=123",
+                        "Path failure: /Users/alice/private/key.pem",
+                        "User info: username=bob",
+                    ]
+                )
+
+        register_adapter("mock-sensitive-diag", MockSensitiveDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-sensitive-diag"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-sensitive-diag",
+                    raw="dummy_payload",
+                )
+                self.assertIn("Safe diagnostic message", result["diagnostics"])
+                redacted_count = sum(1 for diag in result["diagnostics"] if diag == "[redacted]")
+                self.assertEqual(redacted_count, 3)
+
+    def test_custom_telemetry_adapter_invalid_diagnostics_container_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockInvalidDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-invalid-diagnostics",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=None,
+                )
+
+        register_adapter("mock-invalid-diag-container", MockInvalidDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-diag-container"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-diag-container",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertTrue(
+                    any("Adapter diagnostics processing failed: TypeError" in diag for diag in result["diagnostics"])
+                )
+
+    def test_import_external_telemetry_event_id_redaction_in_normalization_diagnostics(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockUnsafeEventIdAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[
+                        ExternalTelemetryEvent(
+                            schema_version="1.0",
+                            source="custom-source",
+                            source_session_id="run-1",
+                            event_id="ghp_unsafe_event_id",
+                            kind="tool_call",
+                            operation="safe operation",
+                            duration_ms=10,
+                            status="success",
+                        )
+                    ],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-unsafe-event-id", MockUnsafeEventIdAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe-event-id"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe-event-id",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["rejected_count"], 1)
+                
+                self.assertFalse(any("ghp_unsafe_event_id" in diag for diag in result["diagnostics"]))
+                self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_invalid_event_type_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+        )
+
+        class MockInvalidEventAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[{"kind": "tool_call", "operation": "safe", "status": "success"}],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-invalid-event", MockInvalidEventAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-event"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-event",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertTrue(any("Adapter event processing failed: TypeError" in diag for diag in result["diagnostics"]))
+
+    def test_import_external_telemetry_rejects_unsafe_metadata_keys(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockUnsafeMetadataKeyAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                return TelemetryParseResult(
+                    events=[
+                        ExternalTelemetryEvent(
+                            schema_version="1.0",
+                            source="custom-source",
+                            source_session_id="run-1",
+                            event_id="evt-1",
+                            kind="tool_call",
+                            operation="safe operation",
+                            duration_ms=10,
+                            status="success",
+                            metadata={"ghp_unsafe_token_as_key": "some_value"},
+                        )
+                    ],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[]
+                )
+
+        register_adapter("mock-unsafe-meta-key", MockUnsafeMetadataKeyAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe-meta-key"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe-meta-key",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertFalse(any("ghp_unsafe_token_as_key" in diag for diag in result["diagnostics"]))
+                self.assertTrue(any("[redacted]" in diag for diag in result["diagnostics"]))
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from hashlib import sha256
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 from gh_address_cr.core import paths as core_paths
@@ -180,6 +181,106 @@ UNSAFE_METADATA_KEY_MARKERS = (
     "prompt",
 )
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
+
+
+@dataclass
+class TelemetryParseResult:
+    events: list[ExternalTelemetryEvent]
+    rejected_count: int
+    unsafe_seen: bool
+    malformed_seen: bool
+    diagnostics: list[Any]
+
+
+class TelemetryAdapter(ABC):
+    @abstractmethod
+    def parse(self, raw: str, source: str) -> TelemetryParseResult:
+        pass
+
+
+class TelemetryAdapterRegistry:
+    def __init__(self):
+        self._adapters: dict[tuple[str, str | None], TelemetryAdapter] = {}
+
+    def register(self, fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
+        key = (fmt, source)
+        if key in self._adapters:
+            raise ValueError(f"Adapter for format '{fmt}' and source '{source}' is already registered.")
+        self._adapters[key] = adapter
+
+    def get_adapter(self, fmt: str, source: str | None = None) -> TelemetryAdapter | None:
+        if source is not None:
+            adapter = self._adapters.get((fmt, source))
+            if adapter is not None:
+                return adapter
+        return self._adapters.get((fmt, None))
+
+    def unregister(self, fmt: str, source: str | None = None) -> None:
+        self._adapters.pop((fmt, source), None)
+
+
+_registry = TelemetryAdapterRegistry()
+
+
+def register_adapter(fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
+    _registry.register(fmt, adapter, source)
+
+
+def get_adapter(fmt: str, source: str | None = None) -> TelemetryAdapter | None:
+    return _registry.get_adapter(fmt, source)
+
+
+def unregister_adapter(fmt: str, source: str | None = None) -> None:
+    _registry.unregister(fmt, source)
+
+
+class GenericAgentJsonlAdapter(TelemetryAdapter):
+    def parse(self, raw: str, source: str) -> TelemetryParseResult:
+        accepted: list[ExternalTelemetryEvent] = []
+        diagnostics: list[str] = []
+        rejected_count = 0
+        unsafe_seen = False
+        malformed_seen = False
+
+        for line_number, line in enumerate(raw.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = _json_loads_strict(line)
+            except json.JSONDecodeError as exc:
+                malformed_seen = True
+                rejected_count += 1
+                diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
+                continue
+            except ValueError as exc:
+                malformed_seen = True
+                rejected_count += 1
+                diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
+                continue
+            try:
+                event = _normalize_external_event(payload, declared_source=source)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("UNSAFE:"):
+                    unsafe_seen = True
+                    diagnostics.append(f"line {line_number}: {message.removeprefix('UNSAFE:')}")
+                else:
+                    malformed_seen = True
+                    diagnostics.append(f"line {line_number}: {message}")
+                rejected_count += 1
+                continue
+            accepted.append(event)
+
+        return TelemetryParseResult(
+            events=accepted,
+            rejected_count=rejected_count,
+            unsafe_seen=unsafe_seen,
+            malformed_seen=malformed_seen,
+            diagnostics=diagnostics,
+        )
+
+
+register_adapter("agent-jsonl", GenericAgentJsonlAdapter())
 
 
 class SessionTelemetry:
@@ -384,7 +485,8 @@ class SessionTelemetry:
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
-    if fmt != "agent-jsonl":
+    adapter = get_adapter(fmt, source=source)
+    if adapter is None:
         reported_format = _reported_format_label(fmt)
         summary = _import_summary(
             paths,
@@ -454,51 +556,105 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         _append_import_summary_if_available(paths, summary)
         return summary
     existing_fingerprints.update(event.identity for event in existing)
+
+    try:
+        parse_result = adapter.parse(raw, source)
+        if not isinstance(parse_result, TelemetryParseResult):
+            raise TypeError(f"Adapter parse must return a TelemetryParseResult instance, got {type(parse_result).__name__}")
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter parsing failed: {type(exc).__name__}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
+
+    accepted_events = parse_result.events
+    rejected_count = parse_result.rejected_count
+    unsafe_seen = parse_result.unsafe_seen
+    malformed_seen = parse_result.malformed_seen
+
+    try:
+        if not isinstance(parse_result.diagnostics, list):
+            raise TypeError(
+                f"Adapter diagnostics must be a list, got {type(parse_result.diagnostics).__name__}"
+            )
+        diagnostics: list[str] = []
+        for diag in parse_result.diagnostics:
+            diagnostics.append(_safe_diagnostic_text(str(diag)))
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter diagnostics processing failed: {type(exc).__name__}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
+
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
     duplicate_fingerprints: list[str] = []
-    diagnostics: list[str] = []
     observed_sessions: set[str] = set()
-    rejected_count = 0
     duplicate_count = 0
-    unsafe_seen = False
-    malformed_seen = False
 
-    for line_number, line in enumerate(raw.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = _json_loads_strict(line)
-        except json.JSONDecodeError as exc:
-            malformed_seen = True
-            rejected_count += 1
-            diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
-            continue
-        except ValueError as exc:
-            malformed_seen = True
-            rejected_count += 1
-            diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
-            continue
-        try:
-            event = _normalize_external_event(payload, declared_source=source)
-        except ValueError as exc:
-            message = str(exc)
-            if message.startswith("UNSAFE:"):
-                unsafe_seen = True
-                diagnostics.append(f"line {line_number}: {message.removeprefix('UNSAFE:')}")
-            else:
-                malformed_seen = True
-                diagnostics.append(f"line {line_number}: {message}")
-            rejected_count += 1
-            continue
-        observed_sessions.add(event.source_session_id)
-        if event.identity in existing_fingerprints:
-            duplicate_count += 1
-            duplicate_fingerprints.append(event.identity)
-            continue
-        existing_fingerprints.add(event.identity)
-        accepted_fingerprints.append(event.identity)
-        accepted.append(event)
+    try:
+        for idx, event in enumerate(accepted_events):
+            if not isinstance(event, ExternalTelemetryEvent):
+                raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
+            try:
+                normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("UNSAFE:"):
+                    unsafe_seen = True
+                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message.removeprefix('UNSAFE:'))}")
+                else:
+                    malformed_seen = True
+                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message)}")
+                rejected_count += 1
+                continue
+
+            observed_sessions.add(normalized_event.source_session_id)
+            if normalized_event.identity in existing_fingerprints:
+                duplicate_count += 1
+                duplicate_fingerprints.append(normalized_event.identity)
+                continue
+            existing_fingerprints.add(normalized_event.identity)
+            accepted_fingerprints.append(normalized_event.identity)
+            accepted.append(normalized_event)
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter event processing failed: {type(exc).__name__}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
 
     ambiguous_seen = len(observed_sessions) > 1
     if unsafe_seen:
@@ -828,7 +984,23 @@ def _safe_metadata(metadata: object) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
     _validate_safe_metadata_value(metadata)
-    return {str(key): value for key, value in metadata.items()}
+    result = {str(key): value for key, value in metadata.items()}
+    try:
+        json.dumps(result, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"metadata contains non-JSON serializable or non-finite values: {exc}") from None
+    return result
+
+
+def _safe_diagnostic_text(value: str) -> str:
+    if (
+        _contains_control_character(value)
+        or _contains_token_marker(value)
+        or _contains_private_identifier(value)
+        or _looks_like_unnecessary_absolute_path(value)
+    ):
+        return "[redacted]"
+    return value
 
 
 def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") -> None:
@@ -837,6 +1009,14 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
             key_text = str(key)
             if _is_unsafe_metadata_key(key_text):
                 raise ValueError(f"UNSAFE:unsafe metadata field: {key_text}")
+            if _contains_token_marker(key_text):
+                raise ValueError(f"UNSAFE:unsafe token in metadata field key: {key_text}")
+            if _contains_private_identifier(key_text):
+                raise ValueError(f"UNSAFE:unsafe private identifier in metadata field key: {key_text}")
+            if _looks_like_unnecessary_absolute_path(key_text):
+                raise ValueError(f"UNSAFE:unsafe absolute path in metadata field key: {key_text}")
+            if _contains_control_character(key_text):
+                raise ValueError(f"UNSAFE:unsafe control character in metadata field key: {key_text}")
             _validate_safe_metadata_value(nested, key_path=f"{key_path}.{key_text}")
         return
     if isinstance(value, list):
