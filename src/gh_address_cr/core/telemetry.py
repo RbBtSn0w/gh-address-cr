@@ -943,15 +943,22 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "report_artifact": str(report_path),
     }
+    artifact_written = False
     try:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        artifact_written = True
     except OSError as exc:
         report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
     telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
     report["telemetry_overhead_ms"] = telemetry_overhead_ms
     if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
         report["diagnostics"].append("TELEMETRY_OVERHEAD_EXCEEDED")
+    if artifact_written:
+        try:
+            report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except OSError as exc:
+            report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
     return report
 
 

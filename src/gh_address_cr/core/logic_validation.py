@@ -8,6 +8,7 @@ from gh_address_cr.core.models import LogicValidationSignal
 
 TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
+NON_MUTATING_GITHUB_RESOLUTIONS = {"clarify", "defer", "reject"}
 
 
 def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicValidationSignal]:
@@ -40,7 +41,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             )
             continue
 
-        if _requires_validation_evidence(item_kind, state) and not _has_validation_evidence(item):
+        if _requires_validation_evidence(item, item_kind, state) and not _has_validation_evidence(item):
             signals.append(
                 _signal(
                     item_id,
@@ -82,6 +83,11 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     for key in ("validation_evidence", "validation_commands", "validation_results"):
         if _has_content(item.get(key)):
             return True
+    accepted_response = item.get("accepted_response")
+    if isinstance(accepted_response, Mapping):
+        for key in ("validation_evidence", "validation_commands", "validation_results"):
+            if _has_content(accepted_response.get(key)):
+                return True
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
         return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
@@ -106,12 +112,31 @@ def _has_content(value: Any) -> bool:
     return bool(value)
 
 
-def _requires_validation_evidence(item_kind: str, state: str) -> bool:
+def _requires_validation_evidence(item: Mapping[str, Any], item_kind: str, state: str) -> bool:
     if item_kind == "local_finding":
         return state in TERMINAL_LOCAL_STATES
     if item_kind == "github_thread":
+        resolution = _github_resolution(item)
+        if resolution in NON_MUTATING_GITHUB_RESOLUTIONS or state in {"clarified", "deferred", "rejected"}:
+            return False
         return state in TERMINAL_GITHUB_STATES
     return False
+
+
+def _github_resolution(item: Mapping[str, Any]) -> str:
+    for source in (item, item.get("accepted_response")):
+        if not isinstance(source, Mapping):
+            continue
+        for key in ("resolution", "decision", "action"):
+            value = source.get(key)
+            if _has_content(value):
+                return str(value).strip().lower()
+    classification_evidence = item.get("classification_evidence")
+    if isinstance(classification_evidence, Mapping):
+        value = classification_evidence.get("classification")
+        if _has_content(value):
+            return str(value).strip().lower()
+    return ""
 
 
 def _is_low_confidence(item: Mapping[str, Any]) -> bool:

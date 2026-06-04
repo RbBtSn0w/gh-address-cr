@@ -188,6 +188,7 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
 
         self.assertEqual(recovery.recovery_outcome, "stop")
         self.assertEqual(recovery.reason_code, "LEASE_ACTIVE")
+        self.assertIsNone(recovery.resume_command)
 
     def test_falsy_lease_fields_fail_closed_without_collapsing_numeric_values(self):
         session = make_session()
@@ -318,6 +319,7 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
         self.assertEqual(caught.exception.reason_code, "WRONG_AGENT")
         self.assertEqual(caught.exception.recovery_state["recovery_outcome"], "stop")
         self.assertEqual(caught.exception.recovery_state["reason_code"], "LEASE_RECOVERY_STOP")
+        self.assertNotIn("resume_command", caught.exception.recovery_state)
 
     def test_stale_request_context_returns_refresh_state_recovery(self):
         session = make_session()
@@ -414,6 +416,7 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
         )
         self.assertEqual(transferred_recovery.recovery_outcome, "stop")
         self.assertEqual(transferred_recovery.reason_code, "LEASE_RECOVERY_STOP")
+        self.assertIsNone(transferred_recovery.resume_command)
 
     def test_expired_lease_stops_when_item_has_new_active_lease_owner(self):
         session = make_session()
@@ -453,6 +456,7 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
 
         self.assertEqual(recovery.recovery_outcome, "stop")
         self.assertEqual(recovery.reason_code, "LEASE_RECOVERY_STOP")
+        self.assertIsNone(recovery.resume_command)
 
 
 class ClaimLeaseConflictTest(unittest.TestCase):

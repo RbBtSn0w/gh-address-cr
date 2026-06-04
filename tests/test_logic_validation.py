@@ -65,6 +65,50 @@ class LogicValidationSignalTest(unittest.TestCase):
 
                 self.assertEqual(signals, [])
 
+    def test_terminal_github_thread_accepts_published_accepted_response_validation(self):
+        session = {
+            "items": {
+                "github-thread:fixed": {
+                    "item_id": "github-thread:fixed",
+                    "item_kind": "github_thread",
+                    "state": "published",
+                    "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "accepted_response": {
+                        "resolution": "fix",
+                        "validation_commands": [
+                            {"command": "python3 -m unittest", "result": "passed"},
+                        ],
+                    },
+                }
+            }
+        }
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
+
+    def test_non_mutating_github_thread_responses_do_not_require_validation(self):
+        for resolution, state in (("clarify", "clarified"), ("defer", "deferred"), ("reject", "rejected")):
+            with self.subTest(resolution=resolution, state=state):
+                session = {
+                    "items": {
+                        f"github-thread:{resolution}": {
+                            "item_id": f"github-thread:{resolution}",
+                            "item_kind": "github_thread",
+                            "state": state,
+                            "reply_evidence": {"reply_url": "https://example.test/reply"},
+                            "accepted_response": {
+                                "resolution": resolution,
+                                "reply_markdown": f"{resolution} response",
+                            },
+                        }
+                    }
+                }
+
+                signals = generate_logic_validation_signals(session)
+
+                self.assertEqual(signals, [])
+
     def test_state_contradiction_generates_blocking_signal(self):
         session = {
             "items": {

@@ -452,6 +452,11 @@ def calculate_lease_recovery_state(
         recovery_outcome = "stop"
         reason_code = "LEASE_RECOVERY_STOP"
 
+    resume_command = (
+        _lease_recovery_resume_command(session, lease_item_id, role=role, agent_id=agent_id)
+        if recovery_outcome in {"reclaim", "refresh_state", "renew"}
+        else None
+    )
     recovery = LeaseRecoveryState(
         lease_id=str(lease_id),
         item_id=lease_item_id,
@@ -462,7 +467,7 @@ def calculate_lease_recovery_state(
         item_state=item_state,
         recovery_outcome=recovery_outcome,
         reason_code=reason_code,
-        resume_command=_lease_recovery_resume_command(session, lease_item_id, role=role, agent_id=agent_id),
+        resume_command=resume_command,
     )
     return recovery
 
