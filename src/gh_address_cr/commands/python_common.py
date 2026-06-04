@@ -936,16 +936,6 @@ def load_pull_request_head_sha(repo: str, pr_number: str) -> str:
     return result.stdout.strip()
 
 
-def session_engine(
-    args: list[str], *, input_text: str | None = None, check: bool = False
-) -> subprocess.CompletedProcess:
-    return run_cmd(
-        [sys.executable, "-m", "gh_address_cr.core.session_engine", *args],
-        input_text=input_text,
-        check=check,
-    )
-
-
 def _comment_nodes(connection: dict | None) -> list[dict]:
     if not isinstance(connection, dict):
         return []
@@ -1123,7 +1113,7 @@ def shield_adapter_passthrough(argv: list[str] | None) -> list[str]:
 
 
 def parse_dispatch(mode: str, parts: list[str]) -> tuple[str | None, str, str, list[str]]:
-    """Shared dispatch parser used by both cr_loop.py and control_plane.py."""
+    """Shared dispatch parser for native review/findings/adapter routing."""
     if mode == "remote":
         if len(parts) != 2:
             raise SystemExit("remote expects: <owner/repo> <pr_number>")

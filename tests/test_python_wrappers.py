@@ -9,20 +9,40 @@ from unittest.mock import patch
 
 from tests.helpers import (
     CLI_PY,
-    CONTROL_PLANE_PY,
     CODE_REVIEW_ADAPTER_PY,
     FINAL_GATE_PY,
-    INGEST_FINDINGS_PY,
     POST_REPLY_PY,
     REVIEW_TO_FINDINGS_PY,
-    RUN_LOCAL_REVIEW_PY,
-    RUN_ONCE_PY,
-    SCRIPT,
     PythonScriptTestCase,
 )
 
 
 class PythonWrapperCLITest(PythonScriptTestCase):
+    def run_findings_ingest(self, payload, *, source="local-agent:test", sync=False):
+        args = [
+            sys.executable,
+            str(CLI_PY),
+            "findings",
+            self.repo,
+            self.pr,
+            "--source",
+            source,
+            "--input",
+            "-",
+        ]
+        if sync:
+            args.insert(-2, "--sync")
+        raw = payload if isinstance(payload, str) else json.dumps(payload)
+        return self.run_cmd(args, stdin=raw)
+
+    def local_items(self):
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        return [
+            item
+            for item in session.get("items", {}).values()
+            if isinstance(item, dict) and item.get("item_kind") == "local_finding"
+        ]
+
     def install_fake_gh_for_threads(self, nodes):
         payload = {
             "data": {
@@ -1126,8 +1146,7 @@ else:
         self.assertEqual(summary["reason_code"], "INVALID_FINDINGS_INPUT")
         self.assertIn("Use [] for an explicit empty producer result", summary["next_action"])
 
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
-        self.assertNotIn("code-review", session["handoff"]["producer_results"])
+        self.assertFalse(self.session_file().exists())
 
     def test_cli_review_continues_after_non_empty_synced_findings_result(self):
         self.install_fake_gh_for_threads([])
@@ -1284,20 +1303,13 @@ else:
 
         session = json.loads(self.session_file().read_text(encoding="utf-8"))
         item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
-        resolved = self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "resolve-local-item",
-                self.repo,
-                self.pr,
-                item_id,
-                "fix",
-                "--note",
-                "Fixed locally before rerunning review.",
-            ]
-        )
-        self.assertEqual(resolved.returncode, 0, resolved.stderr)
+        item = session["items"][item_id]
+        item["status"] = "CLOSED"
+        item["state"] = "fixed"
+        item["blocking"] = False
+        item["handled"] = True
+        item["validation_evidence"] = [{"command": "manual fixture", "result": "passed"}]
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
 
         second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -1767,28 +1779,19 @@ else:
         self.assertEqual(summary["diagnostics"]["command"][:3], ["gh", "api", "graphql"])
         self.assertIn("api.github.com", summary["diagnostics"]["stderr_excerpt"])
 
-    def test_run_local_review_requires_explicit_source_for_sync(self):
-        adapter = Path(self.temp_dir.name) / "adapter.py"
-        adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
-
+    def test_findings_requires_explicit_source_for_sync(self):
         result = self.run_cmd(
             [
                 sys.executable,
-                str(RUN_LOCAL_REVIEW_PY),
-                "--sync",
+                str(CLI_PY),
+                "findings",
                 self.repo,
                 self.pr,
-                sys.executable,
-                str(adapter),
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires an explicit --source", result.stderr)
-
-    def test_ingest_findings_requires_explicit_source_for_sync(self):
-        payload_file = Path(self.temp_dir.name) / "findings.json"
-        payload_file.write_text(
-            json.dumps(
+                "--sync",
+                "--input",
+                "-",
+            ],
+            stdin=json.dumps(
                 [
                     {
                         "title": "Needs source",
@@ -1798,48 +1801,38 @@ else:
                     }
                 ]
             ),
-            encoding="utf-8",
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(INGEST_FINDINGS_PY),
-                "--sync",
-                "--input",
-                str(payload_file),
-                self.repo,
-                self.pr,
-            ]
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires an explicit --source", result.stderr)
+        self.assertIn("requires an explicit --source", result.stdout)
 
-    def test_ingest_findings_rejects_blank_input_without_session_mutation(self):
+    def test_findings_rejects_blank_input_without_session_mutation(self):
         result = self.run_cmd(
             [
                 sys.executable,
-                str(INGEST_FINDINGS_PY),
+                str(CLI_PY),
+                "findings",
+                self.repo,
+                self.pr,
                 "--source",
                 "local-agent:test",
                 "--input",
                 "-",
-                self.repo,
-                self.pr,
             ],
             stdin=" \n\t",
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Use [] for an explicit empty producer result", result.stderr)
+        self.assertIn("Use [] for an explicit empty producer result", result.stdout)
         self.assertFalse(self.session_file().exists())
 
-    def test_run_once_helper_syncs_github_threads(self):
+    def test_address_syncs_github_threads_through_native_cli(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
 import json
 import sys
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
@@ -1868,17 +1861,17 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("github-thread:THREAD_CLI", result.stdout)
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["item_id"], "github-thread:THREAD_CLI")
 
-    def test_session_engine_helper_lists_items(self):
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
+    def test_findings_cli_lists_items_in_native_session(self):
+        result = self.run_findings_ingest(
             [
                 {
                     "title": "CLI list-items",
-                    "body": "Ensure unified CLI dispatches to session engine correctly.",
+                    "body": "Ensure public CLI dispatches to native session storage.",
                     "path": "README.md",
                     "line": 12,
                     "severity": "P3",
@@ -1886,144 +1879,87 @@ else:
                 }
             ]
         )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        item = self.local_items()[0]
+        self.assertTrue(item["item_id"].startswith("local-finding:"))
+        self.assertEqual(item["title"], "CLI list-items")
 
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "list-items",
-                self.repo,
-                self.pr,
-                "--item-kind",
-                "local_finding",
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("local-finding:", result.stdout)
-        self.assertIn("CLI list-items", result.stdout)
-
-    def test_run_local_review_python_ingests_findings(self):
+    def test_adapter_command_ingests_findings_through_native_cli(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text(
             "import json\nprint(json.dumps([{'title':'py-adapter','body':'body','path':'src/a.py','line':4}]))\n",
             encoding="utf-8",
         )
 
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
         result = self.run_cmd(
             [
                 sys.executable,
-                str(RUN_LOCAL_REVIEW_PY),
-                "--source",
-                "local-agent:test",
+                str(CLI_PY),
+                "adapter",
                 self.repo,
                 self.pr,
                 sys.executable,
                 str(adapter),
             ]
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertEqual(self.local_items()[0]["title"], "py-adapter")
 
-    def test_ingest_findings_python_accepts_envelope_payload(self):
-        payload_file = Path(self.temp_dir.name) / "findings.json"
-        payload_file.write_text(
-            json.dumps(
-                {
-                    "findings": [
-                        {
-                            "title": "Envelope finding",
-                            "message": "Imported from another review tool.",
-                            "file": "src/envelope.py",
-                            "position": 9,
-                            "severity": "P2",
-                            "category": "correctness",
-                        }
-                    ]
-                }
-            ),
-            encoding="utf-8",
+    def test_findings_cli_accepts_envelope_payload(self):
+        result = self.run_findings_ingest(
+            {
+                "findings": [
+                    {
+                        "title": "Envelope finding",
+                        "message": "Imported from another review tool.",
+                        "file": "src/envelope.py",
+                        "position": 9,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            },
+            source="local-agent:external-review",
         )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(INGEST_FINDINGS_PY),
-                "--source",
-                "local-agent:external-review",
-                "--input",
-                str(payload_file),
-                self.repo,
-                self.pr,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
-
-        list_result = self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "list-items",
-                self.repo,
-                self.pr,
-                "--item-kind",
-                "local_finding",
-            ],
-            check=True,
-        )
-        item = json.loads(list_result.stdout.strip())
+        self.assertEqual(result.returncode, 5, result.stderr)
+        item = self.local_items()[0]
         self.assertEqual(item["path"], "src/envelope.py")
         self.assertEqual(item["line"], 9)
         self.assertEqual(item["body"], "Imported from another review tool.")
 
-    def test_ingest_findings_helper_accepts_ndjson(self):
-        payload_file = Path(self.temp_dir.name) / "findings-ndjson.jsonl"
-        payload_file.write_text(
-            "\n".join(
-                [
-                    json.dumps(
-                        {
-                            "check": "null-guard",
-                            "description": "Potential null dereference.",
-                            "filename": "src/cli_ingest.py",
-                            "line": 5,
-                            "severity": "P1",
-                        }
-                    )
-                ]
+    def test_findings_cli_accepts_ndjson(self):
+        result = self.run_findings_ingest(
+            json.dumps(
+                {
+                    "check": "null-guard",
+                    "description": "Potential null dereference.",
+                    "filename": "src/cli_ingest.py",
+                    "line": 5,
+                    "severity": "P1",
+                }
             )
             + "\n",
-            encoding="utf-8",
+            source="local-agent:cli-import",
         )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertEqual(self.local_items()[0]["path"], "src/cli_ingest.py")
 
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(INGEST_FINDINGS_PY),
-                "--source",
-                "local-agent:cli-import",
-                "--input",
-                str(payload_file),
-                self.repo,
-                self.pr,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
+    def test_legacy_control_plane_root_command_is_unsupported(self):
+        result = self.run_runtime_module("control-plane", "remote", self.repo, self.pr)
 
-    def test_control_plane_remote_runs_run_once(self):
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Unsupported legacy command: control-plane", result.stderr)
+        self.assertFalse(self.session_file().exists())
+
+    def test_native_address_replaces_control_plane_remote_bootstrap(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
 import json
 import sys
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
@@ -2052,185 +1988,38 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("github-thread:THREAD_REMOTE", result.stdout)
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["item_id"], "github-thread:THREAD_REMOTE")
 
-    def test_control_plane_remote_gate_reuses_run_once_snapshot(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            f"""#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-state_file = Path({str((Path(self.temp_dir.name) / "gh_gate_state.json").as_posix())!r})
-if not state_file.exists():
-    state_file.write_text(json.dumps({{"graphql_calls": 0}}))
-
-args = sys.argv[1:]
-if args[:2] == ['api', 'graphql']:
-    payload = json.loads(state_file.read_text())
-    payload['graphql_calls'] += 1
-    state_file.write_text(json.dumps(payload))
-    print(json.dumps({{
-        'data': {{
-            'repository': {{
-                'pullRequest': {{
-                    'reviewThreads': {{
-                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
-                        'nodes': [{{
-                            'id': 'THREAD_GATE',
-                            'isResolved': True,
-                            'isOutdated': False,
-                            'path': 'src/gate.py',
-                            'line': 4,
-                            'comments': {{'nodes': [
-                                {{'url': 'https://example.test/thread/gate', 'body': 'gate', 'author': {{'login': 'reviewer'}}}},
-                                {{'url': 'https://example.test/thread/gate#reply', 'body': 'handled', 'author': {{'login': 'agent-login'}}}},
-                            ]}},
-                            'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/gate', 'body': 'gate'}}]}},
-                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/gate#reply', 'body': 'handled'}}]}},
-                        }}]
-                    }}
-                }}
-            }}
-        }}
-    }}))
-elif args[:2] == ['api', 'user']:
-    print(json.dumps({{'login': 'agent-login'}}))
-elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
-    print('[]')
-else:
-    raise SystemExit(f'unhandled gh args: {{args}}')
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", "--gate", self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        state = json.loads((Path(self.temp_dir.name) / "gh_gate_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["graphql_calls"], 1)
-
-    def test_control_plane_mixed_json_runs_sync_and_ingest(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-if sys.argv[1:3] == ['api', 'graphql']:
-    print(json.dumps({
-        'data': {
-            'repository': {
-                'pullRequest': {
-                    'reviewThreads': {
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                        'nodes': [{
-                            'id': 'THREAD_MIXED',
-                            'isResolved': False,
-                            'isOutdated': False,
-                            'path': 'src/mixed.py',
-                            'line': 8,
-                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/mixed', 'body': 'mixed'}]},
-                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/mixed', 'body': 'mixed'}]},
-                        }]
-                    }
+    def test_native_findings_replaces_control_plane_local_json_ingest(self):
+        result = self.run_findings_ingest(
+            [
+                {
+                    "title": "stdin bridge finding",
+                    "body": "Imported through --input -.",
+                    "path": "src/stdin_bridge.py",
+                    "line": 14,
+                    "severity": "P2",
                 }
-            }
-        }
-    }))
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
-""",
-            encoding="utf-8",
+            ],
+            source="local-agent:code-review",
         )
-        gh.chmod(0o755)
+        self.assertEqual(result.returncode, 5, result.stderr)
+        item = self.local_items()[0]
+        self.assertEqual(item["title"], "stdin bridge finding")
+        self.assertEqual(item["line"], 14)
 
-        payload_file = Path(self.temp_dir.name) / "mixed-findings.json"
-        payload_file.write_text(
-            json.dumps(
-                [
-                    {
-                        "title": "Mixed finding",
-                        "body": "Imported into mixed flow.",
-                        "path": "src/mixed_local.py",
-                        "line": 11,
-                    }
-                ]
-            ),
-            encoding="utf-8",
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(CONTROL_PLANE_PY),
-                "mixed",
-                "json",
-                "--input",
-                str(payload_file),
-                self.repo,
-                self.pr,
-            ]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("github-thread:THREAD_MIXED", result.stdout)
-        self.assertIn("Created 1 local item", result.stdout)
-
-    def test_control_plane_stops_after_run_once_failure(self):
-        gh = self.bin_dir / "gh"
-        gh.write_text(
-            """#!/usr/bin/env python3
-import sys
-sys.stderr.write('graphql failed\\n')
-raise SystemExit(1)
-""",
-            encoding="utf-8",
-        )
-        gh.chmod(0o755)
-
-        payload_file = Path(self.temp_dir.name) / "mixed-findings.json"
-        payload_file.write_text(
-            json.dumps(
-                [
-                    {
-                        "title": "Should not ingest after remote failure",
-                        "body": "Control plane must stop on the first failed stage.",
-                        "path": "src/ignored.py",
-                        "line": 11,
-                    }
-                ]
-            ),
-            encoding="utf-8",
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(CONTROL_PLANE_PY),
-                "mixed",
-                "json",
-                "--input",
-                str(payload_file),
-                self.repo,
-                self.pr,
-            ]
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("Created 1 local item", result.stdout)
-
-        session_file = self.session_file()
-        self.assertFalse(session_file.exists())
-
-    def test_control_plane_mixed_code_review_accepts_dash_input_from_stdin(self):
+    def test_native_adapter_replaces_control_plane_local_adapter(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
 import json
 import sys
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
@@ -2244,58 +2033,12 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
-else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+    raise SystemExit(0)
+raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
             encoding="utf-8",
         )
         gh.chmod(0o755)
-
-        payload = json.dumps(
-            [
-                {
-                    "title": "stdin bridge finding",
-                    "body": "Imported through --input -.",
-                    "path": "src/stdin_bridge.py",
-                    "line": 14,
-                    "severity": "P2",
-                }
-            ]
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(CONTROL_PLANE_PY),
-                "mixed",
-                "code-review",
-                "--input",
-                "-",
-                self.repo,
-                self.pr,
-            ],
-            stdin=payload,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
-
-        list_result = self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "list-items",
-                self.repo,
-                self.pr,
-                "--item-kind",
-                "local_finding",
-            ],
-            check=True,
-        )
-        item = json.loads(list_result.stdout.strip())
-        self.assertEqual(item["title"], "stdin bridge finding")
-        self.assertEqual(item["line"], 14)
-
-    def test_control_plane_local_adapter_runs_adapter(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text(
             "import json\nprint(json.dumps([{'title':'adapter finding','body':'body','path':'src/a.py','line':4}]))\n",
@@ -2305,8 +2048,7 @@ else:
         result = self.run_cmd(
             [
                 sys.executable,
-                str(CONTROL_PLANE_PY),
-                "local",
+                str(CLI_PY),
                 "adapter",
                 self.repo,
                 self.pr,
@@ -2314,30 +2056,8 @@ else:
                 str(adapter),
             ]
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
-
-    def test_control_plane_rejects_remote_with_producer(self):
-        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", "code-review", self.repo, self.pr])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("remote expects", result.stderr)
-
-    def test_control_plane_requires_json_input_for_code_review(self):
-        result = self.run_cmd(
-            [sys.executable, str(CONTROL_PLANE_PY), "local", "code-review", self.repo, self.pr], stdin=""
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires findings JSON", result.stderr)
-
-    def test_control_plane_rejects_ingest_code_review(self):
-        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "ingest", "code-review", self.repo, self.pr])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ingest mode only supports producer=json", result.stderr)
-
-    def test_control_plane_requires_explicit_source_for_sync(self):
-        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "local", "json", "--sync", self.repo, self.pr])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires an explicit --source", result.stderr)
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertEqual(self.local_items()[0]["title"], "adapter finding")
 
     def test_review_to_findings_python_converts_markdown_blocks_to_workspace_json(self):
         markdown = """Intro text that should be ignored.
@@ -2448,8 +2168,8 @@ body: CLI bridge output.
         self.assertEqual(findings[0]["title"], "CLI finding")
         self.assertTrue((self.workspace_dir() / "code-review-findings.json").exists())
 
-    def test_ingest_findings_python_accepts_stdin_array(self):
-        payload = json.dumps(
+    def test_findings_cli_accepts_stdin_array(self):
+        result = self.run_findings_ingest(
             [
                 {
                     "title": "stdin finding",
@@ -2459,47 +2179,24 @@ body: CLI bridge output.
                     "severity": "P3",
                     "category": "docs",
                 }
-            ]
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(INGEST_FINDINGS_PY),
-                "--source",
-                "local-agent:stdin-review",
-                self.repo,
-                self.pr,
             ],
-            stdin=payload,
+            source="local-agent:stdin-review",
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
-
-        list_result = self.run_cmd(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "list-items",
-                self.repo,
-                self.pr,
-                "--item-kind",
-                "local_finding",
-            ],
-            check=True,
-        )
-        item = json.loads(list_result.stdout.strip())
+        self.assertEqual(result.returncode, 5, result.stderr)
+        item = self.local_items()[0]
         self.assertEqual(item["path"], "src/stdin.py")
         self.assertEqual(item["line"], 3)
         self.assertEqual(item["source"], "local-agent:stdin-review")
 
-    def test_run_once_python_syncs_session_with_mocked_gh(self):
+    def test_address_syncs_session_with_mocked_gh(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
 import json
 import sys
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
@@ -2528,12 +2225,11 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), "--audit-id", "test", self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("== PR Review Threads ==", result.stdout)
-        self.assertIn("github-thread:THREAD_A", result.stdout)
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["item_id"], "github-thread:THREAD_A")
 
-    def test_run_once_python_lists_reopened_thread_as_unhandled(self):
+    def test_address_lists_reopened_thread_as_unhandled(self):
         gh = self.bin_dir / "gh"
         phase_file = Path(self.temp_dir.name) / "thread_phase.txt"
         phase_file.write_text("resolved", encoding="utf-8")
@@ -2554,6 +2250,8 @@ node = {{
     'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/reopened', 'body': 'Please revisit this.'}}]}},
 }}
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({{
         'data': {{
@@ -2574,21 +2272,23 @@ else:
         )
         gh.chmod(0o755)
 
-        first = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
-        self.assertEqual(first.returncode, 0, first.stderr)
+        first = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(first.returncode, 5, first.stderr)
 
         phase_file.write_text("reopened", encoding="utf-8")
-        second = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
-        self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertIn("github-thread:THREAD_REOPENED", second.stdout)
+        second = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(second.returncode, 5, second.stderr)
+        self.assertEqual(json.loads(second.stdout)["item_id"], "github-thread:THREAD_REOPENED")
 
-    def test_run_once_python_lists_stale_thread_as_unhandled(self):
+    def test_address_lists_stale_thread_as_unhandled(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
 import json
 import sys
 
+if sys.argv[1:3] == ['auth', 'status']:
+    raise SystemExit(0)
 if sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
@@ -2617,10 +2317,12 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('"item_id": "github-thread:THREAD_STALE"', result.stdout)
-        self.assertIn('"status": "STALE"', result.stdout)
+        result = self.run_cmd([sys.executable, str(CLI_PY), "address", self.repo, self.pr, "--lean"])
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["item_id"], "github-thread:THREAD_STALE")
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        self.assertEqual(session["items"]["github-thread:THREAD_STALE"]["state"], "stale")
 
     def test_final_gate_python_passes_on_resolved_threads(self):
         gh = self.bin_dir / "gh"
@@ -3580,8 +3282,7 @@ else:
         )
         gh.chmod(0o755)
 
-        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
-        payload = json.dumps(
+        ingest = self.run_findings_ingest(
             [
                 {
                     "title": "Blocking finding",
@@ -3593,11 +3294,7 @@ else:
                 }
             ]
         )
-        self.run_cmd(
-            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
-            stdin=payload,
-            check=True,
-        )
+        self.assertEqual(ingest.returncode, 5, ingest.stderr)
 
         result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)

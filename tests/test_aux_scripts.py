@@ -12,7 +12,6 @@ from unittest.mock import patch
 from tests.helpers import (
     PYTHON_COMMON_PY,
     PythonScriptTestCase,
-    RUN_ONCE_PY,
     SUBMIT_FEEDBACK_PY,
 )
 
@@ -33,55 +32,18 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
             time.sleep(interval)
         return predicate()
 
-    def test_run_once_helper_parses_each_snapshot_line_once(self):
-        spec = importlib.util.spec_from_file_location("run_once_module", RUN_ONCE_PY)
-        self.assertIsNotNone(spec)
-        module = importlib.util.module_from_spec(spec)
-        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.path.pop(0)
-        snapshot_text = "\n".join(
-            [
-                '{"id":"THREAD_1","isResolved":false}',
-                '{"id":"THREAD_2","isResolved":true}',
-                '{"id":"THREAD_3","isResolved":false}',
-                "",
-            ]
-        )
-        self.assertEqual(module.unresolved_ids_from_snapshot_text(snapshot_text), ["THREAD_1", "THREAD_3"])
+    def test_native_findings_parser_reports_invalid_json_array(self):
+        from gh_address_cr.intake.findings import FindingsFormatError, parse_records
 
-    def test_ingest_findings_reports_invalid_json_array(self):
-        ingest_spec = importlib.util.spec_from_file_location(
-            "ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py"
-        )
-        self.assertIsNotNone(ingest_spec)
-        ingest_module = importlib.util.module_from_spec(ingest_spec)
-        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
-        try:
-            ingest_spec.loader.exec_module(ingest_module)
-        finally:
-            sys.path.pop(0)
+        with self.assertRaises(FindingsFormatError) as ctx:
+            parse_records('[{"title": "oops"')
+        self.assertIn("Invalid NDJSON input on line 1", str(ctx.exception))
 
-        with self.assertRaises(SystemExit) as ctx:
-            ingest_module.parse_records('[{"title": "oops"')
-        self.assertIn("Invalid JSON array input", str(ctx.exception))
+    def test_native_findings_parser_reports_invalid_ndjson_line(self):
+        from gh_address_cr.intake.findings import FindingsFormatError, parse_records
 
-    def test_ingest_findings_reports_invalid_ndjson_line(self):
-        ingest_spec = importlib.util.spec_from_file_location(
-            "ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py"
-        )
-        self.assertIsNotNone(ingest_spec)
-        ingest_module = importlib.util.module_from_spec(ingest_spec)
-        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
-        try:
-            ingest_spec.loader.exec_module(ingest_module)
-        finally:
-            sys.path.pop(0)
-
-        with self.assertRaises(SystemExit) as ctx:
-            ingest_module.parse_records('{"title": "ok"}\nnot-json\n')
+        with self.assertRaises(FindingsFormatError) as ctx:
+            parse_records('{"title": "ok"}\nnot-json\n')
         self.assertIn("Invalid NDJSON input on line 2", str(ctx.exception))
 
     def test_submit_feedback_dry_run_outputs_canonical_issue_body(self):

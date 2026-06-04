@@ -1,5 +1,9 @@
 # Feature Specification: Agent Efficiency Metrics
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for
+> implementation paths. Command telemetry now belongs to native runtime modules,
+> not `core/cr_loop.py`.
+
 **Feature Branch**: `011-agent-efficiency-metrics`
 **Created**: 2026-05-29
 **Status**: In Review

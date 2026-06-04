@@ -52,17 +52,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_runtime_cli_has_no_legacy_or_handler_script_dispatcher(self):
         import gh_address_cr.cli as cli
-        from gh_address_cr.core import control_plane, cr_loop
 
         self.assertFalse(hasattr(cli, "COMMAND_TO_SCRIPT"))
         self.assertFalse(hasattr(cli, "SCRIPT_DIR"))
         self.assertFalse(hasattr(cli, "run_script"))
-        self.assertFalse(hasattr(control_plane, "SCRIPT_DIR"))
-        self.assertFalse(hasattr(control_plane, "RUN_ONCE"))
-        self.assertFalse(hasattr(control_plane, "RUN_LOCAL_REVIEW"))
-        self.assertFalse(hasattr(cr_loop, "SCRIPT_DIR"))
-        self.assertFalse(hasattr(cr_loop, "RUN_ONCE"))
-        self.assertFalse(hasattr(cr_loop, "RUN_LOCAL_REVIEW"))
 
     def test_current_runtime_commands_are_not_handler_package_named(self):
         env = self.env.copy()
@@ -88,7 +81,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip().splitlines(), ["True", "True", "True"])
 
-    def test_native_session_engine_exposes_legacy_cli_contract(self):
+    def test_legacy_core_session_engine_module_is_removed(self):
         env = self.env.copy()
         env["PYTHONPATH"] = str(SRC_ROOT)
 
@@ -97,10 +90,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 sys.executable,
                 "-c",
                 (
-                    "from gh_address_cr.core import session_engine\n"
-                    "parser = session_engine.build_parser()\n"
-                    "print(parser.prog)\n"
-                    "print(hasattr(session_engine, 'main'))\n"
+                    "import importlib.util\n"
+                    "print(importlib.util.find_spec('gh_address_cr.core.session_engine') is None)\n"
                 ),
             ],
             text=True,
@@ -110,9 +101,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("True", result.stdout)
+        self.assertEqual(result.stdout.strip(), "True")
 
-    def test_native_cr_loop_exposes_legacy_cli_contract(self):
+    def test_legacy_core_cr_loop_module_is_removed(self):
         env = self.env.copy()
         env["PYTHONPATH"] = str(SRC_ROOT)
 
@@ -121,11 +112,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 sys.executable,
                 "-c",
                 (
-                    "from gh_address_cr.core import cr_loop\n"
-                    "parser = cr_loop.build_parser()\n"
-                    "print(parser.prog)\n"
-                    "print(hasattr(cr_loop, 'main'))\n"
-                    "print(hasattr(cr_loop, 'handle_batch'))\n"
+                    "import importlib.util\n"
+                    "print(importlib.util.find_spec('gh_address_cr.core.cr_loop') is None)\n"
                 ),
             ],
             text=True,
@@ -135,9 +123,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("True\nTrue", result.stdout)
+        self.assertEqual(result.stdout.strip(), "True")
 
-    def test_native_control_plane_exposes_legacy_cli_contract(self):
+    def test_legacy_core_control_plane_module_is_removed(self):
         env = self.env.copy()
         env["PYTHONPATH"] = str(SRC_ROOT)
 
@@ -146,11 +134,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 sys.executable,
                 "-c",
                 (
-                    "from gh_address_cr.core import control_plane\n"
-                    "parser = control_plane.build_parser()\n"
-                    "print(parser.prog)\n"
-                    "print(hasattr(control_plane, 'main'))\n"
-                    "print(hasattr(control_plane, 'run_or_return'))\n"
+                    "import importlib.util\n"
+                    "print(importlib.util.find_spec('gh_address_cr.core.control_plane') is None)\n"
                 ),
             ],
             text=True,
@@ -160,7 +145,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("True\nTrue", result.stdout)
+        self.assertEqual(result.stdout.strip(), "True")
 
     def test_runtime_module_help_lists_public_commands(self):
         result = self.run_runtime_module("--help")

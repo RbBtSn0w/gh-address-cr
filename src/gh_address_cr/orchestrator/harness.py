@@ -8,7 +8,6 @@ from uuid import uuid4
 import os
 from typing import List, Optional
 from gh_address_cr import __version__
-from packaging.version import Version
 from gh_address_cr.orchestrator.session import (
     OrchestrationSession,
     load_orchestration_session,
@@ -24,7 +23,8 @@ from gh_address_cr.orchestrator.worker import (
     HumanHandoffRequired,
     MAX_RETRIES,
 )
-from gh_address_cr.core import workflow, session_engine
+from gh_address_cr.core import gate as core_gate
+from gh_address_cr.core import workflow
 from gh_address_cr.core import session as core_session
 
 MIN_REQUIRED_VERSION = "0.0.1"
@@ -45,13 +45,16 @@ def _output_signal(status: str, reason_code: str, next_action: str, message: str
 
 def check_runtime_version() -> bool:
     try:
-        current = Version(__version__)
-        required = Version(MIN_REQUIRED_VERSION)
-        if current < required:
-            return False
+        current = _version_tuple(__version__)
+        required = _version_tuple(MIN_REQUIRED_VERSION)
+        return current >= required
     except Exception:
-        pass
-    return True
+        return True
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    core = value.split("-", 1)[0].split("+", 1)[0]
+    return tuple(int(part) for part in core.split(".") if part.isdigit())
 
 
 def _parse_common_args(args: List[str]):
@@ -592,22 +595,15 @@ def _eligible_runtime_items(runtime_state: dict) -> List[str]:
 
 def _load_runtime_state(repo: str, pr_number: str) -> dict:
     try:
-        return session_engine.load_session(repo, pr_number)
-    except SystemExit as exc:
-        if "Unsupported session schema version" in str(exc):
-            return core_session.load_session(repo, pr_number)
-        raise
+        return core_session.load_session(repo, pr_number)
+    except core_session.SessionError:
+        return {}
 
 
 def _run_authoritative_gate(repo: str, pr_number: str) -> int:
     try:
-        return session_engine.cmd_gate(argparse.Namespace(repo=repo, pr_number=pr_number))
-    except SystemExit as exc:
-        if "Unsupported session schema version" not in str(exc):
-            raise
         runtime_state = core_session.load_session(repo, pr_number)
-        items = runtime_state.get("items", {}) if isinstance(runtime_state, dict) else {}
-        if not isinstance(items, dict):
-            return 1
-        blocking = [item for item in items.values() if isinstance(item, dict) and bool(item.get("blocking"))]
-        return 0 if not blocking else 1
+    except core_session.SessionError:
+        runtime_state = {"repo": repo, "pr_number": str(pr_number), "items": {}}
+    result = core_gate.evaluate_final_gate(runtime_state)
+    return result.exit_code

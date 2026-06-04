@@ -1,5 +1,9 @@
 # Research: Runtime Native Refactor
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for the
+> final cleanup stage. `session_engine.py` references below are migration
+> history, not current implementation guidance.
+
 ## Migration Analysis: Legacy Scripts
 
 ### Core State & Session Engine (`session_engine.py`, `python_common.py`)

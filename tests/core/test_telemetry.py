@@ -1953,7 +1953,7 @@ class TestTelemetry(unittest.TestCase):
     def test_run_cmd_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err")
 
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["sleep", "10"], timeout=120.0)
 
         self.assertEqual(res.returncode, 124)
@@ -1969,7 +1969,7 @@ class TestTelemetry(unittest.TestCase):
     def test_run_cmd_does_not_apply_default_timeout(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
 
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         run_cmd(["ls"])
 
         self.assertIsNone(mock_run.call_args.kwargs["timeout"])
@@ -1981,7 +1981,7 @@ class TestTelemetry(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
         mock_record.side_effect = Exception("Telemetry DB error")
         
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["ls"])
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout, "ok")

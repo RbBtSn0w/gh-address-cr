@@ -1,5 +1,9 @@
 # Implementation Plan: Runtime Native Refactor
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for the
+> final cleanup stage. Current implementation no longer preserves
+> `session_engine.py` compatibility shims.
+
 **Branch**: `002-runtime-native-refactor` | **Date**: 2026-04-24 | **Spec**: [specs/002-runtime-native-refactor/spec.md](spec.md)
 **Input**: Feature specification from `/specs/002-runtime-native-refactor/spec.md`
 

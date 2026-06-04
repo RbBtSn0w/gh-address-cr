@@ -1379,19 +1379,43 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     lean = bool(lean or parsed.lean or parsed.summary)
     run_id = parsed.audit_id or f"native-{_utc_now()}"
     auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
+    preloaded_findings_input: str | None = None
+    if parsed.sync and not parsed.source:
+        summary = build_preflight_summary(
+            command,
+            repo,
+            pr_number,
+            status="BLOCKED",
+            exit_code=2,
+            reason_code="INVALID_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action="`--sync` requires an explicit --source so missing findings stay scoped to one producer.",
+        )
+        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        return 2
+    if command in {"review", "findings"} and parsed.input:
+        preloaded_findings_input = _read_findings_input(parsed.input)
+        if not preloaded_findings_input.strip():
+            summary = build_preflight_summary(
+                command,
+                repo,
+                pr_number,
+                status="BLOCKED",
+                exit_code=2,
+                reason_code="INVALID_FINDINGS_INPUT",
+                waiting_on="findings_input",
+                next_action=EMPTY_FINDINGS_INPUT_MESSAGE,
+            )
+            sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+            return 2
     session = _load_or_create_session(repo, pr_number)
     _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
     try:
-        if parsed.sync and not parsed.source:
-            raise FindingsFormatError(
-                "`--sync` requires an explicit --source so missing findings stay scoped to one producer."
-            )
         if command in {"review", "findings"} and parsed.input:
-            raw = _read_findings_input(parsed.input)
             _ingest_native_findings(
                 session,
-                raw=raw,
+                raw=preloaded_findings_input or "",
                 source=parsed.source or "json",
                 sync=parsed.sync,
                 scan_id=parsed.scan_id,

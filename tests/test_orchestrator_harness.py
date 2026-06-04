@@ -252,8 +252,7 @@ class TestOrchestratorHarness(unittest.TestCase):
     def test_stop_enforces_authoritative_final_gate(self, mock_stdout):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
-        with patch("gh_address_cr.orchestrator.harness.session_engine.cmd_gate", return_value=1):
-            exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
+        exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
         self.assertEqual(exit_code, 2)
         self.assertIn("final-gate", mock_stdout.getvalue().lower())
 

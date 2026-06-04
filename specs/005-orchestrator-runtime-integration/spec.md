@@ -1,5 +1,10 @@
 # Feature Specification: Orchestrator-Runtime Integration
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal. Current
+> runtime state and final-gate integration use native `core.session`,
+> `core.workflow`, and `core.gate`; references below to `session_engine.py` are
+> historical and not current implementation guidance.
+
 **Feature Branch**: `005-orchestrator-runtime-integration`
 **Created**: 2026-04-27  
 **Status**: Verified  
