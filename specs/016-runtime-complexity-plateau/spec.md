@@ -2,7 +2,7 @@
 
 **Feature Branch**: `016-runtime-complexity-plateau`  
 **Created**: 2026-06-04  
-**Status**: Verified
+**Status**: In Review
 **Input**: User description: "系统正处于复杂度平台期：核心模块语义密度过载，需要将不同类型 WorkItem 处理逻辑解耦为独立 Handler 插件架构；租约过期会造成代理挫败感，需要更优雅的宽限期或续约机制；telemetry 在性能与一致性之间需要明确取舍；风险判定不能长期只依赖正则 markers，需要轻量逻辑验证器。此次 spec 文档用中文。"
 
 ## User Scenarios & Testing *(mandatory)*
