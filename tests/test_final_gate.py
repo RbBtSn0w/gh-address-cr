@@ -288,3 +288,19 @@ class FinalGateTestCase(unittest.TestCase):
         telemetry_report["coverage_label"] = "runtime-only"
         guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
         self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
+
+    def test_build_completion_summary_guidance_none_telemetry_fields(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": None,
+            "total_events": None,
+            "success_rate": None,
+            "inefficiency_flags": None,
+            "report_artifact": None,
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]", guidance)

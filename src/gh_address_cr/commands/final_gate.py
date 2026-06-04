@@ -315,10 +315,12 @@ def build_completion_summary_guidance(
     checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
     checks_concise = f"{checks_failed}/{checks_pending}" if result.check_requirement else "N/A"
 
-    coverage = telemetry_report.get("coverage_label", "unavailable")
-    total_events = telemetry_report.get("total_events", 0)
-    success_rate = telemetry_report.get("success_rate", 0.0)
-    inefficiency_flags = telemetry_report.get("inefficiency_flags", [])
+    coverage = telemetry_report.get("coverage_label") or "unavailable"
+    total_events = telemetry_report.get("total_events") or 0
+    success_rate = telemetry_report.get("success_rate")
+    if success_rate is None:
+        success_rate = 0.0
+    inefficiency_flags = telemetry_report.get("inefficiency_flags") or []
     flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
 
