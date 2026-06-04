@@ -35,7 +35,7 @@ def gh_read_json(args: list[str]) -> Any:
 
 
 def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
-    result = run_cmd_native(cmd, stdin=input_text)
+    result = run_cmd_native(cmd, stdin=input_text, retries=1)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
     return result

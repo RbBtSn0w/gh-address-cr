@@ -209,6 +209,29 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertEqual(payload, {"items": []})
         self.assertEqual(calls, [(["gh", "api", "search/issues?q=x"], {"retries": 3})])
 
+    def test_submit_feedback_write_cmd_does_not_retry_non_idempotent_write(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_write_retry_under_test")
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, "{}", "")
+
+        module.run_cmd_native = fake_run_cmd
+
+        result = module.gh_write_cmd(["gh", "api", "repos/octo/example/issues", "--method", "POST"], input_text="{}")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    ["gh", "api", "repos/octo/example/issues", "--method", "POST"],
+                    {"stdin": "{}", "retries": 1},
+                )
+            ],
+        )
+
     def test_submit_feedback_sanitize_text_only_redacts_absolute_paths(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_under_test")
 
