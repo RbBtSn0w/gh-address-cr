@@ -583,18 +583,30 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     unsafe_seen = parse_result.unsafe_seen
     malformed_seen = parse_result.malformed_seen
 
-    diagnostics: list[str] = []
-    for diag in parse_result.diagnostics:
-        diag_str = str(diag)
-        if (
-            _contains_control_character(diag_str)
-            or _contains_token_marker(diag_str)
-            or _contains_private_identifier(diag_str)
-            or _looks_like_unnecessary_absolute_path(diag_str)
-        ):
-            diagnostics.append("[redacted]")
-        else:
-            diagnostics.append(diag_str)
+    try:
+        if not isinstance(parse_result.diagnostics, list):
+            raise TypeError(
+                f"Adapter diagnostics must be a list, got {type(parse_result.diagnostics).__name__}"
+            )
+        diagnostics: list[str] = []
+        for diag in parse_result.diagnostics:
+            diagnostics.append(_safe_diagnostic_text(str(diag)))
+    except Exception as exc:
+        summary = _import_summary(
+            paths,
+            source=source,
+            fmt=fmt,
+            status="FAILED",
+            reason_code="MALFORMED_TELEMETRY",
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=0,
+            accepted_fingerprints=[],
+            duplicate_fingerprints=[],
+            diagnostics=[f"Adapter diagnostics processing failed: {type(exc).__name__}"],
+        )
+        _append_import_summary(paths, summary)
+        return summary
 
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
@@ -612,10 +624,10 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
                 message = str(exc)
                 if message.startswith("UNSAFE:"):
                     unsafe_seen = True
-                    diagnostics.append(f"event index {idx}: {message.removeprefix('UNSAFE:')}")
+                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message.removeprefix('UNSAFE:'))}")
                 else:
                     malformed_seen = True
-                    diagnostics.append(f"event index {idx}: {message}")
+                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message)}")
                 rejected_count += 1
                 continue
 
@@ -978,6 +990,17 @@ def _safe_metadata(metadata: object) -> dict[str, Any]:
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"metadata contains non-JSON serializable or non-finite values: {exc}") from None
     return result
+
+
+def _safe_diagnostic_text(value: str) -> str:
+    if (
+        _contains_control_character(value)
+        or _contains_token_marker(value)
+        or _contains_private_identifier(value)
+        or _looks_like_unnecessary_absolute_path(value)
+    ):
+        return "[redacted]"
+    return value
 
 
 def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") -> None:

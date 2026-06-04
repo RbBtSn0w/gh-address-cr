@@ -2669,6 +2669,54 @@ class TestTelemetry(unittest.TestCase):
                 redacted_count = sum(1 for diag in result["diagnostics"] if diag == "[redacted]")
                 self.assertEqual(redacted_count, 3)
 
+    def test_custom_telemetry_adapter_invalid_diagnostics_container_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+        )
+
+        class MockInvalidDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-invalid-diagnostics",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=None,
+                )
+
+        register_adapter("mock-invalid-diag-container", MockInvalidDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-diag-container"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-diag-container",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertTrue(
+                    any("Adapter diagnostics processing failed: TypeError" in diag for diag in result["diagnostics"])
+                )
+
     def test_import_external_telemetry_event_id_redaction_in_normalization_diagnostics(self):
         from gh_address_cr.core.telemetry import (
             TelemetryAdapter,
@@ -2686,11 +2734,11 @@ class TestTelemetry(unittest.TestCase):
                             schema_version="1.0",
                             source="custom-source",
                             source_session_id="run-1",
-                            event_id="unsafe-secret-token-sk-12345",
+                            event_id="ghp_unsafe_event_id",
                             kind="tool_call",
                             operation="safe operation",
                             duration_ms=10,
-                            status="invalid-status",
+                            status="success",
                         )
                     ],
                     rejected_count=0,
@@ -2715,7 +2763,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
                 self.assertEqual(result["rejected_count"], 1)
                 
-                self.assertFalse(any("unsafe-secret-token-sk-12345" in diag for diag in result["diagnostics"]))
+                self.assertFalse(any("ghp_unsafe_event_id" in diag for diag in result["diagnostics"]))
                 self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_invalid_event_type_rejection(self):
@@ -2798,7 +2846,8 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["status"], "FAILED")
                 self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
                 self.assertEqual(result["rejected_count"], 1)
-                self.assertTrue(any("unsafe token in metadata field key" in diag for diag in result["diagnostics"]))
+                self.assertFalse(any("ghp_unsafe_token_as_key" in diag for diag in result["diagnostics"]))
+                self.assertTrue(any("[redacted]" in diag for diag in result["diagnostics"]))
 
 if __name__ == "__main__":
     unittest.main()
