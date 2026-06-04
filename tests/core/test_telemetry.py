@@ -2295,6 +2295,87 @@ class TestTelemetry(unittest.TestCase):
             register_adapter("mock-dup", MockCustomAdapter())
         self.assertIn("already registered", str(context.exception))
 
+        # Check that registering the same format with a specific source also raises error on duplicate
+        register_adapter("mock-dup", MockCustomAdapter(), source="special-src")
+        self.addCleanup(lambda: unregister_adapter("mock-dup", source="special-src"))
+
+        with self.assertRaises(ValueError) as context_src:
+            register_adapter("mock-dup", MockCustomAdapter(), source="special-src")
+        self.assertIn("already registered", str(context_src.exception))
+
+    def test_custom_telemetry_adapter_source_override(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class DefaultMockAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-1",
+                    event_id="event-1",
+                    kind="tool_call",
+                    operation="op-default",
+                    status="success",
+                    duration_ms=1000,
+                )
+                return TelemetryParseResult([event], 0, False, False, [])
+
+        class SpecialMockAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-1",
+                    event_id="event-1",
+                    kind="tool_call",
+                    operation="op-override",
+                    status="success",
+                    duration_ms=2000,
+                )
+                return TelemetryParseResult([event], 0, False, False, [])
+
+        # Register format default adapter
+        register_adapter("multi-source", DefaultMockAdapter())
+        self.addCleanup(lambda: unregister_adapter("multi-source"))
+
+        # Register source-specific override adapter
+        register_adapter("multi-source", SpecialMockAdapter(), source="special-host")
+        self.addCleanup(lambda: unregister_adapter("multi-source", source="special-host"))
+
+        # 1. Verification with default fallback
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result_default = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="ordinary-host",
+                    fmt="multi-source",
+                    raw="dummy",
+                )
+                self.assertEqual(result_default["status"], "SUCCESS")
+                report_default = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report_default["slowest_operations"][0]["operation"], "op-default")
+
+        # 2. Verification with source override priority
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result_override = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="special-host",
+                    fmt="multi-source",
+                    raw="dummy",
+                )
+                self.assertEqual(result_override["status"], "SUCCESS")
+                report_override = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report_override["slowest_operations"][0]["operation"], "op-override")
+
     def test_custom_telemetry_adapter_unsafe_normalization_rejection(self):
         from gh_address_cr.core.telemetry import (
             TelemetryAdapter,

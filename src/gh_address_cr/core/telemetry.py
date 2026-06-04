@@ -200,33 +200,38 @@ class TelemetryAdapter(ABC):
 
 class TelemetryAdapterRegistry:
     def __init__(self):
-        self._adapters: dict[str, TelemetryAdapter] = {}
+        self._adapters: dict[tuple[str, str | None], TelemetryAdapter] = {}
 
-    def register(self, fmt: str, adapter: TelemetryAdapter) -> None:
-        if fmt in self._adapters:
-            raise ValueError(f"Adapter for format '{fmt}' is already registered.")
-        self._adapters[fmt] = adapter
+    def register(self, fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
+        key = (fmt, source)
+        if key in self._adapters:
+            raise ValueError(f"Adapter for format '{fmt}' and source '{source}' is already registered.")
+        self._adapters[key] = adapter
 
-    def get_adapter(self, fmt: str) -> TelemetryAdapter | None:
-        return self._adapters.get(fmt)
+    def get_adapter(self, fmt: str, source: str | None = None) -> TelemetryAdapter | None:
+        if source is not None:
+            adapter = self._adapters.get((fmt, source))
+            if adapter is not None:
+                return adapter
+        return self._adapters.get((fmt, None))
 
-    def unregister(self, fmt: str) -> None:
-        self._adapters.pop(fmt, None)
+    def unregister(self, fmt: str, source: str | None = None) -> None:
+        self._adapters.pop((fmt, source), None)
 
 
 _registry = TelemetryAdapterRegistry()
 
 
-def register_adapter(fmt: str, adapter: TelemetryAdapter) -> None:
-    _registry.register(fmt, adapter)
+def register_adapter(fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
+    _registry.register(fmt, adapter, source)
 
 
-def get_adapter(fmt: str) -> TelemetryAdapter | None:
-    return _registry.get_adapter(fmt)
+def get_adapter(fmt: str, source: str | None = None) -> TelemetryAdapter | None:
+    return _registry.get_adapter(fmt, source)
 
 
-def unregister_adapter(fmt: str) -> None:
-    _registry.unregister(fmt)
+def unregister_adapter(fmt: str, source: str | None = None) -> None:
+    _registry.unregister(fmt, source)
 
 
 class GenericAgentJsonlAdapter(TelemetryAdapter):
@@ -480,7 +485,7 @@ class SessionTelemetry:
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
-    adapter = get_adapter(fmt)
+    adapter = get_adapter(fmt, source=source)
     if adapter is None:
         reported_format = _reported_format_label(fmt)
         summary = _import_summary(
