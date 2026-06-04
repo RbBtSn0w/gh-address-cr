@@ -24,6 +24,8 @@ REQUIRED_ACTION_RESPONSE_FIELDS = (
     "resolution",
     "note",
 )
+WORKFLOW_DECISION_SCHEMA_VERSION = "workflow_decision.v1"
+WORKFLOW_DECISIONS = frozenset({"fix", "clarify", "defer", "reject"})
 
 DIRECT_GITHUB_SIDE_EFFECT_KEYS = frozenset(
     {
@@ -128,6 +130,31 @@ def validate_action_response(
         return ActionResponse.from_dict(payload)
     except (KeyError, TypeError, ValueError) as exc:
         raise ResponseValidationError("malformed_action_response", str(exc)) from exc
+
+
+def validate_workflow_decision(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ResponseValidationError("invalid_workflow_decision", "WorkflowDecision must be a JSON object.")
+    required = ("schema_version", "request_id", "item_id", "decision", "reason")
+    for field in required:
+        if payload.get(field) in (None, "", []):
+            raise ResponseValidationError(f"missing_{field}", f"WorkflowDecision missing {field}.")
+    if payload["schema_version"] != WORKFLOW_DECISION_SCHEMA_VERSION:
+        raise ResponseValidationError(
+            "unsupported_workflow_decision_schema",
+            f"Unsupported WorkflowDecision schema_version: {payload['schema_version']}.",
+        )
+    decision = str(payload["decision"])
+    if decision not in WORKFLOW_DECISIONS:
+        raise ResponseValidationError("unsupported_workflow_decision", f"Unsupported decision: {decision}.")
+    return {
+        "schema_version": WORKFLOW_DECISION_SCHEMA_VERSION,
+        "request_id": str(payload["request_id"]),
+        "item_id": str(payload["item_id"]),
+        "decision": decision,
+        "reason": str(payload["reason"]),
+        "confidence": payload.get("confidence"),
+    }
 
 
 def _validate_required_evidence(request: ActionRequest, response: ActionResponse) -> None:

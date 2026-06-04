@@ -56,6 +56,32 @@ TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
 FIX_ALL_STALE_ROUTE_REASON = "STALE_THREADS_REQUIRE_RESOLVE_STALE"
+TRIVIAL_POSITIVE_MARKERS = (
+    "typo",
+    "spelling",
+    "grammar",
+    "documentation",
+    "docs",
+    "readme",
+    "comment",
+    "wording",
+)
+TRIVIAL_SENSITIVE_MARKERS = (
+    "security",
+    "unsafe",
+    "auth",
+    "token",
+    "secret",
+    "password",
+    "permission",
+    "api",
+    "schema",
+    "data loss",
+    "concurrency",
+    "race",
+    "performance",
+    "memory",
+)
 
 
 class WorkflowError(RuntimeError):
@@ -912,6 +938,71 @@ def fast_fix_item(
         "submit": submitted,
         "next_action": submitted["next_action"],
     }
+
+
+def trivial_fix_item(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, str]],
+    summary: str,
+    why: str,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    session = session_store.load_session(repo, pr_number)
+    item = _items(session).get(item_id)
+    eligible, reason = _trivial_thread_eligibility(item)
+    if not eligible:
+        raise WorkflowError(
+            status="TRIVIAL_FIX_REJECTED",
+            reason_code="TRIVIAL_THREAD_NOT_ELIGIBLE",
+            waiting_on="trivial_fix_input",
+            exit_code=2,
+            message=reason,
+            payload={"item_id": item_id},
+        )
+    result = fast_fix_item(
+        repo,
+        pr_number,
+        item_id=item_id,
+        agent_id=agent_id,
+        commit_hash=commit_hash,
+        files=files,
+        validation_commands=validation_commands,
+        summary=summary,
+        why=why,
+        publish=publish,
+        github_client=github_client,
+        now=now,
+    )
+    result["status"] = "TRIVIAL_FIX_COMPLETE" if publish else "TRIVIAL_FIX_ACCEPTED"
+    result["trivial_eligibility"] = "docs_or_typo"
+    return result
+
+
+def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]:
+    if not isinstance(item, dict):
+        return False, "Trivial fast path requires an existing review-thread item."
+    if item.get("item_kind") != "github_thread":
+        return False, "Trivial fast path only handles GitHub review threads."
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "body", "first_body", "path")
+    ).lower()
+    if any(marker in text for marker in TRIVIAL_SENSITIVE_MARKERS):
+        return False, "Thread contains non-trivial or sensitive review markers."
+    path = str(item.get("path") or "").lower()
+    path_trivial = path.endswith(".md") or path.startswith("docs/") or path in {"readme", "readme.md"}
+    text_trivial = any(marker in text for marker in TRIVIAL_POSITIVE_MARKERS)
+    if not (path_trivial or text_trivial):
+        return False, "Thread does not look like a documentation or typo-only concern."
+    return True, "Thread is eligible for documentation or typo fast path."
 
 
 def fast_fix_matching_threads(

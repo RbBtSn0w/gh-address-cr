@@ -105,12 +105,15 @@ Advanced integration commands:
 - `agent submit`
 - `agent submit-batch`
 - `agent fix`
+- `agent trivial-fix`
 - `agent fix-all`
 - `agent resolve-stale`
 - `agent evidence`
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
+- `agent orchestrate autopilot`
+- `command-session`
 - `doctor`
 
 High-level commands emit machine-readable JSON summaries by default. Use
@@ -122,6 +125,7 @@ Telemetry commands are PR-scoped and do not mutate review item state:
 ```bash
 gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input agent-telemetry.jsonl
 gh-address-cr telemetry summary owner/repo 123 --format markdown
+gh-address-cr telemetry ingest owner/repo 123 --source codex --format codex-host-json --input codex-host.json
 ```
 
 Assistant hosts can also provide a final-gate ingestion hook by setting:
@@ -149,6 +153,29 @@ per-thread summary/why entries for ordinary multi-thread handling. Use
 `agent fix-all --input <batch-response.json>` to route explicit per-thread batch
 evidence, or `agent fix-all --homogeneous-reason <why>` only for a homogeneous
 repeated concern.
+
+When exactly one PR session is cached, PR-scoped commands such as `address`,
+`review`, `threads`, `final-gate`, and `telemetry summary` may omit
+`<owner/repo> <pr_number>`. No-session and multi-session cases fail loud with
+`NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`.
+
+Use `agent trivial-fix` only for documentation or typo-only GitHub review
+threads. The runtime rejects security-sensitive, API-sensitive, performance, or
+ambiguous comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve,
+validation, and final-gate evidence still applies.
+
+Agents that need a schema-defined triage handoff may emit
+`workflow_decision.v1` JSON with `schema_version`, `request_id`, `item_id`,
+`decision`, and `reason`. Existing Markdown decision blocks remain a documented
+compatibility path, but JSON avoids whitespace-sensitive parsing.
+
+`command-session --input <json>|-` executes multiple one-shot runtime commands
+inside one process and returns one result per operation. Failed operations do
+not suppress later operations.
+
+`agent orchestrate autopilot` is guarded dry-run planning by default. It emits a
+deterministic plan for classify, lease, submit, publish, and final-gate steps.
+Side-effecting autopilot execution is not enabled in this v1 contract.
 
 ## Runtime and adapter boundary
 

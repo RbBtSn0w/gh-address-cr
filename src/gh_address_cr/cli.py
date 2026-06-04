@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 import platform
@@ -58,9 +60,43 @@ PUBLIC_COMMANDS = {
     *UTILITY_COMMANDS,
     "active-pr",
     "agent",
+    "command-session",
     "doctor",
     "final-gate",
     "telemetry",
+}
+PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
+IMPLICIT_SCOPE_VALUE_OPTIONS = {
+    "--agent-id",
+    "--audit-id",
+    "--commit",
+    "--concern-label",
+    "--file",
+    "--files",
+    "--format",
+    "--handoff-sha256",
+    "--head",
+    "--homogeneous-reason",
+    "--input",
+    "--item-id",
+    "--max-iterations",
+    "--name",
+    "--note",
+    "--now",
+    "--repo",
+    "--review-priority",
+    "--role",
+    "--scan-id",
+    "--severity",
+    "--severity-note",
+    "--severity-override-note",
+    "--snapshot",
+    "--source",
+    "--test-command",
+    "--test-result",
+    "--validation",
+    "--validation-cmd",
+    "--why",
 }
 UNSUPPORTED_LEGACY_COMMANDS = {
     "audit-report",
@@ -1644,6 +1680,7 @@ def build_agent_manifest() -> dict:
             "triage",
             "classify",
             "fix",
+            "trivial_fix",
             "fix_all",
             "evidence",
             "clarify",
@@ -1659,6 +1696,7 @@ def build_agent_manifest() -> dict:
             "finding.v1",
             "github_thread.v1",
             "evidence_profile.v1",
+            "workflow_decision.v1",
         ],
         "output_formats": [
             "action_response.v1",
@@ -1666,6 +1704,7 @@ def build_agent_manifest() -> dict:
             "evidence_record.v1",
             "evidence_profile.v1",
             "gate_report.v1",
+            "workflow_decision.v1",
         ],
         "constraints": {
             "max_parallel_claims": MAX_PARALLEL_CLAIMS,
@@ -1677,7 +1716,7 @@ def build_agent_manifest() -> dict:
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,fix-all,resolve-stale,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,trivial-fix,fix-all,resolve-stale,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -1694,6 +1733,8 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_submit_batch(args.pr_number, args.args)
     if args.repo == "fix":
         return handle_agent_fix(args.pr_number, args.args)
+    if args.repo == "trivial-fix":
+        return handle_agent_trivial_fix(args.pr_number, args.args)
     if args.repo == "fix-all":
         return handle_agent_fix_all(args.pr_number, args.args)
     if args.repo == "resolve-stale":
@@ -1709,7 +1750,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, fix-all, resolve-stale, evidence, publish, leases, reclaim, orchestrate.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, trivial-fix, fix-all, resolve-stale, evidence, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -1926,6 +1967,50 @@ def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
             severity=parsed.severity,
             severity_note=parsed.severity_note,
             review_priority=parsed.review_priority,
+            publish=parsed.publish,
+            now=now_dt,
+        )
+    except workflow.WorkflowError as exc:
+        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_agent_trivial_fix(repo: str | None, passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gh-address-cr agent trivial-fix",
+        description="Fast path for documentation or typo-only GitHub review-thread fixes.",
+    )
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("item_id")
+    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--files")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--summary", required=True)
+    parser.add_argument("--why", required=True)
+    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--now")
+    scope_args, scope_error = _agent_args_with_scope(repo, passthrough)
+    if scope_error is not None:
+        return _emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scope_args)
+    try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        payload = workflow.trivial_fix_item(
+            parsed.repo,
+            parsed.pr_number,
+            item_id=parsed.item_id,
+            agent_id=parsed.agent_id,
+            commit_hash=parsed.commit,
+            files=_parse_agent_files(parsed.files, parsed.file),
+            validation_commands=_parse_agent_validation(parsed.validation),
+            summary=parsed.summary,
+            why=parsed.why,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -2212,6 +2297,15 @@ def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
 
 
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
+    if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
+        print(
+            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]\n\n"
+            "Host telemetry hook:\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl."
+        )
+        return 0
     parser = argparse.ArgumentParser(
         prog="gh-address-cr final-gate",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2237,7 +2331,11 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     )
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    parsed = parser.parse_args(_prepend_optional(repo, _prepend_optional(pr_number, passthrough)))
+    scoped_args = _prepend_optional(repo, _prepend_optional(pr_number, passthrough))
+    scoped_args, scope_error = _maybe_prepend_implicit_scope(scoped_args)
+    if scope_error is not None:
+        return _emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scoped_args)
     _ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number)
     try:
         result = core_gate.Gatekeeper().run(
@@ -2438,7 +2536,10 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         parser.add_argument("--source", required=True)
         parser.add_argument("--format", default="agent-jsonl")
         parser.add_argument("--input", required=True)
-        parsed = parser.parse_args(args)
+        scoped_args, scope_error = _maybe_prepend_implicit_scope(args)
+        if scope_error is not None:
+            return _emit_scope_resolution_error(scope_error)
+        parsed = parser.parse_args(scoped_args)
         if parsed.input == "-":
             raw = sys.stdin.read()
         else:
@@ -2468,7 +2569,10 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         parser.add_argument("repo")
         parser.add_argument("pr_number")
         parser.add_argument("--format", choices=("json", "markdown"), default="json")
-        parsed = parser.parse_args(args)
+        scoped_args, scope_error = _maybe_prepend_implicit_scope(args)
+        if scope_error is not None:
+            return _emit_scope_resolution_error(scope_error)
+        parsed = parser.parse_args(scoped_args)
         report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
         if _telemetry_report_has_storage_diagnostics(report):
             payload = {
@@ -2933,6 +3037,192 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     )
 
 
+def _active_cached_sessions() -> list[tuple[str, str, Path]]:
+    try:
+        root = core_paths.state_dir()
+    except Exception:
+        return []
+    if not root.exists():
+        return []
+    sessions: list[tuple[str, str, Path]] = []
+    for owner_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        if owner_dir.name == "archive" or "__" not in owner_dir.name:
+            continue
+        owner, repo_name = owner_dir.name.split("__", 1)
+        repo = f"{owner}/{repo_name}"
+        for pr_dir in sorted(path for path in owner_dir.iterdir() if path.is_dir() and path.name.startswith("pr-")):
+            pr_number = pr_dir.name.removeprefix("pr-")
+            session_path = pr_dir / "session.json"
+            if pr_number and session_path.is_file():
+                sessions.append((repo, pr_number, session_path))
+    return sessions
+
+
+def _resolve_active_cached_scope() -> tuple[str, str] | dict:
+    sessions = _active_cached_sessions()
+    if not sessions:
+        return {
+            "status": "PR_SCOPE_UNRESOLVED",
+            "reason_code": "NO_ACTIVE_PR_SCOPE",
+            "waiting_on": "pr_scope",
+            "next_action": "Pass <owner/repo> <pr_number> explicitly or create exactly one cached PR session.",
+            "candidates": [],
+            "exit_code": 2,
+        }
+    if len(sessions) > 1:
+        return {
+            "status": "PR_SCOPE_UNRESOLVED",
+            "reason_code": "AMBIGUOUS_PR_SCOPE",
+            "waiting_on": "pr_scope",
+            "next_action": "Multiple cached PR sessions exist. Pass <owner/repo> <pr_number> explicitly.",
+            "candidates": [
+                {"repo": repo, "pr_number": pr_number, "session_file": str(path)}
+                for repo, pr_number, path in sessions
+            ],
+            "exit_code": 2,
+        }
+    repo, pr_number, _path = sessions[0]
+    return repo, pr_number
+
+
+def _emit_scope_resolution_error(payload: dict) -> int:
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(payload["next_action"], file=sys.stderr)
+    return int(payload["exit_code"])
+
+
+def _scope_positionals(args: list[str], *, value_options: set[str] | None = None) -> list[str]:
+    value_options = value_options or IMPLICIT_SCOPE_VALUE_OPTIONS
+    positional: list[str] = []
+    skip_next = False
+    for index, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            positional.extend(args[index + 1 :])
+            break
+        if arg.startswith("--"):
+            option = arg.split("=", 1)[0]
+            if option in value_options and "=" not in arg:
+                skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        positional.append(arg)
+    return positional
+
+
+def _maybe_prepend_implicit_scope(
+    args: list[str],
+    *,
+    value_options: set[str] | None = None,
+    allow_trailing_positionals: bool = False,
+) -> tuple[list[str], dict | None]:
+    positional = _scope_positionals(args, value_options=value_options)
+    if len(positional) >= 2:
+        return args, None
+    if positional and not allow_trailing_positionals:
+        return args, {
+            "status": "PR_SCOPE_UNRESOLVED",
+            "reason_code": "PARTIAL_PR_SCOPE",
+            "waiting_on": "pr_scope",
+            "next_action": "Pass both <owner/repo> and <pr_number>, or omit both to use the single cached PR session.",
+            "candidates": [],
+            "exit_code": 2,
+        }
+    resolved = _resolve_active_cached_scope()
+    if isinstance(resolved, dict):
+        return args, resolved
+    repo, pr_number = resolved
+    return [repo, pr_number, *args], None
+
+
+def _agent_args_with_scope(repo: str | None, passthrough: list[str]) -> tuple[list[str], dict | None]:
+    args = _prepend_optional(repo, passthrough)
+    return _maybe_prepend_implicit_scope(
+        args,
+        value_options={*IMPLICIT_SCOPE_VALUE_OPTIONS, "--summary"},
+        allow_trailing_positionals=True,
+    )
+
+
+def handle_command_session(passthrough: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr command-session")
+    parser.add_argument("--input", required=True)
+    parsed = parser.parse_args(passthrough)
+    try:
+        raw = sys.stdin.read() if parsed.input == "-" else Path(parsed.input).read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        summary = {
+            "status": "FAILED",
+            "reason_code": "COMMAND_SESSION_INPUT_INVALID",
+            "waiting_on": "command_session_input",
+            "next_action": "Provide JSON with an operations array.",
+            "results": [],
+            "exit_code": 2,
+            "diagnostics": [str(exc)],
+        }
+        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        return 2
+    operations = payload.get("operations") if isinstance(payload, dict) else None
+    if not isinstance(operations, list):
+        summary = {
+            "status": "FAILED",
+            "reason_code": "COMMAND_SESSION_INPUT_INVALID",
+            "waiting_on": "command_session_input",
+            "next_action": "Provide JSON with an operations array.",
+            "results": [],
+            "exit_code": 2,
+        }
+        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        return 2
+
+    results = []
+    for index, operation in enumerate(operations):
+        operation_id = str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
+        argv = operation.get("argv") if isinstance(operation, dict) else None
+        if not isinstance(argv, list) or not all(isinstance(arg, str) for arg in argv):
+            results.append(
+                {
+                    "id": operation_id,
+                    "status": "FAILED",
+                    "reason_code": "COMMAND_SESSION_OPERATION_INVALID",
+                    "exit_code": 2,
+                    "stdout": "",
+                    "stderr": "operation argv must be a string array",
+                }
+            )
+            continue
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                exit_code = main(list(argv))
+            except SystemExit as exc:
+                exit_code = exc.code if isinstance(exc.code, int) else 2
+        results.append(
+            {
+                "id": operation_id,
+                "status": "SUCCESS" if exit_code == 0 else "FAILED",
+                "reason_code": "COMMAND_SESSION_STEP_OK" if exit_code == 0 else "COMMAND_SESSION_STEP_FAILED",
+                "exit_code": exit_code,
+                "stdout": stdout.getvalue(),
+                "stderr": stderr.getvalue(),
+            }
+        )
+    session_exit = 0 if all(result["exit_code"] == 0 for result in results) else 2
+    summary = {
+        "status": "SUCCESS" if session_exit == 0 else "PARTIAL",
+        "reason_code": "COMMAND_SESSION_COMPLETE" if session_exit == 0 else "COMMAND_SESSION_PARTIAL",
+        "results": results,
+        "exit_code": session_exit,
+    }
+    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    return session_exit
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -2957,7 +3247,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,command-session,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -2986,6 +3276,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr final-gate owner/repo 123\n"
             "  gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl\n"
             "  gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]\n"
+            "  gh-address-cr command-session --input commands.json\n"
         ),
     )
     parser.add_argument("repo", nargs="?", help="Owner/repo name.")
@@ -3031,6 +3322,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return handle_telemetry_command(args.repo, args.pr_number, args.args)
+
+    if args.command == "command-session":
+        if args.machine or args.human:
+            print("--machine and --human are not supported for command-session.", file=sys.stderr)
+            return 2
+        return handle_command_session(_root_passthrough_args(args))
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
@@ -3102,8 +3399,9 @@ def main(argv: list[str] | None = None) -> int:
         print(alias_help(args.command), end="")
         return 0
     if args.command in HIGH_LEVEL_COMMANDS and len(args.args) < 2:
-        print("High-level commands require <owner/repo> <pr_number> or <PR_URL>.", file=sys.stderr)
-        return 2
+        args.args, scope_error = _maybe_prepend_implicit_scope(args.args)
+        if scope_error is not None:
+            return _emit_scope_resolution_error(scope_error)
     if args.command in HIGH_LEVEL_COMMANDS:
         preflight_rc = preflight_high_level(args)
         if preflight_rc is not None:
