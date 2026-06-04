@@ -262,6 +262,15 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
 
         self.assertEqual(request.to_dict()["handling_boundary"]["boundary_id"], "github-thread-fix")
 
+    def test_action_request_rejects_non_object_handling_boundary(self):
+        payload = self.request_payload(handling_boundary=["github-thread-fix"])
+
+        with self.assertRaises(RequestValidationError) as caught:
+            validate_action_request(payload)
+
+        self.assertEqual(caught.exception.code, "malformed_action_request")
+        self.assertIn("handling_boundary must be a JSON object", str(caught.exception))
+
     def test_stale_request_context_recovery_payload_is_machine_readable(self):
         recovery = LeaseRecoveryState.from_dict(
             {

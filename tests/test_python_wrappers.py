@@ -2351,6 +2351,31 @@ else:
         self.assertEqual(session["items"]["github-thread:THREAD_STALE"]["state"], "stale")
 
     def test_final_gate_python_passes_on_resolved_threads(self):
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(
+            json.dumps(
+                {
+                    "repo": self.repo,
+                    "pr_number": self.pr,
+                    "status": "WAITING_FOR_GATE",
+                    "items": {
+                        "github-thread:THREAD_DONE": {
+                            "item_id": "github-thread:THREAD_DONE",
+                            "item_kind": "github_thread",
+                            "thread_id": "THREAD_DONE",
+                            "state": "closed",
+                            "reply_evidence": {
+                                "reply_url": "https://example.test/thread/done#reply",
+                                "author_login": "agent-login",
+                            },
+                            "validation_evidence": [{"command": "python3 -m unittest tests.test_python_wrappers"}],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3

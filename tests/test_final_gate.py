@@ -40,6 +40,7 @@ class FinalGateTestCase(unittest.TestCase):
                         "reply_url": "https://example.test/reply",
                         "author_login": "agent-login",
                     },
+                    "validation_evidence": [{"command": "python3 -m unittest tests.test_final_gate", "exit_code": 0}],
                 },
                 "local-finding:FIXED": {
                     "item_id": "local-finding:FIXED",
@@ -298,6 +299,28 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("success rate below 100% (80.0%)", guidance)
         self.assertIn("inefficiency flags present (excessive_loops)", guidance)
         self.assertIn("unresolved threads/checks/blocking items (1 unresolved threads)", guidance)
+
+    def test_completion_summary_guidance_reports_logic_validation_blockers(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        session = self.passing_session()
+        session["items"]["github-thread:THREAD_DONE"].pop("validation_evidence")
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
+        self.assertIn("1 blocking logic-validation signals", guidance)
 
     def test_build_completion_summary_guidance_edge_cases(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance

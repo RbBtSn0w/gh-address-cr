@@ -236,6 +236,26 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            write_text.side_effect = FileNotFoundError(
+                2,
+                "No such file or directory",
+                "/private/tmp/secret/efficiency-report.json",
+            )
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            diagnostic = "\n".join(report["diagnostics"])
+            self.assertIn("efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic)
+            self.assertNotIn("/private/tmp/secret", diagnostic)
+
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_records_overhead_budget_diagnostics(self, state_dir, _perf_counter):

@@ -23,6 +23,25 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(signals[0].signal_type, "missing_required_evidence")
         self.assertEqual(signals[0].gate_effect, "blocking")
 
+    def test_terminal_github_thread_missing_validation_generates_blocking_signal(self):
+        session = {
+            "items": {
+                "github-thread:fixed": {
+                    "item_id": "github-thread:fixed",
+                    "item_kind": "github_thread",
+                    "state": "published",
+                    "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "blocking": False,
+                }
+            }
+        }
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].signal_type, "missing_required_evidence")
+        self.assertEqual(signals[0].gate_effect, "blocking")
+
     def test_state_contradiction_generates_blocking_signal(self):
         session = {
             "items": {

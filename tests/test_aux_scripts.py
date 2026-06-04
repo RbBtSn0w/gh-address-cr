@@ -80,6 +80,15 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("<!-- SPECKIT START -->", content)
         self.assertIn("at specs/123-feature/plan.md", content)
 
+    def test_agent_context_powershell_fallback_does_not_require_pyyaml(self):
+        script = Path(".specify/extensions/agent-context/scripts/powershell/update-agent-context.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("import yaml", script)
+        self.assertNotIn("PyYAML is required", script)
+        self.assertIn("tiny stdlib parser", script)
+
     def test_submit_feedback_dry_run_outputs_canonical_issue_body(self):
         result = self.run_cmd(
             [

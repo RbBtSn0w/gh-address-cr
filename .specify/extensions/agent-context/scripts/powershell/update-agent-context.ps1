@@ -73,7 +73,8 @@ if (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue) {
 }
 
 if ($null -eq $Options) {
-    # ConvertFrom-Yaml unavailable or failed; fall back to Python+PyYAML.
+    # ConvertFrom-Yaml unavailable or failed; fall back to a tiny stdlib parser
+    # for the simple config shape shipped with this extension.
     $pythonCmd = $null
     foreach ($candidate in @('python3', 'python')) {
         if (Get-Command $candidate -ErrorAction SilentlyContinue) {
@@ -91,27 +92,38 @@ if ($null -eq $Options) {
             $jsonOut = & $pythonCmd -c @'
 import json
 import sys
-try:
-    import yaml
-except ImportError:
-    print(
-        "agent-context: PyYAML is required to parse extension config; cannot update context.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
 
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+        lines = fh.readlines()
 except Exception as exc:
     print(
-        f"agent-context: unable to parse {sys.argv[1]} ({exc}); cannot update context.",
+        f"agent-context: unable to read {sys.argv[1]} ({exc}); cannot update context.",
         file=sys.stderr,
     )
     sys.exit(2)
 
-if not isinstance(data, dict):
-    data = {}
+data = {}
+current_parent = None
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    indent = len(raw_line) - len(raw_line.lstrip(" "))
+    if ":" not in stripped:
+        continue
+    key, value = stripped.split(":", 1)
+    key = key.strip()
+    value = value.strip().strip("'\"")
+    if indent == 0:
+        if value:
+            data[key] = value
+            current_parent = None
+        else:
+            data[key] = {}
+            current_parent = key
+    elif current_parent and isinstance(data.get(current_parent), dict):
+        data[current_parent][key] = value
 
 print(json.dumps(data))
 '@ $ExtConfig

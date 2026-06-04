@@ -6,6 +6,7 @@ from gh_address_cr.core.models import LogicValidationSignal
 
 
 TERMINAL_LOCAL_STATES = {"fixed", "closed", "verified", "published"}
+TERMINAL_GITHUB_STATES = {"fixed", "closed", "verified", "published", "resolved"}
 
 
 def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicValidationSignal]:
@@ -38,13 +39,13 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             )
             continue
 
-        if item_kind == "local_finding" and state in TERMINAL_LOCAL_STATES and not _has_validation_evidence(item):
+        if _requires_validation_evidence(item_kind, state) and not _has_validation_evidence(item):
             signals.append(
                 _signal(
                     item_id,
                     "missing_required_evidence",
                     "high",
-                    "Terminal local finding is missing validation evidence.",
+                    "Terminal work item is missing validation evidence.",
                     "Record validation evidence or reopen the item before final-gate.",
                     "blocking",
                 )
@@ -78,6 +79,14 @@ def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     evidence = item.get("validation_evidence") or item.get("validation_commands")
     return bool(evidence)
+
+
+def _requires_validation_evidence(item_kind: str, state: str) -> bool:
+    if item_kind == "local_finding":
+        return state in TERMINAL_LOCAL_STATES
+    if item_kind == "github_thread":
+        return state in TERMINAL_GITHUB_STATES
+    return False
 
 
 def _is_low_confidence(item: Mapping[str, Any]) -> bool:

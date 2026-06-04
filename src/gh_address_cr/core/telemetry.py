@@ -952,7 +952,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         artifact_written = True
     except OSError as exc:
         artifact_written = False
-        report["diagnostics"].append(f"efficiency report artifact unavailable: {type(exc).__name__}: {exc}")
+        report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
     telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
     report["telemetry_overhead_ms"] = telemetry_overhead_ms
     if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
@@ -961,8 +961,13 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         try:
             report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except OSError as exc:
-            report["diagnostics"].append(f"efficiency report artifact unavailable: {type(exc).__name__}: {exc}")
+            report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
     return report
+
+
+def _safe_os_error_diagnostic(prefix: str, exc: OSError) -> str:
+    detail = exc.strerror or str(exc)
+    return f"{prefix}: {type(exc).__name__}: {detail}"
 
 
 def _aggregate_host_metrics(events: list[ExternalTelemetryEvent]) -> dict[str, int]:

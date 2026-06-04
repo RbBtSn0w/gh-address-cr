@@ -51,6 +51,14 @@ def _dict_copy(value: Any) -> JsonDict:
     return dict(value)
 
 
+def _optional_dict_copy(value: Any, *, field_name: str) -> JsonDict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return dict(value)
+
+
 def _validated_string(value: Any, *, field_name: str, allowed: tuple[str, ...] | None = None) -> str:
     normalized = str(value)
     if allowed is not None and normalized not in allowed:
@@ -146,7 +154,7 @@ class ActionRequest:
             repository_context=_dict_copy(payload.get("repository_context")),
             resume_command=payload.get("resume_command"),
             forbidden_actions=_string_tuple(payload.get("forbidden_actions")),
-            handling_boundary=payload.get("handling_boundary"),
+            handling_boundary=_optional_dict_copy(payload.get("handling_boundary"), field_name="handling_boundary"),
         )
 
     def to_dict(self) -> JsonDict:
