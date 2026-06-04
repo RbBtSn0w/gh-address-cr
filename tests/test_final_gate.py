@@ -211,3 +211,45 @@ class FinalGateTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
+
+    def test_build_completion_summary_guidance_clean(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 10,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete (10 events, 100.0%) | inefficiency: none]", guidance)
+        self.assertNotIn("Attention Items", guidance)
+        self.assertNotIn("IMPLICATION PROMPT", guidance)
+
+    def test_build_completion_summary_guidance_abnormal(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_OPEN", "isResolved": False}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 5,
+            "success_rate": 80.0,
+            "inefficiency_flags": ["excessive_loops"],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial (5 events, 80.0%) | inefficiency: excessive_loops]", guidance)
+        self.assertIn("Attention Items & Implications", guidance)
+        self.assertIn("IMPLICATION PROMPT", guidance)
+        self.assertIn("incomplete telemetry coverage (partial)", guidance)
+        self.assertIn("success rate below 100% (80.0%)", guidance)
+        self.assertIn("inefficiency flags present (excessive_loops)", guidance)
+        self.assertIn("unresolved threads/checks/blocking items (1 unresolved threads)", guidance)
