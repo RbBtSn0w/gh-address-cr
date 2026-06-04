@@ -1,5 +1,8 @@
 # Tasks: Orchestrator-Runtime Integration
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal. Tasks
+> below that mention `session_engine` describe the pre-removal implementation.
+
 **Feature Name**: Orchestrator-Runtime Integration
 **Spec**: [specs/005-orchestrator-runtime-integration/spec.md]
 **Plan**: [specs/005-orchestrator-runtime-integration/plan.md]

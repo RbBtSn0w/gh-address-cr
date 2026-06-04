@@ -52,7 +52,7 @@ from gh_address_cr.intake.findings import (
 )
 
 
-HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version"}
+HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
 NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
 PUBLIC_COMMANDS = {
@@ -1379,19 +1379,46 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     lean = bool(lean or parsed.lean or parsed.summary)
     run_id = parsed.audit_id or f"native-{_utc_now()}"
     auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
+    preloaded_findings_input: str | None = None
+    if parsed.sync and not parsed.source:
+        summary = build_preflight_summary(
+            command,
+            repo,
+            pr_number,
+            status="BLOCKED",
+            exit_code=2,
+            reason_code="INVALID_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action="`--sync` requires an explicit --source so missing findings stay scoped to one producer.",
+        )
+        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        return 2
+    if command in {"review", "findings"} and parsed.input:
+        try:
+            preloaded_findings_input = _read_findings_input(parsed.input)
+            if not preloaded_findings_input.strip():
+                raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
+        except (FindingsFormatError, OSError) as exc:
+            summary = build_preflight_summary(
+                command,
+                repo,
+                pr_number,
+                status="BLOCKED",
+                exit_code=2,
+                reason_code="INVALID_FINDINGS_INPUT",
+                waiting_on="findings_input",
+                next_action=str(exc),
+            )
+            sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+            return 2
     session = _load_or_create_session(repo, pr_number)
     _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
     try:
-        if parsed.sync and not parsed.source:
-            raise FindingsFormatError(
-                "`--sync` requires an explicit --source so missing findings stay scoped to one producer."
-            )
         if command in {"review", "findings"} and parsed.input:
-            raw = _read_findings_input(parsed.input)
             _ingest_native_findings(
                 session,
-                raw=raw,
+                raw=preloaded_findings_input or "",
                 source=parsed.source or "json",
                 sync=parsed.sync,
                 scan_id=parsed.scan_id,
@@ -1645,12 +1672,12 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
     if human:
         status = summary["status"]
         if status == "PASSED":
-            print("cr-loop PASSED")
+            print("Review workflow PASSED")
         elif status == "BLOCKED":
-            print("cr-loop BLOCKED")
+            print("Review workflow BLOCKED")
             print(summary["next_action"])
         else:
-            print(f"cr-loop {status}")
+            print(f"Review workflow {status}")
         return
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
@@ -2316,6 +2343,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.\n"
         ),
     )
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON.")
+    output_group.add_argument("--human", action="store_true", help="Emit human-oriented narrative text (default).")
     auto_group = parser.add_mutually_exclusive_group()
     auto_group.add_argument("--auto-clean", dest="auto_clean", action="store_true")
     auto_group.add_argument("--no-auto-clean", dest="auto_clean", action="store_false")
@@ -2337,6 +2367,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return _emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scoped_args)
     _ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number)
+    machine_requested = "--machine" in scoped_args and "--human" not in scoped_args
     try:
         result = core_gate.Gatekeeper().run(
             parsed.repo,
@@ -2346,10 +2377,17 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             require_required_checks=parsed.require_required_checks,
         )
     except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
+        if machine_requested:
+            _emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2)
+        else:
+            print(str(exc), file=sys.stderr)
         return 2
     except Exception as exc:
-        print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
+        message = f"Final gate failed to evaluate: {exc}"
+        if machine_requested:
+            _emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_EVALUATION_FAILED", message, 5)
+        else:
+            print(message, file=sys.stderr)
         return 5
 
     summary_path, telemetry_report = _write_native_final_gate_artifacts(
@@ -2377,12 +2415,41 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                     summary_path=summary_path,
                     telemetry_report=telemetry_report,
                 )
-    _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
+    if parsed.machine:
+        machine_summary = result.to_machine_summary()
+        if summary_path:
+            machine_summary["artifact_path"] = str(summary_path)
+        if telemetry_report is not None:
+            machine_summary["telemetry"] = {
+                "coverage_label": telemetry_report["coverage_label"],
+                "report_artifact": telemetry_report.get("report_artifact"),
+                "total_events": telemetry_report.get("total_events"),
+                "success_rate": telemetry_report.get("success_rate"),
+                "diagnostics": telemetry_report.get("diagnostics", []),
+            }
+        sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
+    else:
+        _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
 
     return 0
+
+
+def _emit_final_gate_machine_error(repo: str, pr_number: str, reason_code: str, message: str, exit_code: int) -> None:
+    payload = {
+        "status": "BLOCKED",
+        "reason_code": reason_code,
+        "next_action": message,
+        "waiting_on": "final_gate",
+        "exit_code": exit_code,
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "counts": {},
+        "failure_codes": [reason_code],
+    }
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | None:
@@ -2647,14 +2714,16 @@ def _emit_final_gate_result(
         )
     print()
     if result.passed:
-        print("== Gate Result ==")
+        print("Final gate PASSED")
+        print("\n== Gate Result ==")
         print("Verified: 0 Unresolved Threads found")
         print("Verified: 0 Pending Reviews found")
         if result.check_requirement:
             print("Verified: 0 Non-green PR Checks found")
         print(f"Session blocking items: {result.counts['blocking_items_count']}")
     else:
-        print("== Gate Result ==")
+        print("Final gate BLOCKED")
+        print("\n== Gate Result ==")
         print(f"Gate FAILED: {_final_gate_failure_message(result)}")
     print()
     print("== Machine Gate Diagnostics ==")
@@ -2825,8 +2894,8 @@ def _archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Pa
         suffix += 1
     shutil.copytree(workspace, archive_target)
     shutil.rmtree(workspace, ignore_errors=True)
-    print(f"Archived PR workspace: {archive_target}")
-    print(f"Auto-cleaned PR workspace: {workspace}")
+    print(f"Archived PR workspace: {archive_target}", file=sys.stderr)
+    print(f"Auto-cleaned PR workspace: {workspace}", file=sys.stderr)
     return archive_target
 
 
@@ -3262,7 +3331,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,command-session,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -3320,14 +3389,18 @@ def main(argv: list[str] | None = None) -> int:
         return handle_doctor_command(args)
 
     if args.command == "final-gate":
-        if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
+        if getattr(args, "lean", False) or getattr(args, "summary", False):
             print(
-                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}. "
                 "--lean and --summary are only supported for address, review, and threads.",
                 file=sys.stderr,
             )
             return 2
-        return handle_final_gate(args.repo, args.pr_number, args.args)
+        passthrough = list(args.args)
+        if args.human and "--human" not in passthrough:
+            passthrough.append("--human")
+        if args.machine and "--machine" not in passthrough:
+            passthrough.append("--machine")
+        return handle_final_gate(args.repo, args.pr_number, passthrough)
 
     if args.command == "telemetry":
         if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):

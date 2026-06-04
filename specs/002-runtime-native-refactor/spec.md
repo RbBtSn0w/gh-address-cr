@@ -1,5 +1,9 @@
 # Feature Specification: Runtime Native Refactor
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for the
+> final cleanup stage. Current implementation no longer preserves
+> `session_engine.py` compatibility shims.
+
 **Feature Branch**: `002-runtime-native-refactor`  
 **Created**: 2026-04-24
 **Status**: Verified

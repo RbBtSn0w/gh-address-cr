@@ -1,5 +1,9 @@
 # Tasks: Runtime Native Refactor
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for the
+> final cleanup stage. Tasks below that preserve session-engine parity describe
+> pre-removal migration proof.
+
 **Input**: Design documents from `specs/002-runtime-native-refactor/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), data-model.md, contracts/
 

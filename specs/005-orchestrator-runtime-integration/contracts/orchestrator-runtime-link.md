@@ -1,5 +1,9 @@
 # Contract: Orchestrator-Runtime Link
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal. The
+> current runtime delegate for session reads is `core.session`; final-gate
+> evaluation is owned by `core.gate`.
+
 ## Command Delegations
 
 | Orchestrate Command | Runtime Delegate Method | Authoritative Side Effect |

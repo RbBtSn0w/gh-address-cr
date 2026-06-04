@@ -1,5 +1,9 @@
 # Tasks: Agent Efficiency Metrics
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for
+> implementation paths. Tasks below that mention `core/cr_loop.py` describe the
+> pre-removal implementation.
+
 **Input**: Design documents from `specs/011-agent-efficiency-metrics/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 

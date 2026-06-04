@@ -38,6 +38,7 @@ class AuditLedger:
         }
         if run_id:
             record["run_id"] = run_id
+            record["audit_id"] = run_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")

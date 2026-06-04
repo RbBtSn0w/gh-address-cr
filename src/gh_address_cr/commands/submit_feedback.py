@@ -9,19 +9,63 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus
 
-from gh_address_cr.commands.python_common import (
-    audit_event,
-    audit_summary_file,
-    gh_read_json,
-    gh_write_cmd,
-    github_pr_cache_file,
-    last_machine_summary_file,
-    session_file,
-    sha256_of_file,
-)
-from gh_address_cr.core.paths import efficiency_report_file
+from gh_address_cr.core import io as core_io
+from gh_address_cr.core import ledger as core_ledger
+from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core.command_runner import run_cmd as run_cmd_native
+
+
+def sha256_of_file(path: Path) -> str:
+    return core_io.sha256_of_file(path)
+
+
+def gh_read_json(args: list[str]) -> Any:
+    result = run_cmd_native(["gh", *args], retries=3)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            ["gh", *args],
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return json.loads(result.stdout)
+
+
+def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
+    result = run_cmd_native(cmd, stdin=input_text, retries=1)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+    return result
+
+
+def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: str | None, message: str, details: dict | None) -> None:
+    path = core_paths.audit_log_file(repo, pr_number)
+    core_ledger.AuditLedger(path).append(
+        action, status, repo, pr_number, message=message, details=details, run_id=audit_id
+    )
+
+
+def last_machine_summary_file(repo: str, pr_number: str) -> Path:
+    return core_paths.last_machine_summary_file(repo, pr_number)
+
+
+def session_file(repo: str, pr_number: str) -> Path:
+    return core_paths.session_file(repo, pr_number)
+
+
+def github_pr_cache_file(repo: str, pr_number: str) -> Path:
+    return core_paths.github_pr_cache_file(repo, pr_number)
+
+
+def audit_summary_file(repo: str, pr_number: str) -> Path:
+    return core_paths.audit_summary_file(repo, pr_number)
+
+
+def efficiency_report_file(repo: str, pr_number: str) -> Path:
+    return core_paths.efficiency_report_file(repo, pr_number)
 
 
 DEFAULT_TARGET_REPO = "RbBtSn0w/gh-address-cr"

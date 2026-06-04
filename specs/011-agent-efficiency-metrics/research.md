@@ -1,5 +1,9 @@
 # Research: Agent Efficiency Metrics
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for
+> implementation paths. The `core/cr_loop.py` interception point below is no
+> longer current.
+
 ## 1. Interception Point for CLI Tools
 - **Decision**: Wrap the existing `run_cmd` function in `src/gh_address_cr/core/cr_loop.py` to record start and end timestamps.
 - **Rationale**: `run_cmd` is the unified bottleneck through which the agent control plane executes external shell commands. Wrapping it guarantees 100% capture of CLI tool executions without needing to scatter tracking logic across the codebase.

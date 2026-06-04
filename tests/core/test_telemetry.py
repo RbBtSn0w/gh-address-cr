@@ -1953,7 +1953,7 @@ class TestTelemetry(unittest.TestCase):
     def test_run_cmd_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err")
 
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["sleep", "10"], timeout=120.0)
 
         self.assertEqual(res.returncode, 124)
@@ -1969,10 +1969,39 @@ class TestTelemetry(unittest.TestCase):
     def test_run_cmd_does_not_apply_default_timeout(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
 
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         run_cmd(["ls"])
 
         self.assertIsNone(mock_run.call_args.kwargs["timeout"])
+
+    @patch("time.sleep")
+    @patch("subprocess.run")
+    def test_run_cmd_retries_transient_gh_failure(self, mock_run, mock_sleep):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="graphql failed"),
+            subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=0, stdout="{}", stderr=""),
+        ]
+
+        from gh_address_cr.core.command_runner import run_cmd
+        res = run_cmd(["gh", "api", "graphql"], retries=2)
+
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(mock_run.call_count, 2)
+        mock_sleep.assert_called_once_with(1)
+
+    @patch("time.sleep")
+    @patch("subprocess.run")
+    def test_run_cmd_does_not_retry_non_transient_gh_failure(self, mock_run, mock_sleep):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="validation failed"
+        )
+
+        from gh_address_cr.core.command_runner import run_cmd
+        res = run_cmd(["gh", "api", "graphql"], retries=3)
+
+        self.assertEqual(res.returncode, 1)
+        self.assertEqual(mock_run.call_count, 1)
+        mock_sleep.assert_not_called()
 
     @patch("sys.stderr")
     @patch("gh_address_cr.core.telemetry.SessionTelemetry.record")
@@ -1981,7 +2010,7 @@ class TestTelemetry(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
         mock_record.side_effect = Exception("Telemetry DB error")
         
-        from gh_address_cr.core.cr_loop import run_cmd
+        from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["ls"])
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout, "ok")

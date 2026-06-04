@@ -3,6 +3,8 @@
 > **Historical note:** Superseded by `specs/012-cli-skill-sync` for current
 > skill execution guidance. `skill/scripts` and `scripts/cli.py` examples below
 > describe the earlier shim-era contract and are not current runnable paths.
+> Issue #80 also supersedes any `core/cr_loop.py` implementation-path mentions
+> below; dynamic replies now live on native runtime paths.
 
 **Input**: Design documents from `/specs/010-dynamic-cr-replies/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/

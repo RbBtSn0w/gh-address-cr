@@ -1,5 +1,9 @@
 # Implementation Plan: Orchestrator-Runtime Integration
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal. Current
+> implementation delegates to native `core.session`, `core.workflow`, and
+> `core.gate`; references below to `session_engine.py` are historical.
+
 **Branch**: `005-orchestrator-runtime-integration` | **Date**: 2026-04-27 | **Spec**: [specs/005-orchestrator-runtime-integration/spec.md]
 **Input**: Feature specification from `/specs/005-orchestrator-runtime-integration/spec.md`
 

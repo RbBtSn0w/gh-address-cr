@@ -1,5 +1,9 @@
 # Research: Orchestrator-Runtime Integration
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal. Current
+> orchestrator runtime reconciliation uses native `core.session` and
+> `core.gate`; references below to `session_engine` are historical.
+
 ## Decision: Queue Population from Core Session
 **Decision**: `handle_start` and `handle_resume` will use `session_engine.load_session` to re-sync the volatile `queued_items`.
 **Rationale**: `session.json` is the authoritative source. By filtering for `blocking: true` and `handled: false` items, we ensure the orchestrator never gets out of sync with the runtime's reality.

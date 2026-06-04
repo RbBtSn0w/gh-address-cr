@@ -4,7 +4,6 @@ import json
 import subprocess
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch
 
 from tests.helpers import PythonScriptTestCase, IMPLEMENTATIONS_DIR
@@ -29,47 +28,6 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         finally:
             sys.path.pop(0)
         return module
-
-    def test_post_reply_audits_invalid_json_response(self):
-        module = self.load_module("post_reply.py", "post_reply_under_test")
-
-        reply_file = Path(self.temp_dir.name) / "reply.md"
-        reply_file.write_text("Reply body", encoding="utf-8")
-        audits = []
-
-        module.github_viewer_login = lambda: "tester"
-        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
-            "status": "skipped",
-            "submitted": [],
-            "error": None,
-        }
-        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
-        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
-
-        with (
-            patched_argv(
-                [
-                    "post_reply.py",
-                    "--repo",
-                    self.repo,
-                    "--pr",
-                    self.pr,
-                    "THREAD_REPLY",
-                    str(reply_file),
-                ]
-            ),
-            patch("sys.stdout", new=io.StringIO()) as stdout,
-            patch("sys.stderr", new=io.StringIO()) as stderr,
-        ):
-            rc = module.main()
-            payload = json.loads(stdout.getvalue())
-
-        self.assertNotEqual(rc, 0)
-        self.assertEqual(payload["status"], "failed")
-        self.assertEqual(payload["error"], "reply response was not valid JSON")
-        self.assertTrue(audits)
-        self.assertIn("reply response was not valid JSON", stderr.getvalue())
 
     def test_submit_feedback_audits_invalid_json_response(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_under_test")
@@ -231,12 +189,48 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         self.assertNotEqual(rc, 0)
         self.assertEqual(payload["status"], "failed")
-        self.assertIsNone(payload["issue_number"])
-        self.assertIsNone(payload["issue_url"])
         self.assertIn("dedupe lookup failed", payload["error"])
         self.assertIn("gh auth failed", payload["error"])
-        self.assertTrue(audits)
+        self.assertEqual(audits[-1][0][1], "failed")
         self.assertIn("dedupe lookup failed", stderr.getvalue())
+
+    def test_submit_feedback_read_json_requests_retrying_github_read(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_retry_under_test")
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, '{"items":[]}', "")
+
+        module.run_cmd_native = fake_run_cmd
+
+        payload = module.gh_read_json(["api", "search/issues?q=x"])
+
+        self.assertEqual(payload, {"items": []})
+        self.assertEqual(calls, [(["gh", "api", "search/issues?q=x"], {"retries": 3})])
+
+    def test_submit_feedback_write_cmd_does_not_retry_non_idempotent_write(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_write_retry_under_test")
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, "{}", "")
+
+        module.run_cmd_native = fake_run_cmd
+
+        result = module.gh_write_cmd(["gh", "api", "repos/octo/example/issues", "--method", "POST"], input_text="{}")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    ["gh", "api", "repos/octo/example/issues", "--method", "POST"],
+                    {"stdin": "{}", "retries": 1},
+                )
+            ],
+        )
 
     def test_submit_feedback_sanitize_text_only_redacts_absolute_paths(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_under_test")

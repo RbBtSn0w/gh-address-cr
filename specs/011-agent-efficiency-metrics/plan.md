@@ -1,5 +1,9 @@
 # Implementation Plan: Agent Efficiency Metrics
 
+> **Historical note:** Superseded by issue #80 legacy workflow removal for
+> implementation paths. Command telemetry now belongs to native runtime modules,
+> not `core/cr_loop.py`.
+
 **Branch**: `011-agent-efficiency-metrics` | **Date**: 2026-05-29 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/011-agent-efficiency-metrics/spec.md`
 
