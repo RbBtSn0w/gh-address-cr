@@ -5,6 +5,7 @@ import math
 import os
 import re
 import shlex
+import time
 import uuid
 from hashlib import sha256
 from dataclasses import dataclass
@@ -876,7 +877,11 @@ def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, f
     return summary
 
 
+TELEMETRY_OVERHEAD_BUDGET_MS = 250
+
+
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
+    overhead_started_at = time.perf_counter()
     paths = core_paths.SessionPaths(repo, pr_number)
     runtime_events = _runtime_events(paths)
     external_events, diagnostics = _load_external_events_with_diagnostics(paths)
@@ -909,6 +914,9 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
     report_path = paths.efficiency_report_file
+    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
+    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS:
+        diagnostics.append("TELEMETRY_OVERHEAD_EXCEEDED")
     report = {
         "status": "SUCCESS",
         "reason_code": "TELEMETRY_REPORT_READY",
@@ -919,6 +927,8 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "total_events": total_events,
         "success_rate": success_rate,
         "total_observed_duration_ms": total_duration,
+        "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
+        "telemetry_overhead_ms": telemetry_overhead_ms,
         "host_metrics": host_metrics,
         "slowest_operations": [
             {

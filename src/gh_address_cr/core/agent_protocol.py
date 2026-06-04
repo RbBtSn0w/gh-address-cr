@@ -20,12 +20,14 @@ from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
     accept_lease,
+    calculate_lease_recovery_state,
     claim_lease,
     expire_leases,
     release_lease,
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
+from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.core.severity import first_scene_item_severity
 from gh_address_cr.evidence.ledger import EvidenceLedger
 from gh_address_cr.core.utils import (
@@ -207,6 +209,9 @@ def issue_action_request(
         "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
         "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
     }
+    handling_boundary = _handling_boundary_summary_or_none(item, role=role)
+    if handling_boundary is not None:
+        request["handling_boundary"] = handling_boundary
     request_hash = ActionRequest.from_dict(request).stable_hash()
     request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
     response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
@@ -267,8 +272,18 @@ def issue_action_request(
         "lease_id": lease_id,
         "resume_token": _get(lease, "resume_token"),
         "item_id": item_id,
+        **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
         "next_action": f"Pass request_path to an agent with the {role} role, then fill response_skeleton_path.",
     }
+
+
+def _handling_boundary_summary_or_none(item: dict[str, Any], *, role: str) -> dict[str, Any] | None:
+    if role != "fixer" or item.get("item_kind") != "github_thread":
+        return None
+    try:
+        return boundary_summary_for_item(item, role=role)
+    except WorkItemBoundaryError:
+        return None
 
 
 def submit_action_response(
@@ -417,6 +432,14 @@ def submit_batch_action_response(
             _validate_batch_fix_contract(session, ledger, response, item_id=item_id, lease_id=lease_id)
             lease_reason_code = _lease_submission_rejection_reason(response, prepared, now)
             if lease_reason_code:
+                lease_recovery = _lease_recovery_payload_for_response(
+                    session,
+                    response,
+                    prepared["lease"],
+                    item_id=item_id,
+                    request_hash=str(prepared.get("expected_request_hash") or response.get("request_id") or ""),
+                    now=now,
+                )
                 _raise_response_rejected(
                     session,
                     ledger,
@@ -425,6 +448,7 @@ def submit_batch_action_response(
                     status="BATCH_ACTION_REJECTED",
                     item_id=item_id,
                     lease_id=lease_id,
+                    lease_recovery=lease_recovery,
                 )
             prepared_rows.append((response, prepared))
 
@@ -824,6 +848,14 @@ def _prepare_action_response_submission(
 
     expected_request_hash, context_reason_code = _expected_request_hash_for_response(response, lease)
     if context_reason_code:
+        lease_recovery = _lease_recovery_payload_for_response(
+            session,
+            response,
+            lease,
+            item_id=item_id,
+            request_hash=str(response.get("request_id") or ""),
+            now=datetime.now(timezone.utc),
+        )
         _raise_response_rejected(
             session,
             ledger,
@@ -832,6 +864,7 @@ def _prepare_action_response_submission(
             status=rejected_status,
             item_id=item_id,
             lease_id=lease_id,
+            lease_recovery=lease_recovery,
         )
 
     return {
@@ -870,13 +903,16 @@ def _accept_action_response_submission(
         accept_lease(session, lease_id, now=now)
     except LeaseSubmissionError as exc:
         _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
+        payload = {"item_id": item_id, "lease_id": lease_id}
+        if exc.recovery_state:
+            payload["lease_recovery"] = exc.recovery_state
         raise WorkflowError(
             status=rejected_status,
             reason_code=exc.reason_code,
             waiting_on="lease",
             exit_code=5,
             message=str(exc),
-            payload={"item_id": item_id, "lease_id": lease_id},
+            payload=payload,
         ) from exc
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
@@ -1113,6 +1149,7 @@ def _raise_response_rejected(
     status: str,
     item_id: str | None = None,
     lease_id: str | None = None,
+    lease_recovery: dict[str, Any] | None = None,
 ) -> None:
     _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
     is_batch = status == "BATCH_ACTION_REJECTED"
@@ -1123,14 +1160,37 @@ def _raise_response_rejected(
         repo=str(session.get("repo") or ""),
         pr_number=str(session.get("pr_number") or ""),
     )
+    payload = {"item_id": item_id, "lease_id": lease_id or response.get("lease_id")}
+    if lease_recovery:
+        payload["lease_recovery"] = lease_recovery
     raise WorkflowError(
         status=status,
         reason_code=reason_code,
         waiting_on="batch_action_response" if is_batch else "action_response",
         exit_code=5,
         message=message,
-        payload={"item_id": item_id, "lease_id": lease_id or response.get("lease_id")},
+        payload=payload,
     )
+
+
+def _lease_recovery_payload_for_response(
+    session: dict[str, Any],
+    response: dict[str, Any],
+    lease: dict[str, Any],
+    *,
+    item_id: str,
+    request_hash: str,
+    now: datetime,
+) -> dict[str, Any]:
+    return calculate_lease_recovery_state(
+        session,
+        str(lease.get("lease_id") or response.get("lease_id") or ""),
+        agent_id=str(response.get("agent_id") or lease.get("agent_id") or ""),
+        role=str(lease.get("role") or ""),
+        item_id=item_id,
+        request_hash=request_hash,
+        now=now,
+    ).to_dict()
 
 
 def _response_rejection_message(payload_name: str, reason_code: str, *, repo: str, pr_number: str) -> str:
@@ -1510,6 +1570,3 @@ def _hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(_json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-
-
-

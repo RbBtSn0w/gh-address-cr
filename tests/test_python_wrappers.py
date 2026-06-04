@@ -314,6 +314,7 @@ else:
                 "failure_codes",
                 "item_id",
                 "item_kind",
+                "logic_validation_signals",
                 "next_action",
                 "pr_number",
                 "reason_code",

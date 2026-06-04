@@ -1,0 +1,57 @@
+{
+  "renewable": {
+    "lease_id": "lease_renewable",
+    "item_id": "github-thread:THREAD_1",
+    "agent_id": "codex-fixer-1",
+    "role": "fixer",
+    "status": "active",
+    "request_id": "req_renewable",
+    "request_hash": "hash-current",
+    "item_state": "claimed",
+    "expected_outcome": "renew"
+  },
+  "reclaimable_expired": {
+    "lease_id": "lease_reclaimable",
+    "item_id": "github-thread:THREAD_2",
+    "agent_id": "codex-fixer-1",
+    "role": "fixer",
+    "status": "expired",
+    "request_id": "req_reclaimable",
+    "request_hash": "hash-current",
+    "item_state": "open",
+    "expected_outcome": "reclaim"
+  },
+  "stale_context": {
+    "lease_id": "lease_stale",
+    "item_id": "github-thread:THREAD_3",
+    "agent_id": "codex-fixer-1",
+    "role": "fixer",
+    "status": "active",
+    "request_id": "req_stale",
+    "request_hash": "hash-old",
+    "item_state": "claimed",
+    "expected_outcome": "refresh_state"
+  },
+  "transferred": {
+    "lease_id": "lease_transferred",
+    "item_id": "github-thread:THREAD_4",
+    "agent_id": "codex-fixer-1",
+    "role": "fixer",
+    "status": "expired",
+    "request_id": "req_transferred",
+    "request_hash": "hash-current",
+    "item_state": "claimed_by_other",
+    "expected_outcome": "stop"
+  },
+  "completed": {
+    "lease_id": "lease_completed",
+    "item_id": "github-thread:THREAD_5",
+    "agent_id": "codex-fixer-1",
+    "role": "fixer",
+    "status": "accepted",
+    "request_id": "req_completed",
+    "request_hash": "hash-current",
+    "item_state": "handled",
+    "expected_outcome": "already_completed"
+  }
+}

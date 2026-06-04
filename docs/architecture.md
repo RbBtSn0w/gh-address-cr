@@ -103,6 +103,44 @@ damaged telemetry and report the reduced coverage instead of blocking review
 completion.
 
 
+## Runtime Complexity Boundary Contracts
+
+The runtime owns the explicit contracts used to reduce workflow complexity:
+
+- `WorkItemHandlingBoundary`: declares which work item kinds a runtime boundary
+  can handle, the required evidence, completion criteria, failure reasons, and
+  safe next actions. Boundary selection is runtime-owned and deterministic.
+- `LeaseRecoveryState`: declares whether an expired or stale lease can `renew`,
+  `reclaim`, `refresh_state`, `stop`, or report `already_completed`.
+- `TelemetryCoverageState`: records coverage, source attribution, diagnostics,
+  privacy status, report location, and measured telemetry overhead.
+- `LogicValidationSignal`: records advisory or blocking consistency risks for
+  evidence gaps, state contradictions, and unsupported completion claims.
+- `DeliverySlice`: records phased implementation scope and acceptance evidence
+  so complexity work can ship in independently verifiable increments.
+
+These models are additive public contract vocabulary. They do not change the
+rule that `session.json`, reply evidence, resolve state, and `final-gate` remain
+the authoritative completion truth.
+
+Execution boundaries:
+
+- Work item handler selection happens before an `ActionRequest` is written. The
+  migrated GitHub review-thread fix path reports `github-thread-fix`; unmigrated
+  paths keep existing behavior and omit `handling_boundary`.
+- Lease recovery is computed from current runtime truth. It advises agents to
+  renew, reclaim, refresh state, stop, or treat work as already completed; it
+  never permits stale responses to overwrite accepted, transferred, or changed
+  work.
+- Telemetry reports include measured overhead and emit
+  `TELEMETRY_OVERHEAD_EXCEEDED` when report construction crosses the 250ms
+  normal-path budget. Core completion remains fail-open for telemetry
+  degradation, while telemetry-specific commands stay fail-loud.
+- Logic validation signals are lightweight consistency checks. Blocking signals
+  can fail final-gate; advisory signals are surfaced for explanation without
+  becoming a second review producer.
+
+
 ## Runtime Package Layout
 
 The main logic lives in the Python runtime package under `src/gh_address_cr/`.

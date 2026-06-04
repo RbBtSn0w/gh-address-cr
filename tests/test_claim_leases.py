@@ -5,6 +5,7 @@ from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
     accept_lease,
+    calculate_lease_recovery_state,
     calculate_conflict_keys,
     claim_lease,
     expire_leases,
@@ -19,7 +20,7 @@ NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
 
 def make_session():
-    return {"leases": {}, "lease_events": []}
+    return {"items": {}, "leases": {}, "lease_events": []}
 
 
 def make_item(item_id, path=None, conflict_keys=(), item_kind="local_finding", thread_id=None):
@@ -156,6 +157,136 @@ class ClaimLeaseLifecycleTest(unittest.TestCase):
         self.assertEqual(stale.status, "expired")
         self.assertEqual(replacement.status, "active")
         self.assertEqual(replacement.agent_id, "agent-c")
+
+
+class LeaseRecoveryOutcomeTest(unittest.TestCase):
+    def test_expired_active_submission_returns_renew_recovery(self):
+        session = make_session()
+        item = make_item("renew-item", path="src/renew.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-renew",
+            ttl_seconds=1,
+            now=NOW,
+        )
+
+        with self.assertRaises(LeaseSubmissionError) as caught:
+            submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="agent-a",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-current",
+                now=NOW + timedelta(seconds=2),
+            )
+
+        recovery = caught.exception.recovery_state
+        self.assertEqual(caught.exception.reason_code, "EXPIRED_LEASE")
+        self.assertEqual(recovery["recovery_outcome"], "renew")
+        self.assertEqual(recovery["reason_code"], "EXPIRED_LEASE_RENEWABLE")
+
+    def test_stale_request_context_returns_refresh_state_recovery(self):
+        session = make_session()
+        item = make_item("stale-item", path="src/stale.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-old",
+            lease_id="lease-stale",
+            now=NOW,
+        )
+
+        with self.assertRaises(LeaseSubmissionError) as caught:
+            submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="agent-a",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-current",
+                now=NOW + timedelta(seconds=1),
+            )
+
+        recovery = caught.exception.recovery_state
+        self.assertEqual(caught.exception.reason_code, "STALE_REQUEST_CONTEXT")
+        self.assertEqual(recovery["recovery_outcome"], "refresh_state")
+        self.assertEqual(recovery["reason_code"], "STALE_REQUEST_CONTEXT")
+
+    def test_terminal_and_transferred_leases_return_stop_or_completed_recovery(self):
+        completed_session = make_session()
+        completed_item = make_item("completed-item", path="src/completed.py")
+        completed_item.update({"state": "handled", "handled": True})
+        completed_session["items"][completed_item["item_id"]] = completed_item
+        completed = claim_lease(
+            completed_session,
+            completed_item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-completed",
+            now=NOW,
+        )
+        submit_lease(
+            completed_session,
+            completed.lease_id,
+            agent_id="agent-a",
+            role="fixer",
+            item_id=completed_item["item_id"],
+            request_hash="hash-current",
+            now=NOW + timedelta(seconds=1),
+        )
+        accept_lease(completed_session, completed.lease_id, now=NOW + timedelta(seconds=2))
+
+        completed_recovery = calculate_lease_recovery_state(
+            completed_session,
+            completed.lease_id,
+            agent_id="agent-a",
+            role="fixer",
+            item_id=completed_item["item_id"],
+            request_hash="hash-current",
+            now=NOW + timedelta(seconds=3),
+        )
+        self.assertEqual(completed_recovery.recovery_outcome, "already_completed")
+        self.assertEqual(completed_recovery.reason_code, "LEASE_ALREADY_COMPLETED")
+
+        transferred_session = make_session()
+        transferred_item = make_item("transferred-item", path="src/transferred.py")
+        transferred_item.update({"state": "claimed", "claimed_by": "agent-b"})
+        transferred_session["items"][transferred_item["item_id"]] = transferred_item
+        expired = claim_lease(
+            transferred_session,
+            transferred_item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-transferred",
+            ttl_seconds=1,
+            now=NOW,
+        )
+        expire_leases(transferred_session, now=NOW + timedelta(seconds=2))
+
+        transferred_recovery = calculate_lease_recovery_state(
+            transferred_session,
+            expired.lease_id,
+            agent_id="agent-a",
+            role="fixer",
+            item_id=transferred_item["item_id"],
+            request_hash="hash-current",
+            now=NOW + timedelta(seconds=3),
+        )
+        self.assertEqual(transferred_recovery.recovery_outcome, "stop")
+        self.assertEqual(transferred_recovery.reason_code, "LEASE_RECOVERY_STOP")
 
 
 class ClaimLeaseConflictTest(unittest.TestCase):

@@ -25,6 +25,8 @@ Use `audit_summary.md` or the machine-readable count lines printed by `final-gat
 
 Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
 
+Final-gate machine output may include `logic_validation_signals`. Signals with `gate_effect=blocking` are completion blockers and must be fixed or explained through runtime evidence before claiming completion. Signals with `gate_effect=advisory` are non-blocking diagnostics; mention their implication when relevant, but do not treat them as a second review producer or as permission to bypass evidence, publish, or final-gate.
+
 For run-scoped diagnostics that must keep artifacts available after the gate, use:
 
 ```text

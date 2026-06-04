@@ -19,6 +19,7 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `commands`
 - `exit_code`
 - `diagnostics`
+- `handling_boundary`
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category. `commands` contains executable command templates for the current PR; prefer those over reconstructing commands manually. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
@@ -94,6 +95,8 @@ Valid `decision` values are `fix`, `clarify`, `defer`, and `reject`. Missing fie
 Classification is triage-phase evidence. Resolution is response-phase evidence. Do not satisfy `MISSING_CLASSIFICATION` by adding a `resolution` field to a response file; run `agent classify` first. Do not satisfy `MISSING_RESOLUTION` by reclassifying the item; add `resolution` to the `ActionResponse` and rerun `agent submit`.
 
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
+
+`agent next` and the written `ActionRequest` may include an additive `handling_boundary` object for migrated work item types. For the first migrated GitHub review-thread fix path, `boundary_id` is `github-thread-fix`; `required_evidence` lists the evidence categories the runtime expects; `completion_criteria` lists the runtime-owned completion checks; `terminal_failure_reasons` lists stable reason codes; and `next_action` points to the next runtime-mediated action. Absence of `handling_boundary` means the item is on an unmigrated compatibility path, not that agents may bypass leases, evidence, publish, or final-gate.
 
 For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Submitting a plain string may pass `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required fields: `commit_hash`, `files`, `summary`. Optional fields: `severity`, `why`, `test_command`, `test_result`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as default validation evidence. For `P0` and `P1` severities, `why` SHOULD contain a rich technical rationale (at least two paragraphs or 150+ characters).
 

@@ -93,6 +93,8 @@ If the host can only hand the runtime a safe JSONL file, set `GH_ADDRESS_CR_HOST
 
 Use `gh-address-cr telemetry summary <owner/repo> <pr_number> --format markdown` when run-scoped efficiency evidence is needed. Completion evidence from `final-gate` must report the telemetry coverage label: `complete`, `partial`, `runtime-only`, or `unavailable`. Host telemetry is optional; missing host telemetry must be reported as coverage, not treated as review-resolution evidence. Imported telemetry is deduplicated by runtime-owned `event_fingerprint`; duplicate or overlapping imports must be reported via `accepted_fingerprints` and `duplicate_fingerprints`, not manually merged by the agent.
 
+Telemetry degradation is visible but does not block core PR completion by itself: `final-gate` reports coverage, diagnostics, and overhead budget findings while preserving review-state pass/fail authority. Telemetry-specific commands such as `telemetry summary` remain fail-loud when telemetry storage or report generation is invalid. If diagnostics include `TELEMETRY_OVERHEAD_EXCEEDED`, report the impact in the completion summary instead of retrying the review workflow.
+
 Use `--format codex-host-json --source codex` only for safe Codex host exports that contain aggregate tokens, tool usage, duration, and status data. Host-specific adapters are optional enrichment over the generic `agent-jsonl` contract.
 
 When exactly one cached PR session exists, PR-scoped commands may omit `<owner/repo> <pr_number>`. If the runtime reports `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target explicitly instead of guessing.

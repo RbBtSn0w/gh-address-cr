@@ -1,0 +1,27 @@
+{
+  "missing_required_evidence": {
+    "item_id": "github-thread:THREAD_1",
+    "claim": "fixed",
+    "evidence": {
+      "files": ["src/example.py"],
+      "validation_commands": []
+    },
+    "expected_signal_type": "missing_required_evidence",
+    "expected_gate_effect": "blocking"
+  },
+  "state_contradiction": {
+    "item_id": "github-thread:THREAD_2",
+    "claim": "ready_to_publish",
+    "item_state": "open",
+    "reply_evidence": null,
+    "expected_signal_type": "state_contradiction",
+    "expected_gate_effect": "blocking"
+  },
+  "low_confidence_advisory": {
+    "item_id": "github-thread:THREAD_3",
+    "claim": "rationale may be thin",
+    "item_state": "handled",
+    "expected_signal_type": "low_confidence_advisory",
+    "expected_gate_effect": "advisory"
+  }
+}

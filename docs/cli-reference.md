@@ -153,6 +153,8 @@ When `--validation` is provided without an explicit `=result` suffix, the entire
 
 `agent next` writes both `request_path` and `response_skeleton_path`. Fill the response skeleton when you need a local artifact with the correct `schema_version`, `request_id`, `lease_id`, `agent_id`, `item_id`, `resolution`, `validation_commands`, and GitHub-thread `fix_reply` shape. Required user-supplied fields are intentionally empty in the skeleton so an unedited template is rejected instead of published.
 
+For migrated work item types, `agent next` and the written `ActionRequest` may include additive `handling_boundary` fields such as `boundary_id`, `required_evidence`, `completion_criteria`, and `terminal_failure_reasons`. Lease-related rejection payloads may include `lease_recovery` with `recovery_outcome` values `renew`, `reclaim`, `refresh_state`, `stop`, or `already_completed`. `final-gate --machine` may include `logic_validation_signals`; blocking signals prevent completion, while advisory signals are diagnostic.
+
 Minimal `BatchActionResponse` shape:
 
 ```json

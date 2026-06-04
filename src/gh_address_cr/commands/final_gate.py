@@ -322,6 +322,12 @@ def build_completion_summary_guidance(
         success_rate = 0.0
     inefficiency_flags = telemetry_report.get("inefficiency_flags") or []
     flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
+    telemetry_diagnostics = [
+        str(diagnostic)
+        for diagnostic in (telemetry_report.get("diagnostics") or [])
+        if str(diagnostic).strip()
+    ]
+    telemetry_diagnostics_str = "; ".join(telemetry_diagnostics)
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
 
     summary_path_str = str(summary_path) if summary_path else "N/A"
@@ -373,6 +379,10 @@ def build_completion_summary_guidance(
             f"- Inefficiency flags detected: {flags_str}. This indicates potential execution friction, "
             "redundant tool calls, or loop behaviors that occurred during the session."
         )
+
+    if telemetry_diagnostics:
+        abnormal_names.append("telemetry diagnostics present")
+        abnormal_implications.append(f"- Telemetry diagnostics: {telemetry_diagnostics_str}")
 
     threads_checks_remain = (
         unresolved_threads > 0 or
