@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
+
+from gh_address_cr.core import session as session_store
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+    get_field as _get,
+    get_session_ledger as _ledger,
+    json_ready as _json_ready,
+    return_expired_items_to_open as _return_expired_items_to_open,
+    set_field as _set,
+)
 
 try:
     from gh_address_cr.core.models import ClaimLease as _ModelClaimLease
@@ -212,6 +222,42 @@ def expire_leases(session: Any, *, now: datetime | None = None) -> list[Any]:
             _expire_lease(session, lease, now)
             expired.append(lease)
     return expired
+
+
+def list_leases(repo: str, pr_number: str) -> dict[str, Any]:
+    session = session_store.load_session(repo, pr_number)
+    return {
+        "status": "LEASES_READY",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "leases": [_json_ready(lease) for lease in session.get("leases", {}).values()],
+    }
+
+
+def reclaim_leases(repo: str, pr_number: str, *, now: datetime | None = None) -> dict[str, Any]:
+    current_time = _coerce_now(now)
+    session = session_store.load_session(repo, pr_number)
+    ledger = _ledger(session)
+    expired = expire_leases(session, now=current_time)
+    _return_expired_items_to_open(session, expired)
+    for lease in expired:
+        ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=str(_get(lease, "item_id")),
+            lease_id=str(_get(lease, "lease_id")),
+            agent_id=str(_get(lease, "agent_id")),
+            role=str(_get(lease, "role")),
+            event_type="lease_expired",
+            payload={"reason": "reclaimed"},
+        )
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "LEASES_RECLAIMED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "expired_count": len(expired),
+        "leases": [_json_ready(lease) for lease in expired],
+    }
 
 
 def reclaim_lease(
@@ -448,27 +494,6 @@ def _conflict_keys(lease: Any) -> set[str]:
 def _required(value: Any, field_name: str) -> Any:
     if value in (None, ""):
         raise ValueError(f"{field_name} is required")
-    return value
-
-
-def _get(obj: Any, field: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(field, default)
-    return getattr(obj, field, default)
-
-
-def _set(obj: Any, field: str, value: Any) -> None:
-    if isinstance(obj, dict):
-        obj[field] = value
-    else:
-        setattr(obj, field, value)
-
-
-def _coerce_now(value: datetime | None) -> datetime:
-    if value is None:
-        return datetime.now(timezone.utc)
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
     return value
 
 

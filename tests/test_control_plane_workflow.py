@@ -5,7 +5,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr import cli
+from gh_address_cr.commands import agent
 from gh_address_cr.core.models import ActionRequest
 
 from tests.helpers import PythonScriptTestCase
@@ -2303,10 +2303,10 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         with (
             patch("gh_address_cr.core.telemetry.SessionTelemetry.get_instance", side_effect=AssertionError("blocked")),
-            patch("gh_address_cr.cli.workflow.publish_github_thread_responses", return_value=expected) as publish,
+            patch("gh_address_cr.commands.agent.publisher.publish_github_thread_responses", return_value=expected) as publish,
             redirect_stdout(stdout),
         ):
-            result = cli.handle_agent_publish(None, [self.repo, self.pr])
+            result = agent.handle_agent_publish(None, [self.repo, self.pr])
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(stdout.getvalue()), expected)

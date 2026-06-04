@@ -2017,11 +2017,11 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(res.stderr, "")
         mock_stderr.write.assert_not_called()
 
-    @patch("gh_address_cr.core.workflow.submit_lease")
-    @patch("gh_address_cr.core.workflow.accept_lease")
-    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
     def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
-        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
         from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path
@@ -2116,11 +2116,11 @@ class TestTelemetry(unittest.TestCase):
             _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
             self.assertEqual(len(tracker.metrics), 10)
 
-    @patch("gh_address_cr.core.workflow.submit_lease")
-    @patch("gh_address_cr.core.workflow.accept_lease")
-    @patch("gh_address_cr.core.workflow._apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
     def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
-        from gh_address_cr.core.workflow import _accept_action_response_submission
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
         from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path
@@ -2169,10 +2169,11 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(len(tracker.metrics), 1)
             self.assertNotIn("_telemetry_validation_seen", session)
 
-    @patch("gh_address_cr.core.workflow.submit_lease")
-    @patch("gh_address_cr.core.workflow.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol.accept_lease")
     def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
-        from gh_address_cr.core.workflow import WorkflowError, _accept_action_response_submission
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
         from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path

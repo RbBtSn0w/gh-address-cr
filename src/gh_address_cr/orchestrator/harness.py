@@ -24,8 +24,9 @@ from gh_address_cr.orchestrator.worker import (
     MAX_RETRIES,
 )
 from gh_address_cr.core import gate as core_gate
-from gh_address_cr.core import workflow
+from gh_address_cr.core import agent_protocol
 from gh_address_cr.core import session as core_session
+from gh_address_cr.core.errors import WorkflowError
 
 MIN_REQUIRED_VERSION = "0.0.1"
 MAX_QUEUE_RECONCILIATION_SECONDS = 1.0
@@ -165,8 +166,8 @@ def handle_submit(args: List[str]) -> int:
             return 2
 
         try:
-            _ = workflow.submit_action_response(repo, pr, response_path=str(parsed.input))
-        except workflow.WorkflowError as e:
+            _ = agent_protocol.submit_action_response(repo, pr, response_path=str(parsed.input))
+        except WorkflowError as e:
             save_orchestration_session(session)
             _output_signal("FAILED", e.reason_code, "RETRY", f"Submission failed: {e.reason_code}: {e}")
             return 2
@@ -405,13 +406,13 @@ def handle_step(args: List[str]) -> int:
     role = parsed.role or "fixer"  # Default to fixer for MVP
 
     try:
-        action_result = workflow.issue_action_request(
+        action_result = agent_protocol.issue_action_request(
             repo,
             pr,
             role=role,
             agent_id=f"orchestrator:{session.run_id}",
         )
-    except workflow.WorkflowError as e:
+    except WorkflowError as e:
         if e.reason_code in {"NO_ELIGIBLE_ITEM"}:
             _sync_queue_from_runtime(session, enforce_budget=False)
             save_orchestration_session(session)

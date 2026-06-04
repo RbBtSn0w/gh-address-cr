@@ -104,7 +104,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertNotIn("session-engine", result.stdout)
 
     def test_cli_telemetry_source_redaction_delegates_to_core(self):
-        source = CLI_PY.read_text(encoding="utf-8")
+        source = (CLI_PY.parent / "commands" / "telemetry.py").read_text(encoding="utf-8")
 
         self.assertIn("return core_telemetry._reported_source_label(source)", source)
         self.assertNotIn("core_telemetry._contains_token_marker(source)", source)
@@ -180,7 +180,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                 self.assertEqual(rc, 0)
 
     def test_final_gate_host_hook_fallback_summary_failure_is_fail_open(self):
-        import gh_address_cr.cli as cli
+        from gh_address_cr.commands import final_gate
 
         with (
             patch.dict(
@@ -190,14 +190,14 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
                 },
             ),
-            patch.object(cli.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
+            patch.object(final_gate.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
         ):
-            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+            result = final_gate.ingest_host_telemetry_from_environment(self.repo, self.pr)
 
         self.assertIsNone(result)
 
     def test_final_gate_host_hook_import_storage_error_reports_hook_diagnostic(self):
-        import gh_address_cr.cli as cli
+        from gh_address_cr.commands import final_gate
 
         feed = Path(self.temp_dir.name) / "host.jsonl"
         feed.write_text("{}\n", encoding="utf-8")
@@ -210,15 +210,15 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
                 },
             ),
-            patch.object(cli.core_telemetry, "import_external_telemetry", side_effect=OSError("disk full")),
-            patch.object(cli.core_telemetry, "input_unavailable_import_summary") as unavailable,
+            patch.object(final_gate.core_telemetry, "import_external_telemetry", side_effect=OSError("disk full")),
+            patch.object(final_gate.core_telemetry, "input_unavailable_import_summary") as unavailable,
         ):
-            result = cli._ingest_host_telemetry_from_environment(self.repo, self.pr)
+            result = final_gate.ingest_host_telemetry_from_environment(self.repo, self.pr)
 
         self.assertEqual(result["reason_code"], "TELEMETRY_HOOK_UNAVAILABLE")
         self.assertEqual(result["diagnostics"], ["host telemetry hook import unavailable"])
         unavailable.assert_not_called()
-        report = cli.core_telemetry.build_efficiency_report(self.repo, self.pr)
+        report = final_gate.core_telemetry.build_efficiency_report(self.repo, self.pr)
         self.assertIn(
             "telemetry import assistant-host: host telemetry hook import unavailable",
             report["diagnostics"],
@@ -2806,10 +2806,10 @@ else:
         self.assertTrue(any("diagnostics must be a list" in item for item in payload["diagnostics"]))
 
     def test_cli_telemetry_summary_treats_report_artifact_write_failure_as_unavailable(self):
-        from gh_address_cr.cli import _telemetry_report_has_storage_diagnostics
+        from gh_address_cr.commands.telemetry import telemetry_report_has_storage_diagnostics
 
         self.assertTrue(
-            _telemetry_report_has_storage_diagnostics(
+            telemetry_report_has_storage_diagnostics(
                 {
                     "diagnostics": [
                         "efficiency report artifact unavailable: OSError: disk full",

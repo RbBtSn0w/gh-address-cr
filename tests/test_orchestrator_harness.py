@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gh_address_cr.core.session import SessionManager, load_session, session_file
-from gh_address_cr.core.workflow import WorkflowError
+from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.orchestrator.harness import _version_tuple, handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import load_orchestration_session
 
@@ -184,7 +184,7 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(core_state.get("leases", {}), {})
 
     @patch("gh_address_cr.orchestrator.harness.parse_and_validate_response")
-    @patch("gh_address_cr.orchestrator.harness.workflow.submit_action_response")
+    @patch("gh_address_cr.orchestrator.harness.agent_protocol.submit_action_response")
     def test_submit_calls_runtime_and_releases_lease_only_after_success(self, mock_submit, mock_parse):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
@@ -216,7 +216,7 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertNotIn("finding-1", post.active_leases)
 
     @patch("gh_address_cr.orchestrator.harness.parse_and_validate_response")
-    @patch("gh_address_cr.orchestrator.harness.workflow.submit_action_response")
+    @patch("gh_address_cr.orchestrator.harness.agent_protocol.submit_action_response")
     def test_submit_race_fast_fails_and_preserves_lease(self, mock_submit, mock_parse):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
