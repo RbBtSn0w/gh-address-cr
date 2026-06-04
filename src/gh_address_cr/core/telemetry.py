@@ -10,6 +10,7 @@ from hashlib import sha256
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 from gh_address_cr.core import paths as core_paths
@@ -180,6 +181,99 @@ UNSAFE_METADATA_KEY_MARKERS = (
     "prompt",
 )
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
+
+
+class TelemetryParseResult:
+    def __init__(
+        self,
+        events: list[ExternalTelemetryEvent],
+        rejected_count: int,
+        unsafe_seen: bool,
+        malformed_seen: bool,
+        diagnostics: list[str],
+    ):
+        self.events = events
+        self.rejected_count = rejected_count
+        self.unsafe_seen = unsafe_seen
+        self.malformed_seen = malformed_seen
+        self.diagnostics = diagnostics
+
+
+class TelemetryAdapter(ABC):
+    @abstractmethod
+    def parse(self, raw: str, source: str) -> TelemetryParseResult:
+        pass
+
+
+class TelemetryAdapterRegistry:
+    def __init__(self):
+        self._adapters: dict[str, TelemetryAdapter] = {}
+
+    def register(self, fmt: str, adapter: TelemetryAdapter) -> None:
+        self._adapters[fmt] = adapter
+
+    def get_adapter(self, fmt: str) -> TelemetryAdapter | None:
+        return self._adapters.get(fmt)
+
+
+_registry = TelemetryAdapterRegistry()
+
+
+def register_adapter(fmt: str, adapter: TelemetryAdapter) -> None:
+    _registry.register(fmt, adapter)
+
+
+def get_adapter(fmt: str) -> TelemetryAdapter | None:
+    return _registry.get_adapter(fmt)
+
+
+class GenericAgentJsonlAdapter(TelemetryAdapter):
+    def parse(self, raw: str, source: str) -> TelemetryParseResult:
+        accepted: list[ExternalTelemetryEvent] = []
+        diagnostics: list[str] = []
+        rejected_count = 0
+        unsafe_seen = False
+        malformed_seen = False
+
+        for line_number, line in enumerate(raw.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = _json_loads_strict(line)
+            except json.JSONDecodeError as exc:
+                malformed_seen = True
+                rejected_count += 1
+                diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
+                continue
+            except ValueError as exc:
+                malformed_seen = True
+                rejected_count += 1
+                diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
+                continue
+            try:
+                event = _normalize_external_event(payload, declared_source=source)
+            except ValueError as exc:
+                message = str(exc)
+                if message.startswith("UNSAFE:"):
+                    unsafe_seen = True
+                    diagnostics.append(f"line {line_number}: {message.removeprefix('UNSAFE:')}")
+                else:
+                    malformed_seen = True
+                    diagnostics.append(f"line {line_number}: {message}")
+                rejected_count += 1
+                continue
+            accepted.append(event)
+
+        return TelemetryParseResult(
+            events=accepted,
+            rejected_count=rejected_count,
+            unsafe_seen=unsafe_seen,
+            malformed_seen=malformed_seen,
+            diagnostics=diagnostics,
+        )
+
+
+register_adapter("agent-jsonl", GenericAgentJsonlAdapter())
 
 
 class SessionTelemetry:
@@ -384,7 +478,8 @@ class SessionTelemetry:
 
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
-    if fmt != "agent-jsonl":
+    adapter = get_adapter(fmt)
+    if adapter is None:
         reported_format = _reported_format_label(fmt)
         summary = _import_summary(
             paths,
@@ -454,43 +549,21 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         _append_import_summary_if_available(paths, summary)
         return summary
     existing_fingerprints.update(event.identity for event in existing)
+
+    parse_result = adapter.parse(raw, source)
+    accepted_events = parse_result.events
+    rejected_count = parse_result.rejected_count
+    unsafe_seen = parse_result.unsafe_seen
+    malformed_seen = parse_result.malformed_seen
+    diagnostics = parse_result.diagnostics
+
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
     duplicate_fingerprints: list[str] = []
-    diagnostics: list[str] = []
     observed_sessions: set[str] = set()
-    rejected_count = 0
     duplicate_count = 0
-    unsafe_seen = False
-    malformed_seen = False
 
-    for line_number, line in enumerate(raw.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = _json_loads_strict(line)
-        except json.JSONDecodeError as exc:
-            malformed_seen = True
-            rejected_count += 1
-            diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
-            continue
-        except ValueError as exc:
-            malformed_seen = True
-            rejected_count += 1
-            diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
-            continue
-        try:
-            event = _normalize_external_event(payload, declared_source=source)
-        except ValueError as exc:
-            message = str(exc)
-            if message.startswith("UNSAFE:"):
-                unsafe_seen = True
-                diagnostics.append(f"line {line_number}: {message.removeprefix('UNSAFE:')}")
-            else:
-                malformed_seen = True
-                diagnostics.append(f"line {line_number}: {message}")
-            rejected_count += 1
-            continue
+    for event in accepted_events:
         observed_sessions.add(event.source_session_id)
         if event.identity in existing_fingerprints:
             duplicate_count += 1

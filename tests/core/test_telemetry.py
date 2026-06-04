@@ -2216,5 +2216,67 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
+    def test_custom_telemetry_adapter_registration(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            _registry,
+        )
+        
+        class MockCustomAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                parts = raw.strip().split(":")
+                if len(parts) != 4:
+                    return TelemetryParseResult(
+                        events=[],
+                        rejected_count=1,
+                        unsafe_seen=False,
+                        malformed_seen=True,
+                        diagnostics=["malformed mock payload"],
+                    )
+                session_id, event_id, operation, duration_str = parts
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id=session_id,
+                    event_id=event_id,
+                    kind="tool_call",
+                    operation=operation,
+                    status="success",
+                    duration_ms=int(duration_str),
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-custom", MockCustomAdapter())
+        
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                raw_payload = "session-abc:event-123:custom_op:4500"
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-custom",
+                    raw=raw_payload,
+                )
+                self.assertEqual(result["status"], "SUCCESS")
+                self.assertEqual(result["accepted_count"], 1)
+                
+                report = build_efficiency_report("octo/example", "77")
+                self.assertEqual(report["total_events"], 1)
+                self.assertEqual(report["total_observed_duration_ms"], 4500)
+                self.assertEqual(report["slowest_operations"][0]["operation"], "custom_op")
+        
+        if "mock-custom" in _registry._adapters:
+            del _registry._adapters["mock-custom"]
+
 if __name__ == "__main__":
     unittest.main()
