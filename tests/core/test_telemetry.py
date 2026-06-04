@@ -2601,5 +2601,34 @@ class TestTelemetry(unittest.TestCase):
                 # Ensure the ValueError diagnostic element was converted to a string and did not crash json.dumps
                 self.assertIn("Non-JSON error object", result["diagnostics"])
 
+    def test_custom_telemetry_adapter_invalid_return_type_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class MockInvalidReturnAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str):
+                # Invalid: returns None instead of a TelemetryParseResult instance
+                return None
+
+        register_adapter("mock-invalid-ret", MockInvalidReturnAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-invalid-ret"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-invalid-ret",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertTrue(any("TypeError: Adapter parse must return a TelemetryParseResult instance, got NoneType" in diag for diag in result["diagnostics"]))
+
 if __name__ == "__main__":
     unittest.main()

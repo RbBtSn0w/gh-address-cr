@@ -189,7 +189,7 @@ class TelemetryParseResult:
     rejected_count: int
     unsafe_seen: bool
     malformed_seen: bool
-    diagnostics: list[str]
+    diagnostics: list[Any]
 
 
 class TelemetryAdapter(ABC):
@@ -559,6 +559,8 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
 
     try:
         parse_result = adapter.parse(raw, source)
+        if not isinstance(parse_result, TelemetryParseResult):
+            raise TypeError(f"Adapter parse must return a TelemetryParseResult instance, got {type(parse_result).__name__}")
     except Exception as exc:
         summary = _import_summary(
             paths,
