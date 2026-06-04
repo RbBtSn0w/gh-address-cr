@@ -1,13 +1,8 @@
 import importlib.util
-import gzip
 import json
-import os
-import shutil
 import sys
-import threading
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 from tests.helpers import (
     PYTHON_COMMON_PY,

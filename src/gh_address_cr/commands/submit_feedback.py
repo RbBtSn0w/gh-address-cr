@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus
 
 from gh_address_cr.core import io as core_io

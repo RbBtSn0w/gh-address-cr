@@ -4,7 +4,6 @@ import json
 import subprocess
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch
 
 from tests.helpers import PythonScriptTestCase, IMPLEMENTATIONS_DIR
