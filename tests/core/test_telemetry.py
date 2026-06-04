@@ -2421,7 +2421,104 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["status"], "FAILED")
                 self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
                 self.assertEqual(result["accepted_count"], 0)
-                self.assertTrue(any("Adapter parsing failed: ValueError: Int conversion failed" in diag for diag in result["diagnostics"]))
+                # Confirm we only expose the exception type name and NOT the raw exception message for safety
+                self.assertTrue(any(diag == "Adapter parsing failed: ValueError" for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_nan_metadata_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNaNMetadataAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return metadata with a NaN float constant
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-nan",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"ratio": float("nan")}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-nan", MockNaNMetadataAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-nan"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-nan",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("non-finite" in diag for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_non_json_diagnostics_coercion(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockNonJsonDiagnosticsAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-diag-coerce",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                )
+                # Return a diagnostic item that is an Exception instance rather than a string
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[ValueError("Non-JSON error object")],
+                )
+
+        register_adapter("mock-diag-coerce", MockNonJsonDiagnosticsAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-diag-coerce"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-diag-coerce",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "SUCCESS")
+                self.assertEqual(result["accepted_count"], 1)
+                # Ensure the ValueError diagnostic element was converted to a string and did not crash json.dumps
+                self.assertIn("Non-JSON error object", result["diagnostics"])
 
 if __name__ == "__main__":
     unittest.main()

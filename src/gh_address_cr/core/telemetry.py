@@ -566,7 +566,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             duplicate_count=0,
             accepted_fingerprints=[],
             duplicate_fingerprints=[],
-            diagnostics=[f"Adapter parsing failed: {type(exc).__name__}: {exc}"],
+            diagnostics=[f"Adapter parsing failed: {type(exc).__name__}"],
         )
         _append_import_summary(paths, summary)
         return summary
@@ -575,7 +575,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     rejected_count = parse_result.rejected_count
     unsafe_seen = parse_result.unsafe_seen
     malformed_seen = parse_result.malformed_seen
-    diagnostics = parse_result.diagnostics
+    diagnostics = [str(diag) for diag in parse_result.diagnostics]
 
     accepted: list[ExternalTelemetryEvent] = []
     accepted_fingerprints: list[str] = []
@@ -936,9 +936,9 @@ def _safe_metadata(metadata: object) -> dict[str, Any]:
     _validate_safe_metadata_value(metadata)
     result = {str(key): value for key, value in metadata.items()}
     try:
-        json.dumps(result)
-    except (TypeError, OverflowError) as exc:
-        raise ValueError(f"metadata contains non-JSON serializable values: {exc}") from None
+        json.dumps(result, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"metadata contains non-JSON serializable or non-finite values: {exc}") from None
     return result
 
 
