@@ -25,20 +25,20 @@ class NativeFoundationTests(unittest.TestCase):
                 self.assertEqual(paths.efficiency_report_file("owner/repo", "123").name, "efficiency-report.json")
 
     def test_session_paths_properties(self):
-        from gh_address_cr.core.paths import SessionPaths, workspace_dir, session_file, audit_log_file, audit_summary_file, evidence_ledger_file, external_telemetry_file, telemetry_imports_file, telemetry_fingerprints_file, efficiency_report_file
+        from gh_address_cr.core import paths
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
-                sp = SessionPaths("owner/repo", 123)
-                self.assertEqual(sp.workspace_dir, workspace_dir("owner/repo", "123"))
-                self.assertEqual(sp.session_file, session_file("owner/repo", "123"))
-                self.assertEqual(sp.audit_log_file, audit_log_file("owner/repo", "123"))
-                self.assertEqual(sp.audit_summary_file, audit_summary_file("owner/repo", "123"))
-                self.assertEqual(sp.evidence_ledger_file, evidence_ledger_file("owner/repo", "123"))
-                self.assertEqual(sp.external_telemetry_file, external_telemetry_file("owner/repo", "123"))
-                self.assertEqual(sp.telemetry_imports_file, telemetry_imports_file("owner/repo", "123"))
-                self.assertEqual(sp.telemetry_fingerprints_file, telemetry_fingerprints_file("owner/repo", "123"))
-                self.assertEqual(sp.efficiency_report_file, efficiency_report_file("owner/repo", "123"))
+                sp = paths.SessionPaths("owner/repo", 123)
+                self.assertEqual(sp.workspace_dir, paths.workspace_dir("owner/repo", "123"))
+                self.assertEqual(sp.session_file, paths.session_file("owner/repo", "123"))
+                self.assertEqual(sp.audit_log_file, paths.audit_log_file("owner/repo", "123"))
+                self.assertEqual(sp.audit_summary_file, paths.audit_summary_file("owner/repo", "123"))
+                self.assertEqual(sp.evidence_ledger_file, paths.evidence_ledger_file("owner/repo", "123"))
+                self.assertEqual(sp.external_telemetry_file, paths.external_telemetry_file("owner/repo", "123"))
+                self.assertEqual(sp.telemetry_imports_file, paths.telemetry_imports_file("owner/repo", "123"))
+                self.assertEqual(sp.telemetry_fingerprints_file, paths.telemetry_fingerprints_file("owner/repo", "123"))
+                self.assertEqual(sp.efficiency_report_file, paths.efficiency_report_file("owner/repo", "123"))
 
     def test_core_types_define_session_item_lease_and_finding_shapes(self):
         from gh_address_cr.core.types import Finding, Item, Lease, Session

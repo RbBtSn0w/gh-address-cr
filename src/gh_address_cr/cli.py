@@ -2587,12 +2587,12 @@ def _write_native_final_gate_artifacts(
     audit_id: str,
     result: core_gate.GateResult,
 ) -> tuple[Path, dict]:
-    workspace = session_store.workspace_dir(repo, pr_number)
     paths = core_paths.SessionPaths(repo, pr_number)
+    workspace = paths.workspace_dir
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id = audit_id or "final-gate"
-    summary_path = workspace / paths.audit_summary_file.name
-    audit_path = workspace / paths.audit_log_file.name
+    summary_path = paths.audit_summary_file
+    audit_path = paths.audit_log_file
     trace_path = workspace / "trace.jsonl"
     status = "ok" if result.passed else "failed"
     summary_lines = [
