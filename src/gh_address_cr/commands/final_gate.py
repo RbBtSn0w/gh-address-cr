@@ -346,10 +346,20 @@ def build_completion_summary_guidance(
 
     if coverage != "complete":
         abnormal_names.append(f"incomplete telemetry coverage ({coverage})")
-        abnormal_implications.append(
-            f"- Telemetry coverage is {coverage} (not complete). Some agent interactions or tool runs "
-            "were not fully recorded in telemetry, which might make efficiency tracking partially incomplete."
-        )
+        if coverage == "runtime-only":
+            desc = (
+                "Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly "
+                "imported/ingested prior to the final gate check, meaning the metrics represent only command-level "
+                "events tracked by the local session runner."
+            )
+        elif coverage == "unavailable":
+            desc = "Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session."
+        else:
+            desc = (
+                f"Telemetry coverage is {coverage} (not complete). Some agent interactions or tool runs "
+                "were not fully recorded in telemetry, which might make efficiency tracking partially incomplete."
+            )
+        abnormal_implications.append(f"- {desc}")
 
     if total_events > 0 and success_rate < 100.0:
         abnormal_names.append(f"success rate below 100% ({success_rate:.1f}%)")
@@ -394,7 +404,7 @@ def build_completion_summary_guidance(
         abnormal_names.append(f"unresolved threads/checks/blocking items ({remain_str})")
         abnormal_implications.append(
             f"- Session contains unresolved items: {remain_str}. "
-            "PR completion is blocked until all threads are resolved, reviews submitted, and checks pass."
+            "PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed."
         )
 
     header = (

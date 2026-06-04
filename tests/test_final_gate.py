@@ -269,7 +269,7 @@ class FinalGateTestCase(unittest.TestCase):
         )
 
         telemetry_report = {
-            "coverage_label": "complete",
+            "coverage_label": "unavailable",
             "total_events": 0,
             "success_rate": 0.0,
             "inefficiency_flags": [],
@@ -281,3 +281,10 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertNotIn("success rate below 100%", guidance)
         self.assertIn("1 threads missing reply", guidance)
         self.assertIn("1 local items missing validation", guidance)
+        self.assertIn("Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session.", guidance)
+        self.assertIn("PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed.", guidance)
+
+        # Test runtime-only coverage label
+        telemetry_report["coverage_label"] = "runtime-only"
+        guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
