@@ -208,18 +208,21 @@ def handle_autopilot(args: List[str]) -> int:
         for item_id, item in sorted(items.items()):
             if not isinstance(item, dict) or not item.get("blocking") or item.get("handled"):
                 continue
-            classification = "fix" if _looks_trivial(item) else "classify"
-            steps.append(
-                {
-                    "item_id": str(item_id),
-                    "command": "agent classify",
-                    "classification": classification,
-                    "side_effect": True,
-                    "runtime_state_effect": True,
-                    "github_side_effect": False,
-                    "requires_execute": True,
-                }
-            )
+            classification = "fix" if _looks_trivial(item) else None
+            classify_step = {
+                "item_id": str(item_id),
+                "command": "agent classify",
+                "side_effect": True,
+                "runtime_state_effect": True,
+                "github_side_effect": False,
+                "requires_execute": True,
+            }
+            if classification:
+                classify_step["classification"] = classification
+            else:
+                classify_step["requires_decision"] = True
+                classify_step["classification_options"] = ["fix", "clarify", "defer", "reject"]
+            steps.append(classify_step)
             steps.append(
                 {
                     "item_id": str(item_id),

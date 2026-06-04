@@ -396,6 +396,34 @@ class Issue78AutopilotTests(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["steps"][0]["classification"], "fix")
+
+    def test_autopilot_non_trivial_plan_requires_valid_manual_classification_decision(self):
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="ACTIVE")
+        session["items"] = {
+            "github-thread:1": {
+                "item_id": "github-thread:1",
+                "item_kind": "github_thread",
+                "path": "src/app.py",
+                "line": 4,
+                "blocking": True,
+                "handled": False,
+                "state": "open",
+                "body": "This branch needs a deeper behavioral decision.",
+            }
+        }
+        manager.save(session)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "agent", "orchestrate", "autopilot", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        classify_step = payload["steps"][0]
+        self.assertEqual(classify_step["command"], "agent classify")
+        self.assertNotIn("classification", classify_step)
+        self.assertTrue(classify_step["requires_decision"])
+        self.assertEqual(classify_step["classification_options"], ["fix", "clarify", "defer", "reject"])
+        self.assertEqual(payload["steps"][1]["role"], "triage")
         self.assertTrue(payload["steps"][0]["side_effect"])
         self.assertTrue(payload["steps"][0]["runtime_state_effect"])
         self.assertFalse(payload["steps"][0]["github_side_effect"])
@@ -420,7 +448,7 @@ class Issue78TrivialFastPathTests(PythonScriptTestCase):
                 "blocking": True,
                 "handled": False,
                 "state": "open",
-                "body": "Author name typo in the README.",
+                "body": "Capitalization typo in the author name section.",
             }
         }
         manager.save(session)
