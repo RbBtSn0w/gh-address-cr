@@ -1669,12 +1669,12 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
     if human:
         status = summary["status"]
         if status == "PASSED":
-            print("cr-loop PASSED")
+            print("Review workflow PASSED")
         elif status == "BLOCKED":
-            print("cr-loop BLOCKED")
+            print("Review workflow BLOCKED")
             print(summary["next_action"])
         else:
-            print(f"cr-loop {status}")
+            print(f"Review workflow {status}")
         return
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
@@ -2340,8 +2340,8 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.\n"
         ),
     )
-    parser.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON (default).")
-    parser.add_argument("--human", action="store_true", help="Emit human-oriented narrative text.")
+    parser.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON.")
+    parser.add_argument("--human", action="store_true", help="Emit human-oriented narrative text (default).")
     auto_group = parser.add_mutually_exclusive_group()
     auto_group.add_argument("--auto-clean", dest="auto_clean", action="store_true")
     auto_group.add_argument("--no-auto-clean", dest="auto_clean", action="store_false")
@@ -2403,13 +2403,13 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                     summary_path=summary_path,
                     telemetry_report=telemetry_report,
                 )
-    if parsed.human:
-        _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
-    else:
+    if parsed.machine:
         machine_summary = result.to_machine_summary()
         if summary_path:
             machine_summary["artifact_path"] = str(summary_path)
         sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
+    else:
+        _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
         print(f"\nGate FAILED: {_final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
@@ -2679,7 +2679,7 @@ def _emit_final_gate_result(
         )
     print()
     if result.passed:
-        print("cr-loop PASSED")
+        print("Final gate PASSED")
         print("\n== Gate Result ==")
         print("Verified: 0 Unresolved Threads found")
         print("Verified: 0 Pending Reviews found")
@@ -2687,7 +2687,7 @@ def _emit_final_gate_result(
             print("Verified: 0 Non-green PR Checks found")
         print(f"Session blocking items: {result.counts['blocking_items_count']}")
     else:
-        print("cr-loop BLOCKED")
+        print("Final gate BLOCKED")
         print("\n== Gate Result ==")
         print(f"Gate FAILED: {_final_gate_failure_message(result)}")
     print()

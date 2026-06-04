@@ -16,11 +16,7 @@ SCRIPTS_DIR = IMPLEMENTATIONS_DIR
 CORE_DIR = RUNTIME_PACKAGE_DIR / "core"
 
 CLI_PY = RUNTIME_PACKAGE_DIR / "cli.py"
-FINAL_GATE_PY = IMPLEMENTATIONS_DIR / "final_gate.py"
-POST_REPLY_PY = IMPLEMENTATIONS_DIR / "post_reply.py"
-CODE_REVIEW_ADAPTER_PY = IMPLEMENTATIONS_DIR / "code_review_adapter.py"
 REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
-PYTHON_COMMON_PY = IMPLEMENTATIONS_DIR / "python_common.py"
 SUBMIT_FEEDBACK_PY = IMPLEMENTATIONS_DIR / "submit_feedback.py"
 
 
@@ -65,12 +61,9 @@ class PythonScriptTestCase(unittest.TestCase):
             return cmd
         path = Path(cmd[1]).resolve()
         module_by_path = {
-            IMPLEMENTATIONS_DIR / "final_gate.py": "gh_address_cr.commands.final_gate",
-            IMPLEMENTATIONS_DIR / "code_review_adapter.py": "gh_address_cr.commands.code_review_adapter",
             IMPLEMENTATIONS_DIR / "review_to_findings.py": "gh_address_cr.commands.review_to_findings",
             IMPLEMENTATIONS_DIR / "submit_action.py": "gh_address_cr.commands.submit_action",
             IMPLEMENTATIONS_DIR / "submit_feedback.py": "gh_address_cr.commands.submit_feedback",
-            IMPLEMENTATIONS_DIR / "post_reply.py": "gh_address_cr.commands.post_reply",
         }
         module = module_by_path.get(path)
         if module is None:

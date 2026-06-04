@@ -1,24 +1,15 @@
-import importlib.util
 import json
 import sys
 import time
 from pathlib import Path
 
 from tests.helpers import (
-    PYTHON_COMMON_PY,
     PythonScriptTestCase,
     SUBMIT_FEEDBACK_PY,
 )
 
 
 class AuxiliaryScriptsTest(PythonScriptTestCase):
-    def _load_python_common_module(self):
-        spec = importlib.util.spec_from_file_location("python_common_module", PYTHON_COMMON_PY)
-        self.assertIsNotNone(spec)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
     def _wait_until(self, predicate, *, timeout=1.0, interval=0.01):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

@@ -333,7 +333,7 @@ else:
         self.assertIsNone(summary["waiting_on"])
         self.assertEqual(summary["commands"]["final_gate"], f"gh-address-cr final-gate {self.repo} {self.pr}")
 
-    def test_cli_review_human_flag_keeps_human_text(self):
+    def test_cli_final_gate_default_keeps_human_text(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -369,13 +369,12 @@ else:
                 sys.executable,
                 str(CLI_PY),
                 "final-gate",
-                "--human",
                 self.repo,
                 self.pr,
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cr-loop PASSED", result.stdout)
+        self.assertIn("Final gate PASSED", result.stdout)
         self.assertNotIn('"status"', result.stdout)
 
     def test_cli_review_machine_trailing_flag_emits_structured_summary(self):
@@ -1876,6 +1875,7 @@ else:
         self.assertEqual(item["title"], "CLI list-items")
 
     def test_adapter_command_ingests_findings_through_native_cli(self):
+        self.install_fake_gh_for_threads([])
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text(
             "import json\nprint(json.dumps([{'title':'py-adapter','body':'body','path':'src/a.py','line':4}]))\n",
