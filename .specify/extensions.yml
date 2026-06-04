@@ -126,6 +126,13 @@ hooks:
     prompt: Commit specification changes?
     description: Auto-commit after specification
     condition: null
+  - extension: agent-context
+    command: speckit.agent-context.update
+    enabled: true
+    optional: true
+    prompt: Execute speckit.agent-context.update?
+    description: Refresh agent context after specification
+    condition: null
   - extension: superb
     command: speckit.superb.brainstorm
     enabled: true
@@ -137,13 +144,6 @@ hooks:
       of specification creation.
 
       '
-    condition: null
-  - extension: agent-context
-    command: speckit.agent-context.update
-    enabled: true
-    optional: true
-    prompt: Execute speckit.agent-context.update?
-    description: Refresh agent context after specification
     condition: null
   after_clarify:
   - extension: git

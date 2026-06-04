@@ -26,39 +26,6 @@
       "registered_skills": [],
       "installed_at": "2026-04-24T07:38:16.100045+00:00"
     },
-    "superb": {
-      "version": "1.5.0",
-      "source": "local",
-      "manifest_hash": "sha256:aede31489edbfa274c57d0ec101a1c81d2d7919a9ef2d2625278bb64bf9a3e93",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.superb.check",
-          "speckit.superb.brainstorm",
-          "speckit.superb.tdd",
-          "speckit.superb.review",
-          "speckit.superb.verify",
-          "speckit.superb.critique",
-          "speckit.superb.debug",
-          "speckit.superb.finish",
-          "speckit.superb.respond"
-        ],
-        "codex": [
-          "speckit.superb.check",
-          "speckit.superb.brainstorm",
-          "speckit.superb.tdd",
-          "speckit.superb.review",
-          "speckit.superb.verify",
-          "speckit.superb.critique",
-          "speckit.superb.debug",
-          "speckit.superb.finish",
-          "speckit.superb.respond"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-04-24T07:46:36.805417+00:00"
-    },
     "memorylint": {
       "version": "1.5.1",
       "source": "local",
@@ -96,6 +63,39 @@
       },
       "registered_skills": [],
       "installed_at": "2026-06-04T13:41:43.526151+00:00"
+    },
+    "superb": {
+      "version": "1.5.1",
+      "source": "local",
+      "manifest_hash": "sha256:0012e504896d4b7ae5cc8c1606b520e7fe2a1b111ddea2615450eb76d789a078",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.superb.check",
+          "speckit.superb.brainstorm",
+          "speckit.superb.tdd",
+          "speckit.superb.review",
+          "speckit.superb.verify",
+          "speckit.superb.critique",
+          "speckit.superb.debug",
+          "speckit.superb.finish",
+          "speckit.superb.respond"
+        ],
+        "codex": [
+          "speckit.superb.check",
+          "speckit.superb.brainstorm",
+          "speckit.superb.tdd",
+          "speckit.superb.review",
+          "speckit.superb.verify",
+          "speckit.superb.critique",
+          "speckit.superb.debug",
+          "speckit.superb.finish",
+          "speckit.superb.respond"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-24T07:46:36.805417+00:00"
     }
   }
 }
