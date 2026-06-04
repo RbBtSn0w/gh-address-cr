@@ -23,6 +23,7 @@ class WorkflowError(RuntimeError):
 
     def to_summary(self, *, repo: str, pr_number: str) -> dict[str, Any]:
         return {
+            **self.payload,
             "status": self.status,
             "repo": repo,
             "pr_number": pr_number,
@@ -30,5 +31,4 @@ class WorkflowError(RuntimeError):
             "waiting_on": self.waiting_on,
             "next_action": str(self),
             "exit_code": self.exit_code,
-            **self.payload,
         }

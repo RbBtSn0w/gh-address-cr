@@ -1393,9 +1393,13 @@ def _expected_request_hash_for_response(
             return None, "STALE_REQUEST_CONTEXT"
         return str(_get(lease, "request_hash")), None
 
-    if response_request_id != str(_get(lease, "request_hash")):
-        return None, "STALE_REQUEST_CONTEXT"
-    return str(_get(lease, "request_hash")), None
+    lease_request_hash = _get(lease, "request_hash")
+    if lease_request_hash:
+        if response_request_id != str(lease_request_hash):
+            return None, "STALE_REQUEST_CONTEXT"
+        return str(lease_request_hash), None
+
+    return None, "REQUEST_CONTEXT_NOT_FOUND"
 
 
 def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
