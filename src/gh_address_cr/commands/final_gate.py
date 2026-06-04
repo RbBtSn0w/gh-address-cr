@@ -351,7 +351,7 @@ def build_completion_summary_guidance(
             "were not fully recorded in telemetry, which might make efficiency tracking partially incomplete."
         )
 
-    if success_rate < 100.0:
+    if total_events > 0 and success_rate < 100.0:
         abnormal_names.append(f"success rate below 100% ({success_rate:.1f}%)")
         abnormal_implications.append(
             f"- Telemetry success rate is {success_rate:.1f}% (below 100%). Some tool calls, actions, "
@@ -386,6 +386,10 @@ def build_completion_summary_guidance(
             remain_details.append(f"{checks_not_green} non-green checks ({checks_failed} failed, {checks_pending} pending)")
         if blocking_items > 0:
             remain_details.append(f"{blocking_items} blocking items")
+        if missing_reply > 0:
+            remain_details.append(f"{missing_reply} threads missing reply")
+        if missing_validation > 0:
+            remain_details.append(f"{missing_validation} local items missing validation")
         remain_str = ", ".join(remain_details)
         abnormal_names.append(f"unresolved threads/checks/blocking items ({remain_str})")
         abnormal_implications.append(

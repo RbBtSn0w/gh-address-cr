@@ -253,3 +253,29 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("success rate below 100% (80.0%)", guidance)
         self.assertIn("inefficiency flags present (excessive_loops)", guidance)
         self.assertIn("unresolved threads/checks/blocking items (1 unresolved threads)", guidance)
+
+    def test_build_completion_summary_guidance_edge_cases(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        session = self.passing_session()
+        # Make a thread missing reply evidence
+        session["items"]["github-thread:THREAD_DONE"].pop("reply_evidence")
+        # Make a local finding missing validation evidence
+        session["items"]["local-finding:FIXED"].pop("validation_evidence")
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 0,
+            "success_rate": 0.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertNotIn("success rate below 100%", guidance)
+        self.assertIn("1 threads missing reply", guidance)
+        self.assertIn("1 local items missing validation", guidance)
