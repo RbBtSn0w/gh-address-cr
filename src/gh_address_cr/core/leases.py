@@ -433,6 +433,9 @@ def calculate_lease_recovery_state(
     elif item_claimed_by and str(item_claimed_by) != str(agent_id):
         recovery_outcome = "stop"
         reason_code = "LEASE_RECOVERY_STOP"
+    elif lease_status == "active" and lease_request_hash != str(request_hash):
+        recovery_outcome = "refresh_state"
+        reason_code = "STALE_REQUEST_CONTEXT"
     elif lease_status == "active" and lease is not None and _is_expired(lease, now):
         recovery_outcome = "renew"
         reason_code = "EXPIRED_LEASE_RENEWABLE"
@@ -442,9 +445,6 @@ def calculate_lease_recovery_state(
     elif lease_status in {"rejected", "released"}:
         recovery_outcome = "reclaim" if item_state == "open" else "refresh_state"
         reason_code = "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else "STALE_REQUEST_CONTEXT"
-    elif lease_status == "active" and lease_request_hash != str(request_hash):
-        recovery_outcome = "refresh_state"
-        reason_code = "STALE_REQUEST_CONTEXT"
     elif lease_status == "active":
         recovery_outcome = "stop"
         reason_code = "LEASE_ACTIVE"

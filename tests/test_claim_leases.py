@@ -256,6 +256,38 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
         self.assertEqual(recovery["reason_code"], "EXPIRED_LEASE_RENEWABLE")
         self.assertEqual(session["items"][item["item_id"]]["state"], "open")
 
+    def test_expired_active_submission_with_stale_request_hash_refreshes_state(self):
+        session = make_session()
+        item = make_item("expired-stale-item", path="src/expired_stale.py")
+        item["state"] = "claimed"
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="agent-a",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-expired-stale",
+            ttl_seconds=1,
+            now=NOW,
+        )
+
+        with self.assertRaises(LeaseSubmissionError) as caught:
+            submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="agent-a",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-stale",
+                now=NOW + timedelta(seconds=2),
+            )
+
+        recovery = caught.exception.recovery_state
+        self.assertEqual(caught.exception.reason_code, "EXPIRED_LEASE")
+        self.assertEqual(recovery["recovery_outcome"], "refresh_state")
+        self.assertEqual(recovery["reason_code"], "STALE_REQUEST_CONTEXT")
+
     def test_wrong_agent_expired_submission_stops_instead_of_renewing(self):
         session = make_session()
         item = make_item("wrong-agent-item", path="src/wrong.py")

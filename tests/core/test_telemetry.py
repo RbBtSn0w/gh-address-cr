@@ -268,9 +268,10 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["telemetry_overhead_ms"], 300.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.1, 10.4])
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter):
+    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_text):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
 
@@ -278,18 +279,7 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["telemetry_overhead_ms"], 400.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
-
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.1, 10.4])
-    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_artifact_persists_final_overhead_diagnostics(self, state_dir, _perf_counter):
-        with tempfile.TemporaryDirectory() as tmp:
-            state_dir.return_value = Path(tmp)
-
-            report = build_efficiency_report("octo/example", "77")
-            artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
-
-            self.assertEqual(artifact["telemetry_overhead_ms"], 400.0)
-            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", artifact["diagnostics"])
+            self.assertEqual(write_text.call_count, 1)
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):

@@ -101,6 +101,25 @@ class LogicValidationSignalTest(unittest.TestCase):
 
                 self.assertEqual(signals, [])
 
+    def test_terminal_local_states_do_not_contradict_handled_claims(self):
+        for state in ("clarified", "deferred", "rejected"):
+            with self.subTest(state=state):
+                session = {
+                    "items": {
+                        f"local-finding:{state}": {
+                            "item_id": f"local-finding:{state}",
+                            "item_kind": "local_finding",
+                            "state": state,
+                            "completion_claim": "handled",
+                            "validation_evidence": [{"command": "python3 -m unittest", "result": "passed"}],
+                        }
+                    }
+                }
+
+                signals = generate_logic_validation_signals(session)
+
+                self.assertEqual(signals, [])
+
     def test_low_confidence_signal_is_advisory(self):
         session = {
             "items": {

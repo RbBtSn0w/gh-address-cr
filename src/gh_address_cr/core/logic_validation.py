@@ -6,7 +6,7 @@ from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
 
 
-TERMINAL_LOCAL_STATES = {"fixed", "closed", "verified", "published"}
+TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
 
 

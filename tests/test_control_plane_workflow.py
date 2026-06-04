@@ -476,8 +476,8 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "STALE_REQUEST_CONTEXT")
-        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "renew")
-        self.assertEqual(payload["lease_recovery"]["reason_code"], "EXPIRED_LEASE_RENEWABLE")
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "refresh_state")
+        self.assertEqual(payload["lease_recovery"]["reason_code"], "STALE_REQUEST_CONTEXT")
 
     def test_agent_submit_missing_resolution_guides_fixer_response_payload(self):
         self.write_session(
