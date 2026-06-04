@@ -1,7 +1,7 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request has unresolved review threads, pending reviews, stale/outdated threads, local findings ingestion, or needs mandatory final-gate proof in one PR-scoped session.
-argument-hint: "<active-pr|review|address|threads|findings|adapter|doctor|agent|final-gate|submit-feedback> ..."
+argument-hint: "<active-pr|review|address|threads|findings|adapter|doctor|agent|final-gate|telemetry|command-session|submit-feedback> ..."
 ---
 
 # gh-address-cr
@@ -22,6 +22,7 @@ Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runt
 /gh-address-cr final-gate <owner/repo> <pr_number>
 /gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-
 /gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]
+/gh-address-cr command-session --input <commands.json>|-
 /gh-address-cr submit-action <action-request.json> --resolution <fix|clarify|defer|reject> ...
 /gh-address-cr submit-feedback --category <category> --title <title> --summary <summary> ...
 /gh-address-cr version
@@ -36,6 +37,7 @@ Agent protocol commands:
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
 /gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
 /gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+/gh-address-cr agent trivial-fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
 /gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json>
 /gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
 /gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files
@@ -44,6 +46,7 @@ Agent protocol commands:
 /gh-address-cr agent leases <owner/repo> <pr_number>
 /gh-address-cr agent reclaim <owner/repo> <pr_number>
 /gh-address-cr agent orchestrate <start|step|status|stop|resume|submit> ...
+/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit|autopilot> ...
 ```
 
 Examples:
@@ -90,6 +93,10 @@ If the host can only hand the runtime a safe JSONL file, set `GH_ADDRESS_CR_HOST
 
 Use `gh-address-cr telemetry summary <owner/repo> <pr_number> --format markdown` when run-scoped efficiency evidence is needed. Completion evidence from `final-gate` must report the telemetry coverage label: `complete`, `partial`, `runtime-only`, or `unavailable`. Host telemetry is optional; missing host telemetry must be reported as coverage, not treated as review-resolution evidence. Imported telemetry is deduplicated by runtime-owned `event_fingerprint`; duplicate or overlapping imports must be reported via `accepted_fingerprints` and `duplicate_fingerprints`, not manually merged by the agent.
 
+Use `--format codex-host-json --source codex` only for safe Codex host exports that contain aggregate tokens, tool usage, duration, and status data. Host-specific adapters are optional enrichment over the generic `agent-jsonl` contract.
+
+When exactly one cached PR session exists, PR-scoped commands may omit `<owner/repo> <pr_number>`. If the runtime reports `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target explicitly instead of guessing.
+
 ## Execution Ladder
 
 1. If the PR number is unknown, run `active-pr`; it only returns OPEN PRs and fails loud for none or many.
@@ -106,7 +113,13 @@ Use `gh-address-cr telemetry summary <owner/repo> <pr_number> --format markdown`
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely. For shared commit/files/validation evidence, keep per-thread summary/why entries in the batch; use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft the reply content inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime records reply evidence and resolves the thread safely. For shared commit/files/validation evidence, keep per-thread summary/why entries in the batch; use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern. Use `agent trivial-fix` only for documentation or typo-only GitHub threads; if the runtime reports `TRIVIAL_THREAD_NOT_ELIGIBLE`, return to the normal classify/next/submit path.
+
+Prefer `workflow_decision.v1` JSON for structured triage handoff when available. Required fields are `schema_version`, `request_id`, `item_id`, `decision`, and `reason`; Markdown decision blocks remain compatibility prose, not the preferred machine contract.
+
+Use `command-session --input -` to reduce repeated process startup for multiple runtime operations. Treat each returned operation result independently; a failed step does not prove later steps were skipped.
+
+Use `agent orchestrate autopilot` as dry-run planning only. It does not perform GitHub side effects unless a later runtime version explicitly enables a guarded execution mode.
 
 If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
 

@@ -38,6 +38,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
 - `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix.
+- `gh-address-cr agent trivial-fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--publish]`
+  - Narrow shortcut for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
 - `gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json> [--publish]`
   - Routes explicit per-thread batch evidence through the same lease and validation contract as `agent submit-batch`.
 - `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
@@ -50,8 +52,14 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Expires stale leases without deleting accepted evidence.
 - `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-`
   - Imports safe PR-scoped telemetry from a generic agent or host-specific adapter. This does not mutate review item state.
+- `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source codex --format codex-host-json --input <path>|-`
+  - Imports safe aggregate Codex host exports such as tokens, tool usage, duration, and status into the same canonical event model.
 - `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
   - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
+- `gh-address-cr command-session --input <commands.json>|-`
+  - Executes multiple one-shot runtime commands in one process and emits a discrete result for every operation.
+- `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
+  - Emits a guarded dry-run plan for triage, leasing, submission, publish, and final-gate steps. Side-effecting execution is not enabled by default.
 
 Final-gate also supports a host integration hook. If `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` points to a safe JSONL feed, `gh-address-cr final-gate` imports that feed before writing `audit_summary.md` and `efficiency-report.json`. `GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE` defaults to `assistant-host`, and `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`.
 
@@ -64,6 +72,22 @@ Supported `kind` values are `tool_call`, `command`, `wait`, `retry`, `validation
 Telemetry must be public-safe before import. Do not include tokens, credentials, raw prompts, usernames, private machine identifiers, or unnecessary absolute local paths. The runtime computes `event_fingerprint` after canonical normalization and uses it as the authoritative duplicate key. Duplicate or overlapping imports must appear in `duplicate_fingerprints` and must not inflate report counts, durations, or slowest-operation rankings.
 
 Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default.
+
+## Workflow Decision JSON
+
+Structured triage handoff may use `workflow_decision.v1` JSON:
+
+```json
+{
+  "schema_version": "workflow_decision.v1",
+  "request_id": "req-123",
+  "item_id": "github-thread:abc",
+  "decision": "fix",
+  "reason": "Reviewer identified a documentation typo."
+}
+```
+
+Valid `decision` values are `fix`, `clarify`, `defer`, and `reject`. Missing fields, unsupported decisions, or unsupported schema versions fail fast before session state is mutated. Existing Markdown decision blocks remain compatibility guidance; JSON is the preferred machine contract.
 
 ## Evidence Rules
 

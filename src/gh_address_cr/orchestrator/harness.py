@@ -2,6 +2,7 @@ import argparse
 import sys
 import json
 import time
+import re
 from pathlib import Path
 from uuid import uuid4
 import os
@@ -72,7 +73,7 @@ def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> 
             _output_signal("FAILED", "INCOMPATIBLE_RUNTIME", "HALT", f"Incompatible Runtime CLI version: {__version__}")
             return 2
 
-        valid_subcommands = ["start", "status", "step", "resume", "stop", "submit"]
+        valid_subcommands = ["start", "status", "step", "resume", "stop", "submit", "autopilot"]
         if subcommand not in valid_subcommands:
             _output_signal("FAILED", "INVALID_SUBCOMMAND", "HALT", f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}")
             return 2
@@ -89,6 +90,8 @@ def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> 
             return handle_stop(passthrough)
         elif subcommand == "submit":
             return handle_submit(passthrough)
+        elif subcommand == "autopilot":
+            return handle_autopilot(passthrough)
 
         return 2
     except SystemExit as e:
@@ -185,6 +188,117 @@ def handle_submit(args: List[str]) -> int:
     except Exception as e:
         _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Unexpected error: {e}")
         return 5
+
+
+def handle_autopilot(args: List[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate autopilot", exit_on_error=False)
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--execute", action="store_true")
+    try:
+        parsed, _ = parser.parse_known_args(args)
+    except (argparse.ArgumentError, SystemExit) as e:
+        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        return 2
+
+    runtime_state = _load_runtime_state(parsed.repo, parsed.pr_number)
+    items = runtime_state.get("items") if isinstance(runtime_state, dict) else {}
+    steps = []
+    if isinstance(items, dict):
+        for item_id, item in sorted(items.items()):
+            if not isinstance(item, dict) or not item.get("blocking") or item.get("handled"):
+                continue
+            classification = "fix" if _looks_trivial(item) else None
+            classify_step = {
+                "item_id": str(item_id),
+                "command": "agent classify",
+                "side_effect": True,
+                "runtime_state_effect": True,
+                "github_side_effect": False,
+                "requires_execute": True,
+            }
+            if classification:
+                classify_step["classification"] = classification
+            else:
+                classify_step["requires_decision"] = True
+                classify_step["classification_options"] = ["fix", "clarify", "defer", "reject"]
+            steps.append(classify_step)
+            steps.append(
+                {
+                    "item_id": str(item_id),
+                    "command": "agent next",
+                    "role": "fixer" if classification == "fix" else "triage",
+                    "side_effect": True,
+                    "runtime_state_effect": True,
+                    "github_side_effect": False,
+                    "requires_execute": True,
+                }
+            )
+            steps.append(
+                {
+                    "item_id": str(item_id),
+                    "command": "agent submit",
+                    "side_effect": True,
+                    "runtime_state_effect": True,
+                    "github_side_effect": False,
+                    "requires_execute": True,
+                }
+            )
+    steps.append(
+        {
+            "command": "agent publish",
+            "side_effect": True,
+            "runtime_state_effect": True,
+            "github_side_effect": True,
+            "requires_execute": True,
+        }
+    )
+    steps.append(
+        {
+            "command": "final-gate",
+            "side_effect": False,
+            "runtime_state_effect": False,
+            "github_side_effect": False,
+        }
+    )
+
+    payload = {
+        "status": "READY",
+        "reason_code": "AUTOPILOT_PLAN_READY",
+        "next_action": "Review the plan. Re-run with --execute only when side effects are intended.",
+        "repo": parsed.repo,
+        "pr_number": str(parsed.pr_number),
+        "side_effects_enabled": False,
+        "execute_requested": bool(parsed.execute),
+        "steps": steps,
+    }
+    if parsed.execute:
+        payload["status"] = "FAILED"
+        payload["reason_code"] = "AUTOPILOT_EXECUTION_NOT_ENABLED"
+        payload["next_action"] = "This guarded v1 only supports dry-run planning."
+        sys.stdout.write(json.dumps(payload) + "\n")
+        return 2
+    sys.stdout.write(json.dumps(payload) + "\n")
+    return 0
+
+
+def _looks_trivial(item: dict) -> bool:
+    text = " ".join(str(item.get(key) or "") for key in ("title", "body", "first_body", "path")).lower()
+    sensitive = ("security", "unsafe", "auth", "token", "secret", "api", "data loss", "performance")
+    trivial = ("typo", "spelling", "grammar", "documentation", "docs", "readme", "comment", "wording")
+    sensitive_pattern = (
+        r"(?<![A-Za-z0-9])"
+        + "("
+        + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in sensitive)
+        + r")(?![A-Za-z0-9])"
+    )
+    trivial_pattern = (
+        r"(?<![A-Za-z0-9])"
+        + "("
+        + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in trivial)
+        + r")(?![A-Za-z0-9])"
+    )
+    return bool(re.search(trivial_pattern, text)) and not bool(re.search(sensitive_pattern, text))
 
 
 def handle_start(args: List[str]) -> int:

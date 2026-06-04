@@ -82,7 +82,11 @@ def claim_lease(
             continue
         if _get(existing, "item_id") == item_id:
             raise LeaseConflictError("ITEM_ALREADY_LEASED", item_id)
-        overlap = set(keys).intersection(_conflict_keys(existing))
+        existing_keys = _conflict_keys(existing)
+        overlap = set(keys).intersection(existing_keys)
+        hunk_overlap = _hunk_overlap(keys, existing_keys)
+        if hunk_overlap:
+            overlap.update(hunk_overlap)
         if (
             overlap
             and not (is_read_only_role(role) and is_read_only_role(_get(existing, "role")))
@@ -249,8 +253,12 @@ def calculate_conflict_keys(item: Any) -> tuple[str, ...]:
         keys.add(f"item:{item_id}")
 
     path = _get(item, "path")
+    hunk_key = _hunk_conflict_key(item)
     if path:
-        keys.add(f"file:{_normalize_repo_path(path)}")
+        if hunk_key:
+            keys.add(hunk_key)
+        else:
+            keys.add(f"file:{_normalize_repo_path(path)}")
 
     for key in _get(item, "conflict_keys", ()) or ():
         if key:
@@ -264,6 +272,84 @@ def calculate_conflict_keys(item: Any) -> tuple[str, ...]:
             keys.add(f"github_resolve:{thread_id}")
 
     return tuple(sorted(keys))
+
+
+def _hunk_conflict_key(item: Any) -> str | None:
+    path = _get(item, "path")
+    if not path:
+        return None
+    start = _coerce_positive_int(
+        _get(item, "start_line")
+        or _get(item, "line")
+        or _get(item, "original_line")
+    )
+    end = _coerce_positive_int(
+        _get(item, "end_line")
+        or _get(item, "original_end_line")
+        or _get(item, "line")
+        or _get(item, "original_line")
+    )
+    if start is None or end is None:
+        return None
+    if end < start:
+        start, end = end, start
+    return f"hunk:{_normalize_repo_path(path)}:{start}-{end}"
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _hunk_overlap(candidate_keys: tuple[str, ...], existing_keys: set[str]) -> set[str]:
+    overlaps: set[str] = set()
+    candidate_files = {key.removeprefix("file:") for key in candidate_keys if key.startswith("file:")}
+    existing_files = {key.removeprefix("file:") for key in existing_keys if key.startswith("file:")}
+    candidate_hunks = []
+    for key in candidate_keys:
+        parsed = _parse_hunk_key(key)
+        if parsed is None:
+            continue
+        candidate_hunks.append(parsed)
+        if parsed[0] in existing_files:
+            overlaps.add(key)
+    existing_hunks = []
+    for key in existing_keys:
+        parsed = _parse_hunk_key(key)
+        if parsed is None:
+            continue
+        existing_hunks.append(parsed)
+        if parsed[0] in candidate_files:
+            overlaps.add(key)
+    for candidate in candidate_hunks:
+        candidate_path, candidate_start, candidate_end = candidate
+        for existing in existing_hunks:
+            existing_path, existing_start, existing_end = existing
+            if candidate_path != existing_path:
+                continue
+            if candidate_start <= existing_end and existing_start <= candidate_end:
+                overlaps.add(f"hunk:{candidate_path}:{max(candidate_start, existing_start)}-{min(candidate_end, existing_end)}")
+    return overlaps
+
+
+def _parse_hunk_key(key: str) -> tuple[str, int, int] | None:
+    if not key.startswith("hunk:"):
+        return None
+    body = key.removeprefix("hunk:")
+    path, separator, range_text = body.rpartition(":")
+    if not separator:
+        return None
+    start_text, dash, end_text = range_text.partition("-")
+    if not dash:
+        return None
+    start = _coerce_positive_int(start_text)
+    end = _coerce_positive_int(end_text)
+    if start is None or end is None:
+        return None
+    return path, start, end
 
 
 def is_read_only_role(role: str | None) -> bool:
@@ -284,7 +370,7 @@ def _same_agent_github_thread_file_overlap_allowed(
         return False
     if _get(existing, "agent_id") != agent_id:
         return False
-    if not overlap or any(not key.startswith("file:") for key in overlap):
+    if not overlap or any(not (key.startswith("file:") or key.startswith("hunk:")) for key in overlap):
         return False
     existing_keys = set(_conflict_keys(existing))
     return any(key.startswith("github_reply:") for key in existing_keys) and any(
