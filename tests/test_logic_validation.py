@@ -31,6 +31,7 @@ class LogicValidationSignalTest(unittest.TestCase):
                     "item_kind": "github_thread",
                     "state": "published",
                     "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "classification_evidence": {"classification": "fix"},
                     "blocking": False,
                 }
             }
@@ -41,6 +42,23 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].signal_type, "missing_required_evidence")
         self.assertEqual(signals[0].gate_effect, "blocking")
+
+    def test_legacy_closed_github_thread_with_reply_evidence_does_not_require_validation(self):
+        session = {
+            "items": {
+                "github-thread:legacy": {
+                    "item_id": "github-thread:legacy",
+                    "item_kind": "github_thread",
+                    "state": "closed",
+                    "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "blocking": False,
+                }
+            }
+        }
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
 
     def test_terminal_github_thread_accepts_final_gate_validation_shapes(self):
         for key, value in (

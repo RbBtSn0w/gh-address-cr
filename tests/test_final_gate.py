@@ -303,6 +303,7 @@ class FinalGateTestCase(unittest.TestCase):
     def test_completion_summary_guidance_reports_logic_validation_blockers(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
         session = self.passing_session()
+        session["items"]["github-thread:THREAD_DONE"]["classification_evidence"] = {"classification": "fix"}
         session["items"]["github-thread:THREAD_DONE"].pop("validation_evidence")
 
         result = self.evaluate(
