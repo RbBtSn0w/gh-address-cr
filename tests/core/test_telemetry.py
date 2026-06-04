@@ -2222,7 +2222,7 @@ class TestTelemetry(unittest.TestCase):
             TelemetryParseResult,
             ExternalTelemetryEvent,
             register_adapter,
-            _registry,
+            unregister_adapter,
         )
         
         class MockCustomAdapter(TelemetryAdapter):
@@ -2256,6 +2256,7 @@ class TestTelemetry(unittest.TestCase):
                 )
 
         register_adapter("mock-custom", MockCustomAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-custom"))
         
         with tempfile.TemporaryDirectory() as tmp:
             with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
@@ -2274,9 +2275,74 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(report["total_events"], 1)
                 self.assertEqual(report["total_observed_duration_ms"], 4500)
                 self.assertEqual(report["slowest_operations"][0]["operation"], "custom_op")
+
+    def test_custom_telemetry_adapter_registration_duplicate_fails(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            register_adapter,
+            unregister_adapter,
+        )
         
-        if "mock-custom" in _registry._adapters:
-            del _registry._adapters["mock-custom"]
+        class MockCustomAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                return TelemetryParseResult([], 0, False, False, [])
+
+        register_adapter("mock-dup", MockCustomAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-dup"))
+
+        with self.assertRaises(ValueError) as context:
+            register_adapter("mock-dup", MockCustomAdapter())
+        self.assertIn("already registered", str(context.exception))
+
+    def test_custom_telemetry_adapter_unsafe_normalization_rejection(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+        
+        class MockUnsafeAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                # Return an event containing unsafe metadata keys (e.g. password)
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-unsafe",
+                    kind="tool_call",
+                    operation="op",
+                    status="success",
+                    duration_ms=100,
+                    metadata={"password": "should_be_rejected"}
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                )
+
+        register_adapter("mock-unsafe", MockUnsafeAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe",
+                    raw="dummy_payload",
+                )
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("unsafe key" in diag or "password" in diag for diag in result["diagnostics"]))
 
 if __name__ == "__main__":
     unittest.main()

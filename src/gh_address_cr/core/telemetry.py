@@ -183,20 +183,13 @@ UNSAFE_METADATA_KEY_MARKERS = (
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
 
 
+@dataclass
 class TelemetryParseResult:
-    def __init__(
-        self,
-        events: list[ExternalTelemetryEvent],
-        rejected_count: int,
-        unsafe_seen: bool,
-        malformed_seen: bool,
-        diagnostics: list[str],
-    ):
-        self.events = events
-        self.rejected_count = rejected_count
-        self.unsafe_seen = unsafe_seen
-        self.malformed_seen = malformed_seen
-        self.diagnostics = diagnostics
+    events: list[ExternalTelemetryEvent]
+    rejected_count: int
+    unsafe_seen: bool
+    malformed_seen: bool
+    diagnostics: list[str]
 
 
 class TelemetryAdapter(ABC):
@@ -210,10 +203,15 @@ class TelemetryAdapterRegistry:
         self._adapters: dict[str, TelemetryAdapter] = {}
 
     def register(self, fmt: str, adapter: TelemetryAdapter) -> None:
+        if fmt in self._adapters:
+            raise ValueError(f"Adapter for format '{fmt}' is already registered.")
         self._adapters[fmt] = adapter
 
     def get_adapter(self, fmt: str) -> TelemetryAdapter | None:
         return self._adapters.get(fmt)
+
+    def unregister(self, fmt: str) -> None:
+        self._adapters.pop(fmt, None)
 
 
 _registry = TelemetryAdapterRegistry()
@@ -225,6 +223,10 @@ def register_adapter(fmt: str, adapter: TelemetryAdapter) -> None:
 
 def get_adapter(fmt: str) -> TelemetryAdapter | None:
     return _registry.get_adapter(fmt)
+
+
+def unregister_adapter(fmt: str) -> None:
+    _registry.unregister(fmt)
 
 
 class GenericAgentJsonlAdapter(TelemetryAdapter):
@@ -564,14 +566,27 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     duplicate_count = 0
 
     for event in accepted_events:
-        observed_sessions.add(event.source_session_id)
-        if event.identity in existing_fingerprints:
-            duplicate_count += 1
-            duplicate_fingerprints.append(event.identity)
+        try:
+            normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("UNSAFE:"):
+                unsafe_seen = True
+                diagnostics.append(f"event {event.event_id or 'unknown'}: {message.removeprefix('UNSAFE:')}")
+            else:
+                malformed_seen = True
+                diagnostics.append(f"event {event.event_id or 'unknown'}: {message}")
+            rejected_count += 1
             continue
-        existing_fingerprints.add(event.identity)
-        accepted_fingerprints.append(event.identity)
-        accepted.append(event)
+
+        observed_sessions.add(normalized_event.source_session_id)
+        if normalized_event.identity in existing_fingerprints:
+            duplicate_count += 1
+            duplicate_fingerprints.append(normalized_event.identity)
+            continue
+        existing_fingerprints.add(normalized_event.identity)
+        accepted_fingerprints.append(normalized_event.identity)
+        accepted.append(normalized_event)
 
     ambiguous_seen = len(observed_sessions) > 1
     if unsafe_seen:
