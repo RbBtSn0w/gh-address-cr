@@ -16,7 +16,6 @@ from gh_address_cr.core import io as core_io
 from gh_address_cr.core import ledger as core_ledger
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.command_runner import run_cmd as run_cmd_native
-from gh_address_cr.github.client import GitHubClient
 
 
 def sha256_of_file(path: Path) -> str:
@@ -24,7 +23,15 @@ def sha256_of_file(path: Path) -> str:
 
 
 def gh_read_json(args: list[str]) -> Any:
-    return GitHubClient()._read_json(args)
+    result = run_cmd_native(["gh", *args], retries=3)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            ["gh", *args],
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return json.loads(result.stdout)
 
 
 def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:

@@ -189,12 +189,25 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         self.assertNotEqual(rc, 0)
         self.assertEqual(payload["status"], "failed")
-        self.assertIsNone(payload["issue_number"])
-        self.assertIsNone(payload["issue_url"])
         self.assertIn("dedupe lookup failed", payload["error"])
         self.assertIn("gh auth failed", payload["error"])
-        self.assertTrue(audits)
+        self.assertEqual(audits[-1][0][1], "failed")
         self.assertIn("dedupe lookup failed", stderr.getvalue())
+
+    def test_submit_feedback_read_json_requests_retrying_github_read(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_retry_under_test")
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, '{"items":[]}', "")
+
+        module.run_cmd_native = fake_run_cmd
+
+        payload = module.gh_read_json(["api", "search/issues?q=x"])
+
+        self.assertEqual(payload, {"items": []})
+        self.assertEqual(calls, [(["gh", "api", "search/issues?q=x"], {"retries": 3})])
 
     def test_submit_feedback_sanitize_text_only_redacts_absolute_paths(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_under_test")

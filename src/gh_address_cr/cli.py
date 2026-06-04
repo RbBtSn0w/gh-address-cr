@@ -1394,8 +1394,11 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         return 2
     if command in {"review", "findings"} and parsed.input:
-        preloaded_findings_input = _read_findings_input(parsed.input)
-        if not preloaded_findings_input.strip():
+        try:
+            preloaded_findings_input = _read_findings_input(parsed.input)
+            if not preloaded_findings_input.strip():
+                raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
+        except (FindingsFormatError, OSError) as exc:
             summary = build_preflight_summary(
                 command,
                 repo,
@@ -1404,7 +1407,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
                 exit_code=2,
                 reason_code="INVALID_FINDINGS_INPUT",
                 waiting_on="findings_input",
-                next_action=EMPTY_FINDINGS_INPUT_MESSAGE,
+                next_action=str(exc),
             )
             sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
             return 2
@@ -2340,8 +2343,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.\n"
         ),
     )
-    parser.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON.")
-    parser.add_argument("--human", action="store_true", help="Emit human-oriented narrative text (default).")
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON.")
+    output_group.add_argument("--human", action="store_true", help="Emit human-oriented narrative text (default).")
     auto_group = parser.add_mutually_exclusive_group()
     auto_group.add_argument("--auto-clean", dest="auto_clean", action="store_true")
     auto_group.add_argument("--no-auto-clean", dest="auto_clean", action="store_false")
@@ -2363,6 +2367,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return _emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scoped_args)
     _ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number)
+    machine_requested = "--machine" in scoped_args and "--human" not in scoped_args
     try:
         result = core_gate.Gatekeeper().run(
             parsed.repo,
@@ -2372,10 +2377,17 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             require_required_checks=parsed.require_required_checks,
         )
     except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
+        if machine_requested:
+            _emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2)
+        else:
+            print(str(exc), file=sys.stderr)
         return 2
     except Exception as exc:
-        print(f"Final gate failed to evaluate: {exc}", file=sys.stderr)
+        message = f"Final gate failed to evaluate: {exc}"
+        if machine_requested:
+            _emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_EVALUATION_FAILED", message, 5)
+        else:
+            print(message, file=sys.stderr)
         return 5
 
     summary_path, telemetry_report = _write_native_final_gate_artifacts(
@@ -2407,6 +2419,14 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         machine_summary = result.to_machine_summary()
         if summary_path:
             machine_summary["artifact_path"] = str(summary_path)
+        if telemetry_report is not None:
+            machine_summary["telemetry"] = {
+                "coverage_label": telemetry_report["coverage_label"],
+                "report_artifact": telemetry_report.get("report_artifact"),
+                "total_events": telemetry_report.get("total_events"),
+                "success_rate": telemetry_report.get("success_rate"),
+                "diagnostics": telemetry_report.get("diagnostics", []),
+            }
         sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
     else:
         _emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
@@ -2415,6 +2435,21 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return result.exit_code
 
     return 0
+
+
+def _emit_final_gate_machine_error(repo: str, pr_number: str, reason_code: str, message: str, exit_code: int) -> None:
+    payload = {
+        "status": "BLOCKED",
+        "reason_code": reason_code,
+        "next_action": message,
+        "waiting_on": "final_gate",
+        "exit_code": exit_code,
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "counts": {},
+        "failure_codes": [reason_code],
+    }
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | None:

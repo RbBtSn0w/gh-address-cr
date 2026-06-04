@@ -54,7 +54,12 @@ def check_runtime_version() -> bool:
 
 def _version_tuple(value: str) -> tuple[int, ...]:
     core = value.split("-", 1)[0].split("+", 1)[0]
-    return tuple(int(part) for part in core.split(".") if part.isdigit())
+    parts: list[int] = []
+    for part in core.split("."):
+        match = re.match(r"^\d+", part)
+        if match:
+            parts.append(int(match.group(0)))
+    return tuple(parts)
 
 
 def _parse_common_args(args: List[str]):
@@ -594,16 +599,13 @@ def _eligible_runtime_items(runtime_state: dict) -> List[str]:
 
 
 def _load_runtime_state(repo: str, pr_number: str) -> dict:
-    try:
-        return core_session.load_session(repo, pr_number)
-    except core_session.SessionError:
-        return {}
+    return core_session.load_session(repo, pr_number)
 
 
 def _run_authoritative_gate(repo: str, pr_number: str) -> int:
     try:
         runtime_state = core_session.load_session(repo, pr_number)
     except core_session.SessionError:
-        runtime_state = {"repo": repo, "pr_number": str(pr_number), "items": {}}
+        return 1
     result = core_gate.evaluate_final_gate(runtime_state)
     return result.exit_code

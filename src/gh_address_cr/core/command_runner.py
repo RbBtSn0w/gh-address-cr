@@ -5,6 +5,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+TRANSIENT_GH_FAILURE_MARKERS = (
+    "502",
+    "503",
+    "temporary failure",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "graphql error",
+    "graphql failed",
+)
+
+
+def is_transient_gh_failure(
+    stderr: str | None = None, stdout: str | None = None, returncode: int | None = None
+) -> bool:
+    _ = returncode
+    text = f"{stderr or ''}\n{stdout or ''}".lower()
+    return any(marker in text for marker in TRANSIENT_GH_FAILURE_MARKERS)
+
 
 def telemetry_debug_enabled() -> bool:
     return (os.environ.get("GH_ADDRESS_CR_DEBUG_TELEMETRY") or "").strip().lower() in {"1", "true", "yes"}
@@ -37,28 +56,49 @@ def run_cmd(
 
     from gh_address_cr.core.telemetry import SessionTelemetry, command_label
 
-    _ = retries
+    attempts = max(1, retries)
     start_time = time.time()
-    try:
-        result = subprocess.run(
-            cmd,
-            input=stdin,
-            text=True,
-            capture_output=True,
-            env=runtime_subprocess_env(),
-            timeout=timeout,
-        )
-        end_time = time.time()
-        exit_code = result.returncode
-    except subprocess.TimeoutExpired as exc:
-        end_time = time.time()
-        exit_code = 124
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(attempts):
+        try:
+            result = subprocess.run(
+                cmd,
+                input=stdin,
+                text=True,
+                capture_output=True,
+                env=runtime_subprocess_env(),
+                timeout=timeout,
+            )
+            if (
+                result.returncode != 0
+                and cmd
+                and cmd[0] == "gh"
+                and attempt < attempts - 1
+                and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+            ):
+                time.sleep(2**attempt)
+                continue
+            break
+        except subprocess.TimeoutExpired as exc:
+            result = subprocess.CompletedProcess(
+                args=cmd,
+                returncode=124,
+                stdout=timeout_stream_text(exc.stdout),
+                stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+            )
+            if cmd and cmd[0] == "gh" and attempt < attempts - 1:
+                time.sleep(2**attempt)
+                continue
+            break
+    if result is None:
         result = subprocess.CompletedProcess(
             args=cmd,
-            returncode=exit_code,
-            stdout=timeout_stream_text(exc.stdout),
-            stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+            returncode=1,
+            stdout="",
+            stderr="Command failed before producing a result.",
         )
+    end_time = time.time()
+    exit_code = result.returncode
 
     try:
         SessionTelemetry.get_instance().record(

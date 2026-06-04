@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.session import SessionManager, load_session
+from gh_address_cr.core.session import SessionManager, load_session, session_file
 from gh_address_cr.core.workflow import WorkflowError
-from gh_address_cr.orchestrator.harness import handle_agent_orchestrate
+from gh_address_cr.orchestrator.harness import _version_tuple, handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import load_orchestration_session
 
 
@@ -71,6 +71,11 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "INCOMPATIBLE_RUNTIME")
         self.assertEqual(payload["next_action"], "HALT")
+
+    def test_version_tuple_preserves_numeric_prefixes_with_suffixes(self):
+        self.assertEqual(_version_tuple("2.9.10rc1"), (2, 9, 10))
+        self.assertEqual(_version_tuple("1.0.0b1+local"), (1, 0, 0))
+        self.assertEqual(_version_tuple("0.0.2a"), (0, 0, 2))
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_start_syncs_queue_from_authoritative_runtime(self, mock_stdout):
@@ -255,6 +260,20 @@ class TestOrchestratorHarness(unittest.TestCase):
         exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
         self.assertEqual(exit_code, 2)
         self.assertIn("final-gate", mock_stdout.getvalue().lower())
+
+    @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
+    def test_stop_fails_closed_when_authoritative_runtime_state_is_missing(self, mock_stdout):
+        self._write_core_session({})
+        self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
+        runtime_session = session_file(self.repo, self.pr)
+        runtime_session.unlink()
+
+        exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "GATE_FAILED")
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_submit_retry_count_persisted_and_handoff_at_three_failures(self, mock_stdout):

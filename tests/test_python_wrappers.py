@@ -320,6 +320,7 @@ else:
                 "repo",
                 "status",
                 "waiting_on",
+                "telemetry",
             },
         )
         self.assertEqual(summary["status"], "PASSED")
@@ -331,6 +332,8 @@ else:
         self.assertEqual(summary["next_action"], "Completion may be claimed.")
         self.assertIsNone(summary["reason_code"])
         self.assertIsNone(summary["waiting_on"])
+        self.assertEqual(summary["telemetry"]["coverage_label"], "unavailable")
+        self.assertIn("efficiency-report.json", summary["telemetry"]["report_artifact"])
         self.assertEqual(summary["commands"]["final_gate"], f"gh-address-cr final-gate {self.repo} {self.pr}")
 
     def test_cli_final_gate_default_keeps_human_text(self):
@@ -376,6 +379,45 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Final gate PASSED", result.stdout)
         self.assertNotIn('"status"', result.stdout)
+
+    def test_cli_final_gate_global_machine_flag_emits_structured_summary(self):
+        self.install_fake_gh_for_threads([])
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["telemetry"]["coverage_label"], "unavailable")
+        self.assertNotIn("Final gate PASSED", result.stdout)
+
+    def test_cli_final_gate_rejects_conflicting_output_flags(self):
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--machine", "--human", self.repo, self.pr]
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not allowed with argument", result.stderr)
+
+    def test_cli_final_gate_machine_github_failure_emits_structured_summary(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import sys
+sys.stderr.write("gh auth failed\\n")
+raise SystemExit(1)
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--machine", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "FINAL_GATE_EVALUATION_FAILED")
+        self.assertEqual(summary["waiting_on"], "final_gate")
 
     def test_cli_review_machine_trailing_flag_emits_structured_summary(self):
         gh = self.bin_dir / "gh"
@@ -1136,6 +1178,20 @@ else:
         self.assertEqual(summary["reason_code"], "INVALID_FINDINGS_INPUT")
         self.assertIn("Use [] for an explicit empty producer result", summary["next_action"])
 
+        self.assertFalse(self.session_file().exists())
+
+    def test_cli_findings_missing_input_path_returns_structured_error_without_session_mutation(self):
+        missing = Path(self.temp_dir.name) / "missing-findings.json"
+
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(missing)]
+        )
+
+        self.assertEqual(result.returncode, 2)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "INVALID_FINDINGS_INPUT")
+        self.assertIn("missing-findings.json", summary["next_action"])
         self.assertFalse(self.session_file().exists())
 
     def test_cli_review_continues_after_non_empty_synced_findings_result(self):
