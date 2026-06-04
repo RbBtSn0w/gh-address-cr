@@ -369,6 +369,7 @@ else:
                 sys.executable,
                 str(CLI_PY),
                 "final-gate",
+                "--human",
                 self.repo,
                 self.pr,
             ]
@@ -2337,7 +2338,7 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("== Current Run Snapshot ==", result.stdout)
@@ -2769,7 +2770,7 @@ else:
         (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2809,7 +2810,7 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2831,7 +2832,7 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2889,7 +2890,7 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("github_threads_missing_reply_count=1", result.stdout)
         self.assertIn("missing reply evidence", result.stderr)
@@ -2928,7 +2929,7 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Audit summary path:", result.stdout)
@@ -2984,7 +2985,7 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("Pending review count: 1", result.stdout)
         self.assertIn("pending review(s)", result.stderr)
@@ -3050,7 +3051,7 @@ else:
         )
         self.assertEqual(ingest.returncode, 5, ingest.stderr)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         audit_lines = self.audit_log_file().read_text(encoding="utf-8").splitlines()
         last = json.loads(audit_lines[-1])
@@ -3088,7 +3089,7 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--auto-clean", self.repo, self.pr])
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
@@ -3124,7 +3125,7 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
@@ -3207,7 +3208,7 @@ else:
         report_artifact.mkdir(parents=True)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())

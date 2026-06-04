@@ -385,7 +385,7 @@ else:
 
                 self.assertFalse(hasattr(cli, "run_script"))
                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                    rc = cli.main(["final-gate", "--no-auto-clean", "--snapshot", str(snapshot), repo, pr_number])
+                    rc = cli.main(["final-gate", "--human", "--no-auto-clean", "--snapshot", str(snapshot), repo, pr_number])
 
                 self.assertEqual(rc, 0, stderr.getvalue())
                 self.assertIn("Verified: 0 Unresolved Threads found", stdout.getvalue())
@@ -437,7 +437,7 @@ else:
 
                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                     rc = cli.main(
-                        ["final-gate", "--no-auto-clean", "--require-checks", "--snapshot", str(snapshot), repo, pr_number]
+                        ["final-gate", "--human", "--no-auto-clean", "--require-checks", "--snapshot", str(snapshot), repo, pr_number]
                     )
 
                 self.assertEqual(rc, 5)
