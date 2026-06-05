@@ -122,5 +122,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/016-runtime-complexity-plateau/plan.md](specs/016-runtime-complexity-plateau/plan.md)
+  [specs/018-runtime-kernel/plan.md](specs/018-runtime-kernel/plan.md)
 <!-- SPECKIT END -->
