@@ -1,3 +1,10 @@
+## [2.10.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.11...v2.10.0) (2026-06-05)
+
+### Features
+
+* Add agent-context extension for managing coding agent context files ([94104e5](https://github.com/RbBtSn0w/gh-address-cr/commit/94104e57fe8e02d65048549b864c11bd756b88e1))
+* **superb:** Enhance /speckit.superb.review for workflow decision handling ([9fe5504](https://github.com/RbBtSn0w/gh-address-cr/commit/9fe5504d56d3fbf28a0f50194f39a543cba8a066))
+
 ## [2.9.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.10...v2.9.11) (2026-06-04)
 
 ## [2.9.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.9.9...v2.9.10) (2026-06-04)
