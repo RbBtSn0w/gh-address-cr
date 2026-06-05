@@ -41,3 +41,7 @@
 - Items are numbered sequentially for easy reference
 - For implementation/release checklists, include constitution compliance,
   evidence, final-gate, and repo-root vs skill-root path checks where relevant
+- For runtime state, telemetry, final-gate, lease, artifact, GitHub side-effect,
+  or agent-protocol changes, include Architecture Preflight checks for event
+  inputs, projections, policy decisions, side-effect/outbox boundaries, artifact
+  truth boundaries, recovery/replay behavior, and contract tests

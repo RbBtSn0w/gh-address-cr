@@ -16,6 +16,7 @@ INSTALLATION_MD = DOCS_DIR / "installation.md"
 TROUBLESHOOTING_MD = DOCS_DIR / "troubleshooting.md"
 WORKFLOWS_MD = DOCS_DIR / "workflows.md"
 AGENTS_MD = ROOT / "AGENTS.md"
+CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
 OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
@@ -404,6 +405,19 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("product/runtime identity remains", text)
         self.assertIn("`gh-address-cr`: the Python package, console entrypoint, repository URL", text)
         self.assertIn("with `--skill skill`", text)
+
+    def test_project_governance_documents_architecture_preflight_kernel(self):
+        text = read_repo_docs(CONSTITUTION_MD, AGENTS_MD, ARCHITECTURE_MD)
+        for phrase in (
+            "First-Principles Runtime Kernel",
+            "Architecture Preflight",
+            "external facts -> events -> projections -> policy -> command plan/outbox",
+            "artifact truth boundary",
+            "self-referential completion",
+            "stop expanding conditionals",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
 
     def test_readme_and_skill_document_optional_otlp_worker_logging(self):
         readme_text = read_repo_docs(README_MD, DEVELOPMENT_MD)

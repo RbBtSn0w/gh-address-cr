@@ -34,6 +34,10 @@
 - **Control plane ownership**: Does the plan keep runtime state, GitHub side
   effects, reply evidence, loop safety, and final-gate evaluation inside
   deterministic code instead of Markdown instructions?
+- **First-principles runtime kernel**: Does the plan define external facts or
+  event inputs, projections, policy/status-to-action decisions, command
+  planning, outbox execution, execution evidence, and replay or contract tests?
+  Are artifacts treated as evidence/reporting outputs instead of hidden state?
 - **Public CLI contract**: Does the plan preserve or explicitly version the
   `review` entrypoint, high-level command semantics, machine summary fields,
   reason codes, wait states, exit codes, and cache artifact contracts?
@@ -52,6 +56,10 @@
   Does it define source attribution, coverage labels, privacy filtering,
   deterministic event fingerprints, idempotent duplicate handling, and
   fail-loud telemetry commands with fail-open core review workflows?
+- **Architecture plateau discipline**: If the plan follows repeated review or
+  implementation feedback in the same design axis, does it reduce state space
+  rather than add scattered branches? Does it define when to stop patching and
+  move the change into an architecture spec?
 - **Fail-fast verification**: Does the plan include tests or smoke checks for
   each changed public behavior, parser, session transition, or CLI surface?
 
