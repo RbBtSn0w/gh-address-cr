@@ -11,9 +11,21 @@ JsonDict = dict[str, Any]
 
 RUNTIME_FACT_SCHEMA_VERSION = "1.0"
 REVIEW_THREAD_OBSERVED = "review_thread_observed"
+LOCAL_ITEM_OBSERVED = "local_item_observed"
+PENDING_REVIEW_OBSERVED = "pending_review_observed"
+CHECK_RUN_OBSERVED = "check_run_observed"
+LOGIC_VALIDATION_OBSERVED = "logic_validation_observed"
 COMMAND_EXECUTED = "command_executed"
 REPORTING_OBSERVED = "reporting_observed"
-SUPPORTED_FACT_KINDS = (REVIEW_THREAD_OBSERVED, COMMAND_EXECUTED, REPORTING_OBSERVED)
+SUPPORTED_FACT_KINDS = (
+    REVIEW_THREAD_OBSERVED,
+    LOCAL_ITEM_OBSERVED,
+    PENDING_REVIEW_OBSERVED,
+    CHECK_RUN_OBSERVED,
+    LOGIC_VALIDATION_OBSERVED,
+    COMMAND_EXECUTED,
+    REPORTING_OBSERVED,
+)
 SUPPORTED_COMMAND_KINDS = frozenset({"reply_thread", "resolve_thread", "retry_command", "run_final_gate"})
 SUPPORTED_COMMAND_EXECUTION_STATUSES = frozenset({"succeeded", "failed"})
 
