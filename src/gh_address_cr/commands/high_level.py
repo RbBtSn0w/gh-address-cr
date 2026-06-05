@@ -428,9 +428,9 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         "claimable_item_ids": claimable_item_ids,
         "batch_response_skeleton": _batch_response_skeleton(claimable_item_ids),
         "instructions": [
-            "Use per-thread ActionResponse evidence, or agent submit-batch when one commit/files/validation set addresses multiple threads.",
+            "Use per-thread ActionResponse evidence, or agent submit-batch when one set of files/validation evidence addresses multiple threads.",
             "For each actionable GitHub thread, run agent classify and agent next to acquire leases before submitting evidence.",
-            "When common commit, file, and validation evidence applies, submit one BatchActionResponse with per-thread summary/why entries.",
+            "When common files and validation evidence apply, submit one BatchActionResponse with per-thread summary/why entries; commit evidence is hydrated during publish.",
             "Use agent fix-all only with --input batch-response.json, or with --homogeneous-reason for a homogeneous repeated concern.",
             "After accepted evidence is present, run agent publish.",
         ],
@@ -457,7 +457,6 @@ def _batch_response_skeleton(item_ids: list[str]) -> dict:
             "files": ["<file_path>"],
             "validation_commands": [{"command": "<test_command>", "result": "<passed|failed + key signal>"}],
             "fix_reply": {
-                "commit_hash": "<commit_hash>",
                 "test_command": "<test_command>",
                 "test_result": "<passed|failed + key signal>",
             },

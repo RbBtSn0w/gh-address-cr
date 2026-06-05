@@ -157,8 +157,8 @@ External fixer commands must read a JSON payload from stdin and return a JSON ob
 - `note`
 - for GitHub thread `fix`: `fix_reply`
   - `summary`
-  - `commit_hash`
   - `files`
+  - optional `commit_hash` when known; publish hydrates commit evidence otherwise
   - optional `severity`, `why`, `test_command`, `test_result`
   - `validation_commands` may be used as the default validation evidence when `test_command` / `test_result` are omitted
 - for GitHub thread `clarify` or `defer`: `reply_markdown`

@@ -23,7 +23,7 @@ class RuntimeComplexityModelTests(unittest.TestCase):
                 "item_kinds": ["github_thread"],
                 "applicability": "matched",
                 "priority": 10,
-                "required_evidence": ["classification", "commit", "files", "validation", "reply"],
+                "required_evidence": ["classification", "files", "validation", "reply"],
                 "completion_criteria": ["accepted_evidence", "published_reply", "resolved_thread", "final_gate"],
                 "terminal_failure_reasons": ["UNSUPPORTED_WORK_ITEM", "BOUNDARY_CONFLICT"],
                 "next_actions": ["issue_action_request"],

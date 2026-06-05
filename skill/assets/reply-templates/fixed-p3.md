@@ -1,14 +1,8 @@
-Fixed in `<commit_hash>`.
+Addressed in `<commit_hash>`.
 
 Review signal: `P3`
 
-What I changed:
 - `<file_path>`: `<small/non-breaking improvement>`
-
-Why this addresses the CR:
-- `<clarity/consistency improvement>`
-- Low-severity improvement validated for non-breaking behavior.
-
-Validation:
-- `<test_command>`
-- Result: `<pass/fail + key signal>`
+- Why: `<clarity/consistency improvement>`
+- Risk note: Low-severity improvement validated for non-breaking behavior.
+- Validation: `<test_command>` `<pass/fail + key signal>`

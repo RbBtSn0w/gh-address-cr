@@ -135,8 +135,8 @@ def build_fix_reply(args: argparse.Namespace, files: list[str]) -> dict:
 def validate_evidence(args: argparse.Namespace, item_kind: str, *, runtime: bool) -> bool:
     files = parse_files(args.files)
     if args.resolution == "fix":
-        if item_kind == "github_thread" and (not args.commit_hash or not files):
-            error("--resolution fix for github_thread requires --commit-hash and --files")
+        if item_kind == "github_thread" and not files:
+            error("--resolution fix for github_thread requires --files")
             return False
         if runtime and not files:
             error("--resolution fix for runtime ActionRequest requires --files")

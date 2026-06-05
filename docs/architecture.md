@@ -244,7 +244,7 @@ If a rule or instruction must ship with the installed skill, it must live inside
 
 - PR-scoped session state for GitHub threads and local findings
 - Strict per-item CR handling workflow
-- Required evidence format (commit/files/test result)
+- Required worker evidence format (files/test result/reviewer-facing rationale) with publish-time commit evidence hydration
 - Mandatory final gate (`gh-address-cr final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
 - Audit log + trace log + audit summary + summary hash output

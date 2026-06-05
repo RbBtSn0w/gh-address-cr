@@ -569,20 +569,14 @@ class NativeWorkflowTests(unittest.TestCase):
             },
         }
         expected = (
-            "Fixed in `abc123`.\n"
+            "Addressed in `abc123`.\n"
             "\n"
             "Review signal: `P1`\n"
             "\n"
-            "What I changed:\n"
             "- `src/example.py`: Added the missing input guard.\n"
-            "\n"
-            "Why this addresses the CR:\n"
-            "- The input is now checked before use.\n"
-            "- High-severity path validated with targeted regression checks.\n"
-            "\n"
-            "Validation:\n"
-            "- `python3 -m unittest tests.test_example`\n"
-            "- Result: passed\n"
+            "- Why: The input is now checked before use.\n"
+            "- Risk note: High-severity path validated with targeted regression checks.\n"
+            "- Validation: `python3 -m unittest tests.test_example` passed\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -594,6 +588,126 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(client.replies[0], expected)
                 self.assertNotIn("Severity:", client.replies[0])
                 self.assertNotIn("Reviewer priority:", client.replies[0])
+
+    def test_publish_github_thread_fix_hydrates_commit_evidence_at_publish_time(self):
+        from gh_address_cr.core import publisher
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "publish_resolution": "fix",
+            "accepted_response": {
+                "resolution": "fix",
+                "note": "Fixed thread issue.",
+                "files": ["AGENTS.md"],
+                "validation_commands": [{"command": "python3 -m unittest tests.test_skill_docs", "result": "passed"}],
+                "fix_reply": {
+                    "summary": "Fixed the stale GitHub thread reference called out here.",
+                    "files": ["AGENTS.md"],
+                    "why": "The updated reference now matches the review-thread contract.",
+                },
+            },
+        }
+        expected = (
+            "Addressed in `b35d5ef`.\n"
+            "\n"
+            "- `AGENTS.md`: Fixed the stale GitHub thread reference called out here.\n"
+            "- Why: The updated reference now matches the review-thread contract.\n"
+            "- Validation: `python3 -m unittest tests.test_skill_docs` passed\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                session = manager.load()
+                session["commit_evidence"] = {"commit_hash": "b35d5ef24ea2d481ff29081d3927db2c2c6e7e7d"}
+                manager.save(session)
+                client = FakeGitHubClient()
+
+                result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(client.replies[0], expected)
+
+    def test_publish_github_thread_fix_reuses_git_head_commit_for_batch_publish(self):
+        from gh_address_cr.core import publisher
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append(body)
+                return f"https://github.test/reply/{thread_id}"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        def item(thread_id):
+            return {
+                "item_id": f"github-thread:{thread_id}",
+                "item_kind": "github_thread",
+                "source": "github",
+                "thread_id": thread_id,
+                "state": "publish_ready",
+                "status": "OPEN",
+                "blocking": True,
+                "publish_resolution": "fix",
+                "accepted_response": {
+                    "resolution": "fix",
+                    "note": "Fixed thread issue.",
+                    "files": ["src/example.py"],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                    "fix_reply": {
+                        "summary": f"Fixed {thread_id}.",
+                        "files": ["src/example.py"],
+                        "why": "The changed path now matches the review comment.",
+                    },
+                },
+            }
+
+        repo = "owner/repo"
+        pr_number = "123"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item("THREAD_1"))
+                session = manager.load()
+                session["items"]["github-thread:THREAD_2"] = item("THREAD_2")
+                manager.save(session)
+                client = FakeGitHubClient()
+                git_result = type(
+                    "GitResult",
+                    (),
+                    {"returncode": 0, "stdout": "abcdef1234567890\n"},
+                )()
+
+                with patch.object(publisher.subprocess, "run", return_value=git_result) as git_run:
+                    result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(git_run.call_count, 1)
+                self.assertEqual(len(client.replies), 2)
+                self.assertTrue(all(reply.startswith("Addressed in `abcdef1`.") for reply in client.replies))
 
     def test_publish_github_thread_fix_without_severity_does_not_default_to_p2(self):
         from gh_address_cr.core import publisher
@@ -765,9 +879,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 return True
 
         expectations = {
-            "P1": "- High-severity path validated with targeted regression checks.",
-            "P2": "- Medium-severity path validated and aligned with expected workflow.",
-            "P3": "- Low-severity improvement validated for non-breaking behavior.",
+            "P1": "- Risk note: High-severity path validated with targeted regression checks.",
+            "P2": "- Risk note: Medium-severity path validated and aligned with expected workflow.",
+            "P3": "- Risk note: Low-severity improvement validated for non-breaking behavior.",
         }
         for severity, expected_line in expectations.items():
             with self.subTest(severity=severity):
@@ -860,7 +974,7 @@ class NativeWorkflowTests(unittest.TestCase):
 
                 publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
 
-                self.assertIn("Fixed in `abc123`.", client.replies[0])
+                self.assertIn("Addressed in `abc123`.", client.replies[0])
                 self.assertNotIn("Legacy handwritten reply", client.replies[0])
 
     def test_publish_github_thread_defer_uses_documented_reply_template(self):
