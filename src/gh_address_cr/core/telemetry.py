@@ -10,7 +10,6 @@ import uuid
 from hashlib import sha256
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
@@ -1277,6 +1276,8 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
     if not value:
         return None
     text = str(value)
+    if _contains_control_character(text):
+        raise ValueError(f"UNSAFE:unsafe control character in {field}")
     if _contains_token_marker(text):
         raise ValueError(f"UNSAFE:unsafe {field}")
     if _contains_private_identifier(text):
@@ -1324,7 +1325,6 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
 
 
-@lru_cache(maxsize=8192)
 def _is_unsafe_metadata_key(key: str) -> bool:
     lowered = key.lower()
     if lowered in {"token_input_count", "token_output_count", "token_total_count"}:
@@ -1399,7 +1399,7 @@ def _load_external_events_with_diagnostics(paths: core_paths.SessionPaths) -> tu
                 except json.JSONDecodeError as exc:
                     diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
                 except ValueError as exc:
-                    diagnostics.append(f"external telemetry line {line_number}: {exc}")
+                    diagnostics.append(f"external telemetry line {line_number}: {_safe_diagnostic_text(str(exc))}")
     except OSError as exc:
         return [], [f"external telemetry unreadable: {exc}"]
     return events, diagnostics
@@ -1495,14 +1495,11 @@ def _stored_optional_string(value: object, *, field: str) -> str | None:
 
 
 def _stored_optional_timestamp(value: object, *, field: str) -> str | None:
-    text = _stored_optional_string(value, field=field)
-    if text is None:
+    if value is None:
         return None
-    try:
-        datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError(f"{field} must be an ISO timestamp") from None
-    return text
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return _safe_optional_timestamp(value, field=field)
 
 
 def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:

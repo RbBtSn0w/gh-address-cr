@@ -1474,6 +1474,68 @@ class TestTelemetry(unittest.TestCase):
             self.assertTrue(any("unsafe correlation_id" in item for item in report["diagnostics"]))
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_stored_external_telemetry_rejects_timestamp_control_characters(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "source": "generic-agent",
+                        "source_session_id": "run-1",
+                        "event_id": "e1",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 1,
+                        "status": "success",
+                        "started_at": "2020-01-01\n12:00:00",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("unsafe control character in started_at" in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_stored_external_telemetry_redacts_unsafe_metadata_key_diagnostic(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.external_telemetry_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            unsafe_key = "github_token_ghp_secret"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "source": "generic-agent",
+                        "source_session_id": "run-1",
+                        "event_id": "e1",
+                        "kind": "tool_call",
+                        "operation": "exec_command",
+                        "duration_ms": 1,
+                        "status": "success",
+                        "metadata": {unsafe_key: "value"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["coverage_label"], "unavailable")
+            self.assertEqual(report["total_events"], 0)
+            self.assertTrue(any("[redacted]" in item for item in report["diagnostics"]))
+            self.assertFalse(any(unsafe_key in item for item in report["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_stored_external_telemetry_rejects_unsafe_metadata(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
