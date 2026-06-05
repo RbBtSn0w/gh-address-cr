@@ -1304,7 +1304,6 @@ def _safe_runtime_operation(operation: str) -> str:
     return operation
 
 
-@lru_cache(maxsize=8192)
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
     if (
