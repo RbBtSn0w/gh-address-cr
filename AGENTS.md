@@ -47,9 +47,11 @@ Public behavior changes MUST update code, docs, and executable tests together. T
 
 ### Verification Commands
 Before claiming work is complete, run these local checks:
-- **Linting**: `ruff check src tests` (configured in `pyproject.toml`).
+- **Linting**: `ruff check src tests scripts/build_plugin_payload.py` (configured in `pyproject.toml`).
 - **Unit Tests**: `python3 -m unittest discover -s tests`.
 - **CLI Smoke Test**: `python3 -m gh_address_cr --help`.
+- **Agent Contract Smoke Test**: `python3 -m gh_address_cr agent manifest`.
+- **Plugin Payload Checks**: `python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr` and `python3 scripts/build_plugin_payload.py --check`.
 
 ### Git Workflow
 - **Status Check**: Always run `git status` before starting work.
@@ -69,6 +71,7 @@ Before claiming work is complete, run these local checks:
 - **Fail fast**: Do not add silent fallbacks or hidden behavior changes.
 - **Smallest change**: Default to the smallest safe change. Avoid opportunistic refactors.
 - **Contract discipline**: If a public or agent-facing contract changes, update docs and tests together.
+- **Skill/runtime feedback**: When the `gh-address-cr` workflow itself blocks progress because of a repeatable skill/runtime gap, use `gh-address-cr submit-feedback ...` against this repository instead of burying the problem in PR findings or local notes.
 
 ### Architecture Preflight Gate
 
