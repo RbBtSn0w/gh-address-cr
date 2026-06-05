@@ -1404,8 +1404,10 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     source = payload.get("source")
     if not source:
         raise ValueError("missing required field(s): source")
+    if not isinstance(source, str):
+        raise ValueError("source must be a string")
     required_strings = ("schema_version", "source_session_id", "event_id", "kind", "operation", "status")
-    values: dict[str, str] = {"source": str(source)}
+    values: dict[str, str] = {"source": _safe_source_label(source)}
     missing: list[str] = []
     for field in required_strings:
         value = payload.get(field)
@@ -1414,7 +1416,26 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
             continue
         if not isinstance(value, str):
             raise ValueError(f"{field} must be a string")
-        values[field] = value
+        if field == "schema_version":
+            values[field] = _safe_identity_label(value, field=field)
+        elif field == "kind":
+            kind = _safe_identity_label(value, field=field)
+            if kind not in SAFE_KINDS:
+                raise ValueError(f"unsupported kind: {kind}")
+            values[field] = kind
+        elif field == "status":
+            status = _safe_identity_label(value, field=field)
+            if status not in SAFE_STATUSES:
+                raise ValueError(f"unsupported status: {status}")
+            values[field] = status
+        elif field == "event_id":
+            values[field] = _safe_identity_label(value, field=field)
+        elif field == "source_session_id":
+            values[field] = value
+        elif field == "operation":
+            values[field] = _safe_operation(value)
+        else:
+            values[field] = value
     if missing:
         raise ValueError(f"missing required field(s): {', '.join(missing)}")
     duration_ms = payload.get("duration_ms")
@@ -1425,20 +1446,14 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     metadata = payload.get("metadata")
     if metadata is None:
         metadata = {}
-    if not isinstance(metadata, dict):
-        raise ValueError("metadata must be an object")
-    started_at = payload.get("started_at")
-    ended_at = payload.get("ended_at")
-    correlation_id = payload.get("correlation_id")
+    metadata = _safe_stored_metadata(metadata)
+    started_at = _stored_optional_timestamp(payload.get("started_at"), field="started_at")
+    ended_at = _stored_optional_timestamp(payload.get("ended_at"), field="ended_at")
+    correlation_raw = payload.get("correlation_id")
+    correlation_id = _stored_optional_string(correlation_raw, field="correlation_id")
     event_fingerprint = payload.get("event_fingerprint")
-    for field_name, value in (
-        ("started_at", started_at),
-        ("ended_at", ended_at),
-        ("correlation_id", correlation_id),
-        ("event_fingerprint", event_fingerprint),
-    ):
-        if value is not None and not isinstance(value, str):
-            raise ValueError(f"{field_name} must be a string")
+    if event_fingerprint is not None and not isinstance(event_fingerprint, str):
+        raise ValueError("event_fingerprint must be a string")
     event = ExternalTelemetryEvent(
         schema_version=values["schema_version"],
         source=values["source"],
@@ -1454,9 +1469,42 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
         correlation_id=correlation_id,
         event_fingerprint=event_fingerprint or "",
     )
-    if not event.event_fingerprint:
+    if not _is_sha256_hex(event.event_fingerprint):
         event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
     return event
+
+
+def _is_sha256_hex(value: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
+def _safe_stored_metadata(metadata: object) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata must be an object")
+    try:
+        json.dumps(metadata, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"metadata contains non-JSON serializable or non-finite values: {exc}") from None
+    return dict(metadata)
+
+
+def _stored_optional_string(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _stored_optional_timestamp(value: object, *, field: str) -> str | None:
+    text = _stored_optional_string(value, field=field)
+    if text is None:
+        return None
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{field} must be an ISO timestamp") from None
+    return text
 
 
 def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:
