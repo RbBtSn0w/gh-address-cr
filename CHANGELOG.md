@@ -1,3 +1,9 @@
+## [2.10.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.2...v2.10.3) (2026-06-05)
+
+### Bug Fixes
+
+* expose final-gate completion summary line ([#104](https://github.com/RbBtSn0w/gh-address-cr/issues/104)) ([9a8d19f](https://github.com/RbBtSn0w/gh-address-cr/commit/9a8d19f8ac4efedb313dc703374c61e4bb4bac0c))
+
 ## [2.10.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.1...v2.10.2) (2026-06-05)
 
 ## [2.10.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.0...v2.10.1) (2026-06-05)
