@@ -134,8 +134,11 @@ Execution boundaries:
   work.
 - Telemetry reports include measured overhead and emit
   `TELEMETRY_OVERHEAD_EXCEEDED` when report construction crosses the 250ms
-  normal-path budget. Core completion remains fail-open for telemetry
-  degradation, while telemetry-specific commands stay fail-loud.
+  normal-path budget. The runtime-returned report owns the final measured
+  overhead; the persisted JSON artifact is written once and may leave that
+  field unset rather than performing an unmeasured self-rewrite. Core completion
+  remains fail-open for telemetry degradation, while telemetry-specific commands
+  stay fail-loud.
 - Logic validation signals are lightweight consistency checks. Blocking signals
   can fail final-gate; advisory signals are surfaced for explanation without
   becoming a second review producer.
