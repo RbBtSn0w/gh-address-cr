@@ -1997,6 +1997,38 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(tracker.metrics, [])
 
+    def test_configure_file_does_not_append_partial_metrics_when_stream_read_fails_midway(self):
+        class _BrokenTelemetryStream:
+            def __init__(self, first_line: str):
+                self._first_line = first_line
+                self._yielded = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self._yielded:
+                    self._yielded = True
+                    return self._first_line
+                raise OSError("denied")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            telemetry_file.write_text("{}", encoding="utf-8")
+            tracker = SessionTelemetry.get_instance()
+            valid_line = '{"command":"pytest","start_time":0.0,"end_time":1.0,"exit_code":0}\n'
+
+            with patch.object(Path, "open", return_value=_BrokenTelemetryStream(valid_line)):
+                tracker.configure_file(telemetry_file)
+
+            self.assertEqual(tracker.metrics, [])
+
     def test_record_is_fail_open_when_metric_persistence_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             telemetry_file = Path(tmp) / "telemetry.jsonl"

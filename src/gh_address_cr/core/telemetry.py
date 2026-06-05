@@ -460,6 +460,7 @@ class SessionTelemetry:
         try:
             if not path.is_file():
                 return
+            loaded_metrics: list[ExecutionMetric] = []
             with path.open("r", encoding="utf-8") as handle:
                 for line in handle:
                     if not line.strip():
@@ -470,7 +471,8 @@ class SessionTelemetry:
                         continue
                     metric = self._metric_from_payload(payload)
                     if metric is not None:
-                        self.metrics.append(metric)
+                        loaded_metrics.append(metric)
+            self.metrics.extend(loaded_metrics)
         except OSError:
             return
 
