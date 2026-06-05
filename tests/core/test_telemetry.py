@@ -1992,7 +1992,7 @@ class TestTelemetry(unittest.TestCase):
             telemetry_file.write_text("{}", encoding="utf-8")
             tracker = SessionTelemetry.get_instance()
 
-            with patch.object(Path, "read_text", side_effect=OSError("denied")):
+            with patch.object(Path, "open", side_effect=OSError("denied")):
                 tracker.configure_file(telemetry_file)
 
             self.assertEqual(tracker.metrics, [])
