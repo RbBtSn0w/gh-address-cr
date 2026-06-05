@@ -19,11 +19,11 @@ Final output must include:
 3. `Verified: 0 Pending Reviews found`
 4. unresolved GitHub threads = 0
 5. session blocking items = 0
-6. the compact metrics line, for example `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only (10 events, 100.0%) | inefficiency: none]`
+6. the compact metrics line, for example `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only/medium (2 events, 100.0%; runtime only, no host import) | sources: runtime 2 | duration: no observed duration | slowest: none | issues: none]`
 7. telemetry coverage label and efficiency report path
 8. audit summary path + sha256
 
-Use `completion_summary_line`, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, event count, success rate, and inefficiency flags.
+Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary.
 
 Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
 

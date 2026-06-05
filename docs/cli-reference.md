@@ -75,6 +75,7 @@ Stable machine summary fields:
 - `commands`
 - `exit_code`
 - `completion_summary_line` (for `final-gate --machine` completion evidence)
+- `completion_summary` (structured final-gate completion summary with `line`, `coverage_note`, `source_summary`, `duration_summary`, `top_operation_summary`, `issue_summary`, and `artifact_summary`)
 - `diagnostics` (optional, for GitHub CLI/API failures)
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.

@@ -322,7 +322,17 @@ class FinalGateTestCase(unittest.TestCase):
             "coverage_label": "complete",
             "total_events": 10,
             "success_rate": 100.0,
+            "confidence": "high",
+            "total_observed_duration_ms": 91234,
+            "sources": [
+                {"source": "runtime", "source_type": "runtime", "event_count": 2, "coverage_status": "available"},
+                {"source": "codex", "source_type": "host-adapter", "event_count": 8, "coverage_status": "available"},
+            ],
+            "slowest_operations": [
+                {"source": "codex", "operation": "run unit tests", "duration_ms": 89105, "status": "success"},
+            ],
             "inefficiency_flags": [],
+            "diagnostics": [],
             "report_artifact": "path/to/report.json",
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
@@ -330,32 +340,41 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete (10 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete/high (10 events, 100.0%) | sources: runtime 2; codex 8 | duration: 91.2s observed | slowest: run unit tests 89.1s success | issues: none]",
         )
         self.assertEqual(guidance.count(summary_line), 1)
         self.assertNotIn("Attention Items", guidance)
         self.assertNotIn("IMPLICATION PROMPT", guidance)
 
     def test_build_completion_summary_line_reports_runtime_only_telemetry_for_issue_103(self):
-        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        from gh_address_cr.commands.final_gate import build_completion_summary_line, build_completion_summary_model
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
         )
         telemetry_report = {
             "coverage_label": "runtime-only",
-            "total_events": 10,
+            "total_events": 2,
             "success_rate": 100.0,
+            "confidence": "medium",
+            "total_observed_duration_ms": 0,
+            "sources": [
+                {"source": "runtime", "source_type": "runtime", "event_count": 2, "coverage_status": "available"},
+            ],
+            "slowest_operations": [],
             "inefficiency_flags": [],
             "report_artifact": "path/to/report.json",
         }
 
         summary_line = build_completion_summary_line(result, telemetry_report)
+        summary_model = build_completion_summary_model(result, telemetry_report)
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only (10 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only/medium (2 events, 100.0%; runtime only, no host import) | sources: runtime 2 | duration: no observed duration | slowest: none | issues: none]",
         )
+        self.assertIn("host telemetry was not imported", summary_model["coverage_note"])
+        self.assertIn("runtime command events only", summary_model["coverage_note"])
 
     def test_build_completion_summary_line_renders_inefficiency_flags(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
@@ -368,12 +387,25 @@ class FinalGateTestCase(unittest.TestCase):
             "total_events": 3,
             "success_rate": 66.7,
             "inefficiency_flags": ["excessive_loops", "repeated_failures"],
+            "error_prone_operations": [
+                {
+                    "operation": "agent publish",
+                    "events": 3,
+                    "failures": 1,
+                    "timeouts": 0,
+                    "retries": 2,
+                    "sources": ["runtime"],
+                }
+            ],
+            "diagnostics": ["TELEMETRY_OVERHEAD_EXCEEDED"],
             "report_artifact": "path/to/report.json",
         }
 
         summary_line = build_completion_summary_line(result, telemetry_report)
 
-        self.assertIn("inefficiency: excessive_loops; repeated_failures]", summary_line)
+        self.assertIn("issues: success 66.7%; flags: excessive_loops; repeated_failures", summary_line)
+        self.assertIn("agent publish failures=1 timeouts=0 retries=2", summary_line)
+        self.assertIn("diagnostics: TELEMETRY_OVERHEAD_EXCEEDED]", summary_line)
 
     def test_build_completion_summary_line_tolerates_malformed_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
@@ -393,7 +425,7 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (0 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: flags: retry-loop]",
         )
 
     def test_build_completion_summary_line_normalizes_non_finite_success_rate(self):
@@ -415,7 +447,7 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (2 events, 0.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (2 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: success 0.0%]",
         )
 
     def test_build_completion_summary_line_normalizes_non_finite_total_events(self):
@@ -437,7 +469,7 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (0 events, 100.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]",
         )
 
     def test_build_completion_summary_line_reports_required_check_counts(self):
@@ -464,7 +496,7 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertEqual(
             summary_line,
-            "[gh-address-cr: FAILED | threads: 0 | reviews: 0 | checks: 1/1 | telemetry: complete (4 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: FAILED | threads: 0 | reviews: 0 | checks: 1/1 | telemetry: complete/high (4 events, 100.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]",
         )
 
     def test_build_completion_summary_guidance_abnormal(self):
@@ -482,7 +514,7 @@ class FinalGateTestCase(unittest.TestCase):
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
-        self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial (5 events, 80.0%) | inefficiency: excessive_loops]", guidance)
+        self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial/medium (5 events, 80.0%) | sources: none | duration: no observed duration | slowest: none | issues: success 80.0%; flags: excessive_loops]", guidance)
         self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
         self.assertIn("Attention Items & Implications", guidance)
         self.assertIn("IMPLICATION PROMPT", guidance)
@@ -583,7 +615,7 @@ class FinalGateTestCase(unittest.TestCase):
             "report_artifact": None,
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
-        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]", guidance)
+        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]", guidance)
 
     def test_build_completion_summary_guidance_tolerates_malformed_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
@@ -604,7 +636,7 @@ class FinalGateTestCase(unittest.TestCase):
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
         self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (0 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: flags: retry-loop; diagnostics: host telemetry degraded]",
             guidance,
         )
         self.assertIn("Telemetry diagnostics: host telemetry degraded", guidance)
@@ -628,7 +660,7 @@ class FinalGateTestCase(unittest.TestCase):
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
         self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (1 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (1 events, 100.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]",
             guidance,
         )
         self.assertNotIn("inefficiency flags present", guidance)
@@ -652,7 +684,7 @@ class FinalGateTestCase(unittest.TestCase):
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
         self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (1 events, 100.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/medium (1 events, 100.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]",
             guidance,
         )
         self.assertNotIn("inefficiency flags present", guidance)
