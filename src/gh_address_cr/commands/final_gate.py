@@ -343,8 +343,10 @@ def _string_list(value: object) -> list[str]:
         return []
     if isinstance(value, (list, tuple)):
         return [text for item in value if (text := str(item).strip())]
-    text = str(value).strip()
-    return [text] if text else []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    return []
 
 
 def build_completion_summary_guidance(

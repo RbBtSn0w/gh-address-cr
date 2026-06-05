@@ -610,3 +610,28 @@ class FinalGateTestCase(unittest.TestCase):
             guidance,
         )
         self.assertNotIn("inefficiency flags present", guidance)
+
+    def test_build_completion_summary_guidance_treats_falsey_scalar_list_fields_as_absent(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "inefficiency_flags": False,
+            "diagnostics": 0,
+            "report_artifact": "report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (1 events, 100.0%) | inefficiency: none]",
+            guidance,
+        )
+        self.assertNotIn("inefficiency flags present", guidance)
+        self.assertNotIn("Telemetry diagnostics:", guidance)
