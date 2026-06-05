@@ -201,6 +201,7 @@ class TelemetryParseResult:
     unsafe_seen: bool
     malformed_seen: bool
     diagnostics: list[Any]
+    events_are_normalized: bool = False
 
 
 class TelemetryAdapter(ABC):
@@ -288,6 +289,7 @@ class GenericAgentJsonlAdapter(TelemetryAdapter):
             unsafe_seen=unsafe_seen,
             malformed_seen=malformed_seen,
             diagnostics=diagnostics,
+            events_are_normalized=True,
         )
 
 
@@ -755,13 +757,16 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     duplicate_fingerprints: list[str] = []
     observed_sessions: set[str] = set()
     duplicate_count = 0
+    trusted_normalized_events = parse_result.events_are_normalized and type(adapter) is GenericAgentJsonlAdapter
 
     try:
         for idx, event in enumerate(accepted_events):
             if not isinstance(event, ExternalTelemetryEvent):
                 raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
             try:
-                normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+                normalized_event = event
+                if not trusted_normalized_events:
+                    normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
             except ValueError as exc:
                 message = str(exc)
                 if message.startswith("UNSAFE:"):
@@ -1200,7 +1205,9 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
         for index, item in enumerate(value):
             _validate_safe_metadata_value(item, key_path=f"{key_path}[{index}]")
         return
-    value_text = str(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    value_text = value if isinstance(value, str) else str(value)
     if _contains_token_marker(value_text):
         raise ValueError(f"UNSAFE:unsafe metadata value at {key_path}")
     if _contains_private_identifier(value_text):
@@ -1269,6 +1276,8 @@ def _safe_optional_timestamp(value: object, *, field: str) -> str | None:
     if not value:
         return None
     text = str(value)
+    if _contains_control_character(text):
+        raise ValueError(f"UNSAFE:unsafe control character in {field}")
     if _contains_token_marker(text):
         raise ValueError(f"UNSAFE:unsafe {field}")
     if _contains_private_identifier(text):
@@ -1386,16 +1395,111 @@ def _load_external_events_with_diagnostics(paths: core_paths.SessionPaths) -> tu
                     continue
                 try:
                     payload = _json_loads_strict(line)
-                    if not isinstance(payload, dict):
-                        raise ValueError("record must be a JSON object")
-                    events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
+                    events.append(_load_stored_external_event(payload))
                 except json.JSONDecodeError as exc:
                     diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
                 except ValueError as exc:
-                    diagnostics.append(f"external telemetry line {line_number}: {exc}")
+                    diagnostics.append(f"external telemetry line {line_number}: {_safe_diagnostic_text(str(exc))}")
     except OSError as exc:
         return [], [f"external telemetry unreadable: {exc}"]
     return events, diagnostics
+
+
+def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
+    if not isinstance(payload, dict):
+        raise ValueError("record must be a JSON object")
+    source = payload.get("source")
+    if not source:
+        raise ValueError("missing required field(s): source")
+    if not isinstance(source, str):
+        raise ValueError("source must be a string")
+    required_strings = ("schema_version", "source_session_id", "event_id", "kind", "operation", "status")
+    values: dict[str, str] = {"source": _safe_source_label(source)}
+    missing: list[str] = []
+    for field in required_strings:
+        value = payload.get(field)
+        if value in (None, ""):
+            missing.append(field)
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be a string")
+        if field == "schema_version":
+            values[field] = _safe_identity_label(value, field=field)
+        elif field == "kind":
+            kind = _safe_identity_label(value, field=field)
+            if kind not in SAFE_KINDS:
+                raise ValueError(f"unsupported kind: {kind}")
+            values[field] = kind
+        elif field == "status":
+            status = _safe_identity_label(value, field=field)
+            if status not in SAFE_STATUSES:
+                raise ValueError(f"unsupported status: {status}")
+            values[field] = status
+        elif field == "event_id":
+            values[field] = _safe_identity_label(value, field=field)
+        elif field == "source_session_id":
+            values[field] = _safe_source_session_id(value)
+        elif field == "operation":
+            values[field] = _safe_operation(value)
+        else:
+            values[field] = value
+    if missing:
+        raise ValueError(f"missing required field(s): {', '.join(missing)}")
+    duration_ms = payload.get("duration_ms")
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
+        raise ValueError("duration_ms must be an integer")
+    if duration_ms < 0:
+        raise ValueError("duration_ms must be non-negative")
+    metadata = payload.get("metadata")
+    if metadata is None:
+        metadata = {}
+    metadata = _safe_metadata(metadata)
+    started_at = _stored_optional_timestamp(payload.get("started_at"), field="started_at")
+    ended_at = _stored_optional_timestamp(payload.get("ended_at"), field="ended_at")
+    correlation_raw = payload.get("correlation_id")
+    correlation_id = None
+    if correlation_raw is not None:
+        if not isinstance(correlation_raw, str):
+            raise ValueError("correlation_id must be a string")
+        correlation_id = _safe_correlation_id(correlation_raw)
+    event_fingerprint = payload.get("event_fingerprint")
+    if event_fingerprint is not None and not isinstance(event_fingerprint, str):
+        raise ValueError("event_fingerprint must be a string")
+    event = ExternalTelemetryEvent(
+        schema_version=values["schema_version"],
+        source=values["source"],
+        source_session_id=values["source_session_id"],
+        event_id=values["event_id"],
+        kind=values["kind"],
+        operation=values["operation"],
+        status=values["status"],
+        duration_ms=duration_ms,
+        started_at=started_at,
+        ended_at=ended_at,
+        metadata=dict(metadata),
+        correlation_id=correlation_id,
+        event_fingerprint=event_fingerprint or "",
+    )
+    canonical_fingerprint = _event_fingerprint(event)
+    if event.event_fingerprint != canonical_fingerprint:
+        event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": canonical_fingerprint})
+    return event
+
+
+def _stored_optional_string(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _stored_optional_timestamp(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return _safe_optional_timestamp(value, field=field)
 
 
 def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:
