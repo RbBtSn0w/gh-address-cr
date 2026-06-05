@@ -1,3 +1,9 @@
+## [2.10.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.5...v2.10.6) (2026-06-05)
+
+### Bug Fixes
+
+* enrich final-gate completion metrics summary ([#109](https://github.com/RbBtSn0w/gh-address-cr/issues/109)) ([2276b20](https://github.com/RbBtSn0w/gh-address-cr/commit/2276b203b4bc8854cf8e6482dbf40112b14dbf7d))
+
 ## [2.10.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.4...v2.10.5) (2026-06-05)
 
 ### Bug Fixes
