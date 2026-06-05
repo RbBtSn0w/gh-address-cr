@@ -17,13 +17,24 @@ def load_gate_module():
 
 
 class FinalGateTestCase(unittest.TestCase):
-    def evaluate(self, session, *, remote_threads=None, pending_reviews=None, current_login="agent-login"):
+    def evaluate(
+        self,
+        session,
+        *,
+        remote_threads=None,
+        pending_reviews=None,
+        current_login="agent-login",
+        check_runs=None,
+        check_requirement=None,
+    ):
         gate = load_gate_module()
         return gate.evaluate_final_gate(
             session,
             remote_threads=remote_threads or [],
             pending_reviews=pending_reviews or [],
             current_login=current_login,
+            check_runs=check_runs or [],
+            check_requirement=check_requirement,
         )
 
     def passing_session(self):
@@ -168,6 +179,28 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.counts["blocking_items_count"], 1)
         self.assertEqual(result.to_machine_summary()["waiting_on"], "local_items")
 
+    def test_blocking_github_items_fail(self):
+        session = self.passing_session()
+        session["items"]["github-thread:THREAD_BLOCKED"] = {
+            "item_id": "github-thread:THREAD_BLOCKED",
+            "item_kind": "github_thread",
+            "thread_id": "THREAD_BLOCKED",
+            "state": "publish_ready",
+            "blocking": True,
+        }
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason_code, "FINAL_GATE_BLOCKING_GITHUB_ITEMS")
+        self.assertEqual(result.failure_codes, ["FINAL_GATE_BLOCKING_GITHUB_ITEMS"])
+        self.assertEqual(result.counts["blocking_github_items_count"], 1)
+        self.assertEqual(result.counts["blocking_items_count"], 1)
+        self.assertEqual(result.to_machine_summary()["waiting_on"], "github_items")
+
     def test_terminal_local_finding_without_validation_evidence_fails(self):
         session = self.passing_session()
         session["items"]["local-finding:FIXED"].pop("validation_evidence")
@@ -223,6 +256,28 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.counts["logic_validation_advisory_count"], 1)
         self.assertEqual(result.to_machine_summary()["logic_validation_signals"][0]["gate_effect"], "advisory")
+
+    def test_failed_and_pending_checks_fail_when_required(self):
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+            check_runs=[
+                {"name": "unit", "state": "failure"},
+                {"name": "lint", "state": "queued"},
+                {"name": "docs", "state": "success"},
+            ],
+            check_requirement="all",
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason_code, "FINAL_GATE_PR_CHECKS_NOT_GREEN")
+        self.assertEqual(result.failure_codes, ["FINAL_GATE_PR_CHECKS_NOT_GREEN"])
+        self.assertEqual(result.counts["pr_checks_count"], 3)
+        self.assertEqual(result.counts["pr_checks_failed_count"], 1)
+        self.assertEqual(result.counts["pr_checks_pending_count"], 1)
+        self.assertEqual(result.counts["pr_checks_not_green_count"], 2)
+        self.assertEqual(result.check_requirement, "all")
+        self.assertEqual(result.to_machine_summary()["waiting_on"], "checks")
 
     def test_failure_codes_are_reported_in_gate_order(self):
         session = self.passing_session()

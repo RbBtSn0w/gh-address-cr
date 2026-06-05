@@ -14,6 +14,22 @@ from gh_address_cr.core.github_thread_state import (
     is_terminal_github_thread,
 )
 from gh_address_cr.core.logic_validation import generate_logic_validation_signals
+from gh_address_cr.core.runtime_kernel.final_gate import (
+    COUNT_KEYS,
+    FAILURE_ORDER,
+    FINAL_GATE_BLOCKING_GITHUB_ITEMS,
+    FINAL_GATE_BLOCKING_LOCAL_ITEMS,
+    FINAL_GATE_LOGIC_VALIDATION_BLOCKING,
+    FINAL_GATE_MISSING_REPLY_EVIDENCE,
+    FINAL_GATE_MISSING_VALIDATION_EVIDENCE,
+    FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW,
+    FINAL_GATE_PR_CHECKS_NOT_GREEN,
+    FINAL_GATE_UNRESOLVED_REMOTE_THREADS,
+    LOCAL_TERMINAL_STATES,
+    build_final_gate_facts,
+    evaluate_final_gate_policy,
+    project_final_gate,
+)
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.core.severity import (
     apply_severity_evidence,
@@ -26,57 +42,10 @@ from gh_address_cr.core.severity import (
 from gh_address_cr.github.client import GitHubClient
 
 
-FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"
-FINAL_GATE_MISSING_REPLY_EVIDENCE = "FINAL_GATE_MISSING_REPLY_EVIDENCE"
-FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW = "FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW"
-FINAL_GATE_BLOCKING_GITHUB_ITEMS = "FINAL_GATE_BLOCKING_GITHUB_ITEMS"
-FINAL_GATE_BLOCKING_LOCAL_ITEMS = "FINAL_GATE_BLOCKING_LOCAL_ITEMS"
-FINAL_GATE_MISSING_VALIDATION_EVIDENCE = "FINAL_GATE_MISSING_VALIDATION_EVIDENCE"
-FINAL_GATE_PR_CHECKS_NOT_GREEN = "FINAL_GATE_PR_CHECKS_NOT_GREEN"
-FINAL_GATE_LOGIC_VALIDATION_BLOCKING = "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"
-
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5
 
 GITHUB_TERMINAL_STATES = GITHUB_THREAD_TERMINAL_STATES
-LOCAL_TERMINAL_STATES = {
-    "closed",
-    "fixed",
-    "clarified",
-    "deferred",
-    "rejected",
-    "verified",
-    "published",
-}
-
-COUNT_KEYS = (
-    "unresolved_github_threads_count",
-    "pending_review_count",
-    "blocking_items_count",
-    "blocking_github_items_count",
-    "github_threads_missing_reply_count",
-    "missing_validation_evidence_count",
-    "blocking_local_items_count",
-    "pending_current_login_review_count",
-    "unresolved_remote_threads_count",
-    "pr_checks_count",
-    "pr_checks_failed_count",
-    "pr_checks_pending_count",
-    "pr_checks_not_green_count",
-    "logic_validation_blocking_count",
-    "logic_validation_advisory_count",
-)
-
-FAILURE_ORDER = (
-    (FINAL_GATE_UNRESOLVED_REMOTE_THREADS, "unresolved_remote_threads_count", "remote_threads"),
-    (FINAL_GATE_MISSING_REPLY_EVIDENCE, "github_threads_missing_reply_count", "reply_evidence"),
-    (FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW, "pending_current_login_review_count", "pending_review"),
-    (FINAL_GATE_BLOCKING_GITHUB_ITEMS, "blocking_github_items_count", "github_items"),
-    (FINAL_GATE_BLOCKING_LOCAL_ITEMS, "blocking_local_items_count", "local_items"),
-    (FINAL_GATE_MISSING_VALIDATION_EVIDENCE, "missing_validation_evidence_count", "validation_evidence"),
-    (FINAL_GATE_LOGIC_VALIDATION_BLOCKING, "logic_validation_blocking_count", "logic_validation"),
-    (FINAL_GATE_PR_CHECKS_NOT_GREEN, "pr_checks_not_green_count", "checks"),
-)
 
 
 @dataclass(frozen=True)
@@ -193,64 +162,28 @@ def evaluate_final_gate(
     check_runs: Iterable[Mapping[str, Any]] = (),
     check_requirement: str | None = None,
 ) -> GateResult:
-    items = _session_items(session)
-    github_items = [item for item in items if _item_kind(item) == "github_thread"]
-    local_items = [item for item in items if _item_kind(item) == "local_finding"]
-
-    remote_thread_rows = list(remote_threads)
-    remote_by_id = {thread_id: thread for thread in remote_thread_rows if (thread_id := _thread_identifier(thread))}
-    unresolved_remote_threads = [thread for thread in remote_thread_rows if not _thread_is_resolved(thread)]
-    pending_current_login_reviews = [
-        review for review in pending_reviews if _is_current_login_pending_review(review, current_login)
-    ]
-    check_rows = list(check_runs)
-    failed_checks = [check for check in check_rows if _check_bucket(check) in {"fail", "cancel", "unknown"}]
-    pending_checks = [check for check in check_rows if _check_bucket(check) == "pending"]
-    blocking_local_items = [item for item in local_items if _is_local_blocking(item)]
-    blocking_github_items = [item for item in github_items if _is_blocking_item(item)]
-    blocking_items = [item for item in items if _is_blocking_item(item)]
-    missing_reply_items = [
-        item
-        for item in github_items
-        if _github_thread_requires_reply_evidence(item, remote_by_id) and not _has_reply_evidence(item, current_login)
-    ]
-    missing_validation_items = [
-        item for item in local_items if _is_terminal_local_item(item) and not _has_validation_evidence(item)
-    ]
     logic_validation_signals = [signal.to_dict() for signal in generate_logic_validation_signals(session)]
-    blocking_logic_validation_signals = [
-        signal
-        for signal in logic_validation_signals
-        if signal.get("gate_effect") == "blocking"
-    ]
-    advisory_logic_validation_signals = [
-        signal for signal in logic_validation_signals if signal.get("gate_effect") == "advisory"
-    ]
-
-    counts = {
-        "unresolved_github_threads_count": len(unresolved_remote_threads),
-        "pending_review_count": len(pending_current_login_reviews),
-        "blocking_items_count": len(blocking_items),
-        "blocking_github_items_count": len(blocking_github_items),
-        "github_threads_missing_reply_count": len(missing_reply_items),
-        "missing_validation_evidence_count": len(missing_validation_items),
-        "blocking_local_items_count": len(blocking_local_items),
-        "pending_current_login_review_count": len(pending_current_login_reviews),
-        "unresolved_remote_threads_count": len(unresolved_remote_threads),
-        "pr_checks_count": len(check_rows),
-        "pr_checks_failed_count": len(failed_checks),
-        "pr_checks_pending_count": len(pending_checks),
-        "pr_checks_not_green_count": len(failed_checks) + len(pending_checks) if check_requirement else 0,
-        "logic_validation_blocking_count": len(blocking_logic_validation_signals),
-        "logic_validation_advisory_count": len(advisory_logic_validation_signals),
-    }
-    failure_codes = [code for code, count_key, _ in FAILURE_ORDER if counts[count_key] > 0]
+    facts = build_final_gate_facts(
+        session,
+        remote_threads=remote_threads,
+        pending_reviews=pending_reviews,
+        current_login=current_login,
+        check_runs=check_runs,
+        check_requirement=check_requirement,
+        logic_validation_signals=logic_validation_signals,
+    )
+    projection = project_final_gate(
+        facts,
+        current_login=current_login,
+        check_requirement=check_requirement,
+    )
+    decision = evaluate_final_gate_policy(projection)
 
     return GateResult(
         repo=str(session.get("repo") or ""),
         pr_number=str(session.get("pr_number") or ""),
-        counts={key: counts[key] for key in COUNT_KEYS},
-        failure_codes=failure_codes,
+        counts={key: projection.counts[key] for key in COUNT_KEYS},
+        failure_codes=list(decision.failure_codes),
         check_requirement=check_requirement,
         logic_validation_signals=logic_validation_signals,
     )
@@ -594,4 +527,6 @@ def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = ""
         return "Record validation evidence for terminal local findings, then rerun final-gate."
     if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
         return "Wait for PR checks to pass or fix failing checks, then rerun final-gate."
+    if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
+        return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
     return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
