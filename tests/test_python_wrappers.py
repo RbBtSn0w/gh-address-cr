@@ -309,6 +309,7 @@ else:
                 "artifact_path",
                 "check_requirement",
                 "commands",
+                "completion_summary",
                 "completion_summary_line",
                 "counts",
                 "exit_code",
@@ -337,8 +338,14 @@ else:
         self.assertIsNone(summary["waiting_on"])
         self.assertEqual(
             summary["completion_summary_line"],
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
         )
+        self.assertEqual(summary["completion_summary"]["line"], summary["completion_summary_line"])
+        self.assertEqual(summary["completion_summary"]["source_summary"], "telemetry 0")
+        self.assertEqual(summary["completion_summary"]["duration_summary"], "no observed duration")
+        self.assertEqual(summary["completion_summary"]["top_operation_summary"], "slowest: none")
+        self.assertEqual(summary["completion_summary"]["issue_summary"], "none")
+        self.assertIn("efficiency-report.json", summary["completion_summary"]["artifact_summary"])
         self.assertEqual(summary["telemetry"]["coverage_label"], "unavailable")
         self.assertIn("efficiency-report.json", summary["telemetry"]["report_artifact"])
         self.assertEqual(summary["telemetry"]["inefficiency_flags"], [])
@@ -422,8 +429,9 @@ else:
         self.assertEqual(summary["reason_code"], "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
         self.assertEqual(
             summary["completion_summary_line"],
-            "[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            "[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
         )
+        self.assertEqual(summary["completion_summary"]["line"], summary["completion_summary_line"])
         self.assertEqual(summary["telemetry"]["inefficiency_flags"], [])
 
     def test_cli_final_gate_rejects_conflicting_output_flags(self):
@@ -2480,7 +2488,7 @@ else:
         self.assertIn("Efficiency report path:", result.stdout)
         self.assertIn("== PR Completion Summary Guidance ==", result.stdout)
         self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
             result.stdout,
         )
         summary_text = summary_file.read_text(encoding="utf-8")
@@ -2490,7 +2498,7 @@ else:
         self.assertIn("- telemetry_diagnostics: none", summary_text)
         self.assertIn("## PR Completion Summary Guidance", summary_text)
         self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
             summary_text,
         )
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))

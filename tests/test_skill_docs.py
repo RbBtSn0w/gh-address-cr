@@ -215,7 +215,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("PR Completion Summary Guidance", combined)
         self.assertIn("first bracketed line", combined)
         self.assertIn("[gh-address-cr: PASSED | threads:", completion_text)
-        self.assertIn("telemetry coverage, event count, success rate, and inefficiency flags", combined)
+        self.assertIn("telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary", combined)
         self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
 
     def test_skill_identifies_as_thin_adapter(self):
@@ -609,6 +609,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("runtime-only", combined)
         self.assertIn("completion_summary_line", cli_text)
         self.assertIn("completion_summary_line", readme_text)
+        self.assertIn("completion_summary", cli_text)
         self.assertIn("compact metrics line", readme_text)
 
     def test_skill_documents_external_agent_telemetry_contract(self):

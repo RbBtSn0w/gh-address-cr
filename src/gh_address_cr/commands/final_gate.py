@@ -128,7 +128,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                 "inefficiency_flags": telemetry_report.get("inefficiency_flags", []),
                 "diagnostics": telemetry_report.get("diagnostics", []),
             }
-            machine_summary["completion_summary_line"] = build_completion_summary_line(result, telemetry_report)
+            completion_summary = build_completion_summary_model(result, telemetry_report)
+            machine_summary["completion_summary"] = completion_summary
+            machine_summary["completion_summary_line"] = completion_summary["line"]
             machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
                 result, telemetry_report, summary_path=summary_path, include_sha256=True
             )
@@ -297,6 +299,10 @@ def read_file_sha256(path: Path) -> str:
 
 
 def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: dict) -> str:
+    return build_completion_summary_model(result, telemetry_report)["line"]
+
+
+def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: dict) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
@@ -307,17 +313,124 @@ def build_completion_summary_line(result: core_gate.GateResult, telemetry_report
     coverage = telemetry_report.get("coverage_label") or "unavailable"
     total_events = _safe_int(telemetry_report.get("total_events"), default=0)
     success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
-    inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
-    flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
-
-    return (
+    confidence = str(telemetry_report.get("confidence") or _default_confidence_for_coverage(coverage))
+    coverage_note = _coverage_note(coverage, confidence, total_events, success_rate)
+    source_summary = _source_summary(telemetry_report.get("sources"))
+    duration_summary = _duration_summary(telemetry_report.get("total_observed_duration_ms"))
+    top_operation_summary = _top_operation_summary(telemetry_report.get("slowest_operations"))
+    issue_summary = _issue_summary(telemetry_report, success_rate=success_rate, total_events=total_events)
+    artifact_summary = str(telemetry_report.get("report_artifact") or "N/A")
+    line = (
         f"[gh-address-cr: {status_str} | "
         f"threads: {unresolved_threads} | "
         f"reviews: {pending_reviews} | "
         f"checks: {checks_concise} | "
-        f"telemetry: {coverage} ({total_events} events, {success_rate:.1f}%) | "
-        f"inefficiency: {flags_str}]"
+        f"telemetry: {coverage}/{confidence} ({total_events} events, {success_rate:.1f}%"
+        f"{_coverage_line_suffix(coverage)}) | "
+        f"sources: {source_summary} | "
+        f"duration: {duration_summary} | "
+        f"{top_operation_summary} | "
+        f"issues: {issue_summary}]"
     )
+    return {
+        "line": line,
+        "coverage_note": coverage_note,
+        "source_summary": source_summary,
+        "duration_summary": duration_summary,
+        "top_operation_summary": top_operation_summary,
+        "issue_summary": issue_summary,
+        "artifact_summary": artifact_summary,
+    }
+
+
+def _default_confidence_for_coverage(coverage: str) -> str:
+    if coverage == "complete":
+        return "high"
+    if coverage in {"partial", "runtime-only"}:
+        return "medium"
+    return "low"
+
+
+def _coverage_line_suffix(coverage: str) -> str:
+    if coverage == "runtime-only":
+        return "; runtime only, no host import"
+    return ""
+
+
+def _coverage_note(coverage: str, confidence: str, total_events: int, success_rate: float) -> str:
+    base = f"{coverage} telemetry with {confidence} confidence, {total_events} events, and {success_rate:.1f}% success."
+    if coverage == "runtime-only":
+        return (
+            f"{base} host telemetry was not imported; metrics cover runtime command events only."
+        )
+    if coverage == "complete":
+        return f"{base} Runtime and imported host telemetry were both available."
+    if coverage == "partial":
+        return f"{base} Some telemetry sources were unavailable or incomplete."
+    return f"{base} No usable efficiency telemetry was available."
+
+
+def _source_summary(value: object) -> str:
+    if not isinstance(value, list):
+        return "none"
+    rows: list[str] = []
+    for source in value:
+        if not isinstance(source, dict):
+            continue
+        name = str(source.get("source") or "unknown")
+        event_count = _safe_int(source.get("event_count"), default=0)
+        rows.append(f"{name} {event_count}")
+    return "; ".join(rows) if rows else "none"
+
+
+def _duration_summary(value: object) -> str:
+    duration_ms = _safe_int(value, default=0)
+    if duration_ms <= 0:
+        return "no observed duration"
+    return f"{_format_duration(duration_ms)} observed"
+
+
+def _top_operation_summary(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return "slowest: none"
+    first = next((row for row in value if isinstance(row, dict)), None)
+    if first is None:
+        return "slowest: none"
+    operation = str(first.get("operation") or "unknown")
+    duration_ms = _safe_int(first.get("duration_ms"), default=0)
+    status = str(first.get("status") or "unknown")
+    if duration_ms <= 0:
+        return f"slowest: {operation} {status}"
+    return f"slowest: {operation} {_format_duration(duration_ms)} {status}"
+
+
+def _issue_summary(telemetry_report: dict, *, success_rate: float, total_events: int) -> str:
+    parts: list[str] = []
+    if total_events > 0 and success_rate < 100.0:
+        parts.append(f"success {success_rate:.1f}%")
+    flags = _string_list(telemetry_report.get("inefficiency_flags"))
+    if flags:
+        parts.append("flags: " + "; ".join(flags))
+    error_rows = telemetry_report.get("error_prone_operations")
+    if isinstance(error_rows, list):
+        for row in error_rows[:2]:
+            if not isinstance(row, dict):
+                continue
+            operation = str(row.get("operation") or "unknown")
+            failures = _safe_int(row.get("failures"), default=0)
+            timeouts = _safe_int(row.get("timeouts"), default=0)
+            retries = _safe_int(row.get("retries"), default=0)
+            parts.append(f"{operation} failures={failures} timeouts={timeouts} retries={retries}")
+    diagnostics = _string_list(telemetry_report.get("diagnostics"))
+    if diagnostics:
+        parts.append("diagnostics: " + "; ".join(diagnostics[:2]))
+    return "; ".join(parts) if parts else "none"
+
+
+def _format_duration(duration_ms: int) -> str:
+    if duration_ms >= 1000:
+        return f"{duration_ms / 1000:.1f}s"
+    return f"{duration_ms}ms"
 
 
 def _safe_int(value: object, *, default: int) -> int:

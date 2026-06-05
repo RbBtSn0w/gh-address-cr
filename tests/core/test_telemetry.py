@@ -2326,7 +2326,7 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_run_adapter_command_records_telemetry(self, mock_run):
-        from gh_address_cr.cli import _run_adapter_command
+        from gh_address_cr.commands.high_level import _run_adapter_command
         import tempfile
         from pathlib import Path
 
