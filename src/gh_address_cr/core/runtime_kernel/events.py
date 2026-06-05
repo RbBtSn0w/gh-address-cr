@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,8 @@ REVIEW_THREAD_OBSERVED = "review_thread_observed"
 COMMAND_EXECUTED = "command_executed"
 REPORTING_OBSERVED = "reporting_observed"
 SUPPORTED_FACT_KINDS = (REVIEW_THREAD_OBSERVED, COMMAND_EXECUTED, REPORTING_OBSERVED)
+SUPPORTED_COMMAND_KINDS = frozenset({"reply_thread", "resolve_thread", "retry_command", "run_final_gate"})
+SUPPORTED_COMMAND_EXECUTION_STATUSES = frozenset({"succeeded", "failed"})
 
 
 def _require_string(payload: JsonDict, field_name: str) -> str:
@@ -29,6 +32,41 @@ def _require_payload(payload: JsonDict) -> JsonDict:
     return dict(value)
 
 
+def _optional_int(payload: JsonDict, field_name: str, default: int = 0) -> int:
+    value = payload.get(field_name, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
+    return value
+
+
+def _parse_observed_at(value: str) -> datetime:
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        raise ValueError(f"observed_at must be an RFC3339 timestamp with timezone: {value}") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"observed_at must include a timezone offset: {value}")
+    return parsed.astimezone(timezone.utc)
+
+
+def _optional_bool(payload: JsonDict, field_name: str) -> bool | None:
+    if field_name not in payload or payload[field_name] is None:
+        return None
+    value = payload[field_name]
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean")
+    return value
+
+
+def _optional_bool_alias(payload: JsonDict, snake_name: str, camel_name: str) -> bool | None:
+    snake_value = _optional_bool(payload, snake_name)
+    camel_value = _optional_bool(payload, camel_name)
+    if snake_value is not None and camel_value is not None and snake_value != camel_value:
+        raise ValueError(f"{snake_name}/{camel_name} boolean fields conflict")
+    return snake_value if snake_value is not None else camel_value
+
+
 @dataclass(frozen=True)
 class RuntimeFact:
     schema_version: str
@@ -41,7 +79,7 @@ class RuntimeFact:
     @classmethod
     def from_dict(cls, payload: JsonDict | "RuntimeFact") -> "RuntimeFact":
         if isinstance(payload, RuntimeFact):
-            return payload
+            payload = payload.to_dict()
         schema_version = _require_string(payload, "schema_version")
         if schema_version != RUNTIME_FACT_SCHEMA_VERSION:
             raise ValueError(f"unsupported runtime fact schema_version: {schema_version}")
@@ -50,17 +88,18 @@ class RuntimeFact:
             raise ValueError(f"unsupported runtime fact kind: {fact_kind}")
         fact_id = _require_string(payload, "fact_id")
         observed_at = _require_string(payload, "observed_at")
+        _parse_observed_at(observed_at)
         return cls(
             schema_version=schema_version,
             fact_kind=fact_kind,
             fact_id=fact_id,
             observed_at=observed_at,
-            sequence=int(payload.get("sequence", 0)),
+            sequence=_optional_int(payload, "sequence"),
             payload=_require_payload(payload),
         )
 
-    def sort_key(self) -> tuple[str, int, str]:
-        return (self.observed_at, self.sequence, self.fact_id)
+    def sort_key(self) -> tuple[datetime, int, str]:
+        return (_parse_observed_at(self.observed_at), self.sequence, self.fact_id)
 
     def to_dict(self) -> JsonDict:
         return {
@@ -93,7 +132,22 @@ class ReviewThreadFact:
         item_id = str(fact.payload.get("item_id") or canonical_item_id)
         if item_id != canonical_item_id:
             raise ValueError(f"ambiguous item_id for thread_id {thread_id}: {item_id}")
-        return cls(fact=fact, thread_id=thread_id, item_id=item_id, payload=dict(fact.payload))
+        payload = dict(fact.payload)
+        resolved = _optional_bool_alias(payload, "is_resolved", "isResolved")
+        outdated = _optional_bool_alias(payload, "is_outdated", "isOutdated")
+        reply_evidence = _optional_bool(payload, "reply_evidence_present")
+        external_wait = _optional_bool(payload, "external_wait")
+        if resolved is not None:
+            payload["is_resolved"] = resolved
+            payload["isResolved"] = resolved
+        if outdated is not None:
+            payload["is_outdated"] = outdated
+            payload["isOutdated"] = outdated
+        if reply_evidence is not None:
+            payload["reply_evidence_present"] = reply_evidence
+        if external_wait is not None:
+            payload["external_wait"] = external_wait
+        return cls(fact=fact, thread_id=thread_id, item_id=item_id, payload=payload)
 
     def row(self) -> JsonDict:
         row = {
@@ -126,14 +180,21 @@ class CommandExecutionFact:
             raise ValueError(f"expected {COMMAND_EXECUTED}, got {fact.fact_kind}")
         command_id = _require_string(fact.payload, "command_id")
         command_kind = _require_string(fact.payload, "command_kind")
+        if command_kind not in SUPPORTED_COMMAND_KINDS:
+            raise ValueError(f"unsupported command execution kind: {command_kind}")
         status = _require_string(fact.payload, "status")
+        if status not in SUPPORTED_COMMAND_EXECUTION_STATUSES:
+            raise ValueError(f"unsupported command execution status: {status}")
+        result_url = fact.payload.get("result_url")
+        if result_url is not None and not isinstance(result_url, str):
+            raise ValueError("result_url must be a string")
         return cls(
             fact=fact,
             command_id=command_id,
             command_kind=command_kind,
             item_id=fact.payload.get("item_id"),
             status=status,
-            result_url=fact.payload.get("result_url"),
+            result_url=result_url,
             payload=dict(fact.payload),
         )
 

@@ -31,7 +31,10 @@ Optional fields:
 - `payload.reply_evidence_present`
 - `payload.external_wait`
 
-Unsupported schema versions, missing thread identity, or ambiguous item identity must fail loudly.
+Unsupported schema versions, malformed `observed_at` values, missing thread
+identity, ambiguous item identity, and non-boolean review-thread boolean fields
+must fail loudly. Fact ordering must compare normalized chronological
+timestamps, not raw timestamp strings.
 
 ## Projection Contract
 
@@ -42,6 +45,7 @@ Projection must:
 - derive a current review-thread generation from the latest review-thread observation
 - treat unresolved and stale/outdated threads as active work
 - treat resolved threads as terminal only when no later reopened observation exists
+- treat external-wait observations as waiting before stale or reopened local-action states
 - mark later unresolved observations after terminal history as reopened
 - mark items evidence-pending when required reply or resolve evidence is missing
 - count command execution evidence only when it matches the current generation and expected planned command identity

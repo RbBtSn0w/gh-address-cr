@@ -116,16 +116,21 @@ def _history_record(thread_fact: ReviewThreadFact) -> JsonDict:
 
 
 def _execution_records(executions: tuple[CommandExecutionFact, ...]) -> tuple[JsonDict, ...]:
-    return tuple(
-        {
+    records: list[JsonDict] = []
+    for execution in sorted(executions, key=lambda execution: execution.command_id):
+        if not execution.succeeded:
+            continue
+        record = {
             "command_id": execution.command_id,
             "command_kind": execution.command_kind,
             "status": execution.status,
             **({"result_url": execution.result_url} if execution.result_url else {}),
         }
-        for execution in sorted(executions, key=lambda execution: execution.command_id)
-        if execution.succeeded
-    )
+        satisfies_command_kind = _satisfies_command_kind(execution)
+        if satisfies_command_kind != execution.command_kind:
+            record["satisfies_command_kind"] = satisfies_command_kind
+        records.append(record)
+    return tuple(records)
 
 
 def _failed_execution_records(executions: tuple[CommandExecutionFact, ...]) -> tuple[JsonDict, ...]:
@@ -141,14 +146,20 @@ def _failed_execution_records(executions: tuple[CommandExecutionFact, ...]) -> t
     )
 
 
+def _satisfies_command_kind(execution: CommandExecutionFact) -> str:
+    if execution.command_kind == "retry_command":
+        return str(execution.payload.get("retry_command_kind") or "")
+    return execution.command_kind
+
+
 def _successful_command_kinds(executions: tuple[CommandExecutionFact, ...]) -> frozenset[str]:
-    return frozenset(execution.command_kind for execution in executions if execution.succeeded)
+    return frozenset(_satisfies_command_kind(execution) for execution in executions if execution.succeeded)
 
 
 def _has_durable_completion_evidence(execution: CommandExecutionFact) -> bool:
     if not execution.succeeded:
         return False
-    if execution.command_kind in DURABLE_EVIDENCE_COMMANDS:
+    if _satisfies_command_kind(execution) in DURABLE_EVIDENCE_COMMANDS:
         return isinstance(execution.result_url, str) and execution.result_url.strip() != ""
     return True
 
@@ -172,11 +183,46 @@ def _expected_command_id(command_kind: str, latest: ReviewThreadFact) -> str:
     )
 
 
+def _expected_retry_command_id(execution: CommandExecutionFact, latest: ReviewThreadFact) -> str | None:
+    retry_command_kind = execution.payload.get("retry_command_kind")
+    if retry_command_kind not in REQUIRED_THREAD_COMMANDS:
+        return None
+    failed_command_id = execution.payload.get("failed_command_id")
+    if failed_command_id != _expected_command_id(str(retry_command_kind), latest):
+        return None
+    payload = planned_command_payload(
+        item_id=latest.item_id,
+        thread_id=latest.thread_id,
+        source_fact_id=latest.fact.fact_id,
+        source_observed_at=latest.fact.observed_at,
+    )
+    payload.update(
+        {
+            "failed_command_id": failed_command_id,
+            "retry_command_kind": retry_command_kind,
+        }
+    )
+    return planned_command_id(
+        command_kind="retry_command",
+        reason_code="SIDE_EFFECT_RETRY_REQUIRED",
+        item_id=latest.item_id,
+        payload=payload,
+    )
+
+
+def _expected_current_generation_command_id(execution: CommandExecutionFact, latest: ReviewThreadFact) -> str | None:
+    if execution.command_kind == "retry_command":
+        return _expected_retry_command_id(execution, latest)
+    return _expected_command_id(execution.command_kind, latest)
+
+
 def _matches_current_generation(execution: CommandExecutionFact, latest: ReviewThreadFact) -> bool:
+    expected_command_id = _expected_current_generation_command_id(execution, latest)
     return (
-        execution.payload.get("source_fact_id") == latest.fact.fact_id
+        expected_command_id is not None
+        and execution.payload.get("source_fact_id") == latest.fact.fact_id
         and execution.payload.get("source_observed_at") == latest.fact.observed_at
-        and execution.command_id == _expected_command_id(execution.command_kind, latest)
+        and execution.command_id == expected_command_id
     )
 
 
@@ -211,7 +257,7 @@ def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[
     successful_commands = _successful_command_kinds(completion_executions)
     completion_evidence = _execution_records(completion_executions)
     failed_commands = _failed_execution_records(current_executions)
-    has_reply = bool(latest_payload.get("reply_evidence_present")) or "reply_thread" in successful_commands
+    has_reply = latest_payload.get("reply_evidence_present") is True or "reply_thread" in successful_commands
     has_resolve = is_resolved_github_thread(latest_row) or "resolve_thread" in successful_commands
     all_commands_succeeded = all(command in successful_commands for command in REQUIRED_THREAD_COMMANDS)
     had_terminal_history = any(record["is_resolved"] for record in history[:-1]) or any(
@@ -219,18 +265,18 @@ def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[
     )
     latest_resolved = is_resolved_github_thread(latest_row)
     latest_stale = is_stale_or_outdated_github_thread(latest_row)
-    external_wait = bool(latest_payload.get("external_wait"))
+    external_wait = latest_payload.get("external_wait") is True
 
     if all_commands_succeeded or (latest_resolved and has_reply):
         state = "terminal"
     elif latest_resolved and not has_reply:
         state = "evidence_pending"
+    elif external_wait:
+        state = "waiting"
     elif had_terminal_history and not latest_resolved:
         state = "reopened"
     elif latest_stale:
         state = "stale"
-    elif external_wait:
-        state = "waiting"
     else:
         state = "active"
 

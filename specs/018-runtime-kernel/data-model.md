@@ -17,7 +17,9 @@ Represents one typed input to the runtime kernel.
 
 - Unsupported `schema_version` fails loudly.
 - Missing `fact_kind`, `fact_id`, or required payload identity fails loudly.
-- Facts sort by `observed_at`, `sequence`, then `fact_id`.
+- `sequence` must be a JSON integer when present.
+- `observed_at` must be an RFC3339 timestamp with an explicit timezone offset.
+- Facts sort by normalized chronological `observed_at`, `sequence`, then `fact_id`.
 
 ## ReviewThreadFact
 
@@ -27,18 +29,19 @@ Represents an observed GitHub review-thread state.
 
 - `thread_id`: GitHub review-thread identity.
 - `item_id`: Runtime work item identity, derived as `github-thread:<thread_id>` when not provided.
-- `is_resolved`: Whether GitHub reports the thread as resolved.
-- `is_outdated`: Whether GitHub reports the thread as outdated.
+- `is_resolved`: Whether GitHub reports the thread as resolved; when present, this must be a JSON boolean.
+- `is_outdated`: Whether GitHub reports the thread as outdated; when present, this must be a JSON boolean.
 - `state`: Optional runtime-normalized state.
 - `status`: Optional GitHub/session status.
 - `path`, `line`, `url`, `body`: Source context.
-- `reply_evidence_present`: Whether durable reply evidence is already recorded.
-- `external_wait`: Whether the item requires external reviewer or producer input.
+- `reply_evidence_present`: Whether durable reply evidence is already recorded; when present, this must be a JSON boolean.
+- `external_wait`: Whether the item requires external reviewer or producer input; when present, this must be a JSON boolean.
 
 **State transitions**:
 
 - unresolved or stale observations project to active work.
 - resolved observations project to terminal work unless a later reopened observation exists.
+- external-wait observations project to waiting work after terminal and evidence-pending checks, before stale or reopened local-action checks.
 - a later unresolved observation after terminal history marks the item as reopened.
 - missing required reply/resolve execution evidence marks the item evidence-pending.
 
@@ -59,9 +62,12 @@ Represents the recorded result of a planned side-effect command.
 
 **Validation rules**:
 
+- Unsupported `command_kind` values fail loudly; only planned command kinds are accepted.
+- Unsupported `status` values fail loudly; only `succeeded` and `failed` are accepted.
 - Execution facts with unknown `command_id` references remain diagnostic until a matching plan can be correlated.
 - Failed execution facts never satisfy completion evidence.
 - Successful execution facts satisfy completion only when the command identity and source generation match the current projected review-thread generation and command kinds requiring external proof include durable, non-empty evidence such as a non-blank `result_url`.
+- Successful `retry_command` facts satisfy the original required command kind only when they reference the failed current-generation command identity and original command kind.
 
 ## ReviewWorkItem
 

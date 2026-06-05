@@ -44,6 +44,10 @@ Unknown, stale-generation, failed, or missing execution results keep the related
 Failed execution results may produce `retry_command` plans that reference the
 failed command identity and original command kind without counting as
 completion evidence.
+Successful `retry_command` execution results may satisfy the original required
+command kind only when the retry references the failed current-generation
+command identity, the original command kind, the same source generation, and
+the required durable evidence.
 
 ## Side-Effect Boundary
 
