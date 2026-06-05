@@ -201,6 +201,7 @@ class TelemetryParseResult:
     unsafe_seen: bool
     malformed_seen: bool
     diagnostics: list[Any]
+    events_are_normalized: bool = False
 
 
 class TelemetryAdapter(ABC):
@@ -288,6 +289,7 @@ class GenericAgentJsonlAdapter(TelemetryAdapter):
             unsafe_seen=unsafe_seen,
             malformed_seen=malformed_seen,
             diagnostics=diagnostics,
+            events_are_normalized=True,
         )
 
 
@@ -759,7 +761,9 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             if not isinstance(event, ExternalTelemetryEvent):
                 raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
             try:
-                normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+                normalized_event = event
+                if not parse_result.events_are_normalized:
+                    normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
             except ValueError as exc:
                 message = str(exc)
                 if message.startswith("UNSAFE:"):
@@ -1386,14 +1390,73 @@ def _load_external_events_with_diagnostics(paths: core_paths.SessionPaths) -> tu
             continue
         try:
             payload = _json_loads_strict(line)
-            if not isinstance(payload, dict):
-                raise ValueError("record must be a JSON object")
-            events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
+            events.append(_load_stored_external_event(payload))
         except json.JSONDecodeError as exc:
             diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
         except ValueError as exc:
             diagnostics.append(f"external telemetry line {line_number}: {exc}")
     return events, diagnostics
+
+
+def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
+    if not isinstance(payload, dict):
+        raise ValueError("record must be a JSON object")
+    source = payload.get("source")
+    if not source:
+        raise ValueError("missing required field(s): source")
+    required_strings = ("schema_version", "source_session_id", "event_id", "kind", "operation", "status")
+    values: dict[str, str] = {"source": str(source)}
+    missing: list[str] = []
+    for field in required_strings:
+        value = payload.get(field)
+        if value in (None, ""):
+            missing.append(field)
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be a string")
+        values[field] = value
+    if missing:
+        raise ValueError(f"missing required field(s): {', '.join(missing)}")
+    duration_ms = payload.get("duration_ms")
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
+        raise ValueError("duration_ms must be an integer")
+    if duration_ms < 0:
+        raise ValueError("duration_ms must be non-negative")
+    metadata = payload.get("metadata")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata must be an object")
+    started_at = payload.get("started_at")
+    ended_at = payload.get("ended_at")
+    correlation_id = payload.get("correlation_id")
+    event_fingerprint = payload.get("event_fingerprint")
+    for field_name, value in (
+        ("started_at", started_at),
+        ("ended_at", ended_at),
+        ("correlation_id", correlation_id),
+        ("event_fingerprint", event_fingerprint),
+    ):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{field_name} must be a string")
+    event = ExternalTelemetryEvent(
+        schema_version=values["schema_version"],
+        source=values["source"],
+        source_session_id=values["source_session_id"],
+        event_id=values["event_id"],
+        kind=values["kind"],
+        operation=values["operation"],
+        status=values["status"],
+        duration_ms=duration_ms,
+        started_at=started_at,
+        ended_at=ended_at,
+        metadata=dict(metadata),
+        correlation_id=correlation_id,
+        event_fingerprint=event_fingerprint or "",
+    )
+    if not event.event_fingerprint:
+        event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
+    return event
 
 
 def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:

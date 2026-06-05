@@ -364,6 +364,68 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["slowest_operations"][0]["operation"], "run unit tests")
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_generic_agent_import_does_not_renormalize_adapter_events(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            payload = json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "source": "generic-agent",
+                    "source_session_id": "run-1",
+                    "event_id": "e1",
+                    "kind": "tool_call",
+                    "operation": "run unit tests",
+                    "duration_ms": 1000,
+                    "status": "success",
+                }
+            )
+
+            from gh_address_cr.core import telemetry as telemetry_module
+
+            original = telemetry_module._normalize_external_event
+            with patch("gh_address_cr.core.telemetry._normalize_external_event", wraps=original) as normalize_event:
+                result = import_external_telemetry(
+                    "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
+                )
+
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(normalize_event.call_count, 1)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_uses_canonical_fast_path_for_stored_external_events(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            imported = import_external_telemetry(
+                "octo/example",
+                "77",
+                source="generic-agent",
+                fmt="agent-jsonl",
+                raw=json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "source": "generic-agent",
+                        "source_session_id": "run-1",
+                        "event_id": "e1",
+                        "kind": "tool_call",
+                        "operation": "run unit tests",
+                        "duration_ms": 1000,
+                        "status": "success",
+                    }
+                ),
+            )
+            self.assertEqual(imported["status"], "SUCCESS")
+
+            from gh_address_cr.core import telemetry as telemetry_module
+
+            original = telemetry_module._normalize_external_event
+            with patch("gh_address_cr.core.telemetry._normalize_external_event", wraps=original) as normalize_event:
+                report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["status"], "SUCCESS")
+            self.assertEqual(report["total_events"], 1)
+            self.assertEqual(normalize_event.call_count, 0)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_overlapping_external_imports_are_deduped_by_event_fingerprint(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
