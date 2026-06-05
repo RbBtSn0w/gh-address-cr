@@ -540,3 +540,27 @@ class FinalGateTestCase(unittest.TestCase):
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
         self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]", guidance)
+
+    def test_build_completion_summary_guidance_tolerates_malformed_telemetry_fields(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": "NaN",
+            "success_rate": "oops",
+            "inefficiency_flags": "retry-loop",
+            "diagnostics": "host telemetry degraded",
+            "report_artifact": "report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
+            guidance,
+        )
+        self.assertIn("Telemetry diagnostics: host telemetry degraded", guidance)
