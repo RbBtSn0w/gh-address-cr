@@ -112,37 +112,38 @@ def fix_reply(
     
     review_signal = _review_signal_label(normalized_severity, normalized_review_priority)
 
-    lines = [
-        f"Fixed in `{commit_hash}`.",
-        "",
-        "What I changed:",
-    ]
+    display_commit = _display_commit_hash(commit_hash)
+    lines = [f"Addressed in `{display_commit}`.", ""]
     if review_signal:
-        lines[2:2] = [f"Review signal: {review_signal}", ""]
-    
+        lines.extend([f"Review signal: {review_signal}", ""])
+
     lines.extend([f"- `{path}`: {file_summary}" for path in files] or ["- No file list provided."])
-    
-    lines.extend(["", "Why this addresses the CR:"])
-    lines.extend(_format_rationale(why))
-    
+
+    rationale_lines = _format_rationale(why)
+    if len(rationale_lines) == 1 and rationale_lines[0].startswith("- "):
+        lines.append(f"- Why: {rationale_lines[0][2:]}")
+    else:
+        lines.append("- Why:")
+        lines.extend(f"  {line}" for line in rationale_lines)
+
     if normalized_severity:
-        lines.append(f"- {SEVERITY_RISK_NOTES[normalized_severity]}")
+        lines.append(f"- Risk note: {SEVERITY_RISK_NOTES[normalized_severity]}")
     elif normalized_review_priority:
         priority_note = str(review_priority_note or "").strip()
         if priority_note:
-            lines.append(f"- {priority_note}")
-        lines.append(f"- {REVIEW_PRIORITY_RISK_NOTES[normalized_review_priority]}")
-    
-    lines.extend(
-        [
-            "",
-            "Validation:",
-            f"- `{test_command}`",
-            f"- Result: {test_result}",
-        ]
-    )
+            lines.append(f"- Review note: {priority_note}")
+        lines.append(f"- Risk note: {REVIEW_PRIORITY_RISK_NOTES[normalized_review_priority]}")
+
+    lines.append(f"- Validation: `{test_command}` {test_result}")
     
     return "\n".join(lines) + "\n"
+
+
+def _display_commit_hash(commit_hash: str) -> str:
+    normalized = commit_hash.strip()
+    if len(normalized) > 12 and all(ch in "0123456789abcdefABCDEF" for ch in normalized):
+        return normalized[:7]
+    return normalized
 
 
 def clarify_reply(payload: list[str]) -> str:

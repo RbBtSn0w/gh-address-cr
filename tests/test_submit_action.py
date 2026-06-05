@@ -114,12 +114,12 @@ class TestSubmitAction(PythonScriptTestCase):
         }
         loop_req_path.write_text(json.dumps(loop_req), encoding="utf-8")
 
-        # Fix requires commit_hash/files
+        # Fix requires files; commit evidence can be attached later during publish.
         result = self.run_cmd(
             [sys.executable, str(CLI_PY), "submit-action", "--resolution", "fix", "--note", "fixed", str(loop_req_path)]
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("requires --commit-hash and --files", result.stderr)
+        self.assertIn("requires --files", result.stderr)
 
         # Success with details
         result = self.run_cmd(

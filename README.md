@@ -148,9 +148,11 @@ inflating counts, durations, or slowest-operation rankings. Corrupted external
 telemetry remains fail-open for review and final-gate flows, while telemetry
 commands fail loudly with reason codes and diagnostics.
 
-For GitHub review-thread replies, shared commit/files/validation evidence is
-not the same as a shared reviewer answer. Use `agent submit-batch` with
-per-thread summary/why entries for ordinary multi-thread handling. Use
+For GitHub review-thread replies, shared files/validation evidence is not the
+same as a shared reviewer answer. Use `agent submit-batch` with per-thread
+summary/why entries for ordinary multi-thread handling. Commit evidence is
+hydrated by the runtime during publish, so independent worker evidence does not
+need to wait for a final commit hash. Use
 `agent fix-all --input <batch-response.json>` to route explicit per-thread batch
 evidence, or `agent fix-all --homogeneous-reason <why>` only for a homogeneous
 repeated concern.

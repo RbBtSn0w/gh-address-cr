@@ -237,7 +237,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         skeleton = json.loads(Path(payload["response_skeleton_path"]).read_text(encoding="utf-8"))
         self.assertEqual(skeleton["files"], [])
         self.assertEqual(skeleton["validation_commands"], [{"command": "", "result": ""}])
-        self.assertEqual(skeleton["fix_reply"]["commit_hash"], "")
+        self.assertNotIn("commit_hash", skeleton["fix_reply"])
         self.assertEqual(skeleton["fix_reply"]["files"], [])
         self.assertNotIn("evidence_ref", skeleton)
 
@@ -631,7 +631,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
 
-    def test_agent_submit_rejects_github_thread_fix_reply_missing_commit_hash(self):
+    def test_agent_submit_accepts_github_thread_fix_reply_before_commit_evidence_exists(self):
         self.write_session(
             items=[
                 open_item(
@@ -675,14 +675,16 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
 
-        self.assertEqual(result.returncode, 5)
+        self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "ACTION_REJECTED")
-        self.assertEqual(payload["reason_code"], "MISSING_FIX_REPLY_COMMIT_HASH")
+        self.assertEqual(payload["status"], "ACTION_ACCEPTED")
         session = self.load_session()
-        self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
-        self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
-        self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+        item = session["items"]["github-thread:abc"]
+        self.assertEqual(item["state"], "publish_ready")
+        self.assertEqual(item["accepted_response"]["fix_reply"]["summary"], "Fixed it.")
+        self.assertNotIn("commit_hash", item["accepted_response"]["fix_reply"])
+        self.assertEqual(session["leases"][request["lease_id"]]["status"], "accepted")
+        self.assertIn("response_accepted", [row["event_type"] for row in self.ledger_rows()])
 
     def test_agent_submit_batch_accepts_common_evidence_for_github_threads(self):
         self.write_session(

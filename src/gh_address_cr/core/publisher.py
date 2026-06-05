@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime
 from typing import Any
 
@@ -51,6 +52,7 @@ def publish_github_thread_responses(
             "published_count": 0,
         }
     publisher_login = _publisher_login(client, fallback=agent_id)
+    default_commit_hash = None
 
     plans: list[dict[str, Any]] = []
     for item_id, item in publish_items:
@@ -78,7 +80,22 @@ def publish_github_thread_responses(
                 message=f"Publish-ready item has no GitHub thread id: {item_id}",
                 payload={"item_id": item_id},
             )
-        reply_body, error = publish_reply_body(item, response)
+        resolved_commit_hash = ""
+        need_default = False
+        if isinstance(response, dict):
+            fix_reply = response.get("fix_reply")
+            if isinstance(fix_reply, dict):
+                if not str(fix_reply.get("commit_hash") or "").strip():
+                    if not _item_commit_hash(item):
+                        need_default = True
+
+        if need_default:
+            if default_commit_hash is None:
+                default_commit_hash = _default_commit_hash_for_publish(session)
+            resolved_commit_hash = default_commit_hash
+
+        hydrated_response = _hydrate_publish_response(session, item, response, default_commit_hash=resolved_commit_hash)
+        reply_body, error = publish_reply_body(item, hydrated_response)
         if not reply_body:
             _record_publish_blocked(session, ledger, item_id, agent_id, error or "MISSING_PUBLISH_REPLY")
             session_store.save_session(repo, pr_number, session)
@@ -91,7 +108,13 @@ def publish_github_thread_responses(
                 payload={"item_id": item_id},
             )
         plans.append(
-            {"item_id": item_id, "item": item, "response": response, "thread_id": thread_id, "reply_body": reply_body}
+            {
+                "item_id": item_id,
+                "item": item,
+                "response": hydrated_response,
+                "thread_id": thread_id,
+                "reply_body": reply_body,
+            }
         )
 
     published: list[str] = []
@@ -264,6 +287,80 @@ def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
     return ""
 
 
+def validate_fix_reply_for_submit(item: dict[str, Any], response: dict[str, Any]) -> str | None:
+    fix_reply = response.get("fix_reply")
+    if not isinstance(fix_reply, dict):
+        return "MISSING_PUBLISH_REPLY"
+    files = _normalize_string_list(fix_reply.get("files") or response.get("files"))
+    if not files:
+        return "MISSING_FIX_REPLY_FILES"
+    validation_commands = _normalize_validation_commands(response.get("validation_commands"))
+    test_command = str(fix_reply.get("test_command") or " && ".join(validation_commands)).strip()
+    test_result = str(fix_reply.get("test_result") or ("passed" if validation_commands else "")).strip()
+    if not test_command:
+        return "MISSING_FIX_REPLY_TEST_COMMAND"
+    if not test_result:
+        return "MISSING_FIX_REPLY_TEST_RESULT"
+    _, severity_error = _fix_reply_severity_for_publish(fix_reply, item)
+    if severity_error:
+        return severity_error
+    return None
+
+
+def _hydrate_publish_response(
+    session: dict[str, Any],
+    item: dict[str, Any],
+    response: dict[str, Any],
+    *,
+    default_commit_hash: str,
+) -> dict[str, Any]:
+    hydrated = dict(response)
+    fix_reply = hydrated.get("fix_reply")
+    if not isinstance(fix_reply, dict):
+        return hydrated
+    hydrated_fix_reply = dict(fix_reply)
+    if not str(hydrated_fix_reply.get("commit_hash") or "").strip():
+        commit_hash = _item_commit_hash(item) or default_commit_hash
+        if commit_hash:
+            hydrated_fix_reply["commit_hash"] = commit_hash
+    hydrated["fix_reply"] = hydrated_fix_reply
+    return hydrated
+
+
+def _default_commit_hash_for_publish(session: dict[str, Any]) -> str:
+    return _commit_hash_from_evidence(session.get("commit_evidence")) or _git_head_commit()
+
+
+def _item_commit_hash(item: dict[str, Any]) -> str:
+    return _commit_hash_from_evidence(item.get("commit_evidence"))
+
+
+def _commit_hash_from_evidence(source: Any) -> str:
+    if not isinstance(source, dict):
+        return ""
+    for key in ("commit_hash", "head_sha", "sha"):
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _git_head_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[str | None, str | None]:
     resolution = str(response.get("resolution") or item.get("publish_resolution") or "")
     reply_markdown = response.get("reply_markdown")
@@ -279,6 +376,9 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
         return None, "MISSING_PUBLISH_REPLY"
+    submit_error = validate_fix_reply_for_submit(item, response)
+    if submit_error:
+        return None, submit_error
     commit_hash = str(fix_reply.get("commit_hash") or "").strip()
     if not commit_hash:
         return None, "MISSING_FIX_REPLY_COMMIT_HASH"

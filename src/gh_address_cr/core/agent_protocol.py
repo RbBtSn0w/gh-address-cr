@@ -551,7 +551,6 @@ def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, it
         if role == "fixer" and resolution == "fix":
             skeleton["fix_reply"] = {
                 "summary": "",
-                "commit_hash": "",
                 "files": [],
                 "why": "",
                 "test_command": "",
@@ -1092,16 +1091,6 @@ def _validate_batch_fix_contract(
             item_id=item_id,
             lease_id=lease_id,
         )
-    if not str(fix_reply.get("commit_hash") or "").strip():
-        _raise_response_rejected(
-            session,
-            ledger,
-            response,
-            "MISSING_BATCH_COMMIT_HASH",
-            status="BATCH_ACTION_REJECTED",
-            item_id=item_id,
-            lease_id=lease_id,
-        )
     if not str(fix_reply.get("why") or "").strip():
         _raise_response_rejected(
             session,
@@ -1418,11 +1407,11 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
             severity_reason = _fix_reply_severity_rejection_reason(fix_reply, item)
             if severity_reason:
                 return severity_reason
-            from gh_address_cr.core.publisher import publish_reply_body
+            from gh_address_cr.core.publisher import validate_fix_reply_for_submit
 
-            _, publish_error = publish_reply_body(item, response)
-            if publish_error:
-                return publish_error
+            submit_error = validate_fix_reply_for_submit(item, response)
+            if submit_error:
+                return submit_error
     else:
         if "validation_commands" in response and not _normalize_validation_command_records(response.get("validation_commands")):
             return "INVALID_VALIDATION_COMMANDS"

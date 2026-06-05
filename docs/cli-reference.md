@@ -137,8 +137,8 @@ Role split:
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
-Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one commit/files/validation set addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Use `agent fix-all --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent fix-all --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve-stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
-The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file commit can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one commit covers them, submit a batch response, publish, then claim the next set.
+Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one set of files/validation evidence addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Commit evidence is hydrated during publish instead of blocking worker submit. Use `agent fix-all --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent fix-all --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve-stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
+The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file patch can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one validation bundle covers them, submit a batch response, publish, then claim the next set.
 
 Reusable evidence profiles reduce repeated commit/files/validation text across responses:
 
@@ -170,7 +170,6 @@ Minimal `BatchActionResponse` shape:
       {"command": "python3 -m unittest tests.test_example", "result": "passed"}
     ],
     "fix_reply": {
-      "commit_hash": "abc123",
       "test_command": "python3 -m unittest tests.test_example",
       "test_result": "passed"
     }
@@ -439,8 +438,8 @@ If you omit the producer where it is required:
   - `note`
   - for GitHub thread `fix`: `fix_reply`
     - `summary`
-    - `commit_hash`
     - `files`
+    - optional `commit_hash` when known; otherwise publish hydrates commit evidence
     - optional `severity`, `severity_note`, `why`, `test_command`, `test_result`
     - `validation_commands` may be used as default validation evidence when `test_command` / `test_result` are omitted
   - for GitHub thread `clarify` or `defer`: `reply_markdown`
