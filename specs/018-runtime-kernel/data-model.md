@@ -16,10 +16,12 @@ Represents one typed input to the runtime kernel.
 **Validation rules**:
 
 - Unsupported `schema_version` fails loudly.
-- Missing `fact_kind`, `fact_id`, or required payload identity fails loudly.
+- Missing or non-string `fact_kind`, `fact_id`, or required payload identity fails loudly.
 - `sequence` must be a JSON integer when present.
 - `observed_at` must be an RFC3339 timestamp with an explicit timezone offset.
 - Facts sort by normalized chronological `observed_at`, `sequence`, then `fact_id`.
+- Duplicate normalized ordering keys fail loudly; a fact set must not contain
+  two facts with the same normalized `observed_at`, `sequence`, and `fact_id`.
 
 ## ReviewThreadFact
 
@@ -52,7 +54,7 @@ Represents the recorded result of a planned side-effect command.
 **Fields**:
 
 - `command_id`: Idempotency identity of the planned command.
-- `command_kind`: Side-effect kind such as `reply_thread`, `resolve_thread`, or `run_final_gate`.
+- `command_kind`: Side-effect kind such as `reply_thread`, `resolve_thread`, `retry_command`, or `run_final_gate`.
 - `item_id`: Related work item identity when item-scoped.
 - `status`: `succeeded` or `failed`.
 - `result_url`: Optional durable evidence URL.
@@ -65,9 +67,13 @@ Represents the recorded result of a planned side-effect command.
 - Unsupported `command_kind` values fail loudly; only planned command kinds are accepted.
 - Unsupported `status` values fail loudly; only `succeeded` and `failed` are accepted.
 - Execution facts with unknown `command_id` references remain diagnostic until a matching plan can be correlated.
+- Unscoped `run_final_gate` execution facts are allowed because final-gate commands are PR-scoped rather than item-scoped.
 - Failed execution facts never satisfy completion evidence.
 - Successful execution facts satisfy completion only when the command identity and source generation match the current projected review-thread generation and command kinds requiring external proof include durable, non-empty evidence such as a non-blank `result_url`.
-- Successful `retry_command` facts satisfy the original required command kind only when they reference the failed current-generation command identity and original command kind.
+- Successful `retry_command` facts satisfy the original required command kind only when they reference an actual failed current-generation command execution fact, the original command kind, the same source generation, and required durable evidence.
+- Failed command records remain actionable only while their original command kind is unsatisfied. Later durable command evidence or pre-existing review-thread evidence suppresses retry planning for already satisfied work.
+- Duplicate failed executions for the same planned side-effect collapse to one actionable failed command record.
+- Failed `retry_command` wrapper executions do not create retry-of-retry work; the original unsatisfied command remains the retry target.
 
 ## ReviewWorkItem
 
@@ -93,6 +99,9 @@ Represents one projected unit of review-resolution work.
 
 - Derived from one or more `ReviewThreadFact` entries.
 - May be satisfied by one or more successful `CommandExecutionFact` entries.
+- Pre-existing `reply_evidence_present` on the current review-thread observation
+  satisfies the reply side of required work; a resolved current GitHub
+  observation satisfies the resolve side.
 
 ## ReviewProjection
 

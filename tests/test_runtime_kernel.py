@@ -1,5 +1,6 @@
 import sys
 import unittest
+from types import SimpleNamespace
 
 from tests.helpers import SRC_ROOT
 
@@ -54,6 +55,34 @@ def command_fact(
         "sequence": sequence,
         "payload": payload,
     }
+
+
+def retry_command_for(item, failed_command):
+    from gh_address_cr.core.runtime_kernel.identity import planned_command_id, planned_command_payload
+
+    payload = planned_command_payload(
+        item_id=item.item_id,
+        thread_id=item.thread_id,
+        source_fact_id=item.source_fact_id,
+        source_observed_at=item.source_observed_at,
+    )
+    payload.update(
+        {
+            "failed_command_id": failed_command.command_id,
+            "retry_command_kind": failed_command.command_kind,
+        }
+    )
+    return SimpleNamespace(
+        command_id=planned_command_id(
+            command_kind="retry_command",
+            reason_code="SIDE_EFFECT_RETRY_REQUIRED",
+            item_id=item.item_id,
+            payload=payload,
+        ),
+        command_kind="retry_command",
+        item_id=item.item_id,
+        payload=payload,
+    )
 
 
 def raw_command_fact(command_id, command_kind, item_id, *, observed_at="2026-06-05T00:01:00Z", status="succeeded"):
@@ -123,6 +152,30 @@ class RuntimeKernelProjectionTests(unittest.TestCase):
 
         self.assertEqual([fact.fact_id for fact in sort_runtime_facts([later, earlier])], ["offset", "z"])
 
+    def test_runtime_fact_duplicate_ordering_key_conflict_fails_loudly(self):
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        open_fact = review_fact(
+            "DUPLICATE",
+            fact_id="same-key",
+            observed_at="2026-06-05T00:00:00Z",
+            sequence=0,
+            is_resolved=False,
+            state="open",
+        )
+        closed_fact = review_fact(
+            "DUPLICATE",
+            fact_id="same-key",
+            observed_at="2026-06-05T00:00:00Z",
+            sequence=0,
+            is_resolved=True,
+            state="closed",
+            reply_evidence_present=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate runtime fact ordering key"):
+            project_review_threads([open_fact, closed_fact])
+
     def test_runtime_fact_rejects_malformed_observed_at(self):
         from gh_address_cr.core.runtime_kernel.events import RuntimeFact
 
@@ -139,6 +192,25 @@ class RuntimeKernelProjectionTests(unittest.TestCase):
                 payload["sequence"] = sequence
                 with self.assertRaisesRegex(ValueError, "sequence must be an integer"):
                     RuntimeFact.from_dict(payload)
+
+    def test_runtime_fact_required_identity_fields_must_be_strings(self):
+        from gh_address_cr.core.runtime_kernel.events import RuntimeFact
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        invalid_fact_id = review_fact("BAD_ID")
+        invalid_fact_id["fact_id"] = 123
+        with self.assertRaisesRegex(ValueError, "fact_id must be a non-empty string"):
+            RuntimeFact.from_dict(invalid_fact_id)
+
+        invalid_thread_id = review_fact("BAD_THREAD")
+        invalid_thread_id["payload"]["thread_id"] = {"id": "BAD_THREAD"}
+        with self.assertRaisesRegex(ValueError, "thread_id must be a non-empty string"):
+            project_review_threads([invalid_thread_id])
+
+        invalid_command_id = raw_command_fact("bad-command", "reply_thread", "github-thread:OPEN")
+        invalid_command_id["payload"]["command_id"] = ["bad-command"]
+        with self.assertRaisesRegex(ValueError, "command_id must be a non-empty string"):
+            project_review_threads([review_fact("OPEN", is_resolved=False), invalid_command_id])
 
     def test_ambiguous_review_thread_item_identity_fails_loudly(self):
         from gh_address_cr.core.runtime_kernel.projections import project_review_threads
@@ -454,6 +526,59 @@ class RuntimeKernelCommandPlanTests(unittest.TestCase):
         self.assertIn("retry_command", [command["command_kind"] for command in retry_plan])
         self.assertIn("github-thread:OPEN", retry_projection.to_dict()["final_gate_blocker_ids"])
 
+    def test_failed_retry_wrapper_replans_original_side_effect(self):
+        from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
+        from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        review = review_fact("FAILED_RETRY", is_resolved=False)
+        initial_projection = project_review_threads([review])
+        initial_plan = plan_review_commands(initial_projection, evaluate_review_policy(initial_projection))
+        failed_reply = next(command for command in initial_plan if command.command_kind == "reply_thread")
+        retry_projection = project_review_threads([review, command_fact(failed_reply, status="failed")])
+        retry_plan = plan_review_commands(retry_projection, evaluate_review_policy(retry_projection))
+        retry_reply = next(command for command in retry_plan if command.command_kind == "retry_command")
+
+        failed_retry_projection = project_review_threads(
+            [
+                review,
+                command_fact(failed_reply, status="failed"),
+                command_fact(retry_reply, status="failed", observed_at="2026-06-05T00:02:00Z", sequence=1),
+            ]
+        )
+        next_plan = [
+            command.to_dict()
+            for command in plan_review_commands(failed_retry_projection, evaluate_review_policy(failed_retry_projection))
+        ]
+        retry_commands = [command for command in next_plan if command["command_kind"] == "retry_command"]
+
+        self.assertEqual(len(retry_commands), 1)
+        self.assertEqual(retry_commands[0]["payload"]["failed_command_id"], failed_reply.command_id)
+        self.assertEqual(retry_commands[0]["payload"]["retry_command_kind"], "reply_thread")
+
+    def test_duplicate_failed_executions_plan_one_retry(self):
+        from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
+        from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        review = review_fact("DUPLICATE_FAILURE", is_resolved=False)
+        initial_projection = project_review_threads([review])
+        initial_plan = plan_review_commands(initial_projection, evaluate_review_policy(initial_projection))
+        failed_reply = next(command for command in initial_plan if command.command_kind == "reply_thread")
+
+        projection = project_review_threads(
+            [
+                review,
+                command_fact(failed_reply, status="failed"),
+                command_fact(failed_reply, status="failed", observed_at="2026-06-05T00:02:00Z", sequence=1),
+            ]
+        )
+        plan = [command.to_dict() for command in plan_review_commands(projection, evaluate_review_policy(projection))]
+        retry_commands = [command for command in plan if command["command_kind"] == "retry_command"]
+
+        self.assertEqual(len(retry_commands), 1)
+        self.assertEqual(retry_commands[0]["payload"]["failed_command_id"], failed_reply.command_id)
+
     def test_successful_retry_execution_satisfies_original_required_command(self):
         from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
         from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
@@ -486,6 +611,58 @@ class RuntimeKernelCommandPlanTests(unittest.TestCase):
 
         self.assertEqual(completed_decision["status"], "final_gate_eligible")
         self.assertEqual(completed_projection.to_dict()["final_gate_blocker_ids"], [])
+
+    def test_retry_execution_requires_actual_failed_original_command(self):
+        from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
+        from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        review = review_fact("NO_FAILED_RETRY", is_resolved=False)
+        initial_projection = project_review_threads([review])
+        initial_plan = plan_review_commands(initial_projection, evaluate_review_policy(initial_projection))
+        failed_reply = next(command for command in initial_plan if command.command_kind == "reply_thread")
+        successful_resolve = next(command for command in initial_plan if command.command_kind == "resolve_thread")
+        retry_reply = retry_command_for(initial_projection.work_items[0], failed_reply)
+
+        projection = project_review_threads(
+            [
+                review,
+                command_fact(successful_resolve),
+                command_fact(retry_reply),
+            ]
+        )
+        decision = evaluate_review_policy(projection)
+        plan = [command.to_dict() for command in plan_review_commands(projection, decision)]
+
+        self.assertEqual(decision.to_dict()["status"], "ready_for_action")
+        self.assertEqual(projection.to_dict()["work_items"][0]["required_commands"], ["reply_thread"])
+        self.assertEqual([command["command_kind"] for command in plan], ["reply_thread"])
+        self.assertIn("github-thread:NO_FAILED_RETRY", projection.to_dict()["final_gate_blocker_ids"])
+
+    def test_successful_command_suppresses_prior_failed_retry_plan(self):
+        from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
+        from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        review = review_fact("FAILED_THEN_SUCCESSFUL_REPLY", is_resolved=False)
+        initial_projection = project_review_threads([review])
+        initial_plan = plan_review_commands(initial_projection, evaluate_review_policy(initial_projection))
+        reply = next(command for command in initial_plan if command.command_kind == "reply_thread")
+
+        projection = project_review_threads(
+            [
+                review,
+                command_fact(reply, status="failed"),
+                command_fact(reply, observed_at="2026-06-05T00:02:00Z", sequence=1),
+            ]
+        )
+        decision = evaluate_review_policy(projection)
+        plan = [command.to_dict() for command in plan_review_commands(projection, decision)]
+
+        self.assertEqual(decision.to_dict()["status"], "ready_for_action")
+        self.assertEqual(projection.to_dict()["work_items"][0]["required_commands"], ["resolve_thread"])
+        self.assertEqual([command["command_kind"] for command in plan], ["resolve_thread"])
+        self.assertEqual(projection.to_dict()["work_items"][0]["failed_commands"], [])
 
     def test_retry_execution_requires_durable_evidence_for_original_required_command(self):
         from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
@@ -520,6 +697,23 @@ class RuntimeKernelCommandPlanTests(unittest.TestCase):
         self.assertEqual(unproven_decision["status"], "ready_for_action")
         self.assertIn("github-thread:OPEN", unproven_projection.to_dict()["final_gate_blocker_ids"])
 
+    def test_payload_reply_evidence_and_resolve_execution_complete_work(self):
+        from gh_address_cr.core.runtime_kernel.commands import plan_review_commands
+        from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        review = review_fact("PAYLOAD_REPLY", is_resolved=False, reply_evidence_present=True)
+        initial_projection = project_review_threads([review])
+        initial_plan = plan_review_commands(initial_projection, evaluate_review_policy(initial_projection))
+        resolve = next(command for command in initial_plan if command.command_kind == "resolve_thread")
+
+        completed_projection = project_review_threads([review, command_fact(resolve)])
+        completed_decision = evaluate_review_policy(completed_projection).to_dict()
+
+        self.assertEqual(completed_decision["status"], "final_gate_eligible")
+        self.assertEqual(completed_projection.to_dict()["work_items"][0]["state"], "terminal")
+        self.assertEqual(completed_projection.to_dict()["final_gate_blocker_ids"], [])
+
     def test_reporting_facts_do_not_complete_work_or_create_recursive_blockers(self):
         from gh_address_cr.core.runtime_kernel.policies import evaluate_review_policy
         from gh_address_cr.core.runtime_kernel.projections import project_review_threads
@@ -535,6 +729,28 @@ class RuntimeKernelCommandPlanTests(unittest.TestCase):
         self.assertEqual(evaluate_review_policy(open_projection).to_dict()["status"], "ready_for_action")
         self.assertEqual(evaluate_review_policy(done_projection).to_dict()["status"], "final_gate_eligible")
         self.assertEqual(done_projection.to_dict()["final_gate_blocker_ids"], [])
+
+    def test_unscoped_final_gate_execution_is_not_an_unscoped_item_diagnostic(self):
+        from gh_address_cr.core.runtime_kernel.projections import project_review_threads
+
+        projection = project_review_threads(
+            [
+                {
+                    "schema_version": "1.0",
+                    "fact_kind": "command_executed",
+                    "fact_id": "final-gate-exec",
+                    "observed_at": "2026-06-05T00:03:00Z",
+                    "payload": {
+                        "command_id": "final-gate",
+                        "command_kind": "run_final_gate",
+                        "status": "succeeded",
+                        "recorded_at": "2026-06-05T00:03:00Z",
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(projection.to_dict()["diagnostics"], [])
 
 
 if __name__ == "__main__":

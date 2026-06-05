@@ -133,17 +133,30 @@ def _execution_records(executions: tuple[CommandExecutionFact, ...]) -> tuple[Js
     return tuple(records)
 
 
-def _failed_execution_records(executions: tuple[CommandExecutionFact, ...]) -> tuple[JsonDict, ...]:
-    return tuple(
-        {
-            "command_id": execution.command_id,
-            "command_kind": execution.command_kind,
-            "status": execution.status,
-            **({"result_url": execution.result_url} if execution.result_url else {}),
-        }
-        for execution in sorted(executions, key=lambda execution: execution.command_id)
-        if not execution.succeeded
-    )
+def _failed_execution_records(
+    executions: tuple[CommandExecutionFact, ...],
+    satisfied_command_kinds: frozenset[str],
+) -> tuple[JsonDict, ...]:
+    records: list[JsonDict] = []
+    seen_failures: set[tuple[str, str]] = set()
+    for execution in sorted(executions, key=lambda execution: execution.command_id):
+        if execution.succeeded or execution.command_kind not in REQUIRED_THREAD_COMMANDS:
+            continue
+        if _satisfies_command_kind(execution) in satisfied_command_kinds:
+            continue
+        failure_key = (execution.command_id, execution.command_kind)
+        if failure_key in seen_failures:
+            continue
+        seen_failures.add(failure_key)
+        records.append(
+            {
+                "command_id": execution.command_id,
+                "command_kind": execution.command_kind,
+                "status": execution.status,
+                **({"result_url": execution.result_url} if execution.result_url else {}),
+            }
+        )
+    return tuple(records)
 
 
 def _satisfies_command_kind(execution: CommandExecutionFact) -> str:
@@ -183,11 +196,44 @@ def _expected_command_id(command_kind: str, latest: ReviewThreadFact) -> str:
     )
 
 
-def _expected_retry_command_id(execution: CommandExecutionFact, latest: ReviewThreadFact) -> str | None:
+def _source_generation_matches(execution: CommandExecutionFact, latest: ReviewThreadFact) -> bool:
+    return (
+        execution.payload.get("source_fact_id") == latest.fact.fact_id
+        and execution.payload.get("source_observed_at") == latest.fact.observed_at
+    )
+
+
+def _matches_direct_current_generation(execution: CommandExecutionFact, latest: ReviewThreadFact) -> bool:
+    if execution.command_kind not in REQUIRED_THREAD_COMMANDS:
+        return False
+    return (
+        _source_generation_matches(execution, latest)
+        and execution.command_id == _expected_command_id(execution.command_kind, latest)
+    )
+
+
+def _failed_direct_command_keys(
+    executions: tuple[CommandExecutionFact, ...],
+    latest: ReviewThreadFact,
+) -> frozenset[tuple[str, str]]:
+    return frozenset(
+        (execution.command_id, execution.command_kind)
+        for execution in executions
+        if not execution.succeeded and _matches_direct_current_generation(execution, latest)
+    )
+
+
+def _expected_retry_command_id(
+    execution: CommandExecutionFact,
+    latest: ReviewThreadFact,
+    failed_direct_command_keys: frozenset[tuple[str, str]],
+) -> str | None:
     retry_command_kind = execution.payload.get("retry_command_kind")
     if retry_command_kind not in REQUIRED_THREAD_COMMANDS:
         return None
     failed_command_id = execution.payload.get("failed_command_id")
+    if (failed_command_id, retry_command_kind) not in failed_direct_command_keys:
+        return None
     if failed_command_id != _expected_command_id(str(retry_command_kind), latest):
         return None
     payload = planned_command_payload(
@@ -210,18 +256,25 @@ def _expected_retry_command_id(execution: CommandExecutionFact, latest: ReviewTh
     )
 
 
-def _expected_current_generation_command_id(execution: CommandExecutionFact, latest: ReviewThreadFact) -> str | None:
+def _expected_current_generation_command_id(
+    execution: CommandExecutionFact,
+    latest: ReviewThreadFact,
+    failed_direct_command_keys: frozenset[tuple[str, str]],
+) -> str | None:
     if execution.command_kind == "retry_command":
-        return _expected_retry_command_id(execution, latest)
+        return _expected_retry_command_id(execution, latest, failed_direct_command_keys)
     return _expected_command_id(execution.command_kind, latest)
 
 
-def _matches_current_generation(execution: CommandExecutionFact, latest: ReviewThreadFact) -> bool:
-    expected_command_id = _expected_current_generation_command_id(execution, latest)
+def _matches_current_generation(
+    execution: CommandExecutionFact,
+    latest: ReviewThreadFact,
+    failed_direct_command_keys: frozenset[tuple[str, str]],
+) -> bool:
+    expected_command_id = _expected_current_generation_command_id(execution, latest, failed_direct_command_keys)
     return (
         expected_command_id is not None
-        and execution.payload.get("source_fact_id") == latest.fact.fact_id
-        and execution.payload.get("source_observed_at") == latest.fact.observed_at
+        and _source_generation_matches(execution, latest)
         and execution.command_id == expected_command_id
     )
 
@@ -230,7 +283,12 @@ def _matching_generation_executions(
     executions: tuple[CommandExecutionFact, ...],
     thread_fact: ReviewThreadFact,
 ) -> tuple[CommandExecutionFact, ...]:
-    return tuple(execution for execution in executions if _matches_current_generation(execution, thread_fact))
+    failed_direct_command_keys = _failed_direct_command_keys(executions, thread_fact)
+    return tuple(
+        execution
+        for execution in executions
+        if _matches_current_generation(execution, thread_fact, failed_direct_command_keys)
+    )
 
 
 def _current_generation_executions(
@@ -241,10 +299,22 @@ def _current_generation_executions(
 
 
 def _generation_completed(thread_fact: ReviewThreadFact, executions: tuple[CommandExecutionFact, ...]) -> bool:
-    successful_commands = _successful_command_kinds(
-        _completion_evidence_executions(_matching_generation_executions(executions, thread_fact))
-    )
-    return all(command in successful_commands for command in REQUIRED_THREAD_COMMANDS)
+    completion_executions = _completion_evidence_executions(_matching_generation_executions(executions, thread_fact))
+    satisfied_commands = _satisfied_command_kinds(thread_fact, completion_executions)
+    return all(command in satisfied_commands for command in REQUIRED_THREAD_COMMANDS)
+
+
+def _satisfied_command_kinds(
+    thread_fact: ReviewThreadFact,
+    completion_executions: tuple[CommandExecutionFact, ...],
+) -> frozenset[str]:
+    latest_row = thread_fact.row()
+    satisfied_commands = set(_successful_command_kinds(completion_executions))
+    if thread_fact.payload.get("reply_evidence_present") is True:
+        satisfied_commands.add("reply_thread")
+    if is_resolved_github_thread(latest_row):
+        satisfied_commands.add("resolve_thread")
+    return frozenset(command for command in satisfied_commands if command in REQUIRED_THREAD_COMMANDS)
 
 
 def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[CommandExecutionFact, ...]) -> ReviewWorkItem:
@@ -254,12 +324,12 @@ def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[
     history = tuple(_history_record(fact) for fact in thread_facts)
     current_executions = _current_generation_executions(executions, latest)
     completion_executions = _completion_evidence_executions(current_executions)
-    successful_commands = _successful_command_kinds(completion_executions)
+    satisfied_commands = _satisfied_command_kinds(latest, completion_executions)
     completion_evidence = _execution_records(completion_executions)
-    failed_commands = _failed_execution_records(current_executions)
-    has_reply = latest_payload.get("reply_evidence_present") is True or "reply_thread" in successful_commands
-    has_resolve = is_resolved_github_thread(latest_row) or "resolve_thread" in successful_commands
-    all_commands_succeeded = all(command in successful_commands for command in REQUIRED_THREAD_COMMANDS)
+    failed_commands = _failed_execution_records(current_executions, satisfied_commands)
+    has_reply = "reply_thread" in satisfied_commands
+    has_resolve = "resolve_thread" in satisfied_commands
+    all_required_commands_satisfied = all(command in satisfied_commands for command in REQUIRED_THREAD_COMMANDS)
     had_terminal_history = any(record["is_resolved"] for record in history[:-1]) or any(
         _generation_completed(thread_fact, executions) for thread_fact in thread_facts[:-1]
     )
@@ -267,7 +337,7 @@ def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[
     latest_stale = is_stale_or_outdated_github_thread(latest_row)
     external_wait = latest_payload.get("external_wait") is True
 
-    if all_commands_succeeded or (latest_resolved and has_reply):
+    if all_required_commands_satisfied:
         state = "terminal"
     elif latest_resolved and not has_reply:
         state = "evidence_pending"
@@ -326,6 +396,8 @@ def project_review_threads(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict 
             execution = CommandExecutionFact.from_runtime_fact(fact)
             if execution.item_id:
                 executions_by_item[str(execution.item_id)].append(execution)
+            elif execution.command_kind == "run_final_gate":
+                continue
             else:
                 diagnostics.append(
                     {

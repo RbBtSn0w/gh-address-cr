@@ -20,9 +20,20 @@ SUPPORTED_COMMAND_EXECUTION_STATUSES = frozenset({"succeeded", "failed"})
 
 def _require_string(payload: JsonDict, field_name: str) -> str:
     value = payload.get(field_name)
-    if value is None or str(value).strip() == "":
+    if value is None:
         raise ValueError(f"{field_name} is required")
-    return str(value)
+    if not isinstance(value, str) or value.strip() == "":
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return value
+
+
+def _optional_string(payload: JsonDict, field_name: str) -> str | None:
+    if field_name not in payload or payload[field_name] is None:
+        return None
+    value = payload[field_name]
+    if not isinstance(value, str) or value.strip() == "":
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return value
 
 
 def _require_payload(payload: JsonDict) -> JsonDict:
@@ -113,7 +124,14 @@ class RuntimeFact:
 
 
 def sort_runtime_facts(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict | RuntimeFact, ...]) -> tuple[RuntimeFact, ...]:
-    return tuple(sorted((RuntimeFact.from_dict(fact) for fact in facts), key=lambda fact: fact.sort_key()))
+    parsed_facts = tuple(RuntimeFact.from_dict(fact) for fact in facts)
+    seen_keys = set()
+    for fact in parsed_facts:
+        sort_key = fact.sort_key()
+        if sort_key in seen_keys:
+            raise ValueError(f"duplicate runtime fact ordering key: {fact.fact_id}")
+        seen_keys.add(sort_key)
+    return tuple(sorted(parsed_facts, key=lambda fact: fact.sort_key()))
 
 
 @dataclass(frozen=True)
@@ -129,7 +147,7 @@ class ReviewThreadFact:
             raise ValueError(f"expected {REVIEW_THREAD_OBSERVED}, got {fact.fact_kind}")
         thread_id = _require_string(fact.payload, "thread_id")
         canonical_item_id = f"github-thread:{thread_id}"
-        item_id = str(fact.payload.get("item_id") or canonical_item_id)
+        item_id = _optional_string(fact.payload, "item_id") or canonical_item_id
         if item_id != canonical_item_id:
             raise ValueError(f"ambiguous item_id for thread_id {thread_id}: {item_id}")
         payload = dict(fact.payload)
@@ -192,7 +210,7 @@ class CommandExecutionFact:
             fact=fact,
             command_id=command_id,
             command_kind=command_kind,
-            item_id=fact.payload.get("item_id"),
+            item_id=_optional_string(fact.payload, "item_id"),
             status=status,
             result_url=result_url,
             payload=dict(fact.payload),

@@ -43,11 +43,17 @@ Planned commands are not completion evidence. Completion evidence requires a rec
 Unknown, stale-generation, failed, or missing execution results keep the related work unresolved.
 Failed execution results may produce `retry_command` plans that reference the
 failed command identity and original command kind without counting as
-completion evidence.
+completion evidence. Retry plans are produced only for failed command kinds
+that remain required by the current projection; later durable success evidence
+or pre-existing review-thread evidence suppresses retry planning for already
+satisfied work. Duplicate failed executions for the same planned side effect
+must produce at most one retry command. Failed `retry_command` wrapper
+executions must not produce retry-of-retry plans; the retry target remains the
+original unsatisfied `reply_thread` or `resolve_thread`.
 Successful `retry_command` execution results may satisfy the original required
-command kind only when the retry references the failed current-generation
-command identity, the original command kind, the same source generation, and
-the required durable evidence.
+command kind only when the retry references an actual failed
+current-generation command execution fact, the original command kind, the same
+source generation, and the required durable evidence.
 
 ## Side-Effect Boundary
 

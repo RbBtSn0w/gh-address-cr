@@ -94,6 +94,8 @@ def plan_review_commands(projection: ReviewProjection, decision: PolicyDecision)
             continue
         failed_command_kinds = {str(record.get("command_kind")) for record in item.failed_commands}
         for failed in item.failed_commands:
+            if str(failed.get("command_kind")) not in item.required_commands:
+                continue
             planned.append(
                 _planned_command(
                     "retry_command",
