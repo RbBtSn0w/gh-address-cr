@@ -418,6 +418,28 @@ class FinalGateTestCase(unittest.TestCase):
             "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (2 events, 0.0%) | inefficiency: none]",
         )
 
+    def test_build_completion_summary_line_normalizes_non_finite_total_events(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": float("inf"),
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 100.0%) | inefficiency: none]",
+        )
+
     def test_build_completion_summary_line_reports_required_check_counts(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
         result = self.evaluate(

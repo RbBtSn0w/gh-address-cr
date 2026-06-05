@@ -323,8 +323,13 @@ def build_completion_summary_line(result: core_gate.GateResult, telemetry_report
 
 def _safe_int(value: object, *, default: int) -> int:
     try:
-        return int(value) if value is not None else default
-    except (TypeError, ValueError):
+        if value is None:
+            return default
+        if isinstance(value, float):
+            return int(value) if math.isfinite(value) else default
+        parsed = int(value)
+        return parsed
+    except (OverflowError, TypeError, ValueError):
         return default
 
 
