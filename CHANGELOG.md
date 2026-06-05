@@ -1,3 +1,9 @@
+## [2.10.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.6...v2.10.7) (2026-06-05)
+
+### Bug Fixes
+
+* reduce telemetry normalization overhead ([#108](https://github.com/RbBtSn0w/gh-address-cr/issues/108)) ([6554aaa](https://github.com/RbBtSn0w/gh-address-cr/commit/6554aaace407622185f223940f71816cea462559))
+
 ## [2.10.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.5...v2.10.6) (2026-06-05)
 
 ### Bug Fixes
