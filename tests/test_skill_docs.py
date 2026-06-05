@@ -204,6 +204,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("prefer the human-readable `Current Run Snapshot` block", text)
         self.assertIn("audit summary path + sha256", combined)
 
+    def test_skill_completion_contract_requires_completion_summary_line(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+        hint_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        combined = "\n".join([skill_text, completion_text, status_text, hint_text])
+
+        self.assertIn("completion_summary_line", combined)
+        self.assertIn("PR Completion Summary Guidance", combined)
+        self.assertIn("first bracketed line", combined)
+        self.assertIn("[gh-address-cr: PASSED | threads:", completion_text)
+        self.assertIn("telemetry coverage, event count, success rate, and inefficiency flags", combined)
+        self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
+
     def test_skill_identifies_as_thin_adapter(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("thin adapter", text.lower())
@@ -580,16 +594,22 @@ class SkillDocumentationContractTest(unittest.TestCase):
         )
 
     def test_completion_summary_final_gate_evidence(self):
-        text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
-        self.assertIn("`gh-address-cr final-gate <owner/repo> <pr_number>` command invocation", text)
-        self.assertNotIn("`final_gate` command used", text)
-        self.assertIn("`Verified: 0 Unresolved Threads found`", text)
-        self.assertIn("`Verified: 0 Pending Reviews found`", text)
-        self.assertIn("unresolved GitHub threads = 0", text)
-        self.assertIn("session blocking items = 0", text)
-        self.assertIn("telemetry coverage label", text)
-        self.assertIn("efficiency report path", text)
-        self.assertIn("runtime-only", text)
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        readme_text = README_MD.read_text(encoding="utf-8")
+        cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+        combined = "\n".join([completion_text, readme_text, cli_text])
+        self.assertIn("`gh-address-cr final-gate <owner/repo> <pr_number>` command invocation", completion_text)
+        self.assertNotIn("`final_gate` command used", completion_text)
+        self.assertIn("`Verified: 0 Unresolved Threads found`", completion_text)
+        self.assertIn("`Verified: 0 Pending Reviews found`", completion_text)
+        self.assertIn("unresolved GitHub threads = 0", completion_text)
+        self.assertIn("session blocking items = 0", completion_text)
+        self.assertIn("telemetry coverage label", combined)
+        self.assertIn("efficiency report path", combined)
+        self.assertIn("runtime-only", combined)
+        self.assertIn("completion_summary_line", cli_text)
+        self.assertIn("completion_summary_line", readme_text)
+        self.assertIn("compact metrics line", readme_text)
 
     def test_skill_documents_external_agent_telemetry_contract(self):
         skill_text = SKILL_MD.read_text(encoding="utf-8")

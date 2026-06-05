@@ -55,7 +55,7 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 ## Stop Conditions
 
 If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
-- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success.
+- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success. The final response must include the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`; explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present.
 
 If `status` is `NO_ACTIVE_PR`:
 - **Action**: No OPEN PR matches the branch. Open a PR or pass an explicit PR number; do not fall back to MERGED/CLOSED PRs.

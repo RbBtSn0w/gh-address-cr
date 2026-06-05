@@ -10,6 +10,7 @@ Never output "done", "all resolved", "completed", or equivalent unless:
 - unresolved GitHub threads = 0
 - session blocking items = 0
 - final-gate output includes a telemetry coverage label
+- final response includes the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`
 
 Final output must include:
 
@@ -18,12 +19,15 @@ Final output must include:
 3. `Verified: 0 Pending Reviews found`
 4. unresolved GitHub threads = 0
 5. session blocking items = 0
-6. telemetry coverage label and efficiency report path
-7. audit summary path + sha256
+6. the compact metrics line, for example `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only (10 events, 100.0%) | inefficiency: none]`
+7. telemetry coverage label and efficiency report path
+8. audit summary path + sha256
 
-Use `audit_summary.md` or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed.
+Use `completion_summary_line`, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, event count, success rate, and inefficiency flags.
 
 Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
+
+If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
 
 Final-gate machine output may include `logic_validation_signals`. Signals with `gate_effect=blocking` are completion blockers and must be fixed or explained through runtime evidence before claiming completion. Signals with `gate_effect=advisory` are non-blocking diagnostics; mention their implication when relevant, but do not treat them as a second review producer or as permission to bypass evidence, publish, or final-gate.
 

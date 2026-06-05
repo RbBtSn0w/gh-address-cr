@@ -77,6 +77,7 @@ Completion means the latest final gate reports:
 - zero pending reviews for the authenticated login
 - no blocking session items
 - terminal GitHub threads have durable reply evidence
+- a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
 - a telemetry coverage label and structured efficiency report path
 - an audit summary path with a sha256 hash
 
