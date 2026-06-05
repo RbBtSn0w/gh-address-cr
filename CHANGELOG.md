@@ -1,3 +1,9 @@
+## [2.10.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.3...v2.10.4) (2026-06-05)
+
+### Performance Improvements
+
+* stream telemetry file reads ([#105](https://github.com/RbBtSn0w/gh-address-cr/issues/105)) ([6d3a3d5](https://github.com/RbBtSn0w/gh-address-cr/commit/6d3a3d5ffa9018be16abaab9c0463ddb46d7a31f))
+
 ## [2.10.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.2...v2.10.3) (2026-06-05)
 
 ### Bug Fixes
