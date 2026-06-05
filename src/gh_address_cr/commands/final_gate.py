@@ -305,11 +305,9 @@ def build_completion_summary_line(result: core_gate.GateResult, telemetry_report
     checks_concise = f"{checks_failed}/{checks_pending}" if result.check_requirement else "N/A"
 
     coverage = telemetry_report.get("coverage_label") or "unavailable"
-    total_events = telemetry_report.get("total_events") or 0
-    success_rate = telemetry_report.get("success_rate")
-    if success_rate is None:
-        success_rate = 0.0
-    inefficiency_flags = telemetry_report.get("inefficiency_flags") or []
+    total_events = _safe_int(telemetry_report.get("total_events"), default=0)
+    success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
+    inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
     flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
 
     return (
@@ -320,6 +318,28 @@ def build_completion_summary_line(result: core_gate.GateResult, telemetry_report
         f"telemetry: {coverage} ({total_events} events, {success_rate:.1f}%) | "
         f"inefficiency: {flags_str}]"
     )
+
+
+def _safe_int(value: object, *, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: object, *, default: float) -> float:
+    try:
+        return float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
 
 
 def build_completion_summary_guidance(

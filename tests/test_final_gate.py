@@ -375,6 +375,27 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertIn("inefficiency: excessive_loops; repeated_failures]", summary_line)
 
+    def test_build_completion_summary_line_tolerates_malformed_telemetry_fields(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": "not-a-number",
+            "success_rate": "also-not-a-number",
+            "inefficiency_flags": "retry-loop",
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
+        )
+
     def test_build_completion_summary_line_reports_required_check_counts(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
         result = self.evaluate(
