@@ -1,3 +1,9 @@
+## [2.10.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.4...v2.10.5) (2026-06-05)
+
+### Bug Fixes
+
+* final-gate guidance telemetry formatting ([#107](https://github.com/RbBtSn0w/gh-address-cr/issues/107)) ([5e6a79f](https://github.com/RbBtSn0w/gh-address-cr/commit/5e6a79f8cbed57fe5ebe63830ac684718e31b8ac))
+
 ## [2.10.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.3...v2.10.4) (2026-06-05)
 
 ### Performance Improvements
