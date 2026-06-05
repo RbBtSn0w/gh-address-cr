@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -43,21 +42,6 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
     return session_store.workspace_dir(repo, pr_number)
 
 
-def _workspace_path_without_create(repo: str, pr_number: str) -> Path:
-    override = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
-    if override:
-        return Path(override) / repo.replace("/", "__") / f"pr-{pr_number}"
-
-    home = os.environ.get("HOME")
-    if platform.system() == "Darwin":
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/Library/Caches" if home else None)
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/.cache" if home else None)
-    if not base:
-        return Path(".gh-address-cr-state") / repo.replace("/", "__") / f"pr-{pr_number}"
-    return Path(base) / "gh-address-cr" / repo.replace("/", "__") / f"pr-{pr_number}"
-
-
 def _persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
     path = _workspace_root(repo, pr_number) / "last-machine-summary.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -88,7 +72,7 @@ def _build_preflight_summary(
             "unresolved_github_threads_count": None,
             "needs_human_items_count": None,
         },
-        "artifact_path": artifact_path or str(_workspace_path_without_create(repo, pr_number)),
+        "artifact_path": artifact_path or str(session_store.workspace_dir(repo, pr_number)),
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,
@@ -539,7 +523,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if not argv:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
-    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+    from gh_address_cr.core.telemetry import (
+        SessionTelemetry,
+        command_label,
+        split_inline_env_assignments as _split_inline_env_assignments,
+    )
 
     start_time = time.time()
     result = None
@@ -576,18 +564,6 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if result.returncode != 0:
         return None, result.stderr or f"Adapter command failed with exit code {result.returncode}."
     return result.stdout, None
-
-
-def _split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, str]]:
-    from gh_address_cr.core.telemetry import is_inline_env_assignment
-
-    index = 0
-    inline_env: dict[str, str] = {}
-    while index < len(argv) and is_inline_env_assignment(argv[index]):
-        key, _separator, value = argv[index].partition("=")
-        inline_env[key] = value
-        index += 1
-    return argv[index:], inline_env
 
 
 def _emit_native_summary(summary: dict, *, human: bool) -> None:

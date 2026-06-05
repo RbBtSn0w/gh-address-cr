@@ -66,6 +66,16 @@ def is_inline_env_assignment(token: str) -> bool:
     return bool(separator and key and key.replace("_", "").isalnum() and not key[0].isdigit())
 
 
+def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, str]]:
+    index = 0
+    inline_env: dict[str, str] = {}
+    while index < len(argv) and is_inline_env_assignment(argv[index]):
+        key, _separator, value = argv[index].partition("=")
+        inline_env[key] = value
+        index += 1
+    return argv[index:], inline_env
+
+
 @dataclass
 class ExecutionMetric:
     command: str

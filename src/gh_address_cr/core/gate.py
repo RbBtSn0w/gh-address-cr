@@ -9,9 +9,7 @@ from typing import Any, Iterable, Mapping
 
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_TERMINAL_STATES,
-    is_resolved_github_thread,
     is_stale_or_outdated_github_thread,
-    is_terminal_github_thread,
 )
 from gh_address_cr.core.logic_validation import generate_logic_validation_signals
 from gh_address_cr.core.runtime_kernel.final_gate import (
@@ -25,10 +23,12 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW,
     FINAL_GATE_PR_CHECKS_NOT_GREEN,
     FINAL_GATE_UNRESOLVED_REMOTE_THREADS,
-    LOCAL_TERMINAL_STATES,
     build_final_gate_facts,
     evaluate_final_gate_policy,
     project_final_gate,
+    _thread_identifier,
+    _thread_is_resolved,
+    _has_content,
 )
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.core.severity import (
@@ -328,148 +328,6 @@ def _has_publish_ready_evidence(item: Mapping[str, Any]) -> bool:
         return True
     return _has_content(item.get("publish_resolution"))
 
-
-def _session_items(session: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    raw_items = session.get("items") or {}
-    if isinstance(raw_items, Mapping):
-        return [item for item in raw_items.values() if isinstance(item, Mapping)]
-    return [item for item in raw_items if isinstance(item, Mapping)]
-
-
-def _item_kind(item: Mapping[str, Any]) -> str:
-    return str(item.get("item_kind") or item.get("kind") or "").lower()
-
-
-def _state(item: Mapping[str, Any]) -> str:
-    return str(item.get("state") or item.get("status") or "").lower()
-
-
-def _thread_identifier(row: Mapping[str, Any]) -> str | None:
-    for key in ("thread_id", "remote_thread_id", "github_thread_id", "id", "node_id"):
-        value = row.get(key)
-        if value:
-            return str(value)
-    item_id = row.get("item_id")
-    if isinstance(item_id, str) and item_id.startswith("github-thread:"):
-        return item_id.split(":", 1)[1]
-    return None
-
-
-def _thread_is_resolved(thread: Mapping[str, Any]) -> bool:
-    return is_resolved_github_thread(thread)
-
-
-def _github_thread_requires_reply_evidence(
-    item: Mapping[str, Any],
-    remote_by_id: Mapping[str, Mapping[str, Any]],
-) -> bool:
-    thread_id = _thread_identifier(item)
-    if thread_id and thread_id in remote_by_id:
-        return _thread_is_resolved(remote_by_id[thread_id])
-    return is_terminal_github_thread(item)
-
-
-def _has_reply_evidence(item: Mapping[str, Any], current_login: str | None) -> bool:
-    evidence = item.get("reply_evidence")
-    if isinstance(evidence, Mapping):
-        reply_url = evidence.get("reply_url") or evidence.get("url") or evidence.get("external_url")
-        author_login = evidence.get("author_login") or evidence.get("login")
-        if not author_login and isinstance(evidence.get("author"), Mapping):
-            author_login = evidence["author"].get("login")
-        return bool(reply_url) and _login_matches(author_login, current_login)
-
-    reply_url = item.get("reply_url") or item.get("reply_evidence_url")
-    reply_posted = item.get("reply_posted", True)
-    author_login = item.get("reply_author_login")
-    return bool(reply_url) and bool(reply_posted) and _login_matches(author_login, current_login)
-
-
-def _login_matches(author_login: Any, current_login: str | None) -> bool:
-    if not current_login or not author_login:
-        return True
-    return str(author_login) == current_login
-
-
-def _is_current_login_pending_review(review: Mapping[str, Any], current_login: str | None) -> bool:
-    if str(review.get("state") or "").upper() != "PENDING":
-        return False
-    if not current_login:
-        return True
-    return _review_login(review) == current_login
-
-
-def _review_login(review: Mapping[str, Any]) -> str | None:
-    if review.get("author_login"):
-        return str(review["author_login"])
-    if isinstance(review.get("user"), Mapping) and review["user"].get("login"):
-        return str(review["user"]["login"])
-    if isinstance(review.get("author"), Mapping) and review["author"].get("login"):
-        return str(review["author"]["login"])
-    if review.get("login"):
-        return str(review["login"])
-    return None
-
-
-def _check_bucket(check: Mapping[str, Any]) -> str:
-    bucket = str(check.get("bucket") or "").strip().lower()
-    if bucket in {"pass", "pending", "fail", "skipping", "cancel"}:
-        return bucket
-    state = str(check.get("state") or "").strip().lower()
-    if state in {"success", "passed", "completed"}:
-        return "pass"
-    if state in {"queued", "pending", "in_progress", "requested", "waiting"}:
-        return "pending"
-    if state in {"failure", "failed", "error", "timed_out", "action_required"}:
-        return "fail"
-    if state in {"cancelled", "canceled", "neutral"}:
-        return "cancel"
-    if state in {"skipped", "skipping"}:
-        return "skipping"
-    return "unknown"
-
-
-def _is_local_blocking(item: Mapping[str, Any]) -> bool:
-    if "blocking" in item:
-        return bool(item["blocking"])
-    return _state(item) not in LOCAL_TERMINAL_STATES
-
-
-def _is_blocking_item(item: Mapping[str, Any]) -> bool:
-    if _item_kind(item) == "local_finding":
-        return _is_local_blocking(item)
-    return bool(item.get("blocking"))
-
-
-def _is_terminal_local_item(item: Mapping[str, Any]) -> bool:
-    return _state(item) in LOCAL_TERMINAL_STATES
-
-
-def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
-    for key in ("validation_evidence", "validation_commands", "validation_results"):
-        if _has_content(item.get(key)):
-            return True
-    evidence = item.get("evidence")
-    if isinstance(evidence, Mapping):
-        return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
-    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
-        "accept",
-        "manual",
-        "sync",
-    }:
-        return True
-    return False
-
-
-def _has_content(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, Mapping):
-        return bool(value)
-    if isinstance(value, Iterable):
-        return any(True for _ in value)
-    return bool(value)
 
 
 def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
