@@ -396,6 +396,28 @@ class FinalGateTestCase(unittest.TestCase):
             "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
         )
 
+    def test_build_completion_summary_line_normalizes_non_finite_success_rate(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 2,
+            "success_rate": "NaN",
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (2 events, 0.0%) | inefficiency: none]",
+        )
+
     def test_build_completion_summary_line_reports_required_check_counts(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
         result = self.evaluate(
@@ -564,3 +586,27 @@ class FinalGateTestCase(unittest.TestCase):
             guidance,
         )
         self.assertIn("Telemetry diagnostics: host telemetry degraded", guidance)
+
+    def test_build_completion_summary_guidance_filters_blank_inefficiency_flags(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "inefficiency_flags": "",
+            "diagnostics": "",
+            "report_artifact": "report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (1 events, 100.0%) | inefficiency: none]",
+            guidance,
+        )
+        self.assertNotIn("inefficiency flags present", guidance)

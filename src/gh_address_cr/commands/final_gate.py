@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -329,7 +330,10 @@ def _safe_int(value: object, *, default: int) -> int:
 
 def _safe_float(value: object, *, default: float) -> float:
     try:
-        return float(value) if value is not None else default
+        if value is None:
+            return default
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else default
     except (TypeError, ValueError):
         return default
 
@@ -338,8 +342,9 @@ def _string_list(value: object) -> list[str]:
     if value is None:
         return []
     if isinstance(value, (list, tuple)):
-        return [str(item) for item in value if str(item)]
-    return [str(value)]
+        return [text for item in value if (text := str(item).strip())]
+    text = str(value).strip()
+    return [text] if text else []
 
 
 def build_completion_summary_guidance(
