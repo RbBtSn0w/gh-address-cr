@@ -460,19 +460,21 @@ class SessionTelemetry:
         try:
             if not path.is_file():
                 return
-            lines = path.read_text(encoding="utf-8").splitlines()
+            loaded_metrics: list[ExecutionMetric] = []
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    metric = self._metric_from_payload(payload)
+                    if metric is not None:
+                        loaded_metrics.append(metric)
+            self.metrics.extend(loaded_metrics)
         except OSError:
             return
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            metric = self._metric_from_payload(payload)
-            if metric is not None:
-                self.metrics.append(metric)
 
     @staticmethod
     def _metric_from_payload(payload: object) -> ExecutionMetric | None:
@@ -1378,21 +1380,21 @@ def _load_external_events_with_diagnostics(paths: core_paths.SessionPaths) -> tu
     events: list[ExternalTelemetryEvent] = []
     diagnostics: list[str] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    payload = _json_loads_strict(line)
+                    if not isinstance(payload, dict):
+                        raise ValueError("record must be a JSON object")
+                    events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
+                except json.JSONDecodeError as exc:
+                    diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
+                except ValueError as exc:
+                    diagnostics.append(f"external telemetry line {line_number}: {exc}")
     except OSError as exc:
         return [], [f"external telemetry unreadable: {exc}"]
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = _json_loads_strict(line)
-            if not isinstance(payload, dict):
-                raise ValueError("record must be a JSON object")
-            events.append(_normalize_external_event(payload, declared_source=str(payload.get("source") or "")))
-        except json.JSONDecodeError as exc:
-            diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
-        except ValueError as exc:
-            diagnostics.append(f"external telemetry line {line_number}: {exc}")
     return events, diagnostics
 
 
