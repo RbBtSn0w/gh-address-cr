@@ -1334,7 +1334,6 @@ def _is_unsafe_metadata_key(key: str) -> bool:
     return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
 
 
-@lru_cache(maxsize=8192)
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
     if any(marker in lowered for marker in TOKEN_MARKERS):
@@ -1348,7 +1347,6 @@ def _contains_control_character(value: str) -> bool:
     return any(character in value for character in ("\n", "\r", "\t"))
 
 
-@lru_cache(maxsize=8192)
 def _contains_private_identifier(value: str) -> bool:
     lowered = value.lower()
     markers = (
@@ -1457,7 +1455,11 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     started_at = _stored_optional_timestamp(payload.get("started_at"), field="started_at")
     ended_at = _stored_optional_timestamp(payload.get("ended_at"), field="ended_at")
     correlation_raw = payload.get("correlation_id")
-    correlation_id = _stored_optional_string(correlation_raw, field="correlation_id")
+    correlation_id = None
+    if correlation_raw is not None:
+        if not isinstance(correlation_raw, str):
+            raise ValueError("correlation_id must be a string")
+        correlation_id = _safe_correlation_id(correlation_raw)
     event_fingerprint = payload.get("event_fingerprint")
     if event_fingerprint is not None and not isinstance(event_fingerprint, str):
         raise ValueError("event_fingerprint must be a string")
@@ -1480,10 +1482,6 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     if event.event_fingerprint != canonical_fingerprint:
         event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": canonical_fingerprint})
     return event
-
-
-def _is_sha256_hex(value: str) -> bool:
-    return bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
 
 def _stored_optional_string(value: object, *, field: str) -> str | None:
