@@ -71,7 +71,7 @@ Before claiming work is complete, run these local checks:
 - **Fail fast**: Do not add silent fallbacks or hidden behavior changes.
 - **Smallest change**: Default to the smallest safe change. Avoid opportunistic refactors.
 - **Contract discipline**: If a public or agent-facing contract changes, update docs and tests together.
-- **Skill/runtime feedback**: When the `gh-address-cr` workflow itself blocks progress because of a repeatable skill/runtime gap, use `gh-address-cr submit-feedback ...` against this repository instead of burying the problem in PR findings or local notes.
+- **Skill/runtime feedback**: When the `gh-address-cr` workflow itself blocks progress because of a repeatable skill/runtime gap, use `python3 -m gh_address_cr submit-feedback ...` against this repository instead of burying the problem in PR findings or local notes.
 
 ### Architecture Preflight Gate
 
