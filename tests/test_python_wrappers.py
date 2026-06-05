@@ -309,6 +309,7 @@ else:
                 "artifact_path",
                 "check_requirement",
                 "commands",
+                "completion_summary_line",
                 "counts",
                 "exit_code",
                 "failure_codes",
@@ -334,8 +335,13 @@ else:
         self.assertEqual(summary["next_action"], "Completion may be claimed.")
         self.assertIsNone(summary["reason_code"])
         self.assertIsNone(summary["waiting_on"])
+        self.assertEqual(
+            summary["completion_summary_line"],
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+        )
         self.assertEqual(summary["telemetry"]["coverage_label"], "unavailable")
         self.assertIn("efficiency-report.json", summary["telemetry"]["report_artifact"])
+        self.assertEqual(summary["telemetry"]["inefficiency_flags"], [])
         self.assertEqual(summary["commands"]["final_gate"], f"gh-address-cr final-gate {self.repo} {self.pr}")
 
     def test_cli_final_gate_default_keeps_human_text(self):
@@ -392,6 +398,33 @@ else:
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["telemetry"]["coverage_label"], "unavailable")
         self.assertNotIn("Final gate PASSED", result.stdout)
+
+    def test_cli_final_gate_machine_blocked_result_includes_completion_summary_line(self):
+        self.install_fake_gh_for_threads(
+            [
+                {
+                    "id": "THREAD_OPEN",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/open.py",
+                    "line": 12,
+                    "firstComment": {"nodes": [{"url": "https://example.test/thread/open", "body": "Still open."}]},
+                    "latestComment": {"nodes": [{"url": "https://example.test/thread/open", "body": "Still open."}]},
+                }
+            ]
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 5)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "FAILED")
+        self.assertEqual(summary["reason_code"], "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
+        self.assertEqual(
+            summary["completion_summary_line"],
+            "[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+        )
+        self.assertEqual(summary["telemetry"]["inefficiency_flags"], [])
 
     def test_cli_final_gate_rejects_conflicting_output_flags(self):
         result = self.run_cmd(
@@ -2445,11 +2478,21 @@ else:
         self.assertIn("== Agent Efficiency Summary ==", result.stdout)
         self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
         self.assertIn("Efficiency report path:", result.stdout)
+        self.assertIn("== PR Completion Summary Guidance ==", result.stdout)
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            result.stdout,
+        )
         summary_text = summary_file.read_text(encoding="utf-8")
         self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
         self.assertIn("- efficiency_report_path:", summary_text)
         self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
         self.assertIn("- telemetry_diagnostics: none", summary_text)
+        self.assertIn("## PR Completion Summary Guidance", summary_text)
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable (0 events, 0.0%) | inefficiency: none]",
+            summary_text,
+        )
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report_path = Path(report_path_line.partition(": ")[2])
         self.assertTrue(report_path.exists())
@@ -3228,6 +3271,9 @@ else:
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")
         self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
+        self.assertIn("## PR Completion Summary Guidance", summary_text)
+        self.assertIn(f"- Efficiency Report: {archived_report}", summary_text)
+        self.assertIn(f"- Audit Summary: {archived_summary}", summary_text)
         report = json.loads(archived_report.read_text(encoding="utf-8"))
         self.assertEqual(report["report_artifact"], str(archived_report))
 

@@ -313,7 +313,7 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
 
     def test_build_completion_summary_guidance_clean(self):
-        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance, build_completion_summary_line
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -326,10 +326,102 @@ class FinalGateTestCase(unittest.TestCase):
             "report_artifact": "path/to/report.json",
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        summary_line = build_completion_summary_line(result, telemetry_report)
 
-        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete (10 events, 100.0%) | inefficiency: none]", guidance)
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete (10 events, 100.0%) | inefficiency: none]",
+        )
+        self.assertEqual(guidance.count(summary_line), 1)
         self.assertNotIn("Attention Items", guidance)
         self.assertNotIn("IMPLICATION PROMPT", guidance)
+
+    def test_build_completion_summary_line_reports_runtime_only_telemetry_for_issue_103(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "runtime-only",
+            "total_events": 10,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only (10 events, 100.0%) | inefficiency: none]",
+        )
+
+    def test_build_completion_summary_line_renders_inefficiency_flags(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 3,
+            "success_rate": 66.7,
+            "inefficiency_flags": ["excessive_loops", "repeated_failures"],
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertIn("inefficiency: excessive_loops; repeated_failures]", summary_line)
+
+    def test_build_completion_summary_line_tolerates_malformed_telemetry_fields(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": "not-a-number",
+            "success_rate": "also-not-a-number",
+            "inefficiency_flags": "retry-loop",
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial (0 events, 0.0%) | inefficiency: retry-loop]",
+        )
+
+    def test_build_completion_summary_line_reports_required_check_counts(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+            check_runs=[
+                {"name": "unit", "state": "failure"},
+                {"name": "lint", "state": "queued"},
+                {"name": "docs", "state": "success"},
+            ],
+            check_requirement="all",
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 4,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        summary_line = build_completion_summary_line(result, telemetry_report)
+
+        self.assertEqual(
+            summary_line,
+            "[gh-address-cr: FAILED | threads: 0 | reviews: 0 | checks: 1/1 | telemetry: complete (4 events, 100.0%) | inefficiency: none]",
+        )
 
     def test_build_completion_summary_guidance_abnormal(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance

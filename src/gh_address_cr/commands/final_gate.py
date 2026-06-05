@@ -125,8 +125,10 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
                 "report_artifact": telemetry_report.get("report_artifact"),
                 "total_events": telemetry_report.get("total_events"),
                 "success_rate": telemetry_report.get("success_rate"),
+                "inefficiency_flags": telemetry_report.get("inefficiency_flags", []),
                 "diagnostics": telemetry_report.get("diagnostics", []),
             }
+            machine_summary["completion_summary_line"] = build_completion_summary_line(result, telemetry_report)
             machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
                 result, telemetry_report, summary_path=summary_path, include_sha256=True
             )
@@ -294,6 +296,52 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
+def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: dict) -> str:
+    status_str = "PASSED" if result.passed else "FAILED"
+    unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
+    pending_reviews = result.counts.get("pending_current_login_review_count", 0)
+    checks_failed = result.counts.get("pr_checks_failed_count", 0)
+    checks_pending = result.counts.get("pr_checks_pending_count", 0)
+    checks_concise = f"{checks_failed}/{checks_pending}" if result.check_requirement else "N/A"
+
+    coverage = telemetry_report.get("coverage_label") or "unavailable"
+    total_events = _safe_int(telemetry_report.get("total_events"), default=0)
+    success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
+    inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
+    flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
+
+    return (
+        f"[gh-address-cr: {status_str} | "
+        f"threads: {unresolved_threads} | "
+        f"reviews: {pending_reviews} | "
+        f"checks: {checks_concise} | "
+        f"telemetry: {coverage} ({total_events} events, {success_rate:.1f}%) | "
+        f"inefficiency: {flags_str}]"
+    )
+
+
+def _safe_int(value: object, *, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: object, *, default: float) -> float:
+    try:
+        return float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
+
+
 def build_completion_summary_guidance(
     result: core_gate.GateResult,
     telemetry_report: dict,
@@ -301,7 +349,6 @@ def build_completion_summary_guidance(
     *,
     include_sha256: bool = True,
 ) -> str:
-    status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
     blocking_local = result.counts.get("blocking_local_items_count", 0)
@@ -314,7 +361,6 @@ def build_completion_summary_guidance(
     checks_failed = result.counts.get("pr_checks_failed_count", 0)
     checks_pending = result.counts.get("pr_checks_pending_count", 0)
     checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
-    checks_concise = f"{checks_failed}/{checks_pending}" if result.check_requirement else "N/A"
 
     coverage = telemetry_report.get("coverage_label") or "unavailable"
     total_events = telemetry_report.get("total_events") or 0
@@ -332,15 +378,7 @@ def build_completion_summary_guidance(
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
 
     summary_path_str = str(summary_path) if summary_path else "N/A"
-
-    metrics_line = (
-        f"[gh-address-cr: {status_str} | "
-        f"threads: {unresolved_threads} | "
-        f"reviews: {pending_reviews} | "
-        f"checks: {checks_concise} | "
-        f"telemetry: {coverage} ({total_events} events, {success_rate:.1f}%) | "
-        f"inefficiency: {flags_str}]"
-    )
+    metrics_line = build_completion_summary_line(result, telemetry_report)
 
     audit_summary_line = f"- Audit Summary: {summary_path_str}"
     if include_sha256 and summary_path:
