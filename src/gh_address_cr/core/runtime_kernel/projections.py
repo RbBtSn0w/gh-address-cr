@@ -415,6 +415,8 @@ def project_review_threads(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict 
                     "write_status": fact.payload.get("write_status"),
                 }
             )
+        else:
+            raise ValueError(f"unsupported fact kind: {fact.fact_kind}")
 
     work_items = tuple(
         _project_item(tuple(thread_facts_by_item[item_id]), tuple(executions_by_item.get(item_id, ())))

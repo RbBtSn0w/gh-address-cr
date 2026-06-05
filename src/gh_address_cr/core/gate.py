@@ -26,9 +26,9 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     build_final_gate_facts,
     evaluate_final_gate_policy,
     project_final_gate,
-    _thread_identifier,
-    _thread_is_resolved,
-    _has_content,
+    thread_identifier,
+    thread_is_resolved,
+    has_content,
 )
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.core.severity import (
@@ -233,7 +233,7 @@ def _session_with_remote_threads(
     raw_items = session.get("items") or {}
     items = dict(raw_items) if isinstance(raw_items, Mapping) else {}
     for thread in remote_threads:
-        thread_id = _thread_identifier(thread)
+        thread_id = thread_identifier(thread)
         if not thread_id:
             continue
         item_id = f"github-thread:{thread_id}"
@@ -289,7 +289,7 @@ def _session_with_remote_threads(
             item["review_priority_evidence"] = priority_evidence
         elif first_body is not None:
             item.pop("review_priority_evidence", None)
-        is_resolved = _thread_is_resolved(thread)
+        is_resolved = thread_is_resolved(thread)
         is_outdated = is_stale_or_outdated_github_thread(thread)
         item["is_outdated"] = is_outdated
         if is_resolved:
@@ -326,7 +326,7 @@ def _session_with_remote_threads(
 def _has_publish_ready_evidence(item: Mapping[str, Any]) -> bool:
     if isinstance(item.get("accepted_response"), Mapping):
         return True
-    return _has_content(item.get("publish_resolution"))
+    return has_content(item.get("publish_resolution"))
 
 
 

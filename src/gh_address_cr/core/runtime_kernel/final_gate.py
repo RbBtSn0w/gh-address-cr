@@ -144,7 +144,9 @@ def build_final_gate_facts(
 
     for index, thread in enumerate(remote_threads):
         payload = dict(thread)
-        thread_id = _thread_identifier(payload) or f"remote-row-{index}"
+        thread_id = thread_identifier(payload) or f"remote-row-{index}"
+        payload["thread_id"] = thread_id
+        payload["item_id"] = f"github-thread:{thread_id}"
         payload["source_scope"] = "remote_thread"
         append_fact(REVIEW_THREAD_OBSERVED, f"remote-thread:{thread_id}:{index}", payload)
 
@@ -202,8 +204,8 @@ def project_final_gate(
             logic_validation_signals.append(payload)
 
     items: list[JsonDict] = [*github_items, *local_items]
-    remote_by_id = {thread_id: thread for thread in remote_thread_rows if (thread_id := _thread_identifier(thread))}
-    unresolved_remote_threads = tuple(thread for thread in remote_thread_rows if not _thread_is_resolved(thread))
+    remote_by_id = {thread_id: thread for thread in remote_thread_rows if (thread_id := thread_identifier(thread))}
+    unresolved_remote_threads = tuple(thread for thread in remote_thread_rows if not thread_is_resolved(thread))
     pending_current_login_reviews = tuple(
         review for review in pending_review_rows if _is_current_login_pending_review(review, current_login)
     )
@@ -296,7 +298,7 @@ def _state(item: Mapping[str, Any]) -> str:
     return str(item.get("state") or item.get("status") or "").lower()
 
 
-def _thread_identifier(row: Mapping[str, Any]) -> str | None:
+def thread_identifier(row: Mapping[str, Any]) -> str | None:
     for key in ("thread_id", "remote_thread_id", "github_thread_id", "id", "node_id"):
         value = row.get(key)
         if value:
@@ -307,7 +309,7 @@ def _thread_identifier(row: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _thread_is_resolved(thread: Mapping[str, Any]) -> bool:
+def thread_is_resolved(thread: Mapping[str, Any]) -> bool:
     return is_resolved_github_thread(thread)
 
 
@@ -315,9 +317,9 @@ def _github_thread_requires_reply_evidence(
     item: Mapping[str, Any],
     remote_by_id: Mapping[str, Mapping[str, Any]],
 ) -> bool:
-    thread_id = _thread_identifier(item)
+    thread_id = thread_identifier(item)
     if thread_id and thread_id in remote_by_id:
-        return _thread_is_resolved(remote_by_id[thread_id])
+        return thread_is_resolved(remote_by_id[thread_id])
     return is_terminal_github_thread(item)
 
 
@@ -398,12 +400,12 @@ def _is_terminal_local_item(item: Mapping[str, Any]) -> bool:
 
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     for key in ("validation_evidence", "validation_commands", "validation_results"):
-        if _has_content(item.get(key)):
+        if has_content(item.get(key)):
             return True
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
-        return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
-    if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
+        return has_content(evidence.get("validation")) or has_content(evidence.get("validation_evidence"))
+    if has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
         "accept",
         "manual",
         "sync",
@@ -412,7 +414,7 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     return False
 
 
-def _has_content(value: Any) -> bool:
+def has_content(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, str):
