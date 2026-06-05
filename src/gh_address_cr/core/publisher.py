@@ -52,7 +52,7 @@ def publish_github_thread_responses(
             "published_count": 0,
         }
     publisher_login = _publisher_login(client, fallback=agent_id)
-    default_commit_hash = _default_commit_hash_for_publish(session)
+    default_commit_hash = None
 
     plans: list[dict[str, Any]] = []
     for item_id, item in publish_items:
@@ -80,7 +80,21 @@ def publish_github_thread_responses(
                 message=f"Publish-ready item has no GitHub thread id: {item_id}",
                 payload={"item_id": item_id},
             )
-        hydrated_response = _hydrate_publish_response(session, item, response, default_commit_hash=default_commit_hash)
+        resolved_commit_hash = ""
+        need_default = False
+        if isinstance(response, dict):
+            fix_reply = response.get("fix_reply")
+            if isinstance(fix_reply, dict):
+                if not str(fix_reply.get("commit_hash") or "").strip():
+                    if not _item_commit_hash(item):
+                        need_default = True
+
+        if need_default:
+            if default_commit_hash is None:
+                default_commit_hash = _default_commit_hash_for_publish(session)
+            resolved_commit_hash = default_commit_hash
+
+        hydrated_response = _hydrate_publish_response(session, item, response, default_commit_hash=resolved_commit_hash)
         reply_body, error = publish_reply_body(item, hydrated_response)
         if not reply_body:
             _record_publish_blocked(session, ledger, item_id, agent_id, error or "MISSING_PUBLISH_REPLY")
@@ -338,8 +352,9 @@ def _git_head_commit() -> str:
             check=False,
             capture_output=True,
             text=True,
+            timeout=5,
         )
-    except OSError:
+    except Exception:
         return ""
     if result.returncode != 0:
         return ""
