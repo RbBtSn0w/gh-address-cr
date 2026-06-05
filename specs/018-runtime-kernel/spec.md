@@ -2,7 +2,7 @@
 
 **Feature Branch**: `018-runtime-kernel`  
 **Created**: 2026-06-05  
-**Status**: Verified
+**Status**: In Review
 **Input**: User description: "Create a Runtime Kernel feature for gh-address-cr that stops unbounded review-resolution edge-case growth."
 
 ## User Scenarios & Testing *(mandatory)*
