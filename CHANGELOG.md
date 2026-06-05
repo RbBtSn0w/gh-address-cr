@@ -1,3 +1,9 @@
+## [2.10.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.7...v2.10.8) (2026-06-05)
+
+### Bug Fixes
+
+* hydrate commit evidence during publish ([#111](https://github.com/RbBtSn0w/gh-address-cr/issues/111)) ([f0e6515](https://github.com/RbBtSn0w/gh-address-cr/commit/f0e6515d66d950a3db19f8501e8116453fd5d7b8))
+
 ## [2.10.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.6...v2.10.7) (2026-06-05)
 
 ### Bug Fixes
