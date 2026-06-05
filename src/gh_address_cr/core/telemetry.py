@@ -10,6 +10,7 @@ import uuid
 from hashlib import sha256
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
@@ -1202,7 +1203,9 @@ def _validate_safe_metadata_value(value: object, *, key_path: str = "metadata") 
         for index, item in enumerate(value):
             _validate_safe_metadata_value(item, key_path=f"{key_path}[{index}]")
         return
-    value_text = str(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    value_text = value if isinstance(value, str) else str(value)
     if _contains_token_marker(value_text):
         raise ValueError(f"UNSAFE:unsafe metadata value at {key_path}")
     if _contains_private_identifier(value_text):
@@ -1298,6 +1301,7 @@ def _safe_runtime_operation(operation: str) -> str:
     return operation
 
 
+@lru_cache(maxsize=8192)
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
     if (
@@ -1318,6 +1322,7 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
 
 
+@lru_cache(maxsize=8192)
 def _is_unsafe_metadata_key(key: str) -> bool:
     lowered = key.lower()
     if lowered in {"token_input_count", "token_output_count", "token_total_count"}:
@@ -1329,6 +1334,7 @@ def _is_unsafe_metadata_key(key: str) -> bool:
     return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
 
 
+@lru_cache(maxsize=8192)
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
     if any(marker in lowered for marker in TOKEN_MARKERS):
@@ -1342,6 +1348,7 @@ def _contains_control_character(value: str) -> bool:
     return any(character in value for character in ("\n", "\r", "\t"))
 
 
+@lru_cache(maxsize=8192)
 def _contains_private_identifier(value: str) -> bool:
     lowered = value.lower()
     markers = (
@@ -1431,7 +1438,7 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
         elif field == "event_id":
             values[field] = _safe_identity_label(value, field=field)
         elif field == "source_session_id":
-            values[field] = value
+            values[field] = _safe_source_session_id(value)
         elif field == "operation":
             values[field] = _safe_operation(value)
         else:
@@ -1446,7 +1453,7 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     metadata = payload.get("metadata")
     if metadata is None:
         metadata = {}
-    metadata = _safe_stored_metadata(metadata)
+    metadata = _safe_metadata(metadata)
     started_at = _stored_optional_timestamp(payload.get("started_at"), field="started_at")
     ended_at = _stored_optional_timestamp(payload.get("ended_at"), field="ended_at")
     correlation_raw = payload.get("correlation_id")
@@ -1469,23 +1476,14 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
         correlation_id=correlation_id,
         event_fingerprint=event_fingerprint or "",
     )
-    if not _is_sha256_hex(event.event_fingerprint):
-        event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
+    canonical_fingerprint = _event_fingerprint(event)
+    if event.event_fingerprint != canonical_fingerprint:
+        event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": canonical_fingerprint})
     return event
 
 
 def _is_sha256_hex(value: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-f]{64}", value))
-
-
-def _safe_stored_metadata(metadata: object) -> dict[str, Any]:
-    if not isinstance(metadata, dict):
-        raise ValueError("metadata must be an object")
-    try:
-        json.dumps(metadata, allow_nan=False)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"metadata contains non-JSON serializable or non-finite values: {exc}") from None
-    return dict(metadata)
 
 
 def _stored_optional_string(value: object, *, field: str) -> str | None:
