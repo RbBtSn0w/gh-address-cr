@@ -2841,6 +2841,55 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["rejected_count"], 1)
                 self.assertTrue(any("unsafe key" in diag or "password" in diag for diag in result["diagnostics"]))
 
+    def test_custom_telemetry_adapter_normalized_flag_still_revalidates_events(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            ExternalTelemetryEvent,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class MockUnsafeNormalizedAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                event = ExternalTelemetryEvent(
+                    schema_version="1.0",
+                    source=source,
+                    source_session_id="session-abc",
+                    event_id="event-unsafe-normalized",
+                    kind="tool_call",
+                    operation="username-alice-laptop",
+                    status="success",
+                    duration_ms=100,
+                )
+                return TelemetryParseResult(
+                    events=[event],
+                    rejected_count=0,
+                    unsafe_seen=False,
+                    malformed_seen=False,
+                    diagnostics=[],
+                    events_are_normalized=True,
+                )
+
+        register_adapter("mock-unsafe-normalized", MockUnsafeNormalizedAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unsafe-normalized"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                result = import_external_telemetry(
+                    "octo/example",
+                    "77",
+                    source="custom-source",
+                    fmt="mock-unsafe-normalized",
+                    raw="dummy_payload",
+                )
+
+                self.assertEqual(result["status"], "FAILED")
+                self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
+                self.assertEqual(result["accepted_count"], 0)
+                self.assertEqual(result["rejected_count"], 1)
+                self.assertTrue(any("unsafe private identifier in operation label" in diag for diag in result["diagnostics"]))
+
     def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
         from gh_address_cr.core.telemetry import (
             TelemetryAdapter,

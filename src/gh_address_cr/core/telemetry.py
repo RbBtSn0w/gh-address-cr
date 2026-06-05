@@ -758,6 +758,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
     duplicate_fingerprints: list[str] = []
     observed_sessions: set[str] = set()
     duplicate_count = 0
+    trusted_normalized_events = parse_result.events_are_normalized and type(adapter) is GenericAgentJsonlAdapter
 
     try:
         for idx, event in enumerate(accepted_events):
@@ -765,7 +766,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
                 raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
             try:
                 normalized_event = event
-                if not parse_result.events_are_normalized:
+                if not trusted_normalized_events:
                     normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
             except ValueError as exc:
                 message = str(exc)
