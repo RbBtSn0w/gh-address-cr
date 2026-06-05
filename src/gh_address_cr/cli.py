@@ -5,8 +5,6 @@ import contextlib
 import hashlib
 import io
 import json
-import os
-import platform
 import re
 import shutil
 import subprocess
@@ -23,8 +21,7 @@ from gh_address_cr.commands.agent import handle_agent_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
     HighLevelReviewRuntime,
-    _run_adapter_command as _run_adapter_command,
-    _summary_commands,
+    summary_commands,
 )
 from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import session as session_store
@@ -95,27 +92,6 @@ def _parse_findings(raw: str) -> list[dict]:
     return native_parse_finding_blocks(raw)
 
 
-def normalize_repo(repo: str) -> str:
-    return repo.replace("/", "__")
-
-
-def default_state_dir_without_create() -> Path:
-    override = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
-    if override:
-        return Path(override)
-
-    home = os.environ.get("HOME")
-    if platform.system() == "Darwin":
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/Library/Caches" if home else None)
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/.cache" if home else None)
-    if not base:
-        return Path(".gh-address-cr-state")
-    return Path(base) / "gh-address-cr"
-
-
-def workspace_path_without_create(repo: str, pr_number: str) -> Path:
-    return default_state_dir_without_create() / normalize_repo(repo) / f"pr-{pr_number}"
 
 
 def workspace_root(repo: str, pr_number: str) -> Path:
@@ -492,7 +468,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": result.returncode,
-        "commands": _summary_commands(repo, pr_number),
+        "commands": summary_commands(repo, pr_number),
     }
 
 
@@ -521,12 +497,12 @@ def build_preflight_summary(
             "unresolved_github_threads_count": None,
             "needs_human_items_count": None,
         },
-        "artifact_path": artifact_path or str(workspace_path_without_create(repo, pr_number)),
+        "artifact_path": artifact_path or str(session_store.workspace_dir(repo, pr_number)),
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
-        "commands": _summary_commands(repo, pr_number),
+        "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
         summary["diagnostics"] = diagnostics

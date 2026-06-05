@@ -77,7 +77,7 @@ def _build_preflight_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
-        "commands": _summary_commands(repo, pr_number),
+        "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
         summary["diagnostics"] = diagnostics
@@ -324,7 +324,7 @@ def _native_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
-        "commands": _summary_commands(repo, pr_number),
+        "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
         summary["diagnostics"] = diagnostics
@@ -333,7 +333,7 @@ def _native_summary(
     return summary
 
 
-def _summary_commands(repo: str, pr_number: str) -> dict[str, str]:
+def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
     return {
         "address": f"gh-address-cr address {repo} {pr_number} --lean",
         "review_auto_simple": f"gh-address-cr review --auto-simple {repo} {pr_number} --lean",
@@ -434,7 +434,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
             "Use agent fix-all only with --input batch-response.json, or with --homogeneous-reason for a homogeneous repeated concern.",
             "After accepted evidence is present, run agent publish.",
         ],
-        "commands": _summary_commands(repo, pr_number),
+        "commands": summary_commands(repo, pr_number),
     }
     request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return request_path
@@ -587,7 +587,7 @@ class HighLevelReviewRuntime:
         repo = parsed.repo
         pr_number = str(parsed.pr_number)
         lean = bool(lean or parsed.lean or parsed.summary)
-        run_id = parsed.audit_id or f"native-{_utc_now()}"
+        run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
         auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
         preloaded_findings_input: str | None = None
         if parsed.sync and not parsed.source:
