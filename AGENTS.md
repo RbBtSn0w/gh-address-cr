@@ -70,6 +70,28 @@ Before claiming work is complete, run these local checks:
 - **Smallest change**: Default to the smallest safe change. Avoid opportunistic refactors.
 - **Contract discipline**: If a public or agent-facing contract changes, update docs and tests together.
 
+### Architecture Preflight Gate
+
+Before editing implementation code, complete an Architecture Preflight when a
+change touches runtime state, telemetry, final-gate behavior, leases, artifacts,
+GitHub reply/resolve/publish side effects, session persistence,
+Status-to-Action Map behavior, or structured agent protocol files. The
+preflight must identify:
+
+- authoritative state owner
+- external facts or event inputs
+- projection or derived-state shape
+- policy table, status-to-action map, or deterministic decision function
+- side-effect command plan or outbox boundary
+- artifact truth boundary and telemetry/reporting self-reference risks
+- recovery, replay, and executable contract tests
+
+If review or implementation feedback repeatedly adds edge branches in the same
+design axis without reducing the state space, stop expanding conditionals and
+create or update an architecture spec instead. Local bug fixes are acceptable
+only when they reduce ambiguity or remove a branch; they must not introduce
+unmodeled state flags, hidden fallback paths, or artifact-backed truth.
+
 ## Completion Standard
 
 A task is complete only when:
@@ -100,5 +122,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/016-runtime-complexity-plateau/plan.md](specs/016-runtime-complexity-plateau/plan.md)
+  [specs/018-runtime-kernel/plan.md](specs/018-runtime-kernel/plan.md)
 <!-- SPECKIT END -->

@@ -1,27 +1,28 @@
 <!--
 Sync Impact Report
-Version change: 1.3.0 -> 1.4.0
+Version change: 1.4.0 -> 1.5.0
 Amendment reason:
-- Promote the external agent telemetry ingestion contract into governance.
-- Define telemetry as observed workflow evidence, not review-resolution state.
-- Require source attribution, coverage labels, privacy filtering, and deterministic
-  fingerprinting for imported telemetry.
+- Promote first-principles runtime-kernel design and architecture plateau
+  discipline into project governance.
+- Require state/event/projection/policy/outbox modeling before implementation
+  for runtime state, telemetry, final-gate, leases, artifacts, and GitHub IO.
+- Stop repeated edge-branch patching when feedback exposes the same unresolved
+  design axis.
 Version bump rationale:
-- MINOR: Added Principle VIII and materially expanded runtime and quality-gate
-  expectations for telemetry ingestion and reporting.
+- MINOR: Added Principle IX and materially expanded quality gates/templates for
+  architecture preflight and runtime-kernel modeling.
 Modified principles:
-- I. Control Plane Owns Runtime State (telemetry state and report artifacts remain runtime-owned)
-- II. CLI Is The Stable Public Interface (telemetry commands are public additive contracts)
-- V. Testable Contracts (telemetry safety, idempotence, and coverage are testable contracts)
+- Runtime Architecture (expanded to include event/projection/policy/outbox kernel boundaries)
+- Development Workflow And Quality Gates (expanded with Architecture Preflight)
 Added sections:
-- VIII. Telemetry Is Attributed Observed Evidence
+- IX. First-Principles Runtime Kernel
 Removed sections:
 - None
 Templates requiring updates:
 - .specify/templates/plan-template.md: ✅ updated
 - .specify/templates/spec-template.md: ✅ updated
 - .specify/templates/tasks-template.md: ✅ updated
-- .specify/templates/checklist-template.md: ✅ reviewed
+- .specify/templates/checklist-template.md: ✅ updated
 - .specify/templates/commands/*.md: ✅ reviewed (directory not present)
 Runtime guidance requiring updates:
 - AGENTS.md: ✅ updated
@@ -176,10 +177,47 @@ Rationale: The runtime cannot assume every agent host exposes complete telemetry
 Honest coverage labels, source attribution, and privacy filtering let efficiency
 reports guide optimization without overstating evidence or leaking host data.
 
+### IX. First-Principles Runtime Kernel
+
+Review resolution MUST be modeled as a first-principles runtime kernel. External
+facts such as GitHub review threads, pending reviews, check state, normalized
+findings, agent submissions, lease changes, telemetry observations, and artifact
+writes MUST enter the system as typed events or documented inputs. Current state
+MUST be derived by projections. Policy decisions MUST be expressed as explicit
+policy tables, status-to-action maps, or deterministic functions over
+projections, not scattered status conditionals. Side effects MUST be planned as
+command or outbox entries and MUST become completion evidence only after
+execution results are recorded.
+
+Artifacts are evidence and reporting outputs. They MUST NOT become authoritative
+truth unless the feature explicitly models them as a versioned event source with
+contract tests. Telemetry and reporting MUST avoid self-referential completion
+semantics; when exact measurement would require observing the reporting write
+itself, the contract MUST define the excluded reporting boundary or use a
+non-self-referential artifact.
+
+Any feature that touches runtime state, telemetry, final-gate behavior, leases,
+artifacts, GitHub IO, session persistence, or the structured agent protocol MUST
+complete Architecture Preflight before implementation. The preflight MUST name
+the state owner, event inputs, projection shape, policy/action map,
+side-effect/outbox boundary, recovery and replay model, artifact truth boundary,
+and executable contract tests. If repeated review or implementation feedback in
+the same design axis requires adding edge branches without reducing the state
+space, implementation MUST stop and create or update an architecture spec
+instead of continuing to patch conditionals.
+
+Rationale: Agent workflows fail when external facts, derived state, decisions,
+side effects, and evidence are blended in one imperative path. Modeling facts
+first and deriving actions from projections prevents unbounded boundary growth
+and makes the system replayable, testable, and maintainable.
+
 ## Runtime Architecture
 
 The intended architecture is:
 
+- Runtime kernel: typed external facts, event log or documented event inputs,
+  projections, policy engine, Status-to-Action Map, command planner, outbox
+  executor, execution evidence, and replay/contract tests.
 - Core engine: deterministic state machine, GitHub IO, findings normalization,
   multi-agent lease management, session persistence, loop safety, final gate,
   audit artifacts, telemetry import ledgers, fingerprint ledgers, coverage
@@ -200,6 +238,13 @@ transitions, GitHub writes, reply/resolve ordering, and final-gate evaluation.
 Telemetry evidence MAY enrich final-gate and audit artifacts, but it MUST NOT
 change review item state or completion truth.
 
+The runtime flow MUST remain conceptually traceable as:
+
+```text
+external facts -> events -> projections -> policy -> command plan/outbox
+-> execution evidence -> events -> final-gate proof
+```
+
 ## Development Workflow And Quality Gates
 
 All non-trivial changes MUST begin by reading the smallest governing contract:
@@ -211,11 +256,15 @@ findings intake, telemetry, or final-gate behavior.
 Implementation plans MUST include a Constitution Check covering:
 
 - control-plane ownership of state and side effects
+- first-principles runtime-kernel modeling, including event inputs, projections,
+  policy/action maps, command planning, outbox execution, and replay evidence
 - public CLI and machine summary compatibility (including Status-to-Action Map)
 - evidence requirements for reply, resolve, and final-gate behavior
 - packaged skill boundary and path discipline (Policy Layer vs implementation)
 - external intake replaceability and findings normalization
 - telemetry attribution, coverage labels, privacy filtering, and fail-open scope
+- artifact truth boundaries and non-self-referential telemetry/reporting design
+- architecture plateau discipline when feedback would add more edge branches
 - test coverage for changed contracts
 - agent protocol and lease compatibility (if multi-agent or action-oriented)
 
@@ -228,6 +277,9 @@ Telemetry changes MUST include tests for safety filtering, deterministic
 fingerprints, duplicate or overlapping import behavior, coverage labels, report
 artifacts, final-gate/audit integration, and the fail-loud telemetry-command
 versus fail-open core-workflow boundary.
+Runtime-kernel changes MUST include replay or contract tests that prove the
+event inputs, projections, policy decisions, side-effect plans, artifact
+boundaries, and final-gate outcomes agree.
 
 ## Governance
 
@@ -258,4 +310,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.4.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-04
+**Version**: 1.5.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-05

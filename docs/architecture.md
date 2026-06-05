@@ -17,6 +17,48 @@ The packaged skill remains under `skill/` and acts as a thin adapter:
 The runtime must be available or execution must fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
 
 
+## First-Principles Runtime Kernel
+
+The project treats PR review resolution as a runtime kernel, not as a sequence
+of agent-authored patches. External facts enter the runtime first; current state
+and safe actions are derived from those facts.
+
+The intended flow is:
+
+```text
+external facts -> events -> projections -> policy -> command plan/outbox
+-> execution evidence -> events -> final-gate proof
+```
+
+- **External facts**: GitHub review threads, pending reviews, check state,
+  normalized findings, agent submissions, lease changes, telemetry observations,
+  and artifact writes.
+- **Events / documented inputs**: append-only facts or explicitly documented
+  inputs that can be replayed or reloaded without agent memory.
+- **Projections**: derived current views such as actionable work items,
+  lease-recovery state, telemetry coverage, and final-gate readiness.
+- **Policy**: explicit status-to-action maps, decision tables, or deterministic
+  functions over projections.
+- **Command plan / outbox**: GitHub reply, resolve, publish, archive, and
+  artifact writes are planned side effects, not hidden state transitions.
+- **Execution evidence**: a side effect affects completion only after the
+  runtime records durable evidence such as reply URLs, resolve confirmation,
+  audit events, or final-gate proof.
+
+Artifacts are evidence and reporting outputs. They are not authoritative state
+unless a feature explicitly models them as a versioned event source with
+contract tests. Telemetry reports must avoid self-referential completion
+semantics; when the reporting write itself would change the measurement, the
+contract must define the excluded reporting boundary or use a
+non-self-referential artifact.
+
+Any feature touching runtime state, telemetry, final-gate behavior, leases,
+artifacts, GitHub IO, session persistence, or the structured agent protocol must
+complete Architecture Preflight before implementation. Repeated feedback that
+adds branches in the same design axis is a signal to update the architecture
+spec instead of continuing to expand conditionals.
+
+
 ## PR Session Architecture
 
 `gh-address-cr` ships the session engine inside the runtime package and exposes supported workflows through the public `gh-address-cr` entrypoint.

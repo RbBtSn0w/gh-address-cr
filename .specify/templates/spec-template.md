@@ -97,13 +97,35 @@
 
 ### Constitution Alignment *(mandatory)*
 
-- **Control Plane Impact**: [Does this feature affect session state, GitHub IO, findings intake, loop safety, audit artifacts, telemetry, or final-gate behavior? If yes, describe the deterministic owner.]
-- **CLI / Agent Contract Impact**: [Does this feature change `review`, high-level commands, machine summary fields, reason codes, wait states, exit codes, or structured action requests/responses? Does it preserve the **Status-to-Action Map**?]
-- **Evidence Requirements**: [What evidence proves each review item was verified, classified, replied to, resolved, and gated?]
-- **Packaged Skill Boundary**: [Which changes belong under `skill/`, and which are repo-root development/test/release support only? Does it preserve the **Thin Adapter and Behavioral Policy Layer** model?]
-- **External Intake Replaceability**: [Does the feature preserve the **Normalized Findings Contract** and intake agnostic nature of the control plane?]
-- **Telemetry Evidence Boundary**: [If telemetry changes, does it remain observed workflow evidence rather than review-resolution state? How are source attribution, coverage labels, safe metadata, deterministic fingerprints, duplicate handling, and fail-open/fail-loud behavior defined?]
-- **Fail-Fast Behavior**: [Which malformed inputs, missing tools, unsafe states, or unsupported usages must fail loudly?]
+- **Control Plane Impact**: [Does this feature affect session state,
+  GitHub IO, findings intake, loop safety, audit artifacts, telemetry, or
+  final-gate behavior? If yes, describe the deterministic owner.]
+- **Runtime Kernel Model**: [If this feature affects runtime behavior, what are
+  the external facts/event inputs, projections, policy/status-to-action
+  decisions, side-effect plan/outbox boundary, artifact truth boundary, and
+  replay or contract tests?]
+- **CLI / Agent Contract Impact**: [Does this feature change `review`,
+  high-level commands, machine summary fields, reason codes, wait states, exit
+  codes, or structured action requests/responses? Does it preserve the
+  **Status-to-Action Map**?]
+- **Evidence Requirements**: [What evidence proves each review item was
+  verified, classified, replied to, resolved, and gated?]
+- **Packaged Skill Boundary**: [Which changes belong under `skill/`, and which
+  are repo-root development/test/release support only? Does it preserve the
+  **Thin Adapter and Behavioral Policy Layer** model?]
+- **External Intake Replaceability**: [Does the feature preserve the
+  **Normalized Findings Contract** and intake agnostic nature of the control
+  plane?]
+- **Telemetry Evidence Boundary**: [If telemetry changes, does it remain
+  observed workflow evidence rather than review-resolution state? How are
+  source attribution, coverage labels, safe metadata, deterministic
+  fingerprints, duplicate handling, and fail-open/fail-loud behavior defined?]
+- **Architecture Plateau Risk**: [Does this feature remove ambiguity or reduce
+  state space? If it adds branches, state flags, fallbacks, or artifact-backed
+  truth, why is that not a sign the design should move to an architecture spec
+  first?]
+- **Fail-Fast Behavior**: [Which malformed inputs, missing tools, unsafe states,
+  or unsupported usages must fail loudly?]
 
 ### Key Entities *(include if feature involves data)*
 
