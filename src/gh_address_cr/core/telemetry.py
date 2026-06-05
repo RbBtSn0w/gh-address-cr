@@ -5,6 +5,7 @@ import math
 import os
 import re
 import shlex
+import time
 import uuid
 from hashlib import sha256
 from dataclasses import dataclass
@@ -876,7 +877,11 @@ def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, f
     return summary
 
 
+TELEMETRY_OVERHEAD_BUDGET_MS = 250
+
+
 def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
+    overhead_started_at = time.perf_counter()
     paths = core_paths.SessionPaths(repo, pr_number)
     runtime_events = _runtime_events(paths)
     external_events, diagnostics = _load_external_events_with_diagnostics(paths)
@@ -919,6 +924,8 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "total_events": total_events,
         "success_rate": success_rate,
         "total_observed_duration_ms": total_duration,
+        "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
+        "telemetry_overhead_ms": None,
         "host_metrics": host_metrics,
         "slowest_operations": [
             {
@@ -940,8 +947,17 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError as exc:
-        report["diagnostics"].append(f"efficiency report artifact unavailable: {type(exc).__name__}: {exc}")
+        report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
+    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
+    report["telemetry_overhead_ms"] = telemetry_overhead_ms
+    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
+        report["diagnostics"].append("TELEMETRY_OVERHEAD_EXCEEDED")
     return report
+
+
+def _safe_os_error_diagnostic(prefix: str, exc: OSError) -> str:
+    detail = exc.strerror or str(exc)
+    return f"{prefix}: {type(exc).__name__}: {detail}"
 
 
 def _aggregate_host_metrics(events: list[ExternalTelemetryEvent]) -> dict[str, int]:

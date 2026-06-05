@@ -8,6 +8,11 @@ from unittest.mock import patch
 
 from gh_address_cr.core.session import SessionManager
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.leases import (
+    LeaseSubmissionError as RuntimeLeaseSubmissionError,
+    claim_lease as runtime_claim_lease,
+    submit_lease as runtime_submit_lease,
+)
 from gh_address_cr.orchestrator.harness import handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import OrchestrationSession, LeaseConflictError, ExpiredLeaseError
 
@@ -161,6 +166,39 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         )
         self.assertEqual(rc_ok, 0)
         self.assertNotIn("finding-1", load_orchestration_session(self.repo, self.pr).active_leases)
+
+
+class TestRuntimeLeaseRecoveryAudit(unittest.TestCase):
+    def test_expired_submission_records_recovery_audit_event(self):
+        session = {"items": {}, "leases": {}, "lease_events": []}
+        item = {"item_id": "finding-1", "path": "src/a.py", "state": "claimed"}
+        session["items"][item["item_id"]] = item
+        lease = runtime_claim_lease(
+            session,
+            item,
+            agent_id="codex-fixer-1",
+            role="fixer",
+            request_hash="hash-current",
+            lease_id="lease-expired",
+            ttl_seconds=1,
+            now=datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc),
+        )
+
+        with self.assertRaises(RuntimeLeaseSubmissionError):
+            runtime_submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="codex-fixer-1",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-current",
+                now=datetime(2026, 4, 24, 12, 0, 2, tzinfo=timezone.utc),
+            )
+
+        recovery_events = [event for event in session["lease_events"] if event["event_type"] == "lease_recovery_calculated"]
+        self.assertEqual(len(recovery_events), 1)
+        self.assertEqual(recovery_events[0]["recovery_outcome"], "renew")
+        self.assertEqual(recovery_events[0]["reason_code"], "EXPIRED_LEASE_RENEWABLE")
 
 
 if __name__ == "__main__":

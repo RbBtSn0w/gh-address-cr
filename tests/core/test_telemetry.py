@@ -236,6 +236,78 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            write_text.side_effect = FileNotFoundError(
+                2,
+                "No such file or directory",
+                "/private/tmp/secret/efficiency-report.json",
+            )
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            diagnostic = "\n".join(report["diagnostics"])
+            self.assertIn("efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic)
+            self.assertNotIn("/private/tmp/secret", diagnostic)
+
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_records_overhead_budget_diagnostics(self, state_dir, _perf_counter):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["telemetry_overhead_budget_ms"], 250)
+            self.assertEqual(report["telemetry_overhead_ms"], 300.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["telemetry_overhead_ms"], 400.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            self.assertEqual(write_text.call_count, 1)
+
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_artifact_marks_final_overhead_unembedded(self, state_dir, _perf_counter):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
+            self.assertEqual(report["telemetry_overhead_ms"], 400.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            self.assertIsNone(artifact["telemetry_overhead_ms"])
+            self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", artifact["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            external_store = core_paths.workspace_dir("octo/example", "77") / "external-telemetry.jsonl"
+            external_store.parent.mkdir(parents=True, exist_ok=True)
+            external_store.mkdir()
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertTrue(report["diagnostics"])
+            self.assertFalse(any(str(external_store.parent) in diagnostic for diagnostic in report["diagnostics"]))
+
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_no_telemetry_efficiency_report_is_unavailable(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:

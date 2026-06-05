@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -31,6 +32,62 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         with self.assertRaises(FindingsFormatError) as ctx:
             parse_records('{"title": "ok"}\nnot-json\n')
         self.assertIn("Invalid NDJSON input on line 2", str(ctx.exception))
+
+    def test_agent_context_update_does_not_require_pyyaml_for_simple_config(self):
+        project = Path(self.temp_dir.name) / "agent-context-project"
+        config_dir = project / ".specify" / "extensions" / "agent-context"
+        specs_dir = project / "specs" / "123-feature"
+        config_dir.mkdir(parents=True)
+        specs_dir.mkdir(parents=True)
+        (config_dir / "agent-context-config.yml").write_text(
+            "context_file: AGENTS.md\n"
+            "context_markers:\n"
+            "  start: <!-- SPECKIT START -->\n"
+            "  end: <!-- SPECKIT END -->\n",
+            encoding="utf-8",
+        )
+        (specs_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+        (project / "AGENTS.md").write_text("before\n", encoding="utf-8")
+
+        no_yaml_dir = Path(self.temp_dir.name) / "no_yaml"
+        no_yaml_dir.mkdir()
+        (no_yaml_dir / "yaml.py").write_text("raise ImportError('blocked by test')\n", encoding="utf-8")
+        python3 = self.bin_dir / "python3"
+        python3.write_text(
+            "#!/bin/sh\n"
+            f"PYTHONPATH={no_yaml_dir}:$PYTHONPATH exec {sys.executable} \"$@\"\n",
+            encoding="utf-8",
+        )
+        python3.chmod(0o755)
+
+        env = self.env.copy()
+        env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                "bash",
+                str(Path(".specify/extensions/agent-context/scripts/bash/update-agent-context.sh").resolve()),
+                "specs/123-feature/plan.md",
+            ],
+            text=True,
+            capture_output=True,
+            cwd=project,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("agent-context: updated AGENTS.md", result.stdout)
+        content = (project / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- SPECKIT START -->", content)
+        self.assertIn("at specs/123-feature/plan.md", content)
+
+    def test_agent_context_powershell_fallback_does_not_require_pyyaml(self):
+        script = Path(".specify/extensions/agent-context/scripts/powershell/update-agent-context.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("import yaml", script)
+        self.assertNotIn("PyYAML is required", script)
+        self.assertIn("tiny stdlib parser", script)
 
     def test_submit_feedback_dry_run_outputs_canonical_issue_body(self):
         result = self.run_cmd(

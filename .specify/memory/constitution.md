@@ -1,26 +1,32 @@
 <!--
 Sync Impact Report
-Version change: 1.2.0 -> 1.3.0
+Version change: 1.3.0 -> 1.4.0
 Amendment reason:
-- Formally define the "Orchestrator as Delegator" pattern.
-- Clarify the relationship between volatile Orchestration state and authoritative Runtime state.
-- Incorporate "Bounded Retry Persistence" as a stability contract.
+- Promote the external agent telemetry ingestion contract into governance.
+- Define telemetry as observed workflow evidence, not review-resolution state.
+- Require source attribution, coverage labels, privacy filtering, and deterministic
+  fingerprinting for imported telemetry.
 Version bump rationale:
-- MINOR: Materially expanded Principle VI (Multi-Agent Coordination) and Principle I (Control Plane Owns Runtime State) to include delegation and persistence rules.
+- MINOR: Added Principle VIII and materially expanded runtime and quality-gate
+  expectations for telemetry ingestion and reporting.
 Modified principles:
-- I. Control Plane Owns Runtime State (clarified transient vs authoritative state)
-- VI. Multi-Agent Coordination and Claim Leases (added Delegation Pattern)
+- I. Control Plane Owns Runtime State (telemetry state and report artifacts remain runtime-owned)
+- II. CLI Is The Stable Public Interface (telemetry commands are public additive contracts)
+- V. Testable Contracts (telemetry safety, idempotence, and coverage are testable contracts)
 Added sections:
-- None
+- VIII. Telemetry Is Attributed Observed Evidence
 Removed sections:
 - None
 Templates requiring updates:
 - .specify/templates/plan-template.md: ✅ updated
 - .specify/templates/spec-template.md: ✅ updated
 - .specify/templates/tasks-template.md: ✅ updated
+- .specify/templates/checklist-template.md: ✅ reviewed
+- .specify/templates/commands/*.md: ✅ reviewed (directory not present)
 Runtime guidance requiring updates:
 - AGENTS.md: ✅ updated
-- README.md: ✅ updated
+- README.md: ✅ reviewed
+- docs/architecture.md: ✅ updated
 Follow-up items:
 - None
 -->
@@ -35,6 +41,9 @@ state, intake routing, GitHub side effects, reply evidence, session metrics,
 loop safety, and final gating MUST be owned by deterministic code. Markdown
 files and agent hints MAY describe how to use the system, but they MUST NOT be
 the authoritative implementation of state transitions or completion checks.
+Telemetry state, import ledgers, fingerprint ledgers, coverage calculations,
+efficiency report artifacts, and telemetry diagnostics MUST also be owned by
+the runtime.
 **Orchestration state (leases, active worker queues) is a volatile, transient
 shadow of the authoritative Runtime state (`session.json`). The control plane
 MUST reconcile orchestration state from the runtime truth before every major
@@ -51,10 +60,11 @@ between the agent and the control plane MUST follow the **Structured Agent Proto
 using formal `ActionRequest` and `ActionResponse` schemas. The control plane MUST
 provide a stable **Status-to-Action Map** that derives safe next actions or stop
 conditions from machine-readable summaries. The main public entrypoint is `review`;
-advanced entrypoints such as `threads`, `findings`, `adapter`, and `review-to-findings`
-MAY exist for explicit integrations but MUST NOT replace `review` as the default
-orchestration path. Machine-readable outputs, reason codes, wait states, exit codes,
-cache artifacts, and stable input contracts MUST be preserved or versioned when changed.
+advanced entrypoints such as `threads`, `findings`, `adapter`,
+`review-to-findings`, `telemetry ingest`, and `telemetry summary` MAY exist for
+explicit integrations but MUST NOT replace `review` as the default orchestration
+path. Machine-readable outputs, reason codes, wait states, exit codes, cache
+artifacts, and stable input contracts MUST be preserved or versioned when changed.
 
 Rationale: AI agents, humans, CI, and future agent runners need the same stable
 control boundary. Formal protocols and status mapping separate cognitive reasoning
@@ -102,6 +112,9 @@ Public behavior changes MUST update code, docs, and executable tests together.
 Silent fallbacks, hidden compatibility shims, alternate prompt contracts,
 and narrative-only findings ingestion are forbidden unless they are explicitly
 documented, tested, and versioned as public behavior.
+Telemetry safety, source attribution, event fingerprinting, duplicate handling,
+coverage labels, fail-open/fail-loud behavior, and final-gate/audit evidence
+MUST be covered by executable contract or acceptance tests when changed.
 
 Rationale: Agent workflows amplify ambiguity. A weak fallback can create false
 completion claims, duplicate side effects, or unrecoverable session drift.
@@ -134,13 +147,43 @@ Rationale: Specializing in resolution prevents scope creep and ensures the
 orchestration layer remains a stable boundary for any review tool that can
 emit the accepted findings format.
 
+### VIII. Telemetry Is Attributed Observed Evidence
+
+Workflow telemetry is observed evidence about agent efficiency and workflow
+coverage. It MUST NOT resolve review items, mutate findings, or replace the
+reply/resolve/final-gate evidence required by Principle III. Runtime telemetry
+and imported external agent telemetry MUST preserve source attribution and MUST
+produce an explicit coverage label: `complete`, `partial`, `runtime-only`, or
+`unavailable`.
+
+External telemetry ingestion MUST use a documented, vendor-neutral event
+contract. The runtime MUST normalize accepted events, compute deterministic
+`event_fingerprint` values after canonicalization, deduplicate duplicate or
+overlapping imports by fingerprint or documented correlation rules, and report
+accepted, duplicate, rejected, and diagnostic outcomes without inflating
+durations, counts, retries, slowest-operation rankings, or error rates.
+
+Telemetry artifacts MUST be public-safe. Imports MUST reject or sanitize tokens,
+credentials, raw prompts, usernames, private machine identifiers, and unnecessary
+absolute local paths before storage or reporting. Telemetry-specific commands
+MUST fail loudly for malformed, unsafe, unsupported, or ambiguous telemetry.
+Core review-resolution flows (`review`, `address`, publish, reply, resolve, and
+`final-gate`) MUST remain fail-open for missing or damaged telemetry and surface
+`runtime-only`, `partial`, or `unavailable` coverage instead of blocking review
+completion.
+
+Rationale: The runtime cannot assume every agent host exposes complete telemetry.
+Honest coverage labels, source attribution, and privacy filtering let efficiency
+reports guide optimization without overstating evidence or leaking host data.
+
 ## Runtime Architecture
 
 The intended architecture is:
 
 - Core engine: deterministic state machine, GitHub IO, findings normalization,
   multi-agent lease management, session persistence, loop safety, final gate,
-  audit artifacts, and telemetry.
+  audit artifacts, telemetry import ledgers, fingerprint ledgers, coverage
+  calculation, and public-safe efficiency reports.
 - CLI: stable public interface for agents, humans, CI, and future automation.
 - Agent protocol: structured `ActionRequest` and `ActionResponse` schemas
   for `fix`, `clarify`, `defer`, and `reject` workflows.
@@ -148,10 +191,14 @@ The intended architecture is:
   when to invoke the CLI and how to react to machine-readable statuses (Status-to-Action Map).
 - External producers: replaceable review sources that emit normalized findings
   JSON or fixed `finding` blocks.
+- External telemetry sources: replaceable agent-host or generic event feeds that
+  emit observed workflow telemetry, never review-resolution decisions.
 
 The CLI control plane is authoritative. Agent reasoning MAY decide how to fix,
 clarify, defer, or reject a specific item, but the CLI MUST own session
 transitions, GitHub writes, reply/resolve ordering, and final-gate evaluation.
+Telemetry evidence MAY enrich final-gate and audit artifacts, but it MUST NOT
+change review item state or completion truth.
 
 ## Development Workflow And Quality Gates
 
@@ -168,6 +215,7 @@ Implementation plans MUST include a Constitution Check covering:
 - evidence requirements for reply, resolve, and final-gate behavior
 - packaged skill boundary and path discipline (Policy Layer vs implementation)
 - external intake replaceability and findings normalization
+- telemetry attribution, coverage labels, privacy filtering, and fail-open scope
 - test coverage for changed contracts
 - agent protocol and lease compatibility (if multi-agent or action-oriented)
 
@@ -176,6 +224,10 @@ CLI or packaging changes MUST include CLI smoke tests. Session, loop, reply,
 resolve, or final-gate changes MUST include behavior tests. Documentation-only
 changes MUST still be checked for repo-root versus skill-root path correctness
 and public contract consistency.
+Telemetry changes MUST include tests for safety filtering, deterministic
+fingerprints, duplicate or overlapping import behavior, coverage labels, report
+artifacts, final-gate/audit integration, and the fail-loud telemetry-command
+versus fail-open core-workflow boundary.
 
 ## Governance
 
@@ -206,4 +258,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.3.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-27
+**Version**: 1.4.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-04

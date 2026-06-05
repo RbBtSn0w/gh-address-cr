@@ -10,8 +10,12 @@ description: "Task list template for feature implementation"
 
 **Tests**: Include test tasks for every behavior, CLI contract, parser,
 session transition, GitHub side effect, final-gate rule, or packaged-skill
-contract changed by the feature. For documentation-only work, include explicit
-validation tasks for path-scope correctness and contract consistency.
+contract changed by the feature. Telemetry changes MUST include tests for
+source attribution, coverage labels, privacy filtering, deterministic event
+fingerprints, duplicate or overlapping imports, report artifacts, final-gate or
+audit integration, and fail-loud telemetry commands versus fail-open core review
+workflows. For documentation-only work, include explicit validation tasks for
+path-scope correctness and contract consistency.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -73,6 +77,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T009 Setup environment configuration management
 - [ ] T010 Define or update deterministic control-plane ownership for changed state, side effects, and gates
 - [ ] T011 Define or update public CLI / agent contract schemas and compatibility expectations
+- [ ] T012 Define or update telemetry evidence boundaries, source coverage labels, privacy guards, fingerprint identities, and fail-open/fail-loud rules when telemetry changes
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -161,6 +166,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests for changed contracts in tests/unit/
 - [ ] TXXX Security hardening
+- [ ] TXXX Verify telemetry source attribution, coverage labels, public-safe report content, and idempotent duplicate handling when telemetry changes
 - [ ] TXXX Run quickstart.md validation
 - [ ] TXXX Run `python3 -m unittest discover -s tests`
 - [ ] TXXX Run CLI smoke checks for changed CLI surfaces

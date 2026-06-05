@@ -13,6 +13,7 @@ from gh_address_cr.core.github_thread_state import (
     is_stale_or_outdated_github_thread,
     is_terminal_github_thread,
 )
+from gh_address_cr.core.logic_validation import generate_logic_validation_signals
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.core.severity import (
     apply_severity_evidence,
@@ -32,6 +33,7 @@ FINAL_GATE_BLOCKING_GITHUB_ITEMS = "FINAL_GATE_BLOCKING_GITHUB_ITEMS"
 FINAL_GATE_BLOCKING_LOCAL_ITEMS = "FINAL_GATE_BLOCKING_LOCAL_ITEMS"
 FINAL_GATE_MISSING_VALIDATION_EVIDENCE = "FINAL_GATE_MISSING_VALIDATION_EVIDENCE"
 FINAL_GATE_PR_CHECKS_NOT_GREEN = "FINAL_GATE_PR_CHECKS_NOT_GREEN"
+FINAL_GATE_LOGIC_VALIDATION_BLOCKING = "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"
 
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5
@@ -61,6 +63,8 @@ COUNT_KEYS = (
     "pr_checks_failed_count",
     "pr_checks_pending_count",
     "pr_checks_not_green_count",
+    "logic_validation_blocking_count",
+    "logic_validation_advisory_count",
 )
 
 FAILURE_ORDER = (
@@ -70,6 +74,7 @@ FAILURE_ORDER = (
     (FINAL_GATE_BLOCKING_GITHUB_ITEMS, "blocking_github_items_count", "github_items"),
     (FINAL_GATE_BLOCKING_LOCAL_ITEMS, "blocking_local_items_count", "local_items"),
     (FINAL_GATE_MISSING_VALIDATION_EVIDENCE, "missing_validation_evidence_count", "validation_evidence"),
+    (FINAL_GATE_LOGIC_VALIDATION_BLOCKING, "logic_validation_blocking_count", "logic_validation"),
     (FINAL_GATE_PR_CHECKS_NOT_GREEN, "pr_checks_not_green_count", "checks"),
 )
 
@@ -81,6 +86,7 @@ class GateResult:
     counts: dict[str, int]
     failure_codes: list[str]
     check_requirement: str | None = None
+    logic_validation_signals: list[dict[str, Any]] | None = None
 
     @property
     def passed(self) -> bool:
@@ -119,6 +125,7 @@ class GateResult:
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
             "commands": _final_gate_commands(self.repo, self.pr_number),
+            "logic_validation_signals": list(self.logic_validation_signals or []),
         }
 
 
@@ -210,6 +217,15 @@ def evaluate_final_gate(
     missing_validation_items = [
         item for item in local_items if _is_terminal_local_item(item) and not _has_validation_evidence(item)
     ]
+    logic_validation_signals = [signal.to_dict() for signal in generate_logic_validation_signals(session)]
+    blocking_logic_validation_signals = [
+        signal
+        for signal in logic_validation_signals
+        if signal.get("gate_effect") == "blocking"
+    ]
+    advisory_logic_validation_signals = [
+        signal for signal in logic_validation_signals if signal.get("gate_effect") == "advisory"
+    ]
 
     counts = {
         "unresolved_github_threads_count": len(unresolved_remote_threads),
@@ -225,6 +241,8 @@ def evaluate_final_gate(
         "pr_checks_failed_count": len(failed_checks),
         "pr_checks_pending_count": len(pending_checks),
         "pr_checks_not_green_count": len(failed_checks) + len(pending_checks) if check_requirement else 0,
+        "logic_validation_blocking_count": len(blocking_logic_validation_signals),
+        "logic_validation_advisory_count": len(advisory_logic_validation_signals),
     }
     failure_codes = [code for code, count_key, _ in FAILURE_ORDER if counts[count_key] > 0]
 
@@ -234,6 +252,7 @@ def evaluate_final_gate(
         counts={key: counts[key] for key in COUNT_KEYS},
         failure_codes=failure_codes,
         check_requirement=check_requirement,
+        logic_validation_signals=logic_validation_signals,
     )
 
 

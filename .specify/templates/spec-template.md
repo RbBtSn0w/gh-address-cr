@@ -102,6 +102,7 @@
 - **Evidence Requirements**: [What evidence proves each review item was verified, classified, replied to, resolved, and gated?]
 - **Packaged Skill Boundary**: [Which changes belong under `skill/`, and which are repo-root development/test/release support only? Does it preserve the **Thin Adapter and Behavioral Policy Layer** model?]
 - **External Intake Replaceability**: [Does the feature preserve the **Normalized Findings Contract** and intake agnostic nature of the control plane?]
+- **Telemetry Evidence Boundary**: [If telemetry changes, does it remain observed workflow evidence rather than review-resolution state? How are source attribution, coverage labels, safe metadata, deterministic fingerprints, duplicate handling, and fail-open/fail-loud behavior defined?]
 - **Fail-Fast Behavior**: [Which malformed inputs, missing tools, unsafe states, or unsupported usages must fail loudly?]
 
 ### Key Entities *(include if feature involves data)*

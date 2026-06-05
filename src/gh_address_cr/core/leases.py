@@ -18,8 +18,10 @@ from gh_address_cr.core.utils import (
 
 try:
     from gh_address_cr.core.models import ClaimLease as _ModelClaimLease
+    from gh_address_cr.core.models import LeaseRecoveryState
 except ImportError:
     _ModelClaimLease = None
+    LeaseRecoveryState = None
 
 
 ACTIVE_LEASE_STATUSES = {"active", "submitted"}
@@ -50,8 +52,15 @@ ClaimLease = _ModelClaimLease or _FallbackClaimLease
 
 
 class LeaseError(ValueError):
-    def __init__(self, reason_code: str, detail: str | None = None):
+    def __init__(
+        self,
+        reason_code: str,
+        detail: str | None = None,
+        *,
+        recovery_state: dict[str, Any] | None = None,
+    ):
         self.reason_code = reason_code
+        self.recovery_state = recovery_state
         message = reason_code if detail is None else f"{reason_code}: {detail}"
         super().__init__(message)
 
@@ -144,22 +153,102 @@ def submit_lease(
 
     status = _get(lease, "status")
     if status == "submitted":
-        raise LeaseSubmissionError("DUPLICATE_SUBMISSION", lease_id)
+        _raise_submission_error(
+            session,
+            "DUPLICATE_SUBMISSION",
+            lease_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if status in TERMINAL_LEASE_STATUSES:
-        raise LeaseSubmissionError("STALE_LEASE", lease_id)
+        _raise_submission_error(
+            session,
+            "STALE_LEASE",
+            lease_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if status != "active":
-        raise LeaseSubmissionError("STALE_LEASE", lease_id)
-    if _is_expired(lease, now):
-        _expire_lease(session, lease, now)
-        raise LeaseSubmissionError("EXPIRED_LEASE", lease_id)
+        _raise_submission_error(
+            session,
+            "STALE_LEASE",
+            lease_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if _get(lease, "role") != role:
-        raise LeaseSubmissionError("CROSS_ROLE_SUBMISSION", role)
+        _raise_submission_error(
+            session,
+            "CROSS_ROLE_SUBMISSION",
+            role,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if _get(lease, "agent_id") != agent_id:
-        raise LeaseSubmissionError("WRONG_AGENT", agent_id)
+        _raise_submission_error(
+            session,
+            "WRONG_AGENT",
+            agent_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
     if _get(lease, "item_id") != item_id:
-        raise LeaseSubmissionError("WRONG_ITEM", item_id)
+        _raise_submission_error(
+            session,
+            "WRONG_ITEM",
+            item_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
+    if _is_expired(lease, now):
+        recovery = calculate_lease_recovery_state(
+            session,
+            lease_id,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        ).to_dict()
+        _append_lease_recovery_event(session, recovery, now=now)
+        _expire_lease(session, lease, now)
+        raise LeaseSubmissionError("EXPIRED_LEASE", lease_id, recovery_state=recovery)
     if _get(lease, "request_hash") != request_hash:
-        raise LeaseSubmissionError("STALE_REQUEST_CONTEXT", lease_id)
+        _raise_submission_error(
+            session,
+            "STALE_REQUEST_CONTEXT",
+            lease_id,
+            lease=lease,
+            agent_id=agent_id,
+            role=role,
+            item_id=item_id,
+            request_hash=request_hash,
+            now=now,
+        )
 
     _set(lease, "status", "submitted")
     _set(lease, "submitted_at", now)
@@ -230,7 +319,7 @@ def list_leases(repo: str, pr_number: str) -> dict[str, Any]:
         "status": "LEASES_READY",
         "repo": repo,
         "pr_number": str(pr_number),
-        "leases": [_json_ready(lease) for lease in session.get("leases", {}).values()],
+        "leases": [_lease_listing_row(session, lease) for lease in session.get("leases", {}).values()],
     }
 
 
@@ -258,6 +347,19 @@ def reclaim_leases(repo: str, pr_number: str, *, now: datetime | None = None) ->
         "expired_count": len(expired),
         "leases": [_json_ready(lease) for lease in expired],
     }
+
+
+def _lease_listing_row(session: Any, lease: Any) -> dict[str, Any]:
+    row = _json_ready(lease)
+    row["lease_recovery"] = calculate_lease_recovery_state(
+        session,
+        str(_get(lease, "lease_id") or ""),
+        agent_id=str(_get(lease, "agent_id") or ""),
+        role=str(_get(lease, "role") or ""),
+        item_id=str(_get(lease, "item_id") or ""),
+        request_hash=str(_get(lease, "request_hash") or ""),
+    ).to_dict()
+    return row
 
 
 def reclaim_lease(
@@ -289,6 +391,85 @@ def reclaim_lease(
         request_id=request_id,
         request_path=request_path,
     )
+
+
+def calculate_lease_recovery_state(
+    session: Any,
+    lease_id: str,
+    *,
+    agent_id: str,
+    role: str,
+    item_id: str,
+    request_hash: str,
+    now: datetime | None = None,
+) -> Any:
+    now = _coerce_now(now)
+    lease = _leases(session).get(lease_id)
+    lease_item_id = _recovery_field(_get(lease, "item_id") if lease is not None else None, default=item_id)
+    item = _items(session).get(lease_item_id) if lease is not None else _items(session).get(item_id)
+    lease_status = _recovery_field(_get(lease, "status") if lease is not None else None, default="missing", false_default="unknown")
+    lease_agent_id = _recovery_field(_get(lease, "agent_id") if lease is not None else None, default=agent_id)
+    lease_role = _role_text(_get(lease, "role") if lease is not None else None, default=role)
+    lease_request_id = _recovery_field(_get(lease, "request_id") if lease is not None else None, default="")
+    lease_request_hash = _recovery_field(_get(lease, "request_hash") if lease is not None else None, default=request_hash)
+    item_state = _recovery_field(_get(item, "state") if item is not None else None, default="missing")
+    item_claimed_by = _get(item, "claimed_by") if item is not None else None
+    item_active_lease_id = _get(item, "active_lease_id") if item is not None else None
+
+    recovery_outcome = "refresh_state"
+    reason_code = "STALE_REQUEST_CONTEXT"
+    if item is not None and (_get(item, "handled") or item_state == "handled"):
+        recovery_outcome = "already_completed"
+        reason_code = "LEASE_ALREADY_COMPLETED"
+    elif lease_status == "accepted":
+        recovery_outcome = "already_completed"
+        reason_code = "LEASE_ALREADY_COMPLETED"
+    elif lease is not None and (lease_agent_id != str(agent_id) or lease_role != str(role)):
+        recovery_outcome = "stop"
+        reason_code = "LEASE_RECOVERY_STOP"
+    elif item_active_lease_id and str(item_active_lease_id) != str(lease_id):
+        recovery_outcome = "stop"
+        reason_code = "LEASE_RECOVERY_STOP"
+    elif item_claimed_by and str(item_claimed_by) != str(agent_id):
+        recovery_outcome = "stop"
+        reason_code = "LEASE_RECOVERY_STOP"
+    elif lease_status == "active" and lease_request_hash != str(request_hash):
+        recovery_outcome = "refresh_state"
+        reason_code = "STALE_REQUEST_CONTEXT"
+    elif lease_status == "active" and lease is not None and _is_expired(lease, now):
+        recovery_outcome = "renew"
+        reason_code = "EXPIRED_LEASE_RENEWABLE"
+    elif lease_status == "expired" and item_state in {"open", "claimed"}:
+        recovery_outcome = "reclaim"
+        reason_code = "EXPIRED_LEASE_RECLAIMABLE"
+    elif lease_status in {"rejected", "released"}:
+        recovery_outcome = "reclaim" if item_state == "open" else "refresh_state"
+        reason_code = "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else "STALE_REQUEST_CONTEXT"
+    elif lease_status == "active":
+        recovery_outcome = "stop"
+        reason_code = "LEASE_ACTIVE"
+    elif lease_status not in {"active", "submitted"}:
+        recovery_outcome = "stop"
+        reason_code = "LEASE_RECOVERY_STOP"
+
+    resume_command = (
+        _lease_recovery_resume_command(session, lease_item_id, role=role, agent_id=agent_id)
+        if recovery_outcome in {"reclaim", "refresh_state", "renew"}
+        else None
+    )
+    recovery = LeaseRecoveryState(
+        lease_id=str(lease_id),
+        item_id=lease_item_id,
+        agent_id=lease_agent_id,
+        request_id=lease_request_id,
+        request_hash=lease_request_hash,
+        lease_status=lease_status,
+        item_state=item_state,
+        recovery_outcome=recovery_outcome,
+        reason_code=reason_code,
+        resume_command=resume_command,
+    )
+    return recovery
 
 
 def calculate_conflict_keys(item: Any) -> tuple[str, ...]:
@@ -431,7 +612,34 @@ def _make_lease(**kwargs: Any) -> Any:
 def _expire_lease(session: Any, lease: Any, now: datetime) -> None:
     _set(lease, "status", "expired")
     _set(lease, "completed_at", now)
+    _return_expired_items_to_open(session, [lease])
+    item = _items(session).get(str(_get(lease, "item_id") or ""))
+    if isinstance(item, dict) and item.get("state") == "claimed":
+        active_lease_id = item.get("active_lease_id")
+        claimed_by = item.get("claimed_by")
+        if active_lease_id in (None, _get(lease, "lease_id")) and claimed_by in (None, _get(lease, "agent_id")):
+            item["state"] = "open"
+            item["claimed_by"] = None
+            item["claimed_at"] = None
+            item["lease_expires_at"] = None
+            item.pop("active_lease_id", None)
     _append_lease_event(session, lease, "lease_expired", now=now)
+
+
+def _recovery_field(value: Any, *, default: Any, false_default: Any | None = None) -> str:
+    if value is None or value == "":
+        return str(default)
+    if isinstance(value, bool) and value is False:
+        return str(default if false_default is None else false_default)
+    return str(value)
+
+
+def _role_text(value: Any, *, default: Any) -> str:
+    if value is None or value == "":
+        return str(default)
+    if hasattr(value, "value"):
+        return str(value.value)
+    return str(value)
 
 
 def _is_expired(lease: Any, now: datetime) -> bool:
@@ -443,6 +651,41 @@ def _find_lease(session: Any, lease_id: str) -> Any:
         return _leases(session)[lease_id]
     except KeyError as exc:
         raise LeaseSubmissionError("LEASE_NOT_FOUND", lease_id) from exc
+
+
+def _raise_submission_error(
+    session: Any,
+    reason_code: str,
+    detail: str,
+    *,
+    lease: Any,
+    agent_id: str,
+    role: str,
+    item_id: str,
+    request_hash: str,
+    now: datetime,
+) -> None:
+    recovery = calculate_lease_recovery_state(
+        session,
+        str(_get(lease, "lease_id") or detail),
+        agent_id=agent_id,
+        role=role,
+        item_id=item_id,
+        request_hash=request_hash,
+        now=now,
+    ).to_dict()
+    _append_lease_recovery_event(session, recovery, now=now)
+    raise LeaseSubmissionError(reason_code, detail, recovery_state=recovery)
+
+
+def _items(session: Any) -> dict[str, Any]:
+    if isinstance(session, dict):
+        return session.setdefault("items", {})
+    items = getattr(session, "items", None)
+    if items is None:
+        items = {}
+        setattr(session, "items", items)
+    return items
 
 
 def _leases(session: Any) -> dict[str, Any]:
@@ -485,6 +728,26 @@ def _append_lease_event(
     if reason is not None:
         event["reason"] = reason
     _lease_events(session).append(event)
+
+
+def _append_lease_recovery_event(session: Any, recovery: dict[str, Any], *, now: datetime) -> None:
+    event = {
+        "event_type": "lease_recovery_calculated",
+        "timestamp": now.isoformat(),
+        "lease_id": recovery["lease_id"],
+        "item_id": recovery["item_id"],
+        "agent_id": recovery["agent_id"],
+        "status": recovery["lease_status"],
+        "recovery_outcome": recovery["recovery_outcome"],
+        "reason_code": recovery["reason_code"],
+    }
+    _lease_events(session).append(event)
+
+
+def _lease_recovery_resume_command(session: Any, item_id: str, *, role: str, agent_id: str) -> str:
+    repo = _get(session, "repo") or "<owner/repo>"
+    pr_number = _get(session, "pr_number") or "<pr_number>"
+    return f"gh-address-cr agent next {repo} {pr_number} --role {role} --agent-id {agent_id} --item-id {item_id}"
 
 
 def _conflict_keys(lease: Any) -> set[str]:

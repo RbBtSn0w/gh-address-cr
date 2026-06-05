@@ -1,0 +1,31 @@
+{
+  "available": {
+    "coverage_label": "runtime-only",
+    "sources": ["runtime"],
+    "write_status": "available",
+    "overhead_ms": 42,
+    "expected_fail_open": true
+  },
+  "slow": {
+    "coverage_label": "partial",
+    "sources": ["runtime"],
+    "write_status": "slow",
+    "overhead_ms": 275,
+    "expected_fail_open": true
+  },
+  "failed": {
+    "coverage_label": "unavailable",
+    "sources": [],
+    "write_status": "failed",
+    "diagnostics": ["TELEMETRY_WRITE_UNAVAILABLE"],
+    "expected_fail_open": true
+  },
+  "unsafe": {
+    "coverage_label": "unavailable",
+    "sources": ["host-agent"],
+    "write_status": "rejected",
+    "privacy_status": "rejected",
+    "diagnostics": ["TELEMETRY_UNSAFE_CONTENT"],
+    "expected_fail_open": true
+  }
+}

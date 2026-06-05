@@ -10,7 +10,7 @@ from unittest.mock import patch
 from gh_address_cr import cli as runtime_cli
 from gh_address_cr.agent.responses import ResponseValidationError, validate_workflow_decision
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.leases import LeaseConflictError, calculate_conflict_keys, claim_lease
+from gh_address_cr.core.leases import LeaseConflictError, LeaseSubmissionError, calculate_conflict_keys, claim_lease, submit_lease
 from gh_address_cr.core.telemetry import build_efficiency_report, import_external_telemetry
 
 from tests.helpers import CLI_PY, PythonScriptTestCase
@@ -190,6 +190,33 @@ class Issue78WorkflowDecisionTests(unittest.TestCase):
 
 
 class Issue78LeaseScopeTests(unittest.TestCase):
+    def test_stale_request_recovery_prevents_blind_retry_loop(self):
+        session = {"items": {}, "leases": {}, "lease_events": []}
+        item = {"item_id": "github-thread:stale", "path": "src/a.py", "state": "claimed"}
+        session["items"][item["item_id"]] = item
+        lease = claim_lease(
+            session,
+            item,
+            agent_id="codex-fixer-1",
+            role="fixer",
+            request_hash="hash-old",
+            lease_id="lease-stale",
+        )
+
+        with self.assertRaises(LeaseSubmissionError) as caught:
+            submit_lease(
+                session,
+                lease.lease_id,
+                agent_id="codex-fixer-1",
+                role="fixer",
+                item_id=item["item_id"],
+                request_hash="hash-new",
+            )
+
+        self.assertEqual(caught.exception.reason_code, "STALE_REQUEST_CONTEXT")
+        self.assertEqual(caught.exception.recovery_state["recovery_outcome"], "refresh_state")
+        self.assertIn("agent next", caught.exception.recovery_state["resume_command"])
+
     def test_hunk_scoped_conflict_keys_allow_non_overlapping_same_file(self):
         first = {"item_id": "a", "path": "src/a.py", "line": 10, "end_line": 12}
         second = {"item_id": "b", "path": "src/a.py", "line": 30, "end_line": 32}

@@ -241,6 +241,28 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(skeleton["fix_reply"]["files"], [])
         self.assertNotIn("evidence_ref", skeleton)
 
+    def test_agent_next_for_github_fix_includes_handling_boundary_summary(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:abc",
+                    item_kind="github_thread",
+                    source="github",
+                    classification_evidence={"classification": "fix", "record_id": "ev_classified"},
+                    thread_id="PRRT_abc",
+                )
+            ]
+        )
+
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        request = json.loads(Path(payload["request_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(payload["handling_boundary"]["boundary_id"], "github-thread-fix")
+        self.assertEqual(request["handling_boundary"]["boundary_id"], "github-thread-fix")
+        self.assertIn("reply", request["handling_boundary"]["required_evidence"])
+
     def test_agent_submit_accepts_fix_response_with_active_lease(self):
         self.write_session(
             items=[
@@ -395,10 +417,67 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "ACTION_REJECTED")
         self.assertEqual(payload["reason_code"], "STALE_REQUEST_CONTEXT")
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "refresh_state")
+        self.assertEqual(payload["lease_recovery"]["reason_code"], "STALE_REQUEST_CONTEXT")
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
         self.assertIn("response_rejected", [row["event_type"] for row in self.ledger_rows()])
+
+    def test_agent_submit_stale_request_recovery_uses_submission_now(self):
+        future_now = datetime(3000, 1, 1, 12, 0, tzinfo=timezone.utc)
+        self.write_session(
+            items=[
+                open_item(
+                    state="claimed",
+                    classification_evidence={
+                        "event_type": "classification_recorded",
+                        "classification": "fix",
+                        "record_id": "ev_classified",
+                    },
+                )
+            ],
+            leases={
+                "lease-time-sensitive": {
+                    "lease_id": "lease-time-sensitive",
+                    "item_id": "local-finding:1",
+                    "agent_id": "codex-1",
+                    "role": "fixer",
+                    "status": "active",
+                    "created_at": NOW.isoformat(),
+                    "expires_at": datetime(2999, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "resume_token": None,
+                    "request_hash": "fresh-request",
+                    "conflict_keys": ["item:local-finding:1", "file:src/example.py"],
+                }
+            },
+        )
+        response_path = self.workspace_dir() / "stale-clock-response.json"
+        response_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "request_id": "stale-request",
+                    "lease_id": "lease-time-sensitive",
+                    "agent_id": "codex-1",
+                    "resolution": "fix",
+                    "note": "This response belongs to an expired request context.",
+                    "files": ["src/example.py"],
+                    "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_runtime_module(
+            "agent", "submit", self.repo, self.pr, "--input", str(response_path), "--now", future_now.isoformat()
+        )
+
+        self.assertEqual(result.returncode, 5)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "STALE_REQUEST_CONTEXT")
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "refresh_state")
+        self.assertEqual(payload["lease_recovery"]["reason_code"], "STALE_REQUEST_CONTEXT")
 
     def test_agent_submit_missing_resolution_guides_fixer_response_payload(self):
         self.write_session(
@@ -2273,6 +2352,8 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
         self.assertEqual(payload["reason_code"], "EXPIRED_LEASE")
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "renew")
+        self.assertEqual(payload["lease_recovery"]["reason_code"], "EXPIRED_LEASE_RENEWABLE")
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
@@ -2393,7 +2474,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         listed = self.run_runtime_module("agent", "leases", self.repo, self.pr)
         self.assertEqual(listed.returncode, 0, listed.stderr)
-        self.assertEqual(json.loads(listed.stdout)["leases"][0]["lease_id"], "lease-stale")
+        listed_payload = json.loads(listed.stdout)
+        self.assertEqual(listed_payload["leases"][0]["lease_id"], "lease-stale")
+        self.assertEqual(listed_payload["leases"][0]["lease_recovery"]["recovery_outcome"], "renew")
 
         reclaimed = self.run_runtime_module("agent", "reclaim", self.repo, self.pr, "--now", NOW.isoformat())
         self.assertEqual(reclaimed.returncode, 0, reclaimed.stderr)

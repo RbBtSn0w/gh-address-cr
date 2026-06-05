@@ -64,6 +64,7 @@ class NativeGateTests(unittest.TestCase):
                                 "reply_url": "https://github.test/reply",
                                 "author_login": "agent-login",
                             },
+                            "validation_evidence": [{"command": "python3 -m unittest tests.test_native_gate"}],
                         },
                         "local-finding:FIXED": {
                             "item_id": "local-finding:FIXED",
@@ -377,6 +378,7 @@ else:
                             "reply_url": "https://github.test/reply",
                             "author_login": "agent-login",
                         },
+                        "validation_evidence": [{"command": "python3 -m unittest tests.test_native_gate"}],
                     }
                 }
                 manager.save(session)

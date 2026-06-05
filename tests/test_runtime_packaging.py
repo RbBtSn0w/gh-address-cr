@@ -217,6 +217,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["constraints"]["max_parallel_claims"], 2)
         self.assertIn("action_request.v1", payload["input_formats"])
         self.assertIn("batch_action_response.v1", payload["output_formats"])
+        self.assertIn("work_item_boundary.v1", payload["output_formats"])
 
     def test_agent_submit_batch_help_documents_batch_contract(self):
         result = self.run_runtime_module("agent", "submit-batch", "--help")

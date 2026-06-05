@@ -12,6 +12,25 @@ from gh_address_cr.agent.roles import AgentRole, parse_role
 
 JsonDict = dict[str, Any]
 
+LEASE_RECOVERY_OUTCOMES = ("renew", "reclaim", "refresh_state", "stop", "already_completed")
+LOGIC_VALIDATION_GATE_EFFECTS = ("advisory", "blocking")
+RUNTIME_COMPLEXITY_REASON_CODES = (
+    "UNSUPPORTED_WORK_ITEM",
+    "BOUNDARY_CONFLICT",
+    "MISSING_REQUIRED_EVIDENCE",
+    "EXPIRED_LEASE_RENEWABLE",
+    "EXPIRED_LEASE_RECLAIMABLE",
+    "STALE_REQUEST_CONTEXT",
+    "LEASE_ACTIVE",
+    "LEASE_RECOVERY_STOP",
+    "LEASE_ALREADY_COMPLETED",
+    "TELEMETRY_OVERHEAD_EXCEEDED",
+    "TELEMETRY_WRITE_UNAVAILABLE",
+    "TELEMETRY_UNSAFE_CONTENT",
+    "LOGIC_VALIDATION_ADVISORY",
+    "LOGIC_VALIDATION_BLOCKING",
+)
+
 
 def stable_payload_hash(payload: Any) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -30,6 +49,21 @@ def _dict_copy(value: Any) -> JsonDict:
     if value is None:
         return {}
     return dict(value)
+
+
+def _optional_dict_copy(value: Any, *, field_name: str) -> JsonDict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return dict(value)
+
+
+def _validated_string(value: Any, *, field_name: str, allowed: tuple[str, ...] | None = None) -> str:
+    normalized = str(value)
+    if allowed is not None and normalized not in allowed:
+        raise ValueError(f"unsupported {field_name}: {normalized}")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -104,6 +138,7 @@ class ActionRequest:
     repository_context: JsonDict = field(default_factory=dict)
     resume_command: str | None = None
     forbidden_actions: tuple[str, ...] = ()
+    handling_boundary: JsonDict | None = None
 
     @classmethod
     def from_dict(cls, payload: JsonDict) -> "ActionRequest":
@@ -119,6 +154,7 @@ class ActionRequest:
             repository_context=_dict_copy(payload.get("repository_context")),
             resume_command=payload.get("resume_command"),
             forbidden_actions=_string_tuple(payload.get("forbidden_actions")),
+            handling_boundary=_optional_dict_copy(payload.get("handling_boundary"), field_name="handling_boundary"),
         )
 
     def to_dict(self) -> JsonDict:
@@ -136,6 +172,8 @@ class ActionRequest:
         }
         if self.resume_command is not None:
             payload["resume_command"] = self.resume_command
+        if self.handling_boundary is not None:
+            payload["handling_boundary"] = dict(self.handling_boundary)
         return payload
 
     def stable_hash(self) -> str:
@@ -227,6 +265,195 @@ class CapabilityManifest:
             "output_formats": list(self.output_formats),
             "protocol_versions": list(self.protocol_versions),
             "constraints": dict(self.constraints),
+        }
+
+
+@dataclass(frozen=True)
+class WorkItemHandlingBoundary:
+    boundary_id: str
+    item_kinds: tuple[str, ...]
+    applicability: str
+    priority: int
+    required_evidence: tuple[str, ...] = ()
+    completion_criteria: tuple[str, ...] = ()
+    terminal_failure_reasons: tuple[str, ...] = ()
+    next_actions: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> "WorkItemHandlingBoundary":
+        return cls(
+            boundary_id=str(payload["boundary_id"]),
+            item_kinds=_string_tuple(payload.get("item_kinds")),
+            applicability=str(payload.get("applicability", "")),
+            priority=int(payload.get("priority", 0)),
+            required_evidence=_string_tuple(payload.get("required_evidence")),
+            completion_criteria=_string_tuple(payload.get("completion_criteria")),
+            terminal_failure_reasons=_string_tuple(payload.get("terminal_failure_reasons")),
+            next_actions=_string_tuple(payload.get("next_actions")),
+        )
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "boundary_id": self.boundary_id,
+            "item_kinds": list(self.item_kinds),
+            "applicability": self.applicability,
+            "priority": self.priority,
+            "required_evidence": list(self.required_evidence),
+            "completion_criteria": list(self.completion_criteria),
+            "terminal_failure_reasons": list(self.terminal_failure_reasons),
+            "next_actions": list(self.next_actions),
+        }
+
+
+@dataclass(frozen=True)
+class LeaseRecoveryState:
+    lease_id: str
+    item_id: str
+    agent_id: str
+    request_id: str
+    request_hash: str
+    lease_status: str
+    item_state: str
+    recovery_outcome: str
+    reason_code: str
+    resume_command: str | None = None
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> "LeaseRecoveryState":
+        return cls(
+            lease_id=str(payload["lease_id"]),
+            item_id=str(payload["item_id"]),
+            agent_id=str(payload["agent_id"]),
+            request_id=str(payload["request_id"]),
+            request_hash=str(payload["request_hash"]),
+            lease_status=str(payload["lease_status"]),
+            item_state=str(payload["item_state"]),
+            recovery_outcome=_validated_string(
+                payload["recovery_outcome"],
+                field_name="recovery_outcome",
+                allowed=LEASE_RECOVERY_OUTCOMES,
+            ),
+            reason_code=str(payload["reason_code"]),
+            resume_command=payload.get("resume_command"),
+        )
+
+    def to_dict(self) -> JsonDict:
+        payload: JsonDict = {
+            "lease_id": self.lease_id,
+            "item_id": self.item_id,
+            "agent_id": self.agent_id,
+            "request_id": self.request_id,
+            "request_hash": self.request_hash,
+            "lease_status": self.lease_status,
+            "item_state": self.item_state,
+            "recovery_outcome": self.recovery_outcome,
+            "reason_code": self.reason_code,
+        }
+        if self.resume_command is not None:
+            payload["resume_command"] = self.resume_command
+        return payload
+
+
+@dataclass(frozen=True)
+class TelemetryCoverageState:
+    coverage_label: str
+    sources: tuple[str, ...] = ()
+    write_status: str = "unavailable"
+    diagnostics: tuple[str, ...] = ()
+    privacy_status: str = "safe"
+    report_path: str | None = None
+    overhead_ms: int | None = None
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> "TelemetryCoverageState":
+        return cls(
+            coverage_label=str(payload["coverage_label"]),
+            sources=_string_tuple(payload.get("sources")),
+            write_status=str(payload.get("write_status", "unavailable")),
+            diagnostics=_string_tuple(payload.get("diagnostics")),
+            privacy_status=str(payload.get("privacy_status", "safe")),
+            report_path=payload.get("report_path"),
+            overhead_ms=payload.get("overhead_ms"),
+        )
+
+    def to_dict(self) -> JsonDict:
+        payload: JsonDict = {
+            "coverage_label": self.coverage_label,
+            "sources": list(self.sources),
+            "write_status": self.write_status,
+            "diagnostics": list(self.diagnostics),
+            "privacy_status": self.privacy_status,
+        }
+        if self.report_path is not None:
+            payload["report_path"] = self.report_path
+        if self.overhead_ms is not None:
+            payload["overhead_ms"] = self.overhead_ms
+        return payload
+
+
+@dataclass(frozen=True)
+class LogicValidationSignal:
+    signal_id: str
+    item_id: str
+    signal_type: str
+    confidence: str
+    explanation: str
+    recommended_action: str
+    gate_effect: str = "advisory"
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> "LogicValidationSignal":
+        return cls(
+            signal_id=str(payload["signal_id"]),
+            item_id=str(payload["item_id"]),
+            signal_type=str(payload["signal_type"]),
+            confidence=str(payload["confidence"]),
+            explanation=str(payload["explanation"]),
+            recommended_action=str(payload["recommended_action"]),
+            gate_effect=_validated_string(
+                payload.get("gate_effect", "advisory"),
+                field_name="gate_effect",
+                allowed=LOGIC_VALIDATION_GATE_EFFECTS,
+            ),
+        )
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "signal_id": self.signal_id,
+            "item_id": self.item_id,
+            "signal_type": self.signal_type,
+            "confidence": self.confidence,
+            "explanation": self.explanation,
+            "recommended_action": self.recommended_action,
+            "gate_effect": self.gate_effect,
+        }
+
+
+@dataclass(frozen=True)
+class DeliverySlice:
+    slice_id: str
+    scope: str
+    included_contracts: tuple[str, ...] = ()
+    acceptance_evidence: tuple[str, ...] = ()
+    remaining_scope: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> "DeliverySlice":
+        return cls(
+            slice_id=str(payload["slice_id"]),
+            scope=str(payload["scope"]),
+            included_contracts=_string_tuple(payload.get("included_contracts")),
+            acceptance_evidence=_string_tuple(payload.get("acceptance_evidence")),
+            remaining_scope=_string_tuple(payload.get("remaining_scope")),
+        )
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "slice_id": self.slice_id,
+            "scope": self.scope,
+            "included_contracts": list(self.included_contracts),
+            "acceptance_evidence": list(self.acceptance_evidence),
+            "remaining_scope": list(self.remaining_scope),
         }
 
 

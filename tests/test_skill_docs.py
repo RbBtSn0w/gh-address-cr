@@ -149,6 +149,22 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`--homogeneous-reason <why>`", protocol_text)
         self.assertIn("agent resolve-stale", protocol_text)
 
+    def test_skill_documents_runtime_complexity_additive_fields(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        combined = "\n".join([skill_text, protocol_text, status_text, completion_text])
+
+        for term in (
+            "handling_boundary",
+            "lease_recovery",
+            "TELEMETRY_OVERHEAD_EXCEEDED",
+            "logic_validation_signals",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, combined)
+
     def test_skill_uses_references_for_advanced_dispatch_details(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)

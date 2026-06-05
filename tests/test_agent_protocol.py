@@ -29,6 +29,10 @@ from gh_address_cr.core.models import (  # noqa: E402
     ActionRequest,
     CapabilityManifest,
     ClaimLease,
+    LEASE_RECOVERY_OUTCOMES,
+    LeaseRecoveryState,
+    LOGIC_VALIDATION_GATE_EFFECTS,
+    RUNTIME_COMPLEXITY_REASON_CODES,
     EvidenceRecord,
     ReviewSession,
     WorkItem,
@@ -230,6 +234,61 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
                 with self.assertRaises(RequestValidationError) as caught:
                     validate_action_request(payload)
                 self.assertEqual(caught.exception.code, "skill_shim_resume_command")
+
+    def test_runtime_complexity_additive_contract_vocabulary_is_available(self):
+        self.assertEqual(
+            LEASE_RECOVERY_OUTCOMES,
+            ("renew", "reclaim", "refresh_state", "stop", "already_completed"),
+        )
+        self.assertEqual(LOGIC_VALIDATION_GATE_EFFECTS, ("advisory", "blocking"))
+        self.assertIn("BOUNDARY_CONFLICT", RUNTIME_COMPLEXITY_REASON_CODES)
+        self.assertIn("EXPIRED_LEASE_RECLAIMABLE", RUNTIME_COMPLEXITY_REASON_CODES)
+        self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", RUNTIME_COMPLEXITY_REASON_CODES)
+        self.assertIn("LOGIC_VALIDATION_BLOCKING", RUNTIME_COMPLEXITY_REASON_CODES)
+
+    def test_action_request_accepts_additive_handling_boundary_summary(self):
+        payload = self.request_payload(
+            handling_boundary={
+                "boundary_id": "github-thread-fix",
+                "applicability": "matched",
+                "required_evidence": ["classification", "reply"],
+                "completion_criteria": ["accepted_evidence", "final_gate"],
+                "terminal_failure_reasons": ["MISSING_REQUIRED_EVIDENCE"],
+                "next_action": "issue_action_request",
+            }
+        )
+
+        request = ActionRequest.from_dict(payload)
+
+        self.assertEqual(request.to_dict()["handling_boundary"]["boundary_id"], "github-thread-fix")
+
+    def test_action_request_rejects_non_object_handling_boundary(self):
+        payload = self.request_payload(handling_boundary=["github-thread-fix"])
+
+        with self.assertRaises(RequestValidationError) as caught:
+            validate_action_request(payload)
+
+        self.assertEqual(caught.exception.code, "malformed_action_request")
+        self.assertIn("handling_boundary must be a JSON object", str(caught.exception))
+
+    def test_stale_request_context_recovery_payload_is_machine_readable(self):
+        recovery = LeaseRecoveryState.from_dict(
+            {
+                "lease_id": "lease-stale",
+                "item_id": "github-thread:abc",
+                "agent_id": "codex-fixer-1",
+                "request_id": "req-stale",
+                "request_hash": "hash-old",
+                "lease_status": "active",
+                "item_state": "claimed",
+                "recovery_outcome": "refresh_state",
+                "reason_code": "STALE_REQUEST_CONTEXT",
+                "resume_command": "gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1",
+            }
+        )
+
+        self.assertEqual(recovery.to_dict()["recovery_outcome"], "refresh_state")
+        self.assertEqual(recovery.to_dict()["reason_code"], "STALE_REQUEST_CONTEXT")
 
 
 class ActionResponseSchemaTests(ActionProtocolTestCase):

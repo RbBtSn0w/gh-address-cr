@@ -1,0 +1,37 @@
+{
+  "migrated_github_thread_fix": {
+    "item_id": "github-thread:THREAD_1",
+    "item_kind": "github_thread",
+    "state": "open",
+    "status": "OPEN",
+    "blocking": true,
+    "path": "src/example.py",
+    "line": 42,
+    "body": "Please validate the empty input path before publishing.",
+    "allowed_actions": ["fix", "clarify", "defer", "reject"],
+    "classification_evidence": {
+      "event_type": "classification_recorded",
+      "classification": "fix",
+      "note": "Reviewer identified a real validation gap.",
+      "record_id": "rec-thread-1"
+    }
+  },
+  "unsupported_work_item": {
+    "item_id": "external-task:ABC",
+    "item_kind": "external_task",
+    "state": "open",
+    "blocking": true,
+    "body": "Unsupported external workflow task."
+  },
+  "conflicting_github_thread": {
+    "item_id": "github-thread:THREAD_CONFLICT",
+    "item_kind": "github_thread",
+    "state": "open",
+    "status": "OPEN",
+    "blocking": true,
+    "path": "src/example.py",
+    "line": 42,
+    "body": "Thread intentionally matches multiple boundaries in tests.",
+    "allowed_actions": ["fix"]
+  }
+}

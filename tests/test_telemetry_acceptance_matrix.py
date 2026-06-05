@@ -1,7 +1,11 @@
 import ast
+import contextlib
+import io
+import json
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +57,31 @@ class TestTelemetryAcceptanceMatrix(unittest.TestCase):
             self.assertTrue(evidence, f"{row['id']} must cite at least one executable test")
             missing = [test_name for test_name in evidence if test_name not in available_tests]
             self.assertEqual([], missing, f"{row['id']} cites missing tests")
+
+    def test_telemetry_summary_command_fails_loud_on_storage_diagnostics(self):
+        from gh_address_cr.commands.telemetry import handle_telemetry_command
+
+        report = {
+            "status": "SUCCESS",
+            "reason_code": "TELEMETRY_REPORT_READY",
+            "repo": "octo/example",
+            "pr_number": "77",
+            "coverage_label": "unavailable",
+            "total_events": 0,
+            "success_rate": 0.0,
+            "diagnostics": ["external telemetry store is not a regular file: external-telemetry.jsonl"],
+            "report_artifact": "",
+        }
+
+        stdout = io.StringIO()
+        with patch("gh_address_cr.commands.telemetry.core_telemetry.build_efficiency_report", return_value=report):
+            with contextlib.redirect_stdout(stdout):
+                exit_code = handle_telemetry_command("summary", None, ["octo/example", "77"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
 
 
 def _parse_matrix(markdown: str) -> list[dict[str, object]]:

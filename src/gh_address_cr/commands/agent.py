@@ -91,6 +91,7 @@ def build_agent_manifest() -> dict:
             "evidence_record.v1",
             "evidence_profile.v1",
             "gate_report.v1",
+            "work_item_boundary.v1",
             "workflow_decision.v1",
         ],
         "constraints": {

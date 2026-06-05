@@ -86,6 +86,7 @@ A task is complete only when:
 - Evidence-first handling (classification, classification reply/resolve) -> Moved to Principle III.
 - Packaged skill boundary vs Deterministic Runtime -> Moved to Principle IV.
 - Findings normalization and replaceability -> Moved to Principle VII.
+- Telemetry attribution, coverage, and fail-open boundaries -> Moved to Principle VIII.
 
 ### Enhancements Made to AGENTS.md
 - Added explicit pointer to `constitution.md`.
@@ -99,5 +100,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-  [specs/015-external-agent-telemetry/plan.md](specs/015-external-agent-telemetry/plan.md)
+  [specs/016-runtime-complexity-plateau/plan.md](specs/016-runtime-complexity-plateau/plan.md)
 <!-- SPECKIT END -->

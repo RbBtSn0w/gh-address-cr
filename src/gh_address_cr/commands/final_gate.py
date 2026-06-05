@@ -309,6 +309,7 @@ def build_completion_summary_guidance(
     missing_reply = result.counts.get("github_threads_missing_reply_count", 0)
     missing_validation = result.counts.get("missing_validation_evidence_count", 0)
     blocking_items = result.counts.get("blocking_items_count", 0)
+    logic_validation_blocking = result.counts.get("logic_validation_blocking_count", 0)
 
     checks_failed = result.counts.get("pr_checks_failed_count", 0)
     checks_pending = result.counts.get("pr_checks_pending_count", 0)
@@ -322,6 +323,12 @@ def build_completion_summary_guidance(
         success_rate = 0.0
     inefficiency_flags = telemetry_report.get("inefficiency_flags") or []
     flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
+    telemetry_diagnostics = [
+        str(diagnostic)
+        for diagnostic in (telemetry_report.get("diagnostics") or [])
+        if str(diagnostic).strip()
+    ]
+    telemetry_diagnostics_str = "; ".join(telemetry_diagnostics)
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
 
     summary_path_str = str(summary_path) if summary_path else "N/A"
@@ -374,6 +381,10 @@ def build_completion_summary_guidance(
             "redundant tool calls, or loop behaviors that occurred during the session."
         )
 
+    if telemetry_diagnostics:
+        abnormal_names.append("telemetry diagnostics present")
+        abnormal_implications.append(f"- Telemetry diagnostics: {telemetry_diagnostics_str}")
+
     threads_checks_remain = (
         unresolved_threads > 0 or
         pending_reviews > 0 or
@@ -382,6 +393,7 @@ def build_completion_summary_guidance(
         blocking_github > 0 or
         missing_reply > 0 or
         missing_validation > 0 or
+        logic_validation_blocking > 0 or
         checks_not_green > 0 or
         checks_failed > 0
     )
@@ -399,6 +411,8 @@ def build_completion_summary_guidance(
             remain_details.append(f"{missing_reply} threads missing reply")
         if missing_validation > 0:
             remain_details.append(f"{missing_validation} local items missing validation")
+        if logic_validation_blocking > 0:
+            remain_details.append(f"{logic_validation_blocking} blocking logic-validation signals")
         remain_str = ", ".join(remain_details)
         abnormal_names.append(f"unresolved threads/checks/blocking items ({remain_str})")
         abnormal_implications.append(

@@ -46,6 +46,11 @@ The session state is stored in a PR-scoped workspace under the user cache direct
 - audit log: `audit.jsonl`
 - trace log: `trace.jsonl`
 - audit summary: `audit_summary.md`
+- runtime telemetry: `telemetry/runtime.jsonl`
+- imported external telemetry: `telemetry/agent.jsonl`
+- telemetry import ledger: `telemetry/imports.jsonl`
+- telemetry fingerprint ledger: `telemetry/fingerprints.json`
+- efficiency report: `efficiency_report.json`
 - findings: `findings-*.json` and `code-review-findings.json`
 - replies: `reply-*.md`
 - loop requests: `loop-request-*.json`
@@ -72,6 +77,71 @@ The session also tracks loop-safety metadata per item:
 - `repeat_count`: how many times the same local finding was re-ingested
 - `reopen_count`: how many times a previously closed/deferred/clarified item was reopened
 - claim lease fields so stale ownership can be reclaimed
+
+
+## Telemetry Evidence Boundary
+
+Telemetry is PR-scoped observed workflow evidence. It can enrich final-gate
+output, `audit_summary.md`, and `efficiency_report.json`, but it does not mutate
+review item state and does not replace reply, resolve, or final-gate proof.
+
+The runtime owns telemetry normalization and reporting:
+
+- runtime events are recorded by `gh-address-cr` itself
+- external agent events are imported through `gh-address-cr telemetry ingest`
+- final-gate may import host telemetry from `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT`
+- accepted events keep source attribution and runtime-computed `event_fingerprint`
+  values
+- duplicate or overlapping events are deduplicated before report statistics are
+  calculated
+- every efficiency summary reports `complete`, `partial`, `runtime-only`, or
+  `unavailable` coverage
+
+Telemetry commands fail loudly for malformed, unsafe, unsupported, or ambiguous
+telemetry input. Core review-resolution flows remain fail-open for missing or
+damaged telemetry and report the reduced coverage instead of blocking review
+completion.
+
+
+## Runtime Complexity Boundary Contracts
+
+The runtime owns the explicit contracts used to reduce workflow complexity:
+
+- `WorkItemHandlingBoundary`: declares which work item kinds a runtime boundary
+  can handle, the required evidence, completion criteria, failure reasons, and
+  safe next actions. Boundary selection is runtime-owned and deterministic.
+- `LeaseRecoveryState`: declares whether an expired or stale lease can `renew`,
+  `reclaim`, `refresh_state`, `stop`, or report `already_completed`.
+- `TelemetryCoverageState`: records coverage, source attribution, diagnostics,
+  privacy status, report location, and measured telemetry overhead.
+- `LogicValidationSignal`: records advisory or blocking consistency risks for
+  evidence gaps, state contradictions, and unsupported completion claims.
+- `DeliverySlice`: records phased implementation scope and acceptance evidence
+  so complexity work can ship in independently verifiable increments.
+
+These models are additive public contract vocabulary. They do not change the
+rule that `session.json`, reply evidence, resolve state, and `final-gate` remain
+the authoritative completion truth.
+
+Execution boundaries:
+
+- Work item handler selection happens before an `ActionRequest` is written. The
+  migrated GitHub review-thread fix path reports `github-thread-fix`; unmigrated
+  paths keep existing behavior and omit `handling_boundary`.
+- Lease recovery is computed from current runtime truth. It advises agents to
+  renew, reclaim, refresh state, stop, or treat work as already completed; it
+  never permits stale responses to overwrite accepted, transferred, or changed
+  work.
+- Telemetry reports include measured overhead and emit
+  `TELEMETRY_OVERHEAD_EXCEEDED` when report construction crosses the 250ms
+  normal-path budget. The runtime-returned report owns the final measured
+  overhead; the persisted JSON artifact is written once and may leave that
+  field unset rather than performing an unmeasured self-rewrite. Core completion
+  remains fail-open for telemetry degradation, while telemetry-specific commands
+  stay fail-loud.
+- Logic validation signals are lightweight consistency checks. Blocking signals
+  can fail final-gate; advisory signals are surfaced for explanation without
+  becoming a second review producer.
 
 
 ## Runtime Package Layout

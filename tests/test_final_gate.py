@@ -40,6 +40,7 @@ class FinalGateTestCase(unittest.TestCase):
                         "reply_url": "https://example.test/reply",
                         "author_login": "agent-login",
                     },
+                    "validation_evidence": [{"command": "python3 -m unittest tests.test_final_gate", "exit_code": 0}],
                 },
                 "local-finding:FIXED": {
                     "item_id": "local-finding:FIXED",
@@ -87,6 +88,8 @@ class FinalGateTestCase(unittest.TestCase):
                 "pr_checks_failed_count": 0,
                 "pr_checks_pending_count": 0,
                 "pr_checks_not_green_count": 0,
+                "logic_validation_blocking_count": 0,
+                "logic_validation_advisory_count": 0,
             },
         )
 
@@ -176,9 +179,50 @@ class FinalGateTestCase(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_VALIDATION_EVIDENCE")
-        self.assertEqual(result.failure_codes, ["FINAL_GATE_MISSING_VALIDATION_EVIDENCE"])
+        self.assertEqual(
+            result.failure_codes,
+            ["FINAL_GATE_MISSING_VALIDATION_EVIDENCE", "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"],
+        )
         self.assertEqual(result.counts["missing_validation_evidence_count"], 1)
         self.assertEqual(result.to_machine_summary()["waiting_on"], "validation_evidence")
+
+    def test_logic_validation_blocking_signal_fails_final_gate(self):
+        session = self.passing_session()
+        session["items"]["github-thread:THREAD_DONE"]["completion_claim"] = "ready_to_publish"
+        session["items"]["github-thread:THREAD_DONE"]["state"] = "open"
+
+        result = self.evaluate(session, remote_threads=[{"id": "THREAD_DONE", "isResolved": True}])
+
+        self.assertFalse(result.passed)
+        self.assertIn("FINAL_GATE_LOGIC_VALIDATION_BLOCKING", result.failure_codes)
+        self.assertEqual(result.counts["logic_validation_blocking_count"], 1)
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["logic_validation_signals"][0]["signal_type"], "state_contradiction")
+
+    def test_missing_required_evidence_counts_as_blocking_logic_validation(self):
+        session = self.passing_session()
+        session["items"]["local-finding:FIXED"].pop("validation_evidence")
+
+        result = self.evaluate(session, remote_threads=[{"id": "THREAD_DONE", "isResolved": True}])
+
+        blocking_signals = [
+            signal
+            for signal in result.to_machine_summary()["logic_validation_signals"]
+            if signal["gate_effect"] == "blocking"
+        ]
+        self.assertEqual(len(blocking_signals), 1)
+        self.assertEqual(blocking_signals[0]["signal_type"], "missing_required_evidence")
+        self.assertEqual(result.counts["logic_validation_blocking_count"], len(blocking_signals))
+
+    def test_logic_validation_advisory_signal_does_not_block_final_gate(self):
+        session = self.passing_session()
+        session["items"]["github-thread:THREAD_DONE"]["logic_confidence"] = "low"
+
+        result = self.evaluate(session, remote_threads=[{"id": "THREAD_DONE", "isResolved": True}])
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.counts["logic_validation_advisory_count"], 1)
+        self.assertEqual(result.to_machine_summary()["logic_validation_signals"][0]["gate_effect"], "advisory")
 
     def test_failure_codes_are_reported_in_gate_order(self):
         session = self.passing_session()
@@ -208,6 +252,7 @@ class FinalGateTestCase(unittest.TestCase):
                 "FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW",
                 "FINAL_GATE_BLOCKING_LOCAL_ITEMS",
                 "FINAL_GATE_MISSING_VALIDATION_EVIDENCE",
+                "FINAL_GATE_LOGIC_VALIDATION_BLOCKING",
             ],
         )
         self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
@@ -255,6 +300,29 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("inefficiency flags present (excessive_loops)", guidance)
         self.assertIn("unresolved threads/checks/blocking items (1 unresolved threads)", guidance)
 
+    def test_completion_summary_guidance_reports_logic_validation_blockers(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        session = self.passing_session()
+        session["items"]["github-thread:THREAD_DONE"]["classification_evidence"] = {"classification": "fix"}
+        session["items"]["github-thread:THREAD_DONE"].pop("validation_evidence")
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
+        self.assertIn("1 blocking logic-validation signals", guidance)
+
     def test_build_completion_summary_guidance_edge_cases(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
         session = self.passing_session()
@@ -288,6 +356,27 @@ class FinalGateTestCase(unittest.TestCase):
         telemetry_report["coverage_label"] = "runtime-only"
         guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
         self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
+
+    def test_completion_summary_guidance_keeps_telemetry_degradation_fail_open(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "partial",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "inefficiency_flags": [],
+            "diagnostics": ["TELEMETRY_OVERHEAD_EXCEEDED"],
+            "report_artifact": "/tmp/efficiency-report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertTrue(result.passed)
+        self.assertIn("telemetry: partial", guidance)
+        self.assertIn("Telemetry diagnostics: TELEMETRY_OVERHEAD_EXCEEDED", guidance)
 
     def test_build_completion_summary_guidance_none_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance

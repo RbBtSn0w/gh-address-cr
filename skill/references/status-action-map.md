@@ -10,6 +10,13 @@ If `status` is `WAITING_FOR_ACTION`:
 If `status` is `ACTION_ACCEPTED`:
 - **Action**: Run the returned `next_action` exactly. For accepted GitHub-thread fixes, this publishes through `gh-address-cr agent publish`.
 
+If `status` is `ACTION_REJECTED` or `BATCH_ACTION_REJECTED` and the payload includes `lease_recovery`:
+- **Action**: Follow `lease_recovery.recovery_outcome`, not a blind retry. `renew` means request a fresh action request for the same item. `reclaim` means run `gh-address-cr agent reclaim <owner/repo> <pr_number>` and then request work again. `refresh_state` means discard the stale response/request file and rerun `agent next` or `address --lean` to get current runtime truth. `stop` means another actor or newer state owns the item; do not resubmit. `already_completed` means the work was accepted or completed; move to publish/final-gate as appropriate.
+- **Command discipline**: Prefer `lease_recovery.resume_command` when present. It is a machine-generated safe next command, not a guarantee that the previous response can be reused.
+
+If `status` is `LEASES_READY` and a lease row includes `lease_recovery`:
+- **Action**: Use the row as pre-submit guidance. A stale or expired row should be refreshed before submitting evidence. Do not infer permission to overwrite accepted, transferred, or changed work from an old lease file.
+
 If `status` is `BLOCKED`:
 - **Action**: Inspect the `reason_code` and `waiting_on`. Handle the blocked item by applying a resolution (`fix`, `clarify`, `defer`, `reject`).
 - **Command discipline**: If the machine summary includes `commands`, prefer those templates. They are the authoritative low-token route for agent recovery.
