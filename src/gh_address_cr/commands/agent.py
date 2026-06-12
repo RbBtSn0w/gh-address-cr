@@ -177,14 +177,15 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--item-id")
     parser.add_argument("--now")
-    parser.add_argument(
-        "--batch",
-        action="store_true",
-        help="Claim eligible GitHub review-thread fixes and write a BatchActionResponse skeleton.",
-    )
+    parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response.json for all unresolved threads.")
+    parser.add_argument("--files", help="Only batch lease threads that affect these files (comma-separated).")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     if not parsed.batch and not parsed.role:
         parser.error("one of the following arguments is required: --role or --batch")
+    if parsed.batch and parsed.role:
+        parser.error("arguments --role and --batch are mutually exclusive")
+    if not parsed.batch and parsed.files:
+        parser.error("argument --files can only be used with --batch")
     try:
         now_dt = None
         if parsed.now:
@@ -194,6 +195,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
                 parsed.repo,
                 parsed.pr_number,
                 agent_id=parsed.agent_id,
+                files=_parse_agent_files(parsed.files),
                 now=now_dt,
             )
         else:

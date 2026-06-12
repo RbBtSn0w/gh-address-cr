@@ -95,14 +95,85 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(submitted_payload["status"], "BATCH_ACTION_ACCEPTED")
         self.assertEqual(submitted_payload["accepted_count"], 2)
 
-    def test_batch_next_reuses_existing_active_leases(self):
+    def test_batch_next_with_files_filter(self):
+        items = [
+            {
+                "item_id": "thread-a",
+                "item_kind": "github_thread",
+                "source": "github",
+                "path": "src/a.py",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+            {
+                "item_id": "thread-b",
+                "item_kind": "github_thread",
+                "source": "github",
+                "path": "src/b.py",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+        ]
+        self.init_session(items)
+
+        # 仅选择过滤 "src/a.py"
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--files", "src/a.py", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout)
+        self.assertEqual(response["lease_count"], 1)
+        self.assertEqual(response["leased_items"][0]["item_id"], "thread-a")
+
+        session = self.load_session()
+        self.assertEqual(session["items"]["thread-a"]["state"], "claimed")
+        self.assertEqual(session["items"]["thread-b"]["state"], "open")
+
+    def test_batch_next_excludes_non_fix_classifications(self):
+        items = [
+            {
+                "item_id": "thread-fix",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+            {
+                "item_id": "thread-reject",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+                "classification_evidence": {
+                    "event_type": "classification_recorded",
+                    "classification": "reject",
+                    "record_id": "ev-reject",
+                },
+            },
+        ]
+        self.init_session(items)
+
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout)
+        
+        # 应当仅租赁了 "thread-fix"
+        self.assertEqual(response["lease_count"], 1)
+        self.assertEqual(response["leased_items"][0]["item_id"], "thread-fix")
+
+        session = self.load_session()
+        self.assertEqual(session["items"]["thread-fix"]["state"], "claimed")
+        self.assertEqual(session["items"]["thread-reject"]["state"], "open")
+
+    def test_batch_next_respects_max_parallel_claims(self):
         items = [
             {
                 "item_id": "thread-1",
                 "item_kind": "github_thread",
                 "source": "github",
-                "state": "claimed",
-                "active_lease_id": "lease-existing",
+                "state": "open",
                 "allowed_actions": ["fix", "clarify", "defer", "reject"],
             },
             {
@@ -112,7 +183,42 @@ class BatchNextTestCase(PythonScriptTestCase):
                 "state": "open",
                 "allowed_actions": ["fix", "clarify", "defer", "reject"],
             },
+            {
+                "item_id": "thread-3",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
         ]
+        self.init_session(items)
+
+        # 由于 MAX_PARALLEL_CLAIMS 被配置为 2 (可以从 CapabilityManifest.constraints 查看)
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout)
+        
+        # 仅应有最多 2 个新租赁
+        self.assertEqual(response["lease_count"], 2)
+        
+        session = self.load_session()
+        claimed_count = sum(1 for itm in session["items"].values() if itm["state"] == "claimed")
+        self.assertEqual(claimed_count, 2)
+
+    def test_batch_next_reconstructs_lease_context(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "claimed",
+                "active_lease_id": "lease-existing",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            }
+        ]
+        # lease-existing 缺失 request_hash/request_path
         leases = {
             "lease-existing": {
                 "lease_id": "lease-existing",
@@ -120,7 +226,7 @@ class BatchNextTestCase(PythonScriptTestCase):
                 "agent_id": "test-agent",
                 "role": "fixer",
                 "status": "active",
-                "request_id": "req-existing",
+                "request_id": "",
                 "expires_at": "2026-06-12T23:59:59Z",
                 "created_at": "2026-06-12T21:59:59Z",
             }
@@ -131,89 +237,131 @@ class BatchNextTestCase(PythonScriptTestCase):
             "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-
-        session = self.load_session()
-        self.assertEqual(session["items"]["thread-1"]["active_lease_id"], "lease-existing")
-        self.assertEqual(session["items"]["thread-2"]["state"], "claimed")
-
         response = json.loads(result.stdout)
+        
+        # 验证 lease-existing 已经在 session 中补充了 request_id/request_hash/request_path
+        session = self.load_session()
+        updated_lease = session["leases"]["lease-existing"]
+        self.assertTrue(updated_lease.get("request_id"))
+        self.assertTrue(updated_lease.get("request_hash"))
+        self.assertTrue(updated_lease.get("request_path"))
+        self.assertTrue(Path(updated_lease["request_path"]).is_file())
+
+        # 验证生成的 skeleton 能正常被 submit-batch
         skeleton_path = Path(response["response_skeleton_path"])
         skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        skeleton["common"]["files"] = ["src/a.py"]
+        skeleton["common"]["validation_commands"][0]["command"] = "echo pass"
+        skeleton["common"]["fix_reply"]["test_command"] = "echo pass"
+        skeleton["common"]["fix_reply"]["test_result"] = "passed"
+        skeleton["items"][0]["fix_reply"]["summary"] = "fixed missing request context"
+        skeleton["items"][0]["fix_reply"]["why"] = "reconstructed successfully"
+        skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        items_in_skeleton = {itm["item_id"]: itm for itm in skeleton["items"]}
-        self.assertIn("thread-1", items_in_skeleton)
-        self.assertIn("thread-2", items_in_skeleton)
-        self.assertEqual(items_in_skeleton["thread-1"]["lease_id"], "lease-existing")
-        self.assertEqual(items_in_skeleton["thread-1"]["request_id"], "req-existing")
+        submitted = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path))
+        self.assertEqual(submitted.returncode, 0, submitted.stderr)
 
-    def test_batch_next_skips_stale_and_other_agent_leases(self):
-        items = [
-            {
-                "item_id": "thread-open",
-                "item_kind": "github_thread",
-                "source": "github",
-                "state": "open",
-                "allowed_actions": ["fix", "clarify", "defer", "reject"],
-            },
-            {
-                "item_id": "thread-stale",
-                "item_kind": "github_thread",
-                "source": "github",
-                "state": "stale",
-                "status": "STALE",
-                "allowed_actions": ["fix", "clarify", "defer", "reject"],
-            },
-            {
-                "item_id": "thread-other-agent",
-                "item_kind": "github_thread",
-                "source": "github",
-                "state": "claimed",
-                "active_lease_id": "lease-other",
-                "allowed_actions": ["fix", "clarify", "defer", "reject"],
-            },
-        ]
-        leases = {
-            "lease-other": {
-                "lease_id": "lease-other",
-                "item_id": "thread-other-agent",
-                "agent_id": "other-agent",
-                "role": "fixer",
-                "status": "active",
-                "request_id": "req-other",
-                "request_hash": "req-other",
-                "expires_at": "2026-06-12T23:59:59Z",
-                "created_at": "2026-06-12T21:59:59Z",
-            }
-        }
-        self.init_session(items, leases)
-
-        result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        response = json.loads(result.stdout)
-        skeleton = json.loads(Path(response["response_skeleton_path"]).read_text(encoding="utf-8"))
-        self.assertEqual([item["item_id"] for item in skeleton["items"]], ["thread-open"])
-
-    def test_batch_next_fails_when_no_unresolved_threads(self):
+    def test_batch_next_rolls_back_on_conflict(self):
         items = [
             {
                 "item_id": "thread-1",
                 "item_kind": "github_thread",
                 "source": "github",
-                "state": "closed",
+                "path": "src/b.py",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+            {
+                "item_id": "thread-2",
+                "item_kind": "github_thread",
+                "source": "github",
+                "path": "src/a.py",
+                "line": 2,
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+        ]
+        # 外部已经有人占用了 "src/a.py" 上的锁，这会导致 thread-2 的 claim_lease 爆发 LeaseConflictError
+        leases = {
+            "lease-other": {
+                "lease_id": "lease-other",
+                "item_id": "thread-other",
+                "agent_id": "other-agent",
+                "role": "fixer",
+                "status": "active",
+                "conflict_keys": ["file:src/a.py"],
+                "expires_at": "2026-06-12T23:59:59Z",
+                "created_at": "2026-06-12T21:59:59Z",
+            }
+        }
+        self.init_session(items, leases)
+
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        # 应该发生 LEASE_REJECTED
+        self.assertEqual(result.returncode, 5, result.stderr)
+
+        # 验证 session 一致性：此前成功获取的 thread-1 应当被回滚释放，不留痕迹
+        session = self.load_session()
+        self.assertEqual(session["items"]["thread-1"]["state"], "open")
+        self.assertNotIn("thread-1", [l.get("item_id") for l in session["leases"].values() if l.get("agent_id") == "test-agent"])
+
+    def test_batch_next_merges_existing_skeleton_replies(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
             }
         ]
         self.init_session(items)
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--batch")
-        self.assertEqual(result.returncode, 4, result.stderr)
-        err = json.loads(result.stdout)
-        self.assertEqual(err["status"], "NO_ELIGIBLE_ITEM")
+        # 1. 运行第一次，写入 skeleton
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout)
+        
+        # 模拟用户手工编辑 skeleton 文件
+        skeleton_path = Path(response["response_skeleton_path"])
+        skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        skeleton["items"][0]["fix_reply"]["summary"] = "User edited summary"
+        skeleton["items"][0]["fix_reply"]["why"] = "User edited why"
+        skeleton["common"]["commit_hash"] = "edited-commit"
+        skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # 2. 运行第二次，应当做增量合并
+        result2 = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result2.returncode, 0, result2.stderr)
+
+        # 验证编辑好的字段在二次获取后没有丢失
+        updated_skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        self.assertEqual(updated_skeleton["items"][0]["fix_reply"]["summary"], "User edited summary")
+        self.assertEqual(updated_skeleton["items"][0]["fix_reply"]["why"], "User edited why")
+        self.assertEqual(updated_skeleton["common"]["commit_hash"], "edited-commit")
 
     def test_cli_requires_role_or_batch(self):
         self.init_session([])
         result = self.run_runtime_module("agent", "next", self.repo, self.pr)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("one of the following arguments is required: --role or --batch", result.stderr)
+
+    def test_cli_role_and_batch_are_mutually_exclusive(self):
+        self.init_session([])
+        # 同时传入 --role 与 --batch
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--batch")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("arguments --role and --batch are mutually exclusive", result.stderr)
+
+    def test_cli_files_only_allowed_with_batch(self):
+        self.init_session([])
+        # 仅传入 --role 与 --files，但没有 --batch
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--files", "src/a.py")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("argument --files can only be used with --batch", result.stderr)

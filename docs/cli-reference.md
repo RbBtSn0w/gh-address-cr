@@ -330,7 +330,7 @@ The runtime is the coordinator. AI agents consume structured requests and return
 gh-address-cr agent manifest
 gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
-gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1 --batch
+gh-address-cr agent next owner/repo 123 --batch --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json

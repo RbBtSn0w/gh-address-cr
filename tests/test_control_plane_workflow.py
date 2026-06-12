@@ -1229,7 +1229,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertIn("--batch", payload["next_action"])
         self.assertEqual(
             payload["commands"]["batch_next"],
-            f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id>",
+            f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id> --files src/shared.py",
         )
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
