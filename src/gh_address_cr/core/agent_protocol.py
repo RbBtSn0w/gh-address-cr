@@ -277,6 +277,256 @@ def issue_action_request(
     }
 
 
+def issue_batch_action_request(
+    repo: str,
+    pr_number: str,
+    *,
+    agent_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_time = _coerce_now(now)
+    session = session_store.load_session(repo, pr_number)
+    ledger = _ledger(session)
+    expired = expire_leases(session, now=current_time)
+    _return_expired_items_to_open(session, expired)
+
+    target_items = []
+    for item_id, item in _items(session).items():
+        if not is_github_thread_item(item):
+            continue
+        existing_lease = _active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
+        if existing_lease is not None or _is_batch_claimable_github_thread(item):
+            target_items.append((item_id, item))
+
+    if not target_items:
+        session_store.save_session(repo, pr_number, session)
+        raise WorkflowError(
+            status="NO_ELIGIBLE_ITEM",
+            reason_code="NO_ELIGIBLE_ITEM",
+            waiting_on="work_item",
+            exit_code=4,
+            message="No eligible unresolved github review thread exists.",
+        )
+
+    leased_items = []
+    for item_id, item in target_items:
+        existing_lease = _active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
+
+        if existing_lease:
+            lease_id = existing_lease["lease_id"]
+            request_id = existing_lease.get("request_id") or ""
+            if not request_id:
+                request_id = _stable_id(
+                    "req",
+                    {
+                        "session_id": session["session_id"],
+                        "item_id": item_id,
+                        "role": "fixer",
+                        "agent_id": agent_id,
+                        "lease_id": lease_id,
+                    },
+                )
+                existing_lease["request_id"] = request_id
+            leased_items.append(
+                {
+                    "item_id": item_id,
+                    "lease_id": lease_id,
+                    "request_id": request_id,
+                }
+            )
+        else:
+            if not _has_classification_evidence(item):
+                item["classification_evidence"] = {
+                    "event_type": "classification_recorded",
+                    "classification": "fix",
+                    "note": "Batch fix skeleton requested by agent next --batch.",
+                    "record_id": _stable_id(
+                        "classification",
+                        {
+                            "session_id": session["session_id"],
+                            "item_id": item_id,
+                            "agent_id": agent_id,
+                            "role": "fixer",
+                        },
+                    ),
+                }
+                item["decision"] = "fix"
+                ledger.append_event(
+                    session_id=str(session["session_id"]),
+                    item_id=item_id,
+                    lease_id=None,
+                    agent_id=agent_id,
+                    role="fixer",
+                    event_type="classification_recorded",
+                    payload={
+                        "classification": "fix",
+                        "note": "Batch fix skeleton requested by agent next --batch.",
+                    },
+                )
+            lease_id = f"lease_{uuid4().hex}"
+            request_id = _stable_id(
+                "req",
+                {
+                    "session_id": session["session_id"],
+                    "item_id": item_id,
+                    "role": "fixer",
+                    "agent_id": agent_id,
+                    "lease_id": lease_id,
+                },
+            )
+            request_item = dict(item)
+            request_item["state"] = "claimed"
+            request = {
+                "schema_version": PROTOCOL_VERSION,
+                "request_id": request_id,
+                "session_id": session["session_id"],
+                "lease_id": lease_id,
+                "agent_role": "fixer",
+                "item": request_item,
+                "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
+                "required_evidence": _required_evidence_for(item, "fixer"),
+                "repository_context": {"repo": repo, "pr_number": str(pr_number)},
+                "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
+                "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+            }
+            handling_boundary = _handling_boundary_summary_or_none(item, role="fixer")
+            if handling_boundary is not None:
+                request["handling_boundary"] = handling_boundary
+            request_hash = ActionRequest.from_dict(request).stable_hash()
+            request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
+            response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+            request["response_skeleton_path"] = str(response_skeleton_path)
+
+            try:
+                claim_lease(
+                    session,
+                    item,
+                    agent_id=agent_id,
+                    role="fixer",
+                    request_hash=request_hash,
+                    lease_id=lease_id,
+                    now=current_time,
+                    request_id=request_id,
+                    request_path=str(request_path),
+                    resume_token=f"resume:{request_id}",
+                    allow_same_agent_github_thread_file_overlap=True,
+                )
+            except LeaseConflictError as exc:
+                session_store.save_session(repo, pr_number, session)
+                raise WorkflowError(
+                    status="LEASE_REJECTED",
+                    reason_code=exc.reason_code,
+                    waiting_on="lease",
+                    exit_code=5,
+                    message=str(exc),
+                    payload={"item_id": item_id},
+                ) from exc
+
+            item["state"] = "claimed"
+            item["active_lease_id"] = lease_id
+            request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+            response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
+            response_skeleton_path.write_text(json.dumps(response_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+            ledger.append_event(
+                session_id=str(session["session_id"]),
+                item_id=item_id,
+                lease_id=lease_id,
+                agent_id=agent_id,
+                role="fixer",
+                event_type="request_issued",
+                payload={
+                    "request_id": request_id,
+                    "request_path": str(request_path),
+                    "response_skeleton_path": str(response_skeleton_path),
+                },
+            )
+
+            leased_items.append(
+                {
+                    "item_id": item_id,
+                    "lease_id": lease_id,
+                    "request_id": request_id,
+                }
+            )
+
+    batch_skeleton = {
+        "schema_version": PROTOCOL_VERSION,
+        "agent_id": agent_id,
+        "resolution": "fix",
+        "common": {
+            "files": [],
+            "commit_hash": "",
+            "validation_commands": [
+                {
+                    "command": "",
+                    "result": "passed",
+                }
+            ],
+            "fix_reply": {
+                "summary": "",
+                "why": "",
+            },
+        },
+        "items": [
+            {
+                "item_id": item_info["item_id"],
+                "request_id": item_info["request_id"],
+                "lease_id": item_info["lease_id"],
+                "fix_reply": {
+                    "summary": "",
+                    "why": "",
+                },
+            }
+            for item_info in leased_items
+        ],
+    }
+
+    batch_skeleton_path = session_store.workspace_dir(repo, pr_number) / "batch-response-skeleton.json"
+    batch_skeleton_path.write_text(json.dumps(batch_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    session_store.save_session(repo, pr_number, session)
+
+    submit_command = f"gh-address-cr agent submit-batch {repo} {pr_number} --input {batch_skeleton_path}"
+    return {
+        "status": "BATCH_ACTION_REQUESTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "response_skeleton_path": str(batch_skeleton_path),
+        "lease_count": len(leased_items),
+        "leased_items": leased_items,
+        "commands": {
+            "submit_batch": submit_command,
+            "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input {batch_skeleton_path}",
+            "publish": f"gh-address-cr agent publish {repo} {pr_number}",
+        },
+        "next_action": f"Edit {batch_skeleton_path} and submit it with `{submit_command}`.",
+    }
+
+
+def _active_fixer_lease_for_item(
+    session: dict[str, Any], item_id: str, *, agent_id: str | None = None
+) -> dict[str, Any] | None:
+    for lease in session.get("leases", {}).values():
+        if not isinstance(lease, dict):
+            continue
+        if lease.get("item_id") != item_id:
+            continue
+        if lease.get("status") != "active":
+            continue
+        if lease.get("role") != "fixer":
+            continue
+        if agent_id is not None and lease.get("agent_id") != agent_id:
+            continue
+        return lease
+    return None
+
+
+def _is_batch_claimable_github_thread(item: dict[str, Any]) -> bool:
+    return is_claimable_github_thread(item) and not is_stale_github_thread_item(item)
+
+
 def _handling_boundary_summary_or_none(item: dict[str, Any], *, role: str) -> dict[str, Any] | None:
     if role != "fixer" or item.get("item_kind") != "github_thread":
         return None

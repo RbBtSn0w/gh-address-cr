@@ -1225,7 +1225,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
         self.assertEqual(payload["waiting_on"], "batch_action_response")
-        self.assertIn("agent submit-batch", payload["next_action"])
+        self.assertIn("agent next", payload["next_action"])
+        self.assertIn("--batch", payload["next_action"])
+        self.assertEqual(
+            payload["commands"]["batch_next"],
+            f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id>",
+        )
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
@@ -1260,6 +1265,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
         self.assertIn("distinct thread bodies", payload["next_action"])
+        self.assertIn("--batch", payload["next_action"])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")

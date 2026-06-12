@@ -596,6 +596,7 @@ else:
                 "threads": f"gh-address-cr threads {self.repo} {self.pr} --lean",
                 "classify": f"gh-address-cr agent classify {self.repo} {self.pr} <item_id> --classification fix --note <note>",
                 "next": f"gh-address-cr agent next {self.repo} {self.pr} --role fixer --agent-id <agent_id>",
+                "batch_next": f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id>",
                 "submit": f"gh-address-cr agent submit {self.repo} {self.pr} --input response.json",
                 "submit_batch": f"gh-address-cr agent submit-batch {self.repo} {self.pr} --input batch-response.json",
                 "fix_all": (

@@ -31,6 +31,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Records triage-phase evidence before a mutating fixer lease is issued.
 - `gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>`
   - Claims one eligible item and writes an `ActionRequest`.
+- `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>`
+  - Claims eligible non-stale GitHub review-thread `fix` items for the agent and writes a fillable `BatchActionResponse` skeleton.
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
@@ -108,6 +110,6 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent submit-batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent fix-all` only with `--input <batch-response.json>` or with `--homogeneous-reason <why>` for a homogeneous repeated concern.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent submit-batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent fix-all` only with `--input <batch-response.json>` or with `--homogeneous-reason <why>` for a homogeneous repeated concern. When `fix-all` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.

@@ -60,6 +60,218 @@ Minimal invocation model:
 
 Advanced/internal integrations are documented later in this reference.
 
+## Command Topology (ASCII)
+
+This map is the CLI coverage checklist. Every public command is either a
+session producer, a session mutator, a side-effect publisher, a gate, a telemetry
+observer, or an operator utility. Arrows show the intended upstream/downstream
+handoff. Commands that emit a `next_action` or `commands` object must point to a
+downstream command in this map.
+
+```text
++-------------------+
+| gh-address-cr CLI |
++---------+---------+
+          |
+          +-- active-pr
+          |      |
+          |      +--> address --lean
+          |      +--> review
+          |
+          +-- review [--auto-simple]
+          |      |
+          |      +--> WAITING_FOR_EXTERNAL_REVIEW
+          |      |      |
+          |      |      +--> review-to-findings
+          |      |      +--> findings --input <json|-|fixed-blocks> --source <producer>
+          |      |      +--> adapter <adapter_cmd...>
+          |      |      +--> review (same command, after producer handoff)
+          |      |
+          |      +--> WAITING_FOR_SIMPLE_ADDRESS
+          |      |      |
+          |      |      +--> address --lean
+          |      |      +--> threads --lean
+          |      |      +--> agent classify
+          |      |      +--> agent next --role fixer
+          |      |      +--> agent next --batch
+          |      |
+          |      +--> session work items
+          |
+          +-- address [--lean|--summary]
+          |      |
+          |      +--> threads [--lean|--summary]
+          |      +--> agent fix
+          |      +--> agent next --batch
+          |      +--> agent submit-batch
+          |      +--> agent publish
+          |
+          +-- threads [--lean|--summary]
+          |      |
+          |      +--> agent classify
+          |      +--> agent next
+          |      +--> agent fix
+          |      +--> agent resolve-stale
+          |
+          +-- findings --input <json|->
+          |      |
+          |      +--> agent classify
+          |      +--> agent next
+          |      +--> agent submit
+          |
+          +-- adapter <adapter_cmd...>
+          |      |
+          |      +--> findings contract
+          |      +--> review/address session sync
+          |
+          +-- agent <subcommand>
+          |      |
+          |      +--> manifest
+          |      |
+          |      +--> classify
+          |      |      |
+          |      |      +--> next --role fixer
+          |      |
+          |      +--> next --role <role>
+          |      |      |
+          |      |      +--> ActionRequest
+          |      |      +--> ActionResponse skeleton
+          |      |      +--> submit
+          |      |
+          |      +--> next --batch
+          |      |      |
+          |      |      +--> BatchActionResponse skeleton
+          |      |      +--> submit-batch
+          |      |      +--> fix-all --input <batch-response.json>
+          |      |
+          |      +--> submit
+          |      |      |
+          |      |      +--> accepted evidence
+          |      |      +--> publish (GitHub thread fixes)
+          |      |      +--> final-gate
+          |      |
+          |      +--> submit-batch
+          |      |      |
+          |      |      +--> per-item accepted evidence
+          |      |      +--> publish
+          |      |      +--> final-gate
+          |      |
+          |      +--> fix
+          |      |      |
+          |      |      +--> classify + next + submit shortcut
+          |      |      +--> publish (--publish or explicit publish)
+          |      |
+          |      +--> trivial-fix
+          |      |      |
+          |      |      +--> narrow documentation/typo fix shortcut
+          |      |      +--> publish (--publish or explicit publish)
+          |      |
+          |      +--> fix-all
+          |      |      |
+          |      |      +--> --input <batch-response.json> -> submit-batch path
+          |      |      +--> --homogeneous-reason <why> -> homogeneous batch shortcut
+          |      |      +--> PER_THREAD_EVIDENCE_REQUIRED -> next --batch
+          |      |
+          |      +--> resolve-stale
+          |      |      |
+          |      |      +--> stale/outdated thread evidence
+          |      |      +--> publish
+          |      |      +--> final-gate
+          |      |
+          |      +--> evidence add
+          |      |      |
+          |      |      +--> evidence_ref in ActionResponse or BatchActionResponse
+          |      |
+          |      +--> evidence list
+          |      |
+          |      +--> publish
+          |      |      |
+          |      |      +--> GitHub reply + resolve side effects
+          |      |      +--> final-gate
+          |      |
+          |      +--> leases
+          |      +--> reclaim
+          |      |
+          |      +--> orchestrate start
+          |      +--> orchestrate step
+          |      +--> orchestrate status
+          |      +--> orchestrate resume
+          |      +--> orchestrate stop
+          |      +--> orchestrate submit
+          |      +--> orchestrate autopilot
+          |
+          +-- final-gate [--require-checks|--require-required-checks]
+          |      |
+          |      +--> PASS -> completion_summary_line + audit summary
+          |      +--> FAIL -> address/threads/agent publish/agent next --batch
+          |
+          +-- telemetry ingest
+          |      |
+          |      +--> telemetry summary
+          |      +--> final-gate telemetry coverage
+          |
+          +-- telemetry summary
+          |      |
+          |      +--> efficiency report artifact
+          |
+          +-- command-session --input <operations.json|->
+          |      |
+          |      +--> repeated gh-address-cr operations
+          |
+          +-- review-to-findings --input <finding-blocks.md|->
+          |      |
+          |      +--> findings --input <json|->
+          |
+          +-- submit-action <action-request.json>
+          |      |
+          |      +--> generated ActionResponse
+          |      +--> agent submit
+          |
+          +-- submit-feedback
+          |      |
+          |      +--> maintainer issue intake for repeatable skill/runtime gaps
+          |
+          +-- doctor
+          |      |
+          |      +--> rerun blocked command after environment repair
+          |
+          +-- version / --version
+          |
+          +-- global output flags
+                 |
+                 +--> --machine
+                 +--> --human
+```
+
+Verification boundaries:
+
+```text
+producer output
+  -> review-to-findings/findings/adapter
+  -> session items
+  -> agent classify
+  -> agent next or agent next --batch
+  -> ActionResponse or BatchActionResponse
+  -> agent submit or agent submit-batch
+  -> accepted evidence
+  -> agent publish (GitHub thread side effects only)
+  -> final-gate
+  -> completion_summary_line
+```
+
+Batch-specific verification:
+
+```text
+fix-all PER_THREAD_EVIDENCE_REQUIRED
+  -> commands.batch_next
+  -> agent next --batch
+  -> runtime-owned leases + request_id values
+  -> batch-response-skeleton.json
+  -> agent fills common evidence + per-item summary/why
+  -> agent submit-batch validates lease ownership and request context
+  -> agent publish posts replies and resolves threads
+  -> final-gate verifies no unresolved threads remain
+```
+
 Stable machine summary fields:
 
 - `status`

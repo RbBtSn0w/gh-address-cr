@@ -340,6 +340,7 @@ def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
         "threads": f"gh-address-cr threads {repo} {pr_number} --lean",
         "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
         "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
+        "batch_next": f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id>",
         "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
         "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
         "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
