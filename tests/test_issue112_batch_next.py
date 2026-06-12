@@ -305,7 +305,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         # 验证 session 一致性：此前成功获取的 thread-1 应当被回滚释放，不留痕迹
         session = self.load_session()
         self.assertEqual(session["items"]["thread-1"]["state"], "open")
-        self.assertNotIn("thread-1", [l.get("item_id") for l in session["leases"].values() if l.get("agent_id") == "test-agent"])
+        self.assertNotIn("thread-1", [lease.get("item_id") for lease in session["leases"].values() if lease.get("agent_id") == "test-agent"])
 
     def test_batch_next_merges_existing_skeleton_replies(self):
         items = [
