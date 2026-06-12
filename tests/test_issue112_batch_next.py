@@ -365,3 +365,49 @@ class BatchNextTestCase(PythonScriptTestCase):
         result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--files", "src/a.py")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("argument --files can only be used with --batch", result.stderr)
+
+    def test_batch_next_fails_fast_on_invalid_skeleton_json(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            }
+        ]
+        self.init_session(items)
+        skeleton_path = self.workspace_dir() / "batch-response-skeleton.json"
+        skeleton_path.write_text("invalid json content", encoding="utf-8")
+
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertIn("Failed to parse existing batch skeleton JSON", result.stderr)
+
+    def test_batch_next_leases_already_classified_threads(self):
+        items = [
+            {
+                "item_id": "thread-classified",
+                "item_kind": "github_thread",
+                "source": "github",
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+                "classification_evidence": {
+                    "event_type": "classification_recorded",
+                    "classification": "fix",
+                    "note": "already classified",
+                    "record_id": "rec-exist",
+                },
+                "decision": "fix",
+            }
+        ]
+        self.init_session(items)
+
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = self.load_session()
+        self.assertEqual(session["items"]["thread-classified"]["state"], "claimed")

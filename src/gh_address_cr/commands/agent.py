@@ -177,7 +177,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--item-id")
     parser.add_argument("--now")
-    parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response.json for all unresolved threads.")
+    parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response-skeleton.json for all unresolved threads.")
     parser.add_argument("--files", help="Only batch lease threads that affect these files (comma-separated).")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     if not parsed.batch and not parsed.role:
