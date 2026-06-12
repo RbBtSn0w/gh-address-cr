@@ -4,31 +4,47 @@
 
 `gh-address-cr` should be understood first as a PR-scoped workflow orchestrator.
 
-Primary commands:
+Primary workflow commands:
 
 - `active-pr`
 - `review`
 - `address`
 - `final-gate`
 
-Advanced/internal integration entrypoints:
+Other public top-level commands:
 
 - `threads`
 - `findings`
 - `adapter`
+- `telemetry ingest`
+- `telemetry summary`
+- `command-session`
 - `review-to-findings`
+- `submit-action`
+- `submit-feedback`
+- `doctor`
+- `version`
+
+Advanced/internal integration entrypoints:
+
+Agent protocol entrypoints:
+
 - `agent manifest`
 - `agent classify`
 - `agent next`
+- `agent next --batch`
 - `agent submit`
 - `agent submit-batch`
 - `agent fix`
+- `agent trivial-fix`
 - `agent fix-all`
 - `agent resolve-stale`
-- `agent evidence`
+- `agent evidence add`
+- `agent evidence list`
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
+- `agent orchestrate`
 
 Fail-fast contract:
 
@@ -140,8 +156,7 @@ downstream command in this map.
           |      +--> next --batch
           |      |      |
           |      |      +--> BatchActionResponse skeleton
-          |      |      +--> submit-batch
-          |      |      +--> fix-all --input <batch-response.json>
+          |      |      +--> submit-batch or fix-all --input <batch-response.json>
           |      |
           |      +--> submit
           |      |      |
@@ -268,6 +283,7 @@ fix-all PER_THREAD_EVIDENCE_REQUIRED
   -> batch-response-skeleton.json
   -> agent fills common evidence + per-item summary/why
   -> agent submit-batch validates lease ownership and request context
+  -> agent fix-all --input routes to the same batch evidence validation path
   -> agent publish posts replies and resolves threads
   -> final-gate verifies no unresolved threads remain
 ```
@@ -314,18 +330,21 @@ The runtime is the coordinator. AI agents consume structured requests and return
 gh-address-cr agent manifest
 gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1 --batch
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
 gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>]
+gh-address-cr agent evidence list owner/repo 123
 gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>] --publish
+gh-address-cr agent trivial-fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files docs/example.md --summary "Fixed typo." --validation "docs-only=passed" --publish
 gh-address-cr agent fix-all owner/repo 123 --input batch-response.json
 gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" --homogeneous-reason "Repeated same-file thread concern." [--severity P0|P1|P2|P3|P4 --severity-note <why>]
 gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
-gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/repo 123
+gh-address-cr agent orchestrate {start,step,status,stop,resume,submit,autopilot} owner/repo 123
 gh-address-cr doctor owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```
