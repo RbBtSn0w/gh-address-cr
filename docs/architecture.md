@@ -71,7 +71,7 @@ The implementation model is now:
 
 - `github_thread` items are synced from GraphQL thread snapshots.
 - `local_finding` items are ingested from a local review adapter.
-- local findings can be explicitly handled in-session with `gh-address-cr agent fix`, `gh-address-cr agent fix-all`, or `gh-address-cr submit-action`.
+- local findings can be explicitly handled in-session with `gh-address-cr agent resolve`, `gh-address-cr agent resolve --batch`, or `gh-address-cr submit-action`.
 - `gh-address-cr final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count

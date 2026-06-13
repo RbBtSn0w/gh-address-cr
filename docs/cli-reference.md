@@ -37,11 +37,7 @@ Agent protocol entrypoints:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent submit-batch`
-- `agent fix`
-- `agent trivial-fix`
-- `agent fix-all`
-- `agent resolve-stale`
+- `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--stale --match-files`)
 - `agent evidence add`
 - `agent evidence list`
 - `agent publish`
@@ -119,17 +115,17 @@ downstream command in this map.
           +-- address [--lean|--summary]
           |      |
           |      +--> threads [--lean|--summary]
-          |      +--> agent fix
+          |      +--> agent resolve <item_id>
           |      +--> agent next --batch
-          |      +--> agent submit-batch
+          |      +--> agent resolve --batch
           |      +--> agent publish
           |
           +-- threads [--lean|--summary]
           |      |
           |      +--> agent classify
           |      +--> agent next
-          |      +--> agent fix
-          |      +--> agent resolve-stale
+          |      +--> agent resolve <item_id>
+          |      +--> agent resolve --stale --match-files
           |
           +-- findings --input <json|->
           |      |
@@ -159,7 +155,7 @@ downstream command in this map.
           |      +--> next --batch
           |      |      |
           |      |      +--> BatchActionResponse skeleton
-          |      |      +--> submit-batch or fix-all --input <batch-response.json>
+          |      |      +--> resolve --batch --input <batch-response.json>
           |      |
           |      +--> submit
           |      |      |
@@ -167,29 +163,28 @@ downstream command in this map.
           |      |      +--> publish (GitHub thread fixes)
           |      |      +--> final-gate
           |      |
-          |      +--> submit-batch
+          |      +--> resolve <item_id>
           |      |      |
-          |      |      +--> per-item accepted evidence
-          |      |      +--> publish
-          |      |      +--> final-gate
-          |      |
-          |      +--> fix
-          |      |      |
-          |      |      +--> classify + next + submit shortcut
+          |      |      +--> classify + claim + submit (one unified shortcut)
           |      |      +--> publish (--publish or explicit publish)
           |      |
-          |      +--> trivial-fix
+          |      +--> resolve --trivial
           |      |      |
           |      |      +--> narrow documentation/typo fix shortcut
           |      |      +--> publish (--publish or explicit publish)
           |      |
-          |      +--> fix-all
+          |      +--> resolve --batch
           |      |      |
-          |      |      +--> --input <batch-response.json> -> submit-batch path
+          |      |      +--> --input <batch-response.json> per-item accepted evidence
+          |      |      +--> publish
+          |      |      +--> final-gate
+          |      |
+          |      +--> resolve --homogeneous-reason
+          |      |      |
           |      |      +--> --homogeneous-reason <why> -> homogeneous batch shortcut
           |      |      +--> PER_THREAD_EVIDENCE_REQUIRED -> next --batch
           |      |
-          |      +--> resolve-stale
+          |      +--> resolve --stale --match-files
           |      |      |
           |      |      +--> stale/outdated thread evidence
           |      |      +--> publish
@@ -269,7 +264,7 @@ producer output
   -> agent classify
   -> agent next or agent next --batch
   -> ActionResponse or BatchActionResponse
-  -> agent submit or agent submit-batch
+  -> agent submit or agent resolve --batch
   -> accepted evidence
   -> agent publish (GitHub thread side effects only)
   -> final-gate
@@ -279,14 +274,14 @@ producer output
 Batch-specific verification:
 
 ```text
-fix-all PER_THREAD_EVIDENCE_REQUIRED
+resolve PER_THREAD_EVIDENCE_REQUIRED
   -> commands.batch_next
   -> agent next --batch
   -> runtime-owned leases + request_id values
   -> batch-response-skeleton.json
   -> agent fills common evidence + per-item summary/why
-  -> agent submit-batch validates lease ownership and request context
-  -> agent fix-all --input routes to the same batch evidence validation path
+  -> agent resolve --batch validates lease ownership and request context
+  -> agent resolve --batch --input routes to the same batch evidence validation path
   -> agent publish posts replies and resolves threads
   -> final-gate verifies no unresolved threads remain
 ```
@@ -312,7 +307,7 @@ Stable machine summary fields:
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
-`commands` contains shell-quoted executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
+`commands` contains shell-quoted executable templates for common next steps such as `address --lean`, `agent publish`, `agent resolve --batch`, `agent resolve --stale`, and `final-gate`.
 The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Full output includes `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
 ### Metadata Commands
@@ -336,14 +331,13 @@ gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 gh-address-cr agent next owner/repo 123 --batch --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
-gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
 gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>]
 gh-address-cr agent evidence list owner/repo 123
-gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>] --publish
-gh-address-cr agent trivial-fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files docs/example.md --summary "Fixed typo." --validation "docs-only=passed" --publish
-gh-address-cr agent fix-all owner/repo 123 --input batch-response.json
-gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" --homogeneous-reason "Repeated same-file thread concern." [--severity P0|P1|P2|P3|P4 --severity-note <why>]
-gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --match-files
+gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>] --publish
+gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --trivial --commit <sha> --files docs/example.md --summary "Fixed typo." --why "Doc-only typo." --validation "docs-only=passed" --publish
+gh-address-cr agent resolve owner/repo 123 --batch --input batch-response.json
+gh-address-cr agent resolve owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" --homogeneous-reason "Repeated same-file thread concern." [--severity P0|P1|P2|P3|P4 --severity-note <why>]
+gh-address-cr agent resolve owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --stale --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
@@ -357,7 +351,7 @@ Classification and resolution are deliberately separate protocol phases:
 - `agent classify` records triage evidence on the item before a mutating fixer lease exists. If `agent next --role fixer` returns `MISSING_CLASSIFICATION`, run `agent classify ... --classification <fix|clarify|defer|reject> --note <why>` first.
 - `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`. Use `--publish` only for accepted GitHub review-thread fix responses when the runtime should post the reply and resolve the thread in the same command.
 - Review signal is evidence-backed. The runtime preserves explicit `P0`, `P1`, `P2`, `P3`, or `P4` markers from the producer payload or the original GitHub review-thread comment. Reviewer words such as `high`, `medium`, or `low priority` are stored as raw priority evidence and are not converted to P-scale severity. Published fix replies use one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
-- `agent fix`, `agent fix-all`, `agent resolve-stale`, and `agent evidence add` may pass `--severity P0|P1|P2|P3|P4` as an explicit override. If that override conflicts with first-scene severity evidence on the item, include `--severity-note <why>` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
+- `agent resolve` (any mode) and `agent evidence add` may pass `--severity P0|P1|P2|P3|P4` as an explicit override. If that override conflicts with first-scene severity evidence on the item, include `--severity-note <why>` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
 
 Role split:
 
@@ -371,7 +365,7 @@ Role split:
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
-Use `agent submit-batch` only for GitHub review-thread `fix` evidence when one set of files/validation evidence addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Commit evidence is hydrated during publish instead of blocking worker submit. Use `agent fix-all --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent fix-all --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve-stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
+Use `agent resolve --batch` only for GitHub review-thread `fix` evidence when one set of files/validation evidence addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Commit evidence is hydrated during publish instead of blocking worker submit. Use `agent resolve --batch --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent resolve --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve --stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
 The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file patch can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one validation bundle covers them, submit a batch response, publish, then claim the next set.
 
 Reusable evidence profiles reduce repeated commit/files/validation text across responses:

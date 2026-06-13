@@ -98,10 +98,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "/gh-address-cr agent classify <owner/repo> <pr_number> <item_id>",
             "/gh-address-cr agent next <owner/repo> <pr_number>",
             "/gh-address-cr agent submit <owner/repo> <pr_number>",
-            "/gh-address-cr agent submit-batch <owner/repo> <pr_number>",
-            "/gh-address-cr agent fix <owner/repo> <pr_number> <item_id>",
-            "/gh-address-cr agent fix-all <owner/repo> <pr_number>",
-            "/gh-address-cr agent resolve-stale <owner/repo> <pr_number>",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id>",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files",
             "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
             "/gh-address-cr agent publish <owner/repo> <pr_number>",
             "/gh-address-cr agent leases <owner/repo> <pr_number>",
@@ -119,8 +118,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
         self.assertIn("GitHub review comment reply tasks", combined)
         self.assertIn("A reply draft is not a submitted task", combined)
-        self.assertIn("`gh-address-cr agent submit`", combined)
-        self.assertIn("`gh-address-cr agent submit-batch`", combined)
+        self.assertIn("`gh-address-cr agent resolve`", combined)
         self.assertIn("`gh-address-cr agent publish`", combined)
         self.assertIn("per-thread summary/why", combined)
         self.assertIn("homogeneous repeated", combined)
@@ -151,10 +149,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         ):
             self.assertIn(f"`{field}`", combined)
         self.assertIn("Lean output keeps only", protocol_text)
-        self.assertIn("agent fix-all", protocol_text)
-        self.assertIn("`--input <batch-response.json>`", protocol_text)
-        self.assertIn("`--homogeneous-reason <why>`", protocol_text)
-        self.assertIn("agent resolve-stale", protocol_text)
+        self.assertIn("agent resolve", protocol_text)
+        self.assertIn("--input <batch-response.json>", protocol_text)
+        self.assertIn("--homogeneous-reason <why>", protocol_text)
+        self.assertIn("--stale --match-files", protocol_text)
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()
@@ -190,11 +188,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "next --role <role>",
             "next --batch",
             "submit",
-            "submit-batch",
-            "fix",
-            "trivial-fix",
-            "fix-all",
-            "resolve-stale",
+            "resolve <item_id>",
+            "resolve --trivial",
+            "resolve --batch",
+            "resolve --homogeneous-reason",
+            "resolve --stale --match-files",
             "evidence add",
             "evidence list",
             "publish",
@@ -221,13 +219,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "session items",
             "agent classify",
             "ActionResponse or BatchActionResponse",
-            "agent submit or agent submit-batch",
+            "agent submit or agent resolve --batch",
             "accepted evidence",
             "agent publish (GitHub thread side effects only)",
             "final-gate",
             "completion_summary_line",
             "runtime-owned leases + request_id values",
-            "agent submit-batch validates lease ownership and request context",
+            "agent resolve --batch validates lease ownership and request context",
         ):
             with self.subTest(edge=edge):
                 self.assertIn(edge, section)
@@ -568,16 +566,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertIn(f"`{field}`", text)
         self.assertIn("current-login pending review count", text)
         self.assertIn("Use `--lean` or `--summary`", text)
-        self.assertIn("agent resolve-stale --match-files", text)
+        self.assertIn("agent resolve --stale --match-files", text)
 
     def test_status_action_map_documents_agent_friction_recovery(self):
         text = (ROOT / "skill" / "references" / "status-action-map.md").read_text(encoding="utf-8")
         self.assertIn("commands", text)
         self.assertIn("gh-address-cr address <owner/repo> <pr_number> --lean", text)
-        self.assertIn("gh-address-cr agent submit-batch", text)
-        self.assertIn("gh-address-cr agent fix-all", text)
+        self.assertIn("agent resolve --batch", text)
         self.assertIn("--homogeneous-reason", text)
-        self.assertIn("gh-address-cr agent resolve-stale", text)
+        self.assertIn("--stale --match-files", text)
         self.assertIn("NO_ACTIVE_PR", text)
         self.assertIn("AMBIGUOUS_ACTIVE_PR", text)
 

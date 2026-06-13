@@ -273,11 +273,15 @@ def handle_autopilot(args: List[str]) -> int:
     )
 
     payload = {
-        "status": "READY",
+        "status": "PLAN_ONLY",
         "reason_code": "AUTOPILOT_PLAN_READY",
-        "next_action": "Review the plan. Re-run with --execute only when side effects are intended.",
+        "next_action": (
+            "This is a dry-run plan only; it performs no side effects. Execute the planned steps "
+            "yourself with `agent resolve` / `agent publish` / `final-gate`."
+        ),
         "repo": parsed.repo,
         "pr_number": str(parsed.pr_number),
+        "executes_side_effects": False,
         "side_effects_enabled": False,
         "execute_requested": bool(parsed.execute),
         "steps": steps,

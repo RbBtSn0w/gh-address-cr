@@ -105,11 +105,7 @@ Advanced integration commands:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent submit-batch`
-- `agent fix`
-- `agent trivial-fix`
-- `agent fix-all`
-- `agent resolve-stale`
+- `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--stale --match-files`)
 - `agent evidence`
 - `agent publish`
 - `agent leases`
@@ -149,26 +145,28 @@ inflating counts, durations, or slowest-operation rankings. Corrupted external
 telemetry remains fail-open for review and final-gate flows, while telemetry
 commands fail loudly with reason codes and diagnostics.
 
-For GitHub review-thread replies, shared files/validation evidence is not the
-same as a shared reviewer answer. Use `agent submit-batch` with per-thread
-summary/why entries for ordinary multi-thread handling. Commit evidence is
-hydrated by the runtime during publish, so independent worker evidence does not
-need to wait for a final commit hash. Use
-`agent fix-all --input <batch-response.json>` to route explicit per-thread batch
-evidence, or `agent fix-all --homogeneous-reason <why>` only for a homogeneous
-repeated concern. When `fix-all` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
+For GitHub review-thread replies, the single mutating entrypoint is
+`agent resolve`; it records classification internally, so no separate
+`agent classify` round-trip is needed. Shared files/validation evidence is not the
+same as a shared reviewer answer. Use `agent resolve --batch --input <batch-response.json>`
+with per-thread summary/why entries for ordinary multi-thread handling. Commit
+evidence is hydrated by the runtime during publish, so independent worker evidence
+does not need to wait for a final commit hash. Use
+`agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern.
+When `resolve` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
 `agent next --batch --agent-id <id>` to claim eligible GitHub review threads and
-write a fillable `batch-response-skeleton.json` before `agent submit-batch`.
+write a fillable `batch-response-skeleton.json` before `agent resolve --batch`.
 
 When exactly one PR session is cached, PR-scoped commands such as `address`,
 `review`, `threads`, `final-gate`, and `telemetry summary` may omit
 `<owner/repo> <pr_number>`. No-session and multi-session cases fail loud with
 `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`.
 
-Use `agent trivial-fix` only for documentation or typo-only GitHub review
-threads. The runtime rejects security-sensitive, API-sensitive, performance, or
-ambiguous comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve,
-validation, and final-gate evidence still applies.
+Use `agent resolve --trivial` only for documentation or typo-only GitHub review
+threads, and `agent resolve --stale --match-files` for STALE/outdated threads. The
+runtime rejects security-sensitive, API-sensitive, performance, or ambiguous
+comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve, validation,
+and final-gate evidence still applies.
 
 Agents that need a schema-defined triage handoff may emit
 `workflow_decision.v1` JSON with `schema_version`, `request_id`, `item_id`,

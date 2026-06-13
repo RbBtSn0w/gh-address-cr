@@ -7,7 +7,7 @@ If `gh-address-cr final-gate` fails:
 1. Read the pending table in terminal output and the printed audit summary path.
 2. Prefer the returned `next_action` and `commands` templates; common recovery starts with `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr agent publish <owner/repo> <pr_number>`.
 3. For each pending or invalid terminal thread, verify both operations were completed through the runtime: reply evidence and thread resolve.
-4. For file-matched stale threads, use `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files`, then publish and rerun final-gate.
+4. For file-matched stale threads, use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate.
 5. If the summary reports missing reply evidence, publish the accepted evidence before re-running `gh-address-cr final-gate`.
 
 
