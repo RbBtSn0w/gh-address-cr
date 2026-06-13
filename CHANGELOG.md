@@ -1,3 +1,9 @@
+## [2.10.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.8...v2.10.9) (2026-06-13)
+
+### Bug Fixes
+
+* **agent:** support batch skeleton generation via agent next --batch ([#113](https://github.com/RbBtSn0w/gh-address-cr/issues/113)) ([9bfb2ff](https://github.com/RbBtSn0w/gh-address-cr/commit/9bfb2ffc08af4da23a113f693322b63c6b8e109e))
+
 ## [2.10.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.7...v2.10.8) (2026-06-05)
 
 ### Bug Fixes
