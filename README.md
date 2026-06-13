@@ -11,8 +11,8 @@ state and side effects; agents return structured evidence and the runtime
 publishes GitHub replies/resolves.
 
 > **Upgrading from 2.x?** 3.0 is a breaking release: the `agent fix`,
-> `trivial-fix`, `fix-all`, `resolve-stale`, and `submit-batch` commands are
-> replaced by a single `agent resolve`. See the
+> `agent trivial-fix`, `agent fix-all`, `agent resolve-stale`, and
+> `agent submit-batch` commands are replaced by a single `agent resolve`. See the
 > [3.0 migration guide](docs/migration-3.0.md).
 
 Project architecture governance lives in `.specify/memory/constitution.md`.

@@ -29,7 +29,7 @@ implementation names. Keep compatibility behavior explicit, tested, and scoped.
   findings JSON or fixed `finding` blocks.
 - As of 3.0, the `agent fix`, `agent trivial-fix`, `agent fix-all`,
   `agent resolve-stale`, and `agent submit-batch` commands are removed with no
-  compatibility alias. All mutating resolution routes through `agent resolve`
+  compatibility alias. All mutating resolution routes go through `agent resolve`
   (with `--trivial`, `--batch --input`, `--homogeneous-reason`, or
   `--stale --match-files`). Unknown-command guidance is returned for the removed
   names. See [migration-3.0.md](migration-3.0.md).

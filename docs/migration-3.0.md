@@ -38,8 +38,11 @@ single shortcut built on top of it.
 - **Gate scope (#119).** Every machine summary now carries `gate_scope`:
   `"inline"` for the `review`/`address`/`threads` pre-gate and `"final"` for
   `final-gate`. Only `gate_scope: "final"` output is completion proof — an inline
-  `PASSED` no longer implies the PR is complete (it does not evaluate pending
-  reviews or PR checks).
+  `PASSED` no longer implies the PR is complete (it evaluates neither pending
+  reviews nor PR checks). Note that `final-gate` evaluates current-login pending
+  reviews by default, but evaluates **PR checks only when you pass
+  `--require-checks` or `--require-required-checks`**; add the appropriate flag
+  when green checks are part of your completion bar.
 - **Stricter validation evidence (#117).** Failing validation results no longer
   satisfy the gate. A record with `result: "failed"`/`exit_code != 0`, or a
   `<cmd>=failed` string, is rejected as missing validation evidence.
@@ -51,7 +54,7 @@ single shortcut built on top of it.
   `status: "PLAN_ONLY"` with `executes_side_effects: false`. It never performs
   side effects; run the planned `agent resolve` / `agent publish` / `final-gate`
   steps yourself.
-- **stdin guard.** `review`/`findings --input -` fail loud on an interactive TTY
+- **stdin guard.** `review`/`findings --input -` fail loudly on an interactive TTY
   instead of blocking on EOF; pipe `[]` for an explicit empty producer result.
 - **Event-sourced rebuild (#116).** `response_accepted` ledger events carry the
   full applied response, and the session cache can be rebuilt from the ledger
@@ -62,8 +65,15 @@ single shortcut built on top of it.
 
 The 3.0 skill is a thin adapter over the 3.0 runtime; `runtime-requirements.json`
 declares `minimum_runtime_version: 3.0.0`. Installing the 3.0 skill against an
-older runtime that lacks `agent resolve` will fail. Verify with:
+older runtime that lacks `agent resolve` will fail.
+
+Confirm your installed runtime is **3.0.0 or newer**:
 
 ```bash
-gh-address-cr adapter check-runtime
+gh-address-cr version
 ```
+
+> `gh-address-cr adapter check-runtime` only reports **protocol** compatibility
+> (still `1.0` in 3.0); it does not compare the installed package version against
+> the skill's `minimum_runtime_version`, so a 2.x runtime can still report
+> `status: compatible`. Use `gh-address-cr version` to verify the package version.
