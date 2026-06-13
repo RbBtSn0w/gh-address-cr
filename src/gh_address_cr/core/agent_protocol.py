@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
@@ -166,8 +167,8 @@ def issue_action_request(
     if item is None:
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
-            status="NO_ELIGIBLE_ITEM",
-            reason_code="NO_ELIGIBLE_ITEM",
+            status=protocol_codes.NO_ELIGIBLE_ITEM,
+            reason_code=protocol_codes.NO_ELIGIBLE_ITEM,
             waiting_on="work_item",
             exit_code=4,
             message=f"No eligible work item exists for role `{role}`.",
@@ -189,12 +190,12 @@ def issue_action_request(
             agent_id=agent_id,
             role=role,
             event_type="request_rejected",
-            payload={"reason_code": "MISSING_CLASSIFICATION"},
+            payload={"reason_code": protocol_codes.MISSING_CLASSIFICATION},
         )
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
             status="REQUEST_REJECTED",
-            reason_code="MISSING_CLASSIFICATION",
+            reason_code=protocol_codes.MISSING_CLASSIFICATION,
             waiting_on="classification",
             exit_code=5,
             message=next_action,
@@ -344,7 +345,7 @@ def submit_action_response(
     ledger = _ledger(session)
     response = _load_response_json_object(
         response_path,
-        status="ACTION_REJECTED",
+        status=protocol_codes.ACTION_REJECTED,
         missing_reason_code="RESPONSE_FILE_NOT_FOUND",
         invalid_reason_code="INVALID_RESPONSE_JSON",
         shape_reason_code="INVALID_RESPONSE_SHAPE",
@@ -395,7 +396,7 @@ def submit_batch_action_response(
     ledger = _ledger(session)
     batch = _load_response_json_object(
         batch_path,
-        status="BATCH_ACTION_REJECTED",
+        status=protocol_codes.BATCH_ACTION_REJECTED,
         missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
         invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
         shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
@@ -417,7 +418,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_DUPLICATE_LEASE",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                 )
             seen_leases.add(lease_id)
 
@@ -426,7 +427,7 @@ def submit_batch_action_response(
                 ledger,
                 response,
                 now=now,
-                rejected_status="BATCH_ACTION_REJECTED",
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
             )
             item_id = str(prepared["item_id"])
             if item_id in seen_items:
@@ -435,7 +436,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_DUPLICATE_ITEM",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -449,7 +450,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_ITEM_KIND",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -459,7 +460,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_ROLE",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -469,7 +470,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_RESOLUTION",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -489,7 +490,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     lease_reason_code,
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                     lease_recovery=lease_recovery,
@@ -507,7 +508,7 @@ def submit_batch_action_response(
                     response,
                     prepared,
                     now=now,
-                    rejected_status="BATCH_ACTION_REJECTED",
+                    rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
                     telemetry_seen=telemetry_seen,
                 ),
             )
@@ -691,7 +692,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
     item = _items(session).get(item_id) if item_id else None
     if not isinstance(item, dict):
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_TARGET_NOT_FOUND",
             waiting_on="action_response",
             exit_code=5,
@@ -700,7 +701,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
         )
     if item.get("item_kind") != "github_thread":
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
             waiting_on="action_response",
             exit_code=5,
@@ -710,7 +711,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
     resolution = str(response.get("resolution") or "")
     if resolution and resolution != "fix":
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
             waiting_on="action_response",
             exit_code=5,
@@ -814,7 +815,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _raise_batch_schema_error(reason_code: str, message: str) -> None:
     raise WorkflowError(
-        status="BATCH_ACTION_REJECTED",
+        status=protocol_codes.BATCH_ACTION_REJECTED,
         reason_code=reason_code,
         waiting_on="batch_action_response",
         exit_code=2,
@@ -828,7 +829,7 @@ def _prepare_action_response_submission(
     response: dict[str, Any],
     *,
     now: datetime,
-    rejected_status: str = "ACTION_REJECTED",
+    rejected_status: str = protocol_codes.ACTION_REJECTED,
 ) -> dict[str, Any]:
     lease_id = _required_response_field(response, "lease_id", status=rejected_status)
     lease = session.get("leases", {}).get(lease_id)
@@ -927,7 +928,7 @@ def _accept_action_response_submission(
     prepared: dict[str, Any],
     *,
     now: datetime,
-    rejected_status: str = "ACTION_REJECTED",
+    rejected_status: str = protocol_codes.ACTION_REJECTED,
     telemetry_seen: set[tuple[str, str, str, str, str, str]] | None = None,
 ) -> Any:
     lease_id = str(prepared["lease_id"])
@@ -1098,7 +1099,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_FILES",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1109,7 +1110,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_VALIDATION_COMMANDS",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1120,7 +1121,7 @@ def _validate_batch_fix_contract(
                 ledger,
                 response,
                 "INVALID_BATCH_VALIDATION_COMMAND",
-                status="BATCH_ACTION_REJECTED",
+                status=protocol_codes.BATCH_ACTION_REJECTED,
                 item_id=item_id,
                 lease_id=lease_id,
             )
@@ -1131,7 +1132,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_FIX_REPLY",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1141,7 +1142,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_ITEM_WHY",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1171,7 +1172,7 @@ def _lease_submission_rejection_reason(
     if str(_get(lease, "item_id")) != str(prepared["item_id"]):
         return "WRONG_ITEM"
     if str(_get(lease, "request_hash")) != str(prepared["expected_request_hash"]):
-        return "STALE_REQUEST_CONTEXT"
+        return protocol_codes.STALE_REQUEST_CONTEXT
     return None
 
 
@@ -1187,7 +1188,7 @@ def _raise_response_rejected(
     lease_recovery: dict[str, Any] | None = None,
 ) -> None:
     _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
-    is_batch = status == "BATCH_ACTION_REJECTED"
+    is_batch = status == protocol_codes.BATCH_ACTION_REJECTED
     payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
     message = _response_rejection_message(
         payload_name,
@@ -1437,7 +1438,7 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
         return "UNSUPPORTED_RESOLUTION"
     if resolution == "fix":
         if not _has_classification_evidence(item):
-            return "MISSING_CLASSIFICATION"
+            return protocol_codes.MISSING_CLASSIFICATION
         if not response.get("files"):
             return "MISSING_FILES"
         if not response.get("validation_commands"):
@@ -1479,19 +1480,19 @@ def _expected_request_hash_for_response(
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None, "INVALID_REQUEST_CONTEXT"
         if response_request_id != str(request.get("request_id") or ""):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return expected_hash, None
 
     lease_request_id = _get(lease, "request_id")
     if lease_request_id:
         if response_request_id != str(lease_request_id):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return str(_get(lease, "request_hash")), None
 
     lease_request_hash = _get(lease, "request_hash")
     if lease_request_hash:
         if response_request_id != str(lease_request_hash):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return str(lease_request_hash), None
 
     return None, "REQUEST_CONTEXT_NOT_FOUND"
@@ -1584,7 +1585,7 @@ def _record_response_rejected(
 
 
 
-def _required_response_field(response: dict[str, Any], field: str, *, status: str = "ACTION_REJECTED") -> str:
+def _required_response_field(response: dict[str, Any], field: str, *, status: str = protocol_codes.ACTION_REJECTED) -> str:
     value = response.get(field)
     if not value:
         raise WorkflowError(
@@ -1597,7 +1598,11 @@ def _required_response_field(response: dict[str, Any], field: str, *, status: st
     return str(value)
 
 
-# Batch action-request orchestration lives in agent_batch; re-exported here (at the
-# module bottom, after every shared helper above is defined) so existing
-# `agent_protocol.issue_batch_action_request` callers keep working.
-from gh_address_cr.core.agent_batch import issue_batch_action_request  # noqa: E402,F401
+# Batch action-request orchestration lives in agent_batch, which imports shared
+# helpers from this module. To keep `agent_protocol.issue_batch_action_request`
+# working without a load-time import cycle, delegate lazily at call time — this is
+# robust regardless of which module is imported first.
+def issue_batch_action_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from gh_address_cr.core.agent_batch import issue_batch_action_request as _impl
+
+    return _impl(*args, **kwargs)

@@ -15,7 +15,7 @@ from gh_address_cr import (
     SUPPORTED_SKILL_CONTRACT_VERSIONS,
     __version__,
 )
-from gh_address_cr.core import agent_protocol, command_templates
+from gh_address_cr.core import agent_protocol, command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _chunks,
@@ -121,7 +121,7 @@ def fast_fix_from_batch_input(
 ) -> dict[str, Any]:
     batch = _load_response_json_object(
         batch_path,
-        status="FAST_FIX_ALL_REJECTED",
+        status=protocol_codes.FAST_FIX_ALL_REJECTED,
         missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
         invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
         shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
@@ -172,7 +172,7 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
             missing.append(index)
     if missing:
         raise WorkflowError(
-            status="FAST_FIX_ALL_REJECTED",
+            status=protocol_codes.FAST_FIX_ALL_REJECTED,
             reason_code="MISSING_FIX_ALL_ITEM_REPLY_EVIDENCE",
             waiting_on="batch_action_response",
             exit_code=2,
@@ -213,7 +213,7 @@ def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict
         "for stale or outdated GitHub review threads."
     )
     raise WorkflowError(
-        status="FAST_FIX_ALL_REJECTED",
+        status=protocol_codes.FAST_FIX_ALL_REJECTED,
         reason_code=FIX_ALL_STALE_ROUTE_REASON,
         waiting_on="stale_resolution_input",
         exit_code=4,
@@ -242,7 +242,7 @@ def record_evidence_profile(
     profile_name = name.strip()
     if not profile_name or not EVIDENCE_PROFILE_NAME_RE.match(profile_name):
         raise WorkflowError(
-            status="EVIDENCE_PROFILE_REJECTED",
+            status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
             reason_code="INVALID_EVIDENCE_PROFILE_NAME",
             waiting_on="evidence_profile",
             exit_code=2,
@@ -251,7 +251,7 @@ def record_evidence_profile(
     normalized_files = _normalize_string_list(files)
     if not normalized_files:
         raise WorkflowError(
-            status="EVIDENCE_PROFILE_REJECTED",
+            status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
             reason_code="MISSING_EVIDENCE_PROFILE_FILES",
             waiting_on="evidence_profile",
             exit_code=2,
@@ -260,7 +260,7 @@ def record_evidence_profile(
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_validation:
         raise WorkflowError(
-            status="EVIDENCE_PROFILE_REJECTED",
+            status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
             reason_code="MISSING_EVIDENCE_PROFILE_VALIDATION",
             waiting_on="evidence_profile",
             exit_code=2,
@@ -269,7 +269,7 @@ def record_evidence_profile(
     normalized_commit = commit_hash.strip()
     if not normalized_commit:
         raise WorkflowError(
-            status="EVIDENCE_PROFILE_REJECTED",
+            status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
             reason_code="MISSING_EVIDENCE_PROFILE_COMMIT",
             waiting_on="evidence_profile",
             exit_code=2,
@@ -292,7 +292,7 @@ def record_evidence_profile(
         fix_reply["test_result"] = test_result.strip()
     normalized_severity = _validate_requested_severity(
         severity,
-        status="EVIDENCE_PROFILE_REJECTED",
+        status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
         waiting_on="evidence_profile",
     )
     if normalized_severity:
@@ -373,7 +373,7 @@ def fast_fix_item(
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
         raise WorkflowError(
-            status="FAST_FIX_REJECTED",
+            status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="MISSING_FILES",
             waiting_on="fast_fix_input",
             exit_code=2,
@@ -382,7 +382,7 @@ def fast_fix_item(
         )
     if not normalized_validation:
         raise WorkflowError(
-            status="FAST_FIX_REJECTED",
+            status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="MISSING_VALIDATION_COMMANDS",
             waiting_on="fast_fix_input",
             exit_code=2,
@@ -391,8 +391,8 @@ def fast_fix_item(
         )
     if not commit_hash.strip():
         raise WorkflowError(
-            status="FAST_FIX_REJECTED",
-            reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
             waiting_on="fast_fix_input",
             exit_code=2,
             message="agent fix requires --commit for GitHub thread replies.",
@@ -400,7 +400,7 @@ def fast_fix_item(
         )
     if not summary.strip() or not why.strip():
         raise WorkflowError(
-            status="FAST_FIX_REJECTED",
+            status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="MISSING_SUMMARY_OR_WHY",
             waiting_on="fast_fix_input",
             exit_code=2,
@@ -409,7 +409,7 @@ def fast_fix_item(
         )
     normalized_severity = _validate_requested_severity(
         severity,
-        status="FAST_FIX_REJECTED",
+        status=protocol_codes.FAST_FIX_REJECTED,
         waiting_on="fast_fix_input",
         payload={"item_id": item_id},
     )
@@ -421,7 +421,7 @@ def fast_fix_item(
                 normalized_severity,
                 item,
                 severity_note,
-                status="FAST_FIX_REJECTED",
+                status=protocol_codes.FAST_FIX_REJECTED,
                 waiting_on="fast_fix_input",
                 payload={"item_id": item_id},
             )
@@ -432,7 +432,7 @@ def fast_fix_item(
     )
     if review_priority and requested_priority_evidence is None:
         raise WorkflowError(
-            status="FAST_FIX_REJECTED",
+            status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="INVALID_REVIEW_PRIORITY",
             waiting_on="fast_fix_input",
             exit_code=2,
@@ -628,7 +628,7 @@ def _build_fast_fix_context(
     if not commit_hash.strip():
         raise WorkflowError(
             status=rejected_status,
-            reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+            reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
             waiting_on=input_waiting_on,
             exit_code=2,
             message=f"{command_name} requires --commit.",

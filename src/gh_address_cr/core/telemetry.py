@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.command_runner import telemetry_debug_enabled
 from gh_address_cr.core.io import write_json_atomic
 
@@ -58,7 +59,7 @@ def configure_context_safely(repo: str, pr_number: str) -> None:
     """Configure the telemetry session context without ever raising into the caller."""
     try:
         SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-    except Exception as exc:  # noqa: BLE001 - telemetry must not break core flows
+    except Exception as exc:  # intentionally broad: telemetry must not break core flows
         _log_telemetry_failure("context configuration", exc)
 
 
@@ -641,8 +642,8 @@ def _resolve_import_status(
     if duplicate_count and not rejected_count:
         return "FAILED", "DUPLICATE_TELEMETRY_IMPORT", "All telemetry events were duplicates."
     if malformed_seen:
-        return "FAILED", "MALFORMED_TELEMETRY", None
-    return "FAILED", "MALFORMED_TELEMETRY", "No telemetry events were provided."
+        return "FAILED", protocol_codes.MALFORMED_TELEMETRY, None
+    return "FAILED", protocol_codes.MALFORMED_TELEMETRY, "No telemetry events were provided."
 
 
 def _load_import_state(paths, *, source: str, fmt: str):
@@ -706,7 +707,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             paths,
             source=source,
             fmt=fmt,
-            reason_code="MALFORMED_TELEMETRY",
+            reason_code=protocol_codes.MALFORMED_TELEMETRY,
             diagnostics=[f"Adapter parsing failed: {type(exc).__name__}"],
         )
 
@@ -728,7 +729,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             paths,
             source=source,
             fmt=fmt,
-            reason_code="MALFORMED_TELEMETRY",
+            reason_code=protocol_codes.MALFORMED_TELEMETRY,
             diagnostics=[f"Adapter diagnostics processing failed: {type(exc).__name__}"],
         )
 
@@ -771,7 +772,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             paths,
             source=source,
             fmt=fmt,
-            reason_code="MALFORMED_TELEMETRY",
+            reason_code=protocol_codes.MALFORMED_TELEMETRY,
             diagnostics=[f"Adapter event processing failed: {type(exc).__name__}"],
         )
 

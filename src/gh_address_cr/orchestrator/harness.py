@@ -9,7 +9,7 @@ from typing import List, Optional
 from uuid import uuid4
 
 from gh_address_cr import __version__
-from gh_address_cr.core import agent_protocol
+from gh_address_cr.core import agent_protocol, protocol_codes
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as core_session
 from gh_address_cr.core.errors import WorkflowError
@@ -73,7 +73,7 @@ def _parse_common_args(args: List[str]):
     try:
         return parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
-        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        _output_signal("FAILED", protocol_codes.INVALID_ARGUMENTS, "HALT", str(e))
         sys.exit(2)
 
 
@@ -113,7 +113,7 @@ def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> 
             _output_signal("FAILED", "SYSTEM_EXIT", "HALT", e.code)
         return e.code if isinstance(e.code, int) else 2
     except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", str(e))
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", str(e))
         return 5
 
 
@@ -127,7 +127,7 @@ def handle_submit(args: List[str]) -> int:
     try:
         parsed, _ = parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
-        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        _output_signal("FAILED", protocol_codes.INVALID_ARGUMENTS, "HALT", str(e))
         return 2
     repo, pr = parsed.repo, parsed.pr_number
 
@@ -187,16 +187,16 @@ def handle_submit(args: List[str]) -> int:
         )
         return 0
     except (WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
-        _output_signal("FAILED", "STALE_REQUEST_CONTEXT", "RETRY", f"Submission failed: {e}")
+        _output_signal("FAILED", protocol_codes.STALE_REQUEST_CONTEXT, "RETRY", f"Submission failed: {e}")
         return 2
     except OrchestrationSessionError as e:
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", f"Submission failed: {e}")
+        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", f"Submission failed: {e}")
         return 2
     except HumanHandoffRequired as e:
         _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: {e}")
         return 2
     except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Unexpected error: {e}")
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Unexpected error: {e}")
         return 5
 
 
@@ -208,7 +208,7 @@ def handle_autopilot(args: List[str]) -> int:
     try:
         parsed, _ = parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
-        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        _output_signal("FAILED", protocol_codes.INVALID_ARGUMENTS, "HALT", str(e))
         return 2
 
     runtime_state = _load_runtime_state(parsed.repo, parsed.pr_number)
@@ -346,7 +346,7 @@ def handle_start(args: List[str]) -> int:
         return 0
     except (Exception, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to start orchestration: {msg}")
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to start orchestration: {msg}")
         return 5
 
 
@@ -360,7 +360,7 @@ def handle_step(args: List[str]) -> int:
     try:
         parsed, _ = parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
-        _output_signal("FAILED", "INVALID_ARGUMENTS", "HALT", str(e))
+        _output_signal("FAILED", protocol_codes.INVALID_ARGUMENTS, "HALT", str(e))
         return 2
     repo, pr = parsed.repo, parsed.pr_number
 
@@ -387,10 +387,10 @@ def handle_step(args: List[str]) -> int:
 
     except (OrchestrationSessionError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
+        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", msg)
         return 2
     except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to synchronize runtime queue: {e}")
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to synchronize runtime queue: {e}")
         return 2
 
     # Simple dequeue logic
@@ -414,7 +414,7 @@ def handle_step(args: List[str]) -> int:
             agent_id=f"orchestrator:{session.run_id}",
         )
     except WorkflowError as e:
-        if e.reason_code in {"NO_ELIGIBLE_ITEM"}:
+        if e.reason_code in {protocol_codes.NO_ELIGIBLE_ITEM}:
             _sync_queue_from_runtime(session, enforce_budget=False)
             save_orchestration_session(session)
             warnings = session.pop_audit_warnings()
@@ -424,7 +424,7 @@ def handle_step(args: List[str]) -> int:
                 _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
             return 0
 
-        if e.reason_code in {"MISSING_CLASSIFICATION", "REQUEST_REJECTED"}:
+        if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION, "REQUEST_REJECTED"}:
             save_orchestration_session(session)
             warnings = session.pop_audit_warnings()
             _output_signal("WAITING", e.reason_code, "RETRY", str(e), warnings)
@@ -489,10 +489,10 @@ def handle_resume(args: List[str]) -> int:
         return 0
     except (OrchestrationSessionError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
+        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", msg)
         return 2
     except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Failed to resume orchestration: {e}")
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to resume orchestration: {e}")
         return 5
 
 
@@ -520,13 +520,13 @@ def handle_status(args: List[str]) -> int:
         return 0
     except (OrchestrationSessionError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
-        _output_signal("FAILED", "SESSION_ERROR", "HALT", msg)
+        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", msg)
         return 2
     except RuntimeError as e:
         _output_signal("FAILED", "RECONCILIATION_TIMEOUT", "RETRY", str(e))
         return 2
     except Exception as e:
-        _output_signal("FAILED", "SYSTEM_ERROR", "HALT", f"Unexpected error during status: {e}")
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Unexpected error during status: {e}")
         return 5
 
 

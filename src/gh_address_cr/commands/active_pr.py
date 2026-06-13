@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 
@@ -64,7 +65,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     except RuntimeError as exc:
         return _emit_active_pr_payload(
             {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": parsed.repo,
                 "head": parsed.head,
                 "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
@@ -91,7 +92,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     if shutil.which("gh") is None:
         return _emit_active_pr_payload(
             {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
                 "reason_code": "GH_NOT_FOUND",
@@ -106,7 +107,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
         diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
         return _emit_active_pr_payload(
             {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
                 "reason_code": "ACTIVE_PR_QUERY_FAILED",
@@ -122,7 +123,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     except json.JSONDecodeError as exc:
         return _emit_active_pr_payload(
             {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
                 "reason_code": "ACTIVE_PR_INVALID_JSON",
@@ -168,7 +169,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     if not pr_number or not pr_number.isdigit():
         return _emit_active_pr_payload(
             {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
                 "reason_code": "ACTIVE_PR_INVALID_RESPONSE",

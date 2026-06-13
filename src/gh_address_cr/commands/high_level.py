@@ -538,7 +538,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
                 end_time=end_time,
                 exit_code=exit_code,
             )
-        except Exception as exc:  # noqa: BLE001 - telemetry must not break command execution
+        except Exception as exc:  # intentionally broad: telemetry must not break command execution
             from gh_address_cr.core.command_runner import telemetry_debug_enabled
 
             if telemetry_debug_enabled():

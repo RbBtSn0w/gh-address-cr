@@ -12,6 +12,7 @@ build/
 htmlcov/
 coverage.xml
 coverage/
+.mypy_cache/
 *.tmp
 *.log
 *.swp

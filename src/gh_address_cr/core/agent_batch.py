@@ -14,12 +14,13 @@ from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import MAX_PARALLEL_CLAIMS, PROTOCOL_VERSION
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 
-# Shared protocol helpers/constants owned by agent_protocol. This import is safe because
-# agent_protocol re-exports issue_batch_action_request at its module bottom (after all of
-# these are defined), and nothing imports agent_batch before agent_protocol.
-from gh_address_cr.core.agent_protocol import (  # noqa: E402
+# Shared protocol helpers/constants owned by agent_protocol. Safe to import at the top:
+# agent_protocol exposes issue_batch_action_request via a lazy call-time wrapper, so it
+# has no load-time dependency on agent_batch and either module may be imported first.
+from gh_address_cr.core.agent_protocol import (
     _BATCH_CLASSIFICATION_NOTE,
     TERMINAL_RESOLUTIONS,
     _active_fixer_lease_for_item,
@@ -310,8 +311,8 @@ def _build_batch_skeleton(agent_id, leased_items, existing_items_replies, existi
 
 def _no_eligible_item_error() -> WorkflowError:
     return WorkflowError(
-        status="NO_ELIGIBLE_ITEM",
-        reason_code="NO_ELIGIBLE_ITEM",
+        status=protocol_codes.NO_ELIGIBLE_ITEM,
+        reason_code=protocol_codes.NO_ELIGIBLE_ITEM,
         waiting_on="work_item",
         exit_code=4,
         message="No eligible unresolved github review thread exists.",

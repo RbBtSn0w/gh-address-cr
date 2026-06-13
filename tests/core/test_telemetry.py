@@ -217,12 +217,12 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["total_events"], 2)
             self.assertEqual(report["success_rate"], 100.0)
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_text):
+    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
-            write_text.side_effect = OSError("disk full")
+            write_json.side_effect = OSError("disk full")
             tracker = SessionTelemetry.get_instance()
             tracker.configure_context("octo/example", "77")
             tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
@@ -236,12 +236,12 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_text):
+    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
-            write_text.side_effect = FileNotFoundError(
+            write_json.side_effect = FileNotFoundError(
                 2,
                 "No such file or directory",
                 "/private/tmp/secret/efficiency-report.json",
@@ -268,10 +268,10 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["telemetry_overhead_ms"], 300.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_text):
+    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
 
@@ -279,7 +279,7 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["telemetry_overhead_ms"], 400.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
-            self.assertEqual(write_text.call_count, 1)
+            self.assertEqual(write_json.call_count, 1)
 
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
