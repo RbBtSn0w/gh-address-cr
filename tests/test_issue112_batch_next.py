@@ -481,3 +481,51 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         session = self.load_session()
         self.assertEqual(session["items"]["thread-classified"]["state"], "claimed")
+
+    def test_submit_batch_rejection_prioritizes_lease_recovery(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "title": "Concern 1",
+                "body": "First issue",
+                "path": "src/a.py",
+                "line": 10,
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            }
+        ]
+        self.init_session(items)
+        requested = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
+        )
+        self.assertEqual(requested.returncode, 0)
+        request_payload = json.loads(requested.stdout)
+        skeleton_path = Path(request_payload["response_skeleton_path"])
+        skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        skeleton["common"]["files"] = ["src/a.py"]
+        skeleton["common"]["validation_commands"][0]["command"] = "python3 -m unittest"
+        skeleton["common"]["fix_reply"]["test_command"] = "python3 -m unittest"
+        skeleton["common"]["fix_reply"]["test_result"] = "passed"
+        for item in skeleton["items"]:
+            item["fix_reply"]["summary"] = "Fixed"
+            item["fix_reply"]["why"] = "Why fixed"
+        skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Artificially expire the lease in the session so it triggers EXPIRED_LEASE
+        session = self.load_session()
+        lease_id = list(session["leases"].keys())[0]
+        session["leases"][lease_id]["expires_at"] = "2020-01-01T00:00:00Z"
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        # Submit should fail with BATCH_ACTION_REJECTED due to expired lease and return lease recovery guidance
+        rejected = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+        )
+        self.assertEqual(rejected.returncode, 5)
+        payload = json.loads(rejected.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertIn("lease_recovery", payload)
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "renew")
+        self.assertIn("Please renew the expired lease", payload["next_action"])
