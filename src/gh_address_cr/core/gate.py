@@ -91,6 +91,9 @@ class GateResult:
             "waiting_on": self.waiting_on,
             "next_action": _next_action(self.reason_code, repo=self.repo, pr_number=self.pr_number, passed=self.passed),
             "exit_code": self.exit_code,
+            # Authoritative completion proof (pending reviews + checks evaluated),
+            # distinct from the inline pre-gate emitted by review/address/threads.
+            "gate_scope": "final",
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
             "commands": _final_gate_commands(self.repo, self.pr_number),

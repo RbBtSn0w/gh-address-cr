@@ -80,6 +80,7 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIsNone(summary["waiting_on"])
         self.assertEqual(summary["exit_code"], 0)
         self.assertEqual(summary["next_action"], "Completion may be claimed.")
+        self.assertEqual(summary["gate_scope"], "final")  # #119: authoritative scope
         self.assertEqual(summary["failure_codes"], [])
         self.assertIsNone(summary["check_requirement"])
         self.assertEqual(

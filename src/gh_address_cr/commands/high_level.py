@@ -81,6 +81,7 @@ def _build_preflight_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
+        "gate_scope": "inline",
         "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
@@ -174,6 +175,11 @@ def _recalc_native_metrics(session: dict) -> None:
 
 def _read_findings_input(input_path: str | None) -> str:
     if input_path == "-":
+        # Fail loud on an interactive TTY instead of blocking forever waiting for
+        # EOF that will never arrive (#115). Piped-but-empty input still reaches
+        # the explicit EMPTY_FINDINGS_INPUT_MESSAGE check downstream.
+        if sys.stdin.isatty():
+            raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
         return sys.stdin.read()
     if not input_path:
         return ""
@@ -325,6 +331,9 @@ def _native_summary(
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
+        # Inline pre-gate: not the authoritative completion proof. Only
+        # `final-gate` (gate_scope=final) checks pending reviews and PR checks.
+        "gate_scope": "inline",
         "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
@@ -394,6 +403,52 @@ def _auto_simple_local_gate_failed(result: core_gate.GateResult) -> bool:
         }
         for code in result.failure_codes
     )
+
+
+def _emit_auto_simple_not_eligible(
+    *,
+    command: str,
+    repo: str,
+    pr_number: str,
+    run_id: str,
+    max_iterations: int,
+    session: dict,
+    item: dict | None,
+    human: bool,
+    lean: bool,
+) -> int:
+    """Single emission point for the auto-simple-meets-local-findings block (#121)."""
+    next_action = (
+        "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
+        "to handle local findings, then rerun this command."
+    )
+    _set_loop_state(
+        session,
+        run_id=run_id,
+        status="BLOCKED",
+        iteration=1,
+        max_iterations=max_iterations,
+        current_item_id=item.get("item_id") if item else None,
+        last_error=next_action,
+    )
+    _recalc_native_metrics(session)
+    session_store.save_session(repo, pr_number, session)
+    summary = _native_summary(
+        command=command,
+        repo=repo,
+        pr_number=pr_number,
+        status="BLOCKED",
+        reason_code="AUTO_SIMPLE_NOT_ELIGIBLE",
+        waiting_on="local_findings",
+        next_action=next_action,
+        exit_code=5,
+        session=session,
+        item=item,
+        include_threads=True,
+        lean=lean,
+    )
+    _emit_native_summary(summary, human=human)
+    return 5
 
 
 def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, command: str, run_id: str) -> Path:
@@ -639,38 +694,17 @@ class HighLevelReviewRuntime:
                 session = core_gate.session_with_remote_threads(session, remote_threads)
             _recalc_native_metrics(session)
             if auto_simple and _blocking_local_items(session):
-                next_action = (
-                    "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
-                    "to handle local findings, then rerun this command."
-                )
-                item = _blocking_local_items(session)[0]
-                _set_loop_state(
-                    session,
-                    run_id=run_id,
-                    status="BLOCKED",
-                    iteration=1,
-                    max_iterations=parsed.max_iterations,
-                    current_item_id=item.get("item_id"),
-                    last_error=next_action,
-                )
-                _recalc_native_metrics(session)
-                session_store.save_session(repo, pr_number, session)
-                summary = _native_summary(
+                return _emit_auto_simple_not_eligible(
                     command=command,
                     repo=repo,
                     pr_number=pr_number,
-                    status="BLOCKED",
-                    reason_code="AUTO_SIMPLE_NOT_ELIGIBLE",
-                    waiting_on="local_findings",
-                    next_action=next_action,
-                    exit_code=5,
+                    run_id=run_id,
+                    max_iterations=parsed.max_iterations,
                     session=session,
-                    item=item,
-                    include_threads=True,
+                    item=_blocking_local_items(session)[0],
+                    human=human,
                     lean=lean,
                 )
-                _emit_native_summary(summary, human=human)
-                return 5
             result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
         except (FindingsFormatError, OSError) as exc:
             _set_loop_state(
@@ -726,38 +760,17 @@ class HighLevelReviewRuntime:
 
         if auto_simple and not result.passed:
             if _auto_simple_local_gate_failed(result):
-                next_action = (
-                    "Auto-simple only handles GitHub review threads. Run normal review/findings/adapter workflow "
-                    "to handle local findings, then rerun this command."
-                )
-                item = _first_local_item(session) or _first_blocking_item(session)
-                _set_loop_state(
-                    session,
-                    run_id=run_id,
-                    status="BLOCKED",
-                    iteration=1,
-                    max_iterations=parsed.max_iterations,
-                    current_item_id=item.get("item_id") if item else None,
-                    last_error=next_action,
-                )
-                _recalc_native_metrics(session)
-                session_store.save_session(repo, pr_number, session)
-                summary = _native_summary(
+                return _emit_auto_simple_not_eligible(
                     command=command,
                     repo=repo,
                     pr_number=pr_number,
-                    status="BLOCKED",
-                    reason_code="AUTO_SIMPLE_NOT_ELIGIBLE",
-                    waiting_on="local_findings",
-                    next_action=next_action,
-                    exit_code=5,
+                    run_id=run_id,
+                    max_iterations=parsed.max_iterations,
                     session=session,
-                    item=item,
-                    include_threads=True,
+                    item=_first_local_item(session) or _first_blocking_item(session),
+                    human=human,
                     lean=lean,
                 )
-                _emit_native_summary(summary, human=human)
-                return 5
             item = _first_blocking_item(session)
             request_path = _write_simple_address_request(repo, pr_number, session, command=command, run_id=run_id)
             next_action = (
