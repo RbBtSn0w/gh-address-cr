@@ -29,6 +29,12 @@ dependencies = [
   "packaging>=24",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "coverage>=7",
+  "ruff>=0.15",
+]
+
 [project.urls]
 Homepage = "https://github.com/RbBtSn0w/gh-address-cr"
 Source = "https://github.com/RbBtSn0w/gh-address-cr"
@@ -56,3 +62,15 @@ ignore = ["E501"]
 [tool.ruff.lint.mccabe]
 # Ratchet target: lower this over time as legacy hot-path functions are decomposed.
 max-complexity = 20
+
+[tool.coverage.run]
+branch = true
+source = ["gh_address_cr"]
+
+[tool.coverage.report]
+# Ratchet target: raise as coverage improves. Measured baseline is ~69% (branch).
+# Floor set a few points below to absorb cross-environment variance; ratchet up over time.
+# NOTE: the CLI subprocess tests (test_python_wrappers) execute in child
+# processes and are NOT counted here, so true coverage is higher than reported.
+fail_under = 65
+skip_covered = false

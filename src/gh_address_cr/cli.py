@@ -31,6 +31,7 @@ from gh_address_cr.commands.high_level import (
 from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
@@ -271,7 +272,7 @@ def alias_help(command: str) -> str:
 
 def persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
     path = last_machine_summary_file(repo, pr_number)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(path, payload)
 
 
 def external_review_command(repo: str, pr_number: str) -> str:
@@ -361,7 +362,7 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
         return None, None, None
 
     normalized_path = normalized_handoff_findings_file(repo, pr_number)
-    normalized_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(normalized_path, findings)
     return (
         str(normalized_path),
         hashlib.sha256(canonical_findings_payload(findings).encode("utf-8")).hexdigest(),

@@ -25,6 +25,7 @@ from gh_address_cr.core.handoff import (
 from gh_address_cr.core.handoff import (
     record_producer_result,
 )
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -47,7 +48,7 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
 
 def _persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
     path = _workspace_root(repo, pr_number) / "last-machine-summary.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(path, payload)
 
 
 def _build_preflight_summary(
@@ -97,12 +98,9 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict:
         created = True
     _ensure_native_session_fields(session)
     if created:
-        try:
-            from gh_address_cr.core.telemetry import SessionTelemetry
+        from gh_address_cr.core.telemetry import configure_context_safely
 
-            SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-        except Exception:
-            pass
+        configure_context_safely(repo, pr_number)
     return session
 
 
@@ -274,7 +272,7 @@ def _write_native_action_request(repo: str, pr_number: str, item: dict, *, comma
         ],
         "resume_command": f"gh-address-cr {command} {repo} {pr_number}",
     }
-    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(request_path, request)
     return request_path
 
 
@@ -420,7 +418,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         ],
         "commands": summary_commands(repo, pr_number),
     }
-    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(request_path, request)
     return request_path
 
 
@@ -540,8 +538,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
                 end_time=end_time,
                 exit_code=exit_code,
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - telemetry must not break command execution
+            from gh_address_cr.core.command_runner import telemetry_debug_enabled
+
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
 
     if error is not None:
         return None, error

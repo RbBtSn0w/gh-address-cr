@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from gh_address_cr.core import session as core_session
+from gh_address_cr.core.io import write_json_atomic
 
 STATE_INITIALIZED = "INITIALIZED"
 STATE_RUNNING = "RUNNING"
@@ -220,7 +221,7 @@ def save_orchestration_session(session: OrchestrationSession) -> None:
     workspace = core_session.workspace_dir(session.repo, session.pr_number)
     workspace.mkdir(parents=True, exist_ok=True)
     path = workspace / "orchestration.json"
-    path.write_text(json.dumps(session.to_dict(), indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(path, session.to_dict())
 
 
 def load_orchestration_session(repo: str, pr_number: str) -> OrchestrationSession:

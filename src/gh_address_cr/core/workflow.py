@@ -30,6 +30,7 @@ from gh_address_cr.core.github_thread_state import (
     is_stale_github_thread_item,
     is_stale_or_outdated_github_thread,
 )
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.severity import (
     review_priority_evidence,
 )
@@ -486,7 +487,7 @@ def fast_fix_item(
             "validation_commands": normalized_validation,
             "fix_reply": fix_reply,
         }
-        response_path.write_text(json.dumps(response, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json_atomic(response_path, response)
         submitted = agent_protocol.submit_action_response(
             repo,
             pr_number,

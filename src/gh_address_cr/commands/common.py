@@ -88,7 +88,9 @@ def active_cached_sessions() -> list[tuple[str, str, Path]]:
                 if pr_number and cached_session_is_active(session_path):
                     sessions.append((repo, pr_number, session_path))
         return sessions
-    except Exception:
+    except OSError:
+        # Filesystem unavailable mid-scan: treat as "no cached sessions".
+        # Narrowed from Exception so genuine logic errors surface instead of being masked.
         return []
 
 

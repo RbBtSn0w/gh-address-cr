@@ -19,6 +19,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core.io import write_json_atomic
 
 HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
 HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
@@ -233,7 +234,7 @@ def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_rep
     try:
         if report_path.is_dir():
             shutil.rmtree(report_path)
-        report_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json_atomic(report_path, current)
     except OSError:
         return
 

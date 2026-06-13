@@ -264,12 +264,9 @@ def publish_github_thread_responses(
 
 
 def _configure_publish_telemetry(repo: str, pr_number: str) -> None:
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
+    from gh_address_cr.core.telemetry import configure_context_safely
 
-        SessionTelemetry.get_instance().configure_context(repo, pr_number)
-    except Exception:
-        return
+    configure_context_safely(repo, pr_number)
 
 def _publish_ready_items(session: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     ready: list[tuple[str, dict[str, Any]]] = []

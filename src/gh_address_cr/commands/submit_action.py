@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from gh_address_cr.core.io import write_json_atomic
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -247,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{output_prefix}-{item_id}.json"
 
-    output_path.write_text(json.dumps(action, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(output_path, action)
 
     script_path = output_dir / f"fixer-{item_id}.sh"
     script_path.write_text(f"#!/bin/sh\ncat {shlex.quote(str(output_path))}\n", encoding="utf-8")
