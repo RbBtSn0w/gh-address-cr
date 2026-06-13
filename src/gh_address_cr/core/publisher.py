@@ -4,29 +4,46 @@ import subprocess
 from datetime import datetime
 from typing import Any
 
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.reply_templates import (
     clarify_reply as render_clarify_reply,
+)
+from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
+)
+from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
-from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+)
+from gh_address_cr.core.utils import (
+    fix_reply_severity_for_publish as _fix_reply_severity_for_publish,
+)
+from gh_address_cr.core.utils import (
+    format_timestamp as _format_timestamp,
+)
+from gh_address_cr.core.utils import (
+    get_session_items as _items,
+)
+from gh_address_cr.core.utils import (
+    get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
+    normalize_string_list as _normalize_string_list,
+)
+from gh_address_cr.core.utils import (
+    normalize_validation_commands as _normalize_validation_commands,
+)
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
-from gh_address_cr.core.utils import (
-    coerce_now as _coerce_now,
-    format_timestamp as _format_timestamp,
-    get_session_items as _items,
-    get_session_ledger as _ledger,
-    normalize_string_list as _normalize_string_list,
-    normalize_validation_commands as _normalize_validation_commands,
-    fix_reply_severity_for_publish as _fix_reply_severity_for_publish,
-)
 
 
 def publish_github_thread_responses(
@@ -61,7 +78,7 @@ def publish_github_thread_responses(
             _record_publish_blocked(session, ledger, item_id, agent_id, "MISSING_ACCEPTED_RESPONSE")
             session_store.save_session(repo, pr_number, session)
             raise WorkflowError(
-                status="PUBLISH_BLOCKED",
+                status=protocol_codes.PUBLISH_BLOCKED,
                 reason_code="MISSING_ACCEPTED_RESPONSE",
                 waiting_on="action_response",
                 exit_code=5,
@@ -73,7 +90,7 @@ def publish_github_thread_responses(
             _record_publish_blocked(session, ledger, item_id, agent_id, "MISSING_THREAD_ID")
             session_store.save_session(repo, pr_number, session)
             raise WorkflowError(
-                status="PUBLISH_BLOCKED",
+                status=protocol_codes.PUBLISH_BLOCKED,
                 reason_code="MISSING_THREAD_ID",
                 waiting_on="github_thread",
                 exit_code=5,
@@ -97,11 +114,11 @@ def publish_github_thread_responses(
         hydrated_response = _hydrate_publish_response(session, item, response, default_commit_hash=resolved_commit_hash)
         reply_body, error = publish_reply_body(item, hydrated_response)
         if not reply_body:
-            _record_publish_blocked(session, ledger, item_id, agent_id, error or "MISSING_PUBLISH_REPLY")
+            _record_publish_blocked(session, ledger, item_id, agent_id, error or protocol_codes.MISSING_PUBLISH_REPLY)
             session_store.save_session(repo, pr_number, session)
             raise WorkflowError(
-                status="PUBLISH_BLOCKED",
-                reason_code=error or "MISSING_PUBLISH_REPLY",
+                status=protocol_codes.PUBLISH_BLOCKED,
+                reason_code=error or protocol_codes.MISSING_PUBLISH_REPLY,
                 waiting_on="reply_evidence",
                 exit_code=5,
                 message=f"Publish-ready item has no valid GitHub reply body: {item_id}",
@@ -248,12 +265,9 @@ def publish_github_thread_responses(
 
 
 def _configure_publish_telemetry(repo: str, pr_number: str) -> None:
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
+    from gh_address_cr.core.telemetry import configure_context_safely
 
-        SessionTelemetry.get_instance().configure_context(repo, pr_number)
-    except Exception:
-        return
+    configure_context_safely(repo, pr_number)
 
 def _publish_ready_items(session: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     ready: list[tuple[str, dict[str, Any]]] = []
@@ -290,7 +304,7 @@ def _github_thread_id(item_id: str, item: dict[str, Any]) -> str:
 def validate_fix_reply_for_submit(item: dict[str, Any], response: dict[str, Any]) -> str | None:
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
-        return "MISSING_PUBLISH_REPLY"
+        return protocol_codes.MISSING_PUBLISH_REPLY
     files = _normalize_string_list(fix_reply.get("files") or response.get("files"))
     if not files:
         return "MISSING_FIX_REPLY_FILES"
@@ -367,7 +381,7 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
 
     if resolution != "fix":
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
-            return None, "MISSING_PUBLISH_REPLY"
+            return None, protocol_codes.MISSING_PUBLISH_REPLY
         if resolution == "clarify":
             return render_clarify_reply([reply_markdown.strip()]), None
         if resolution == "defer":
@@ -375,13 +389,13 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
-        return None, "MISSING_PUBLISH_REPLY"
+        return None, protocol_codes.MISSING_PUBLISH_REPLY
     submit_error = validate_fix_reply_for_submit(item, response)
     if submit_error:
         return None, submit_error
     commit_hash = str(fix_reply.get("commit_hash") or "").strip()
     if not commit_hash:
-        return None, "MISSING_FIX_REPLY_COMMIT_HASH"
+        return None, protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH
     files = _normalize_string_list(fix_reply.get("files") or response.get("files"))
     if not files:
         return None, "MISSING_FIX_REPLY_FILES"
@@ -407,7 +421,7 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
             review_priority_note=review_priority_note,
         ), None
     except SystemExit as exc:
-        return None, str(exc) or "MISSING_PUBLISH_REPLY"
+        return None, str(exc) or protocol_codes.MISSING_PUBLISH_REPLY
 
 
 
@@ -472,7 +486,7 @@ def _publish_error(repo: str, pr_number: str, item_id: str, exc: GitHubError) ->
     if exc.diagnostics:
         payload["diagnostics"] = exc.diagnostics
     return WorkflowError(
-        status="PUBLISH_BLOCKED",
+        status=protocol_codes.PUBLISH_BLOCKED,
         reason_code=exc.reason_code,
         waiting_on=github_waiting_on(exc.diagnostics),
         exit_code=5,

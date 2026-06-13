@@ -1,6 +1,8 @@
 import inspect
 import unittest
-from gh_address_cr.core.reply_templates import fix_reply, clarify_reply, defer_reply, _normalize_severity
+
+from gh_address_cr.core.reply_templates import _normalize_severity, clarify_reply, defer_reply, fix_reply
+
 
 class TestReplyTemplates(unittest.TestCase):
     def test_normalize_severity_p0_p4(self):

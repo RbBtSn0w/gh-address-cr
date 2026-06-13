@@ -1,7 +1,7 @@
 import json
 import os
-from uuid import uuid4
 from typing import Any, Dict, List
+from uuid import uuid4
 
 MAX_RETRIES = 3
 
@@ -28,8 +28,8 @@ def parse_and_validate_response(
             response = json.loads(content)
     except json.JSONDecodeError as e:
         if retry_count >= MAX_RETRIES:
-            raise HumanHandoffRequired(f"Max retries ({MAX_RETRIES}) reached. Failed to parse JSON: {e}")
-        raise WorkerPacketValidationError(f"Failed to parse JSON response: {e}")
+            raise HumanHandoffRequired(f"Max retries ({MAX_RETRIES}) reached. Failed to parse JSON: {e}") from e
+        raise WorkerPacketValidationError(f"Failed to parse JSON response: {e}") from e
 
     validate_action_response(response, required_evidence)
     return response

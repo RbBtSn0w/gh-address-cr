@@ -11,6 +11,7 @@ from gh_address_cr.commands.common import (
     prepend_optional,
 )
 from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core.io import write_json_atomic
 
 
 def handle_telemetry_command(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
@@ -121,6 +122,6 @@ def write_telemetry_report_payload(payload: dict) -> None:
     path = Path(report_artifact)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json_atomic(path, payload)
     except OSError:
         return

@@ -4,6 +4,7 @@ import unittest
 
 from tests.helpers import SRC_ROOT
 
+
 class VersionQueryTestCase(unittest.TestCase):
     def run_cli(self, args):
         env = {"PYTHONPATH": str(SRC_ROOT)}

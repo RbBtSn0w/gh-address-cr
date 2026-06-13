@@ -4,7 +4,6 @@ import unittest
 
 from tests.helpers import ROOT, SRC_ROOT
 
-
 sys.path.insert(0, str(SRC_ROOT))
 
 from gh_address_cr.agent.manifests import (  # noqa: E402
@@ -26,18 +25,17 @@ from gh_address_cr.agent.responses import (  # noqa: E402
 )
 from gh_address_cr.agent.roles import AgentRole  # noqa: E402
 from gh_address_cr.core.models import (  # noqa: E402
+    LEASE_RECOVERY_OUTCOMES,
+    LOGIC_VALIDATION_GATE_EFFECTS,
+    RUNTIME_COMPLEXITY_REASON_CODES,
     ActionRequest,
     CapabilityManifest,
     ClaimLease,
-    LEASE_RECOVERY_OUTCOMES,
-    LeaseRecoveryState,
-    LOGIC_VALIDATION_GATE_EFFECTS,
-    RUNTIME_COMPLEXITY_REASON_CODES,
     EvidenceRecord,
+    LeaseRecoveryState,
     ReviewSession,
     WorkItem,
 )
-
 
 FIXTURES_DIR = ROOT / "tests" / "fixtures" / "action_protocol"
 

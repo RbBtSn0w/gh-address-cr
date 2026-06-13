@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from gh_address_cr import PROTOCOL_VERSION, MAX_PARALLEL_CLAIMS
+from gh_address_cr import PROTOCOL_VERSION
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
@@ -16,6 +17,8 @@ from gh_address_cr.core.github_thread_state import (
     is_github_thread_item,
     is_stale_github_thread_item,
 )
+from gh_address_cr.core.ids import stable_id as _stable_id
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
@@ -27,23 +30,39 @@ from gh_address_cr.core.leases import (
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
-from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.core.severity import first_scene_item_severity
-from gh_address_cr.evidence.ledger import EvidenceLedger
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
-    json_ready as _json_ready,
-    get_session_items as _items,
-    get_session_ledger as _ledger,
-    normalize_string_list as _normalize_string_list,
-    normalize_optional_fix_reply_severity as _normalize_optional_fix_reply_severity,
-    severity_override_note as _severity_override_note,
+)
+from gh_address_cr.core.utils import (
     fix_reply_severity_rejection_reason as _fix_reply_severity_rejection_reason,
-    return_expired_items_to_open as _return_expired_items_to_open,
-    return_item_to_claimable_state as _return_item_to_claimable_state,
+)
+from gh_address_cr.core.utils import (
     get_field as _get,
 )
-
+from gh_address_cr.core.utils import (
+    get_session_items as _items,
+)
+from gh_address_cr.core.utils import (
+    get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
+    normalize_optional_fix_reply_severity as _normalize_optional_fix_reply_severity,
+)
+from gh_address_cr.core.utils import (
+    normalize_string_list as _normalize_string_list,
+)
+from gh_address_cr.core.utils import (
+    return_expired_items_to_open as _return_expired_items_to_open,
+)
+from gh_address_cr.core.utils import (
+    return_item_to_claimable_state as _return_item_to_claimable_state,
+)
+from gh_address_cr.core.utils import (
+    severity_override_note as _severity_override_note,
+)
+from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
+from gh_address_cr.evidence.ledger import EvidenceLedger
 
 MUTATING_ROLES = {"fixer"}
 TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
@@ -148,8 +167,8 @@ def issue_action_request(
     if item is None:
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
-            status="NO_ELIGIBLE_ITEM",
-            reason_code="NO_ELIGIBLE_ITEM",
+            status=protocol_codes.NO_ELIGIBLE_ITEM,
+            reason_code=protocol_codes.NO_ELIGIBLE_ITEM,
             waiting_on="work_item",
             exit_code=4,
             message=f"No eligible work item exists for role `{role}`.",
@@ -171,12 +190,12 @@ def issue_action_request(
             agent_id=agent_id,
             role=role,
             event_type="request_rejected",
-            payload={"reason_code": "MISSING_CLASSIFICATION"},
+            payload={"reason_code": protocol_codes.MISSING_CLASSIFICATION},
         )
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
             status="REQUEST_REJECTED",
-            reason_code="MISSING_CLASSIFICATION",
+            reason_code=protocol_codes.MISSING_CLASSIFICATION,
             waiting_on="classification",
             exit_code=5,
             message=next_action,
@@ -245,9 +264,9 @@ def issue_action_request(
 
     item["state"] = "claimed"
     item["active_lease_id"] = lease_id
-    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(request_path, request)
     response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
-    response_skeleton_path.write_text(json.dumps(response_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(response_skeleton_path, response_skeleton)
 
     ledger.append_event(
         session_id=str(session["session_id"]),
@@ -277,381 +296,7 @@ def issue_action_request(
     }
 
 
-def issue_batch_action_request(
-    repo: str,
-    pr_number: str,
-    *,
-    agent_id: str,
-    files: list[str] | None = None,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    current_time = _coerce_now(now)
-    session = session_store.load_session(repo, pr_number)
-    ledger = _ledger(session)
-    expired = expire_leases(session, now=current_time)
-    _return_expired_items_to_open(session, expired)
-
-    active_leases_count = sum(
-        1
-        for lease in session.get("leases", {}).values()
-        if isinstance(lease, dict)
-        and lease.get("status") == "active"
-        and lease.get("role") == "fixer"
-        and lease.get("agent_id") == agent_id
-    )
-    max_to_lease = max(0, MAX_PARALLEL_CLAIMS - active_leases_count)
-
-    target_items = []
-    for item_id, item in _items(session).items():
-        if not is_github_thread_item(item):
-            continue
-        if files:
-            item_path = item.get("path")
-            if not item_path or item_path not in files:
-                continue
-        existing_lease = _active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
-        if existing_lease is not None or _is_batch_claimable_github_thread(item):
-            target_items.append((item_id, item))
-
-    if not target_items:
-        session_store.save_session(repo, pr_number, session)
-        raise WorkflowError(
-            status="NO_ELIGIBLE_ITEM",
-            reason_code="NO_ELIGIBLE_ITEM",
-            waiting_on="work_item",
-            exit_code=4,
-            message="No eligible unresolved github review thread exists.",
-        )
-
-    leased_items = []
-    newly_leased_items = []
-    try:
-        for item_id, item in target_items:
-            existing_lease = _active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
-
-            if existing_lease:
-                lease_id = existing_lease["lease_id"]
-                request_id = existing_lease.get("request_id") or ""
-                request_path = existing_lease.get("request_path")
-                request_hash = existing_lease.get("request_hash")
-                path_ok = request_path and Path(request_path).is_file()
-
-                if not _has_classification_evidence(item):
-                    item["classification_evidence"] = {
-                        "event_type": "classification_recorded",
-                        "classification": "fix",
-                        "note": "Batch fix skeleton requested by agent next --batch.",
-                        "record_id": _stable_id(
-                            "classification",
-                            {
-                                "session_id": session["session_id"],
-                                "item_id": item_id,
-                                "agent_id": agent_id,
-                                "role": "fixer",
-                            },
-                        ),
-                    }
-                    item["decision"] = "fix"
-                    ledger.append_event(
-                        session_id=str(session["session_id"]),
-                        item_id=item_id,
-                        lease_id=None,
-                        agent_id=agent_id,
-                        role="fixer",
-                        event_type="classification_recorded",
-                        payload={
-                            "classification": "fix",
-                            "note": "Batch fix skeleton requested by agent next --batch.",
-                        },
-                    )
-
-                # Thread 1: Ensure active leases have valid request contexts, otherwise reconstruct
-                if not request_id or not request_hash or not path_ok:
-                    request_id = request_id or _stable_id(
-                        "req",
-                        {
-                            "session_id": session["session_id"],
-                            "item_id": item_id,
-                            "role": "fixer",
-                            "agent_id": agent_id,
-                            "lease_id": lease_id,
-                        },
-                    )
-                    request_item = dict(item)
-                    request_item["state"] = "claimed"
-                    request = {
-                        "schema_version": PROTOCOL_VERSION,
-                        "request_id": request_id,
-                        "session_id": session["session_id"],
-                        "lease_id": lease_id,
-                        "agent_role": "fixer",
-                        "item": request_item,
-                        "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
-                        "required_evidence": _required_evidence_for(item, "fixer"),
-                        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-                        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
-                        "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-                    }
-                    handling_boundary = _handling_boundary_summary_or_none(item, role="fixer")
-                    if handling_boundary is not None:
-                        request["handling_boundary"] = handling_boundary
-
-                    new_request_hash = ActionRequest.from_dict(request).stable_hash()
-                    new_request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
-                    response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
-                    request["response_skeleton_path"] = str(response_skeleton_path)
-
-                    new_request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-                    existing_lease["request_id"] = request_id
-                    existing_lease["request_hash"] = new_request_hash
-                    existing_lease["request_path"] = str(new_request_path)
-
-                    if not response_skeleton_path.is_file():
-                        response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
-                        response_skeleton_path.write_text(json.dumps(response_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-                leased_items.append(
-                    {
-                        "item_id": item_id,
-                        "lease_id": lease_id,
-                        "request_id": request_id,
-                    }
-                )
-            else:
-                if max_to_lease <= 0:
-                    continue
-
-                if _has_classification_evidence(item):
-                    evidence = item.get("classification_evidence")
-                    decision = evidence.get("classification") if isinstance(evidence, dict) else None
-                    if not decision:
-                        decision = item.get("decision")
-                    if decision != "fix":
-                        continue
-
-                if not _has_classification_evidence(item):
-                    item["classification_evidence"] = {
-                        "event_type": "classification_recorded",
-                        "classification": "fix",
-                        "note": "Batch fix skeleton requested by agent next --batch.",
-                        "record_id": _stable_id(
-                            "classification",
-                            {
-                                "session_id": session["session_id"],
-                                "item_id": item_id,
-                                "agent_id": agent_id,
-                                "role": "fixer",
-                            },
-                        ),
-                    }
-                    item["decision"] = "fix"
-                    ledger.append_event(
-                        session_id=str(session["session_id"]),
-                        item_id=item_id,
-                        lease_id=None,
-                        agent_id=agent_id,
-                        role="fixer",
-                        event_type="classification_recorded",
-                        payload={
-                            "classification": "fix",
-                            "note": "Batch fix skeleton requested by agent next --batch.",
-                        },
-                    )
-
-                lease_id = f"lease_{uuid4().hex}"
-                request_id = _stable_id(
-                    "req",
-                    {
-                        "session_id": session["session_id"],
-                        "item_id": item_id,
-                        "role": "fixer",
-                        "agent_id": agent_id,
-                        "lease_id": lease_id,
-                    },
-                )
-                request_item = dict(item)
-                request_item["state"] = "claimed"
-                request = {
-                    "schema_version": PROTOCOL_VERSION,
-                    "request_id": request_id,
-                    "session_id": session["session_id"],
-                    "lease_id": lease_id,
-                    "agent_role": "fixer",
-                    "item": request_item,
-                    "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
-                    "required_evidence": _required_evidence_for(item, "fixer"),
-                    "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-                    "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
-                    "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-                }
-                handling_boundary = _handling_boundary_summary_or_none(item, role="fixer")
-                if handling_boundary is not None:
-                    request["handling_boundary"] = handling_boundary
-                request_hash = ActionRequest.from_dict(request).stable_hash()
-                request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
-                response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
-                request["response_skeleton_path"] = str(response_skeleton_path)
-
-                claim_lease(
-                    session,
-                    item,
-                    agent_id=agent_id,
-                    role="fixer",
-                    request_hash=request_hash,
-                    lease_id=lease_id,
-                    now=current_time,
-                    request_id=request_id,
-                    request_path=str(request_path),
-                    resume_token=f"resume:{request_id}",
-                    allow_same_agent_github_thread_file_overlap=True,
-                )
-
-                item["state"] = "claimed"
-                item["active_lease_id"] = lease_id
-                request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-                response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
-                response_skeleton_path.write_text(json.dumps(response_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-                ledger.append_event(
-                    session_id=str(session["session_id"]),
-                    item_id=item_id,
-                    lease_id=lease_id,
-                    agent_id=agent_id,
-                    role="fixer",
-                    event_type="request_issued",
-                    payload={
-                        "request_id": request_id,
-                        "request_path": str(request_path),
-                        "response_skeleton_path": str(response_skeleton_path),
-                    },
-                )
-
-                leased_items.append(
-                    {
-                        "item_id": item_id,
-                        "lease_id": lease_id,
-                        "request_id": request_id,
-                    }
-                )
-                newly_leased_items.append((lease_id, item))
-                max_to_lease -= 1
-
-    except Exception as exc:
-        # Thread 7: Roll back newly leased items in this batch on failure
-        leases = session.setdefault("leases", {})
-        for lid, itm in newly_leased_items:
-            leases.pop(lid, None)
-            _return_item_to_claimable_state(itm)
-            if not is_stale_github_thread_item(itm):
-                itm["blocking"] = True
-            itm["claimed_by"] = None
-            itm["claimed_at"] = None
-            itm["lease_expires_at"] = None
-            itm.pop("active_lease_id", None)
-        session_store.save_session(repo, pr_number, session)
-        if isinstance(exc, LeaseConflictError):
-            raise WorkflowError(
-                status="LEASE_REJECTED",
-                reason_code=exc.reason_code,
-                waiting_on="lease",
-                exit_code=5,
-                message=str(exc),
-                payload={"item_id": item_id} if "item_id" in locals() else {},
-            ) from exc
-        raise
-
-    if not leased_items:
-        session_store.save_session(repo, pr_number, session)
-        raise WorkflowError(
-            status="NO_ELIGIBLE_ITEM",
-            reason_code="NO_ELIGIBLE_ITEM",
-            waiting_on="work_item",
-            exit_code=4,
-            message="No eligible unresolved github review thread exists.",
-        )
-
-    # Thread 6: Avoid overwriting existing batch skeletons by merging
-    batch_skeleton_path = session_store.workspace_dir(repo, pr_number) / "batch-response-skeleton.json"
-    existing_items_replies = {}
-    existing_common = {}
-    if batch_skeleton_path.is_file():
-        try:
-            existing_data = json.loads(batch_skeleton_path.read_text(encoding="utf-8"))
-            if isinstance(existing_data, dict):
-                for itm in existing_data.get("items") or []:
-                    if isinstance(itm, dict) and itm.get("item_id"):
-                        existing_items_replies[itm["item_id"]] = itm.get("fix_reply")
-                if isinstance(existing_data.get("common"), dict):
-                    existing_common = existing_data["common"]
-        except Exception as exc:
-            raise WorkflowError(
-                status="INVALID_BATCH_SKELETON",
-                reason_code="INVALID_JSON",
-                waiting_on="batch_action_response",
-                exit_code=5,
-                message=f"Failed to parse existing batch skeleton JSON: {exc}",
-            ) from exc
-
-    items_list = []
-    for item_info in leased_items:
-        item_id = item_info["item_id"]
-        fix_reply = {
-            "summary": "",
-            "why": "",
-        }
-        if item_id in existing_items_replies and isinstance(existing_items_replies[item_id], dict):
-            fix_reply.update(existing_items_replies[item_id])
-
-        items_list.append(
-            {
-                "item_id": item_id,
-                "request_id": item_info["request_id"],
-                "lease_id": item_info["lease_id"],
-                "fix_reply": fix_reply,
-            }
-        )
-
-    batch_skeleton = {
-        "schema_version": PROTOCOL_VERSION,
-        "agent_id": agent_id,
-        "resolution": "fix",
-        "common": {
-            "files": existing_common.get("files") or [],
-            "commit_hash": existing_common.get("commit_hash") or "",
-            "validation_commands": existing_common.get("validation_commands") or [
-                {
-                    "command": "",
-                    "result": "passed",
-                }
-            ],
-            "fix_reply": existing_common.get("fix_reply") or {
-                "summary": "",
-                "why": "",
-            },
-        },
-        "items": items_list,
-    }
-
-    batch_skeleton_path.write_text(json.dumps(batch_skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    session_store.save_session(repo, pr_number, session)
-
-    submit_command = f"gh-address-cr agent submit-batch {repo} {pr_number} --input {batch_skeleton_path}"
-    return {
-        "status": "BATCH_ACTION_REQUESTED",
-        "repo": repo,
-        "pr_number": str(pr_number),
-        "response_skeleton_path": str(batch_skeleton_path),
-        "lease_count": len(leased_items),
-        "leased_items": leased_items,
-        "commands": {
-            "submit_batch": submit_command,
-            "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input {batch_skeleton_path}",
-            "publish": f"gh-address-cr agent publish {repo} {pr_number}",
-        },
-        "next_action": f"Edit {batch_skeleton_path} and submit it with `{submit_command}`.",
-    }
+_BATCH_CLASSIFICATION_NOTE = "Batch fix skeleton requested by agent next --batch."
 
 
 def _active_fixer_lease_for_item(
@@ -700,7 +345,7 @@ def submit_action_response(
     ledger = _ledger(session)
     response = _load_response_json_object(
         response_path,
-        status="ACTION_REJECTED",
+        status=protocol_codes.ACTION_REJECTED,
         missing_reason_code="RESPONSE_FILE_NOT_FOUND",
         invalid_reason_code="INVALID_RESPONSE_JSON",
         shape_reason_code="INVALID_RESPONSE_SHAPE",
@@ -751,7 +396,7 @@ def submit_batch_action_response(
     ledger = _ledger(session)
     batch = _load_response_json_object(
         batch_path,
-        status="BATCH_ACTION_REJECTED",
+        status=protocol_codes.BATCH_ACTION_REJECTED,
         missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
         invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
         shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
@@ -773,7 +418,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_DUPLICATE_LEASE",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                 )
             seen_leases.add(lease_id)
 
@@ -782,7 +427,7 @@ def submit_batch_action_response(
                 ledger,
                 response,
                 now=now,
-                rejected_status="BATCH_ACTION_REJECTED",
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
             )
             item_id = str(prepared["item_id"])
             if item_id in seen_items:
@@ -791,7 +436,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_DUPLICATE_ITEM",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -805,7 +450,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_ITEM_KIND",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -815,7 +460,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_ROLE",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -825,7 +470,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     "BATCH_UNSUPPORTED_RESOLUTION",
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                 )
@@ -845,7 +490,7 @@ def submit_batch_action_response(
                     ledger,
                     response,
                     lease_reason_code,
-                    status="BATCH_ACTION_REJECTED",
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
                     item_id=item_id,
                     lease_id=lease_id,
                     lease_recovery=lease_recovery,
@@ -863,7 +508,7 @@ def submit_batch_action_response(
                     response,
                     prepared,
                     now=now,
-                    rejected_status="BATCH_ACTION_REJECTED",
+                    rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
                     telemetry_seen=telemetry_seen,
                 ),
             )
@@ -1047,7 +692,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
     item = _items(session).get(item_id) if item_id else None
     if not isinstance(item, dict):
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_TARGET_NOT_FOUND",
             waiting_on="action_response",
             exit_code=5,
@@ -1056,7 +701,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
         )
     if item.get("item_kind") != "github_thread":
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
             waiting_on="action_response",
             exit_code=5,
@@ -1066,7 +711,7 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
     resolution = str(response.get("resolution") or "")
     if resolution and resolution != "fix":
         raise WorkflowError(
-            status="ACTION_REJECTED",
+            status=protocol_codes.ACTION_REJECTED,
             reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
             waiting_on="action_response",
             exit_code=5,
@@ -1170,7 +815,7 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _raise_batch_schema_error(reason_code: str, message: str) -> None:
     raise WorkflowError(
-        status="BATCH_ACTION_REJECTED",
+        status=protocol_codes.BATCH_ACTION_REJECTED,
         reason_code=reason_code,
         waiting_on="batch_action_response",
         exit_code=2,
@@ -1184,7 +829,7 @@ def _prepare_action_response_submission(
     response: dict[str, Any],
     *,
     now: datetime,
-    rejected_status: str = "ACTION_REJECTED",
+    rejected_status: str = protocol_codes.ACTION_REJECTED,
 ) -> dict[str, Any]:
     lease_id = _required_response_field(response, "lease_id", status=rejected_status)
     lease = session.get("leases", {}).get(lease_id)
@@ -1283,7 +928,7 @@ def _accept_action_response_submission(
     prepared: dict[str, Any],
     *,
     now: datetime,
-    rejected_status: str = "ACTION_REJECTED",
+    rejected_status: str = protocol_codes.ACTION_REJECTED,
     telemetry_seen: set[tuple[str, str, str, str, str, str]] | None = None,
 ) -> Any:
     lease_id = str(prepared["lease_id"])
@@ -1364,6 +1009,7 @@ def _record_validation_command_telemetry(
     try:
         import shlex
         import time
+
         from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
 
         telemetry = SessionTelemetry.get_instance()
@@ -1453,7 +1099,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_FILES",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1464,7 +1110,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_VALIDATION_COMMANDS",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1475,7 +1121,7 @@ def _validate_batch_fix_contract(
                 ledger,
                 response,
                 "INVALID_BATCH_VALIDATION_COMMAND",
-                status="BATCH_ACTION_REJECTED",
+                status=protocol_codes.BATCH_ACTION_REJECTED,
                 item_id=item_id,
                 lease_id=lease_id,
             )
@@ -1486,7 +1132,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_FIX_REPLY",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1496,7 +1142,7 @@ def _validate_batch_fix_contract(
             ledger,
             response,
             "MISSING_BATCH_ITEM_WHY",
-            status="BATCH_ACTION_REJECTED",
+            status=protocol_codes.BATCH_ACTION_REJECTED,
             item_id=item_id,
             lease_id=lease_id,
         )
@@ -1526,7 +1172,7 @@ def _lease_submission_rejection_reason(
     if str(_get(lease, "item_id")) != str(prepared["item_id"]):
         return "WRONG_ITEM"
     if str(_get(lease, "request_hash")) != str(prepared["expected_request_hash"]):
-        return "STALE_REQUEST_CONTEXT"
+        return protocol_codes.STALE_REQUEST_CONTEXT
     return None
 
 
@@ -1542,7 +1188,7 @@ def _raise_response_rejected(
     lease_recovery: dict[str, Any] | None = None,
 ) -> None:
     _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
-    is_batch = status == "BATCH_ACTION_REJECTED"
+    is_batch = status == protocol_codes.BATCH_ACTION_REJECTED
     payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
     message = _response_rejection_message(
         payload_name,
@@ -1792,7 +1438,7 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
         return "UNSUPPORTED_RESOLUTION"
     if resolution == "fix":
         if not _has_classification_evidence(item):
-            return "MISSING_CLASSIFICATION"
+            return protocol_codes.MISSING_CLASSIFICATION
         if not response.get("files"):
             return "MISSING_FILES"
         if not response.get("validation_commands"):
@@ -1834,19 +1480,19 @@ def _expected_request_hash_for_response(
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None, "INVALID_REQUEST_CONTEXT"
         if response_request_id != str(request.get("request_id") or ""):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return expected_hash, None
 
     lease_request_id = _get(lease, "request_id")
     if lease_request_id:
         if response_request_id != str(lease_request_id):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return str(_get(lease, "request_hash")), None
 
     lease_request_hash = _get(lease, "request_hash")
     if lease_request_hash:
         if response_request_id != str(lease_request_hash):
-            return None, "STALE_REQUEST_CONTEXT"
+            return None, protocol_codes.STALE_REQUEST_CONTEXT
         return str(lease_request_hash), None
 
     return None, "REQUEST_CONTEXT_NOT_FOUND"
@@ -1939,7 +1585,7 @@ def _record_response_rejected(
 
 
 
-def _required_response_field(response: dict[str, Any], field: str, *, status: str = "ACTION_REJECTED") -> str:
+def _required_response_field(response: dict[str, Any], field: str, *, status: str = protocol_codes.ACTION_REJECTED) -> str:
     value = response.get(field)
     if not value:
         raise WorkflowError(
@@ -1952,11 +1598,11 @@ def _required_response_field(response: dict[str, Any], field: str, *, status: st
     return str(value)
 
 
-def _stable_id(prefix: str, payload: dict[str, Any]) -> str:
-    return f"{prefix}_{_hash_payload(payload)[:20]}"
+# Batch action-request orchestration lives in agent_batch, which imports shared
+# helpers from this module. To keep `agent_protocol.issue_batch_action_request`
+# working without a load-time import cycle, delegate lazily at call time — this is
+# robust regardless of which module is imported first.
+def issue_batch_action_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from gh_address_cr.core.agent_batch import issue_batch_action_request as _impl
 
-
-def _hash_payload(payload: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(_json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    return _impl(*args, **kwargs)

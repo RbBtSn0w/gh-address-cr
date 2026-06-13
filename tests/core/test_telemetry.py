@@ -1,5 +1,5 @@
-import subprocess
 import json
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -217,12 +217,12 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["total_events"], 2)
             self.assertEqual(report["success_rate"], 100.0)
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_text):
+    def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
-            write_text.side_effect = OSError("disk full")
+            write_json.side_effect = OSError("disk full")
             tracker = SessionTelemetry.get_instance()
             tracker.configure_context("octo/example", "77")
             tracker.record("python3 -m unittest discover -s tests", 0, 2, 0)
@@ -236,12 +236,12 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_text):
+    def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
-            write_text.side_effect = FileNotFoundError(
+            write_json.side_effect = FileNotFoundError(
                 2,
                 "No such file or directory",
                 "/private/tmp/secret/efficiency-report.json",
@@ -268,10 +268,10 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["telemetry_overhead_ms"], 300.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
-    @patch("gh_address_cr.core.telemetry.Path.write_text")
+    @patch("gh_address_cr.core.telemetry.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
-    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_text):
+    def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_json):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
 
@@ -279,7 +279,7 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["telemetry_overhead_ms"], 400.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
-            self.assertEqual(write_text.call_count, 1)
+            self.assertEqual(write_json.call_count, 1)
 
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
@@ -2469,10 +2469,11 @@ class TestTelemetry(unittest.TestCase):
     @patch("gh_address_cr.core.agent_protocol.accept_lease")
     @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
     def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
-        from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
 
         session = {
             "session_id": "owner/repo#123",
@@ -2568,10 +2569,11 @@ class TestTelemetry(unittest.TestCase):
     @patch("gh_address_cr.core.agent_protocol.accept_lease")
     @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
     def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
-        from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
 
         session = {
             "session_id": "owner/repo#123",
@@ -2620,11 +2622,12 @@ class TestTelemetry(unittest.TestCase):
     @patch("gh_address_cr.core.agent_protocol.submit_lease")
     @patch("gh_address_cr.core.agent_protocol.accept_lease")
     def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
-        from gh_address_cr.core.errors import WorkflowError
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
-        from unittest.mock import MagicMock
         import tempfile
         from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
+        from gh_address_cr.core.errors import WorkflowError
 
         session = {
             "session_id": "owner/repo#123",
@@ -2670,9 +2673,10 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_run_adapter_command_records_telemetry(self, mock_run):
-        from gh_address_cr.commands.high_level import _run_adapter_command
         import tempfile
         from pathlib import Path
+
+        from gh_address_cr.commands.high_level import _run_adapter_command
 
         mock_run.return_value = subprocess.CompletedProcess(args=["my-adapter"], returncode=0, stdout="findings JSON", stderr="")
 
@@ -2696,9 +2700,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_registration(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -2783,9 +2787,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_source_override(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -2856,9 +2860,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_unsafe_normalization_rejection(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -2905,9 +2909,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_normalized_flag_still_revalidates_events(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -2954,9 +2958,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -3034,9 +3038,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_nan_metadata_rejection(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -3083,9 +3087,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_non_json_diagnostics_coercion(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
-            ExternalTelemetryEvent,
             register_adapter,
             unregister_adapter,
         )
@@ -3160,9 +3164,9 @@ class TestTelemetry(unittest.TestCase):
     def test_custom_telemetry_adapter_diagnostics_sanitization(self):
         from gh_address_cr.core.telemetry import (
             TelemetryAdapter,
+            TelemetryParseResult,
             register_adapter,
             unregister_adapter,
-            TelemetryParseResult,
         )
 
         class MockSensitiveDiagnosticsAdapter(TelemetryAdapter):
@@ -3198,11 +3202,11 @@ class TestTelemetry(unittest.TestCase):
 
     def test_custom_telemetry_adapter_invalid_diagnostics_container_rejection(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
+            TelemetryParseResult,
             register_adapter,
             unregister_adapter,
-            TelemetryParseResult,
-            ExternalTelemetryEvent,
         )
 
         class MockInvalidDiagnosticsAdapter(TelemetryAdapter):
@@ -3246,11 +3250,11 @@ class TestTelemetry(unittest.TestCase):
 
     def test_import_external_telemetry_event_id_redaction_in_normalization_diagnostics(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
+            TelemetryParseResult,
             register_adapter,
             unregister_adapter,
-            TelemetryParseResult,
-            ExternalTelemetryEvent,
         )
 
         class MockUnsafeEventIdAdapter(TelemetryAdapter):
@@ -3296,9 +3300,9 @@ class TestTelemetry(unittest.TestCase):
     def test_custom_telemetry_adapter_invalid_event_type_rejection(self):
         from gh_address_cr.core.telemetry import (
             TelemetryAdapter,
+            TelemetryParseResult,
             register_adapter,
             unregister_adapter,
-            TelemetryParseResult,
         )
 
         class MockInvalidEventAdapter(TelemetryAdapter):
@@ -3329,11 +3333,11 @@ class TestTelemetry(unittest.TestCase):
 
     def test_import_external_telemetry_rejects_unsafe_metadata_keys(self):
         from gh_address_cr.core.telemetry import (
+            ExternalTelemetryEvent,
             TelemetryAdapter,
+            TelemetryParseResult,
             register_adapter,
             unregister_adapter,
-            TelemetryParseResult,
-            ExternalTelemetryEvent,
         )
 
         class MockUnsafeMetadataKeyAdapter(TelemetryAdapter):

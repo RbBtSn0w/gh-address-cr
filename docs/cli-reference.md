@@ -27,6 +27,9 @@ Other public top-level commands:
 
 Advanced/internal integration entrypoints:
 
+The advanced surface is split between top-level integration commands above and
+the structured agent protocol commands below.
+
 Agent protocol entrypoints:
 
 - `agent manifest`
@@ -309,7 +312,7 @@ Stable machine summary fields:
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
-`commands` contains executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
+`commands` contains shell-quoted executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
 The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Full output includes `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
 ### Metadata Commands
@@ -540,64 +543,6 @@ body: Potential null dereference.
 
 This converter rejects plain narrative Markdown review output.
 
-Prompt patterns:
-
-```text
-先运行 `$gh-address-cr review <PR_URL>`。
-
-如果当前 PR 还没有 findings，`review` 应进入 `WAITING_FOR_EXTERNAL_REVIEW`，
-写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`。
-
-如果你自己就是外部 review producer，就在当前任务里直接生成 findings JSON，
-写入 `incoming-findings.json`，或者通过 `findings --input - --source <producer>` 交给同一 PR session；或者生成固定格式的 `finding` blocks，
-写入 `incoming-findings.md`。不要只输出普通 Markdown 审查报告。
-
-收到 handoff 或 source-scoped findings ingest 成功后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
-```
-
-Ready-to-use prompt variants:
-
-- Short generic:
-
-```text
-使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
-```
-
-- Explicit `$code-review` producer:
-
-```text
-使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
-
-先运行 $gh-address-cr review。
-如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用 $code-review 作为外部 review producer。
-按照 producer-request.md 的要求交接：
-- 优先把 findings JSON 写入 incoming-findings.json
-- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
-- 自动化路径也可以用 `findings --input - --sync --source code-review` 交接；`[]` 表示明确的空结果
-- 不要只输出普通 Markdown 审查报告
-
-写入 handoff 文件或成功 ingest source-scoped findings 后，重新运行同一条 $gh-address-cr review 命令，
-继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
-```
-
-- Any external review producer:
-
-```text
-使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
-
-先运行 $gh-address-cr review。
-如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用当前环境中可用的外部 review 能力完成审查。
-按照 producer-request.md 的要求交接：
-- 优先把 findings JSON 写入 incoming-findings.json
-- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
-- 自动化路径也可以用 `findings --input - --sync --source <producer>` 交接；`[]` 表示明确的空结果
-- 不要只输出普通 Markdown 审查报告
-
-写入 handoff 文件或成功 ingest source-scoped findings 后，重新运行同一条 $gh-address-cr review 命令，
-继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
-```
-
-
 ## Advanced / Developer Integration
 
 The public user flow above does not require manual `--input`, producer selection, or mode routing.
@@ -647,199 +592,10 @@ For `adapter`, the last two examples mean different things:
 
 `code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
 
-Use the prompt patterns above as the canonical templates. Do not keep a second, shorter variant with weaker rules.
+Prompt patterns, automatic workflow details, producer categories, and local AI review ingestion are maintained in `docs/workflows.md`. Keep this file focused on command syntax and machine-readable CLI contracts.
 
 If you omit the producer where it is required:
 
 - `local` and `mixed` will fail because the dispatcher cannot infer whether you mean `json`, `code-review`, or `adapter`
 - `ingest` will assume `json`
 - `remote` does not accept a producer at all
-
-
-## Automatic Review Workflow
-
-`review` is the autonomous runner built on top of the existing intake and gate layers.
-
-- It performs repeated intake, item selection, action execution, and gate evaluation internally.
-- By default it uses an internal fixer handoff for the current AI agent.
-- If a finding cannot be resolved automatically, the workflow writes an internal fixer request artifact into the PR cache artifacts directory and exits `BLOCKED` for the agent to handle.
-- `--fixer-cmd` remains available as an advanced integration path.
-- External fixer commands must read a JSON payload from stdin and return JSON:
-  - `resolution`: `fix`, `clarify`, or `defer`
-  - `note`
-  - for GitHub thread `fix`: `fix_reply`
-    - `summary`
-    - `files`
-    - optional `commit_hash` when known; otherwise publish hydrates commit evidence
-    - optional `severity`, `severity_note`, `why`, `test_command`, `test_result`
-    - `validation_commands` may be used as default validation evidence when `test_command` / `test_result` are omitted
-  - for GitHub thread `clarify` or `defer`: `reply_markdown`
-  - optional `validation_commands`
-- `adapter` producer is re-run on each iteration.
-- `json` and `code-review` producers are treated as one-shot inputs for the current review run.
-- The workflow exits with one of:
-  - `PASSED`
-  - `NEEDS_HUMAN`
-  - `BLOCKED`
-
-Advanced external-fixer example:
-
-```bash
-gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py
-```
-
-By default, the skill stores its PR progress + audit artifacts in a user cache directory
-(override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
-from GitHub thread state; the main downside is potential repeated work.
-
-Advanced producer categories:
-
-- `code-review`
-- `json`
-- `adapter`
-
-Producer naming rule:
-
-- `code-review` is a producer category, not a hardcoded skill name.
-- It can be backed by `/code-review`, `/code-review-aa`, `/code-review-bb`, `/code-review-cc`, or any other review step that emits structured findings JSON.
-- `gh-address-cr` only cares about the findings contract, not the upstream tool name.
-
-Producer selection rule:
-
-- `remote`
-  - no producer is needed
-- `ingest`
-  - producer may be omitted; default is `json`
-- `local` or `mixed`
-  - producer must be explicit
-
-Use this mapping:
-
-| Upstream situation | Producer to use |
-| --- | --- |
-| Only GitHub review threads | none (`remote`) |
-| Existing findings JSON file | `json` |
-| A review-style skill/command emits findings JSON first | `code-review` |
-| A command directly prints findings JSON as its interface | `adapter` |
-
-Important:
-
-- `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
-- Do not put the upstream tool name itself into the producer slot.
-- Example:
-  - correct: `review <owner/repo> <pr>`
-  - incorrect: `code-review-aa <owner/repo> <pr>`
-
-Meaning:
-
-- `remote`
-  - only GitHub review threads are part of the session
-- `local`
-  - only locally produced findings are part of the session
-- `mixed`
-  - GitHub review threads and local findings are both part of the session
-- `ingest`
-  - import existing findings JSON into the session without running a local adapter
-
-This keeps `gh-address-cr` as the session/gate/orchestration layer while letting different review producers feed findings into the same PR workflow.
-
-The exact dispatch behavior for each supported `mode + producer` combination is documented in:
-
-- `skill/references/mode-producer-matrix.md`
-
-The preferred automation entrypoint is now:
-
-```bash
-gh-address-cr review <owner/repo> <pr_number> [--input <path>|-] [--human]
-```
-
-
-## Local AI Review Ingestion
-
-Use `gh-address-cr findings --input -` to feed local AI findings into the PR session without requiring GitHub thread preflight:
-
-```bash
-./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
-```
-
-Producer contract:
-
-- the producer prints a JSON array to stdout
-- each finding should include `title`, `body`, `path`, `line`
-- optional fields: `severity`, `category`, `confidence`
-- `severity` is accepted only when it is an explicit `P0`, `P1`, `P2`, `P3`, or `P4`; missing or non-P-scale values do not create a session severity.
-
-This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
-
-If the producer is a local `code-review` run, use the built-in adapter backend:
-
-```bash
-cat findings.json | gh-address-cr review owner/repo 123 --input -
-```
-
-Input rule:
-
-- if you already have a real findings JSON file from another tool, use `--input <path>`
-- if findings are being produced in the current step, prefer `--input -` and pipe them over `stdin`
-- do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
-- use `--sync` when you want missing local findings from the same source to auto-close on refresh
-
-When `review` returns `WAITING_FOR_EXTERNAL_REVIEW`, use the cache-backed `producer-request.md` handoff instead of creating review artifacts in the project workspace.
-
-If your review tool already produces findings JSON, you do not need a custom adapter command. Use `gh-address-cr findings` instead:
-
-```bash
-cat findings.json | gh-address-cr findings owner/repo 123 --input - --sync --source code-review
-```
-
-Accepted input shapes:
-
-- JSON array of finding objects
-- JSON object with `findings`, `issues`, or `results`
-- NDJSON, one finding object per line
-
-Field normalization is intentionally broad so external tools can map in without a custom schema bridge:
-
-- `path` or `file` or `filename`
-- `line` or `start_line` or `position`
-- `title` or `rule` or `check`
-- `body` or `message` or `description`
-
-Minimum accepted finding shape:
-
-```json
-[
-  {
-    "title": "Missing null guard",
-    "body": "Potential null dereference.",
-    "path": "src/example.py",
-    "line": 12
-  }
-]
-```
-
-This is the long-term integration path for any local code-review tool. If it can emit structured findings JSON, `gh-address-cr` can ingest it into the PR session.
-
-To record fix evidence for a local finding inside the PR session:
-
-```bash
-gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
-gh-address-cr final-gate --no-auto-clean owner/repo 123
-```
-
-`agent fix` records the terminal local-finding resolution. `final-gate` verifies
-that no blocking local or GitHub review items remain.
-
-To reclaim expired item claims inside a PR session:
-
-```bash
-gh-address-cr agent reclaim owner/repo 123
-```
-
-To apply a terminal local finding resolution atomically, use:
-
-```bash
-gh-address-cr submit-action <action-request.json> --resolution fix --note "Fixed locally and verified." --files src/example.py --validation-cmd "python3 -m unittest=passed"
-gh-address-cr submit-action <action-request.json> --resolution clarify --note "Expected behavior." --reply-markdown "Expected behavior."
-gh-address-cr submit-action <action-request.json> --resolution defer --note "Deferred to a follow-up PR." --reply-markdown "Deferred to a follow-up PR."
-```

@@ -9,9 +9,7 @@ from pathlib import Path
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
-
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
-
 
 PYPROJECT = ROOT / "pyproject.toml"
 RELEASE_CONFIG = ROOT / "release.config.cjs"

@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 VALID_SEVERITIES = {"P0", "P1", "P2", "P3", "P4"}
 
 _EXPLICIT_P_SCALE_PATTERNS = (

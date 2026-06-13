@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_address_cr.agent.roles import AgentRole, parse_role
-
+from gh_address_cr.core import protocol_codes
 
 JsonDict = dict[str, Any]
 
@@ -20,9 +20,9 @@ RUNTIME_COMPLEXITY_REASON_CODES = (
     "MISSING_REQUIRED_EVIDENCE",
     "EXPIRED_LEASE_RENEWABLE",
     "EXPIRED_LEASE_RECLAIMABLE",
-    "STALE_REQUEST_CONTEXT",
+    protocol_codes.STALE_REQUEST_CONTEXT,
     "LEASE_ACTIVE",
-    "LEASE_RECOVERY_STOP",
+    protocol_codes.LEASE_RECOVERY_STOP,
     "LEASE_ALREADY_COMPLETED",
     "TELEMETRY_OVERHEAD_EXCEEDED",
     "TELEMETRY_WRITE_UNAVAILABLE",

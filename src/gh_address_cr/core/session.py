@@ -7,7 +7,6 @@ from typing import Any
 from gh_address_cr.core import paths
 from gh_address_cr.core.io import JsonIOError, read_json_object, write_json_atomic
 
-
 DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 
 
@@ -104,11 +103,9 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
     payload.setdefault("leases", {})
     payload.setdefault("ledger_path", str(default_ledger_path(repo, pr_number)))
     _coerce_lease_datetimes(payload)
-    try:
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-    except Exception:
-        pass
+    from gh_address_cr.core.telemetry import configure_context_safely
+
+    configure_context_safely(repo, pr_number)
     return payload
 
 

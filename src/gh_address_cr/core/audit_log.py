@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-class AuditLedger:
+class AuditLog:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 

@@ -1,5 +1,5 @@
-import unittest
 import json
+import unittest
 from pathlib import Path
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "thin_skill_orchestration"

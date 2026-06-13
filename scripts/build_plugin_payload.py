@@ -14,7 +14,6 @@ import tempfile
 import zlib
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / "skill"
 DEFAULT_OUTPUT_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"

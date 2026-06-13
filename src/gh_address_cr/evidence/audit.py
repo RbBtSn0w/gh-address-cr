@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 TERMINAL_ITEM_STATES = {"fixed", "clarified", "deferred", "rejected", "closed", "CLOSED"}
 
 

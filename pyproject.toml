@@ -29,6 +29,13 @@ dependencies = [
   "packaging>=24",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "coverage>=7",
+  "mypy>=1.8",
+  "ruff>=0.15",
+]
+
 [project.urls]
 Homepage = "https://github.com/RbBtSn0w/gh-address-cr"
 Source = "https://github.com/RbBtSn0w/gh-address-cr"
@@ -48,5 +55,33 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F"]
+# E/F: pyflakes + pycodestyle. B: bugbear (likely-bug patterns).
+# I: import sorting. C901: cyclomatic complexity guardrail against new god-functions.
+select = ["E", "F", "B", "I", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# Ratchet target: lower this over time as legacy hot-path functions are decomposed.
+max-complexity = 20
+
+[tool.coverage.run]
+branch = true
+source = ["gh_address_cr"]
+
+[tool.coverage.report]
+# Ratchet target: raise as coverage improves. Measured baseline is ~69% (branch).
+# Floor set a few points below to absorb cross-environment variance; ratchet up over time.
+# NOTE: the CLI subprocess tests (test_python_wrappers) execute in child
+# processes and are NOT counted here, so true coverage is higher than reported.
+fail_under = 65
+skip_covered = false
+
+[tool.mypy]
+# Lenient introduction (~55 errors at adoption). CI runs this non-blocking; the
+# ratchet is to drive that count to zero, then flip on stricter flags and make it
+# blocking. Do not relax further — only tighten.
+python_version = "3.10"
+files = ["src/gh_address_cr"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true

@@ -4,8 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from tests.helpers import PythonScriptTestCase, SRC_ROOT
-
+from tests.helpers import SRC_ROOT, PythonScriptTestCase
 
 HELPER_SCRIPTS = (
     SRC_ROOT / "gh_address_cr" / "commands" / "submit_action.py",

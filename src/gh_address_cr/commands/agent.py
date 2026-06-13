@@ -15,12 +15,18 @@ from gh_address_cr import (
 )
 from gh_address_cr.commands.common import (
     agent_args_with_scope as _agent_args_with_scope,
+)
+from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
+)
+from gh_address_cr.commands.common import (
     output_generic_agent_error,
     output_workflow_error,
+)
+from gh_address_cr.commands.common import (
     prepend_optional as _prepend_optional,
 )
-from gh_address_cr.core import agent_protocol, leases, publisher, workflow
+from gh_address_cr.core import agent_protocol, leases, protocol_codes, publisher, workflow
 from gh_address_cr.core.errors import WorkflowError
 
 PUBLIC_COMMANDS = {
@@ -299,7 +305,7 @@ def _looks_like_agent_validation_result(value: str) -> bool:
 def _changed_files_for_commit(
     commit_hash: str,
     *,
-    rejected_status: str = "FAST_FIX_ALL_REJECTED",
+    rejected_status: str = protocol_codes.FAST_FIX_ALL_REJECTED,
     command_name: str = "agent fix-all",
 ) -> list[str]:
     commit = commit_hash.strip()
@@ -476,7 +482,7 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
                 conflicting_flags.append("--include-stale")
             if conflicting_flags:
                 raise WorkflowError(
-                    status="FAST_FIX_ALL_REJECTED",
+                    status=protocol_codes.FAST_FIX_ALL_REJECTED,
                     reason_code="CONFLICTING_FIX_ALL_INPUT",
                     waiting_on="fast_fix_input",
                     exit_code=2,
@@ -496,8 +502,8 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
             return 0
         if not parsed.commit:
             raise WorkflowError(
-                status="FAST_FIX_ALL_REJECTED",
-                reason_code="MISSING_FIX_REPLY_COMMIT_HASH",
+                status=protocol_codes.FAST_FIX_ALL_REJECTED,
+                reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
                 waiting_on="fast_fix_input",
                 exit_code=2,
                 message="agent fix-all requires --commit unless --input supplies a BatchActionResponse.",
@@ -608,7 +614,7 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
         else:
             if not parsed.name:
                 raise WorkflowError(
-                    status="EVIDENCE_PROFILE_REJECTED",
+                    status=protocol_codes.EVIDENCE_PROFILE_REJECTED,
                     reason_code="MISSING_EVIDENCE_PROFILE_NAME",
                     waiting_on="evidence_profile",
                     exit_code=2,
@@ -674,7 +680,7 @@ def handle_agent_leases(repo: str | None, passthrough: list[str]) -> int:
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
-        return output_generic_agent_error(parsed.repo, parsed.pr_number, "SESSION_ERROR", str(exc))
+        return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 
@@ -691,7 +697,7 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
-        return output_generic_agent_error(parsed.repo, parsed.pr_number, "SESSION_ERROR", str(exc))
+        return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 

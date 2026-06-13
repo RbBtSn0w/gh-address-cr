@@ -8,7 +8,11 @@ dist/
 build/
 *.egg-info/
 .coverage
+.coverage.*
+htmlcov/
+coverage.xml
 coverage/
+.mypy_cache/
 *.tmp
 *.log
 *.swp

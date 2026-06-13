@@ -1,20 +1,24 @@
-import unittest
-import tempfile
-import os
 import json
-from pathlib import Path
+import os
+import tempfile
+import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.session import SessionManager
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.leases import (
     LeaseSubmissionError as RuntimeLeaseSubmissionError,
+)
+from gh_address_cr.core.leases import (
     claim_lease as runtime_claim_lease,
+)
+from gh_address_cr.core.leases import (
     submit_lease as runtime_submit_lease,
 )
+from gh_address_cr.core.session import SessionManager
 from gh_address_cr.orchestrator.harness import handle_agent_orchestrate
-from gh_address_cr.orchestrator.session import OrchestrationSession, LeaseConflictError, ExpiredLeaseError
+from gh_address_cr.orchestrator.session import ExpiredLeaseError, LeaseConflictError, OrchestrationSession
 
 
 class TestLeaseScheduling(unittest.TestCase):

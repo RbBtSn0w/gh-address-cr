@@ -1,5 +1,6 @@
 import unittest
-from gh_address_cr.orchestrator.worker import build_worker_packet, validate_action_response, WorkerPacketValidationError
+
+from gh_address_cr.orchestrator.worker import WorkerPacketValidationError, build_worker_packet, validate_action_response
 
 
 class TestOrchestratorSession(unittest.TestCase):
@@ -49,7 +50,8 @@ class TestOrchestratorSession(unittest.TestCase):
         # T021: Error handling test for missing/corrupted orchestration.json
         import tempfile
         from pathlib import Path
-        from gh_address_cr.orchestrator.session import load_orchestration_session, OrchestrationSessionError
+
+        from gh_address_cr.orchestrator.session import OrchestrationSessionError, load_orchestration_session
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

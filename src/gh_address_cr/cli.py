@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import hashlib
-import io
 import json
 import re
 import shutil
@@ -12,12 +10,19 @@ import sys
 from pathlib import Path
 
 from gh_address_cr import __version__
+from gh_address_cr.commands.active_pr import handle_active_pr_command
+from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
+)
+from gh_address_cr.commands.common import (
     maybe_prepend_implicit_scope as _maybe_prepend_implicit_scope,
+)
+from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
-from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.doctor import handle_doctor_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
     HighLevelReviewRuntime,
@@ -26,14 +31,20 @@ from gh_address_cr.commands.high_level import (
 from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
-from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
+from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
+)
+from gh_address_cr.intake.findings import (
     normalize_finding as native_normalize_finding,
+)
+from gh_address_cr.intake.findings import (
     parse_finding_blocks as native_parse_finding_blocks,
+)
+from gh_address_cr.intake.findings import (
     parse_records as native_parse_records,
 )
-
 
 HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
 NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
@@ -261,7 +272,7 @@ def alias_help(command: str) -> str:
 
 def persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
     path = last_machine_summary_file(repo, pr_number)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(path, payload)
 
 
 def external_review_command(repo: str, pr_number: str) -> str:
@@ -351,7 +362,7 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
         return None, None, None
 
     normalized_path = normalized_handoff_findings_file(repo, pr_number)
-    normalized_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(normalized_path, findings)
     return (
         str(normalized_path),
         hashlib.sha256(canonical_findings_payload(findings).encode("utf-8")).hexdigest(),
@@ -606,83 +617,6 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
     )
 
 
-def _doctor_check(name: str, passed: bool, *, detail: str | None = None, diagnostics: dict | None = None) -> dict:
-    row = {
-        "name": name,
-        "status": "passed" if passed else "failed",
-    }
-    if detail:
-        row["detail"] = detail
-    if diagnostics:
-        row["diagnostics"] = diagnostics
-    return row
-
-
-def _run_doctor_gh_check(name: str, command: list[str]) -> dict:
-    result = subprocess.run(command, text=True, capture_output=True)
-    if result.returncode == 0:
-        detail = result.stdout.strip()
-        return _doctor_check(name, True, detail=detail or None)
-    diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
-    return _doctor_check(name, False, detail=result.stderr.strip() or result.stdout.strip() or None, diagnostics=diagnostics)
-
-
-def _doctor_writable_dir_check(name: str, path: Path) -> dict:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".gh-address-cr-doctor-write-test"
-        probe.write_text("ok\n", encoding="utf-8")
-        probe.unlink()
-    except OSError as exc:
-        diagnostics = classify_github_failure(str(exc), "", None, [name, str(path)])
-        return _doctor_check(name, False, detail=str(path), diagnostics=diagnostics)
-    return _doctor_check(name, True, detail=str(path))
-
-
-def handle_doctor_command(args: argparse.Namespace) -> int:
-    repo = args.repo
-    pr_number = args.pr_number
-    checks: list[dict] = []
-
-    gh_path = shutil.which("gh")
-    checks.append(_doctor_check("gh_available", bool(gh_path), detail=gh_path or "GitHub CLI `gh` not found on PATH."))
-    if gh_path:
-        checks.append(_run_doctor_gh_check("gh_auth", ["gh", "auth", "status"]))
-        checks.append(_run_doctor_gh_check("gh_viewer", ["gh", "api", "user"]))
-        if repo:
-            checks.append(_run_doctor_gh_check("repo_access", ["gh", "repo", "view", repo, "--json", "nameWithOwner"]))
-    elif repo:
-        checks.append(
-            _doctor_check(
-                "repo_access",
-                False,
-                detail="Repository access check requires GitHub CLI `gh`.",
-            )
-        )
-
-    try:
-        checks.append(_doctor_writable_dir_check("state_dir", session_store.state_dir()))
-    except session_store.SessionError as exc:
-        checks.append(_doctor_check("state_dir", False, detail=str(exc)))
-    if repo and pr_number:
-        try:
-            checks.append(_doctor_writable_dir_check("workspace_dir", session_store.workspace_dir(repo, pr_number)))
-        except session_store.SessionError as exc:
-            checks.append(_doctor_check("workspace_dir", False, detail=str(exc)))
-
-    failed = [check for check in checks if check["status"] != "passed"]
-    summary = {
-        "status": "FAILED" if failed else "PASSED",
-        "reason_code": "DOCTOR_FAILED" if failed else "DOCTOR_PASSED",
-        "repo": repo,
-        "pr_number": str(pr_number) if pr_number else None,
-        "checks": checks,
-        "next_action": "Fix failed doctor checks, then rerun the original command." if failed else "Rerun the blocked gh-address-cr command.",
-        "exit_code": 5 if failed else 0,
-    }
-    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    return int(summary["exit_code"])
-
 
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
     if shutil.which("gh") is None:
@@ -809,261 +743,7 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     return HighLevelReviewRuntime().handle(command, passthrough_args, human=human, lean=lean)
 
 
-def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    if stderr:
-        print(stderr, file=sys.stderr)
-    return int(payload["exit_code"])
 
-
-def _git_output(command: list[str]) -> str:
-    result = subprocess.run(command, text=True, capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"{' '.join(command)} failed.")
-    return result.stdout.strip()
-
-
-def _derive_current_branch() -> str:
-    branch = _git_output(["git", "branch", "--show-current"])
-    if not branch:
-        raise RuntimeError("Current git branch is detached or empty. Pass --head explicitly.")
-    return branch
-
-
-def _derive_current_repo() -> str:
-    remote_url = _git_output(["git", "config", "--get", "remote.origin.url"])
-    normalized = remote_url.strip().rstrip("/").removesuffix(".git")
-    patterns = (
-        r"^git@github\.com:(?P<repo>[^/]+/[^/]+)$",
-        r"^ssh://git@github\.com/(?P<repo>[^/]+/[^/]+)$",
-        r"^https?://github\.com/(?P<repo>[^/]+/[^/]+)$",
-    )
-    for pattern in patterns:
-        match = re.match(pattern, normalized)
-        if match:
-            return match.group("repo")
-    raise RuntimeError(f"Could not derive owner/repo from remote.origin.url: {remote_url}")
-
-
-def handle_active_pr_command(passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="gh-address-cr active-pr")
-    parser.add_argument("--repo")
-    parser.add_argument("--head")
-    parsed = parser.parse_args(passthrough)
-    try:
-        repo = parsed.repo or _derive_current_repo()
-        head = parsed.head or _derive_current_branch()
-    except RuntimeError as exc:
-        return _emit_active_pr_payload(
-            {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
-                "repo": parsed.repo,
-                "head": parsed.head,
-                "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
-                "waiting_on": "active_pr_target",
-                "next_action": f"{exc} Pass --repo <owner/repo> and --head <branch> explicitly.",
-                "exit_code": 2,
-            },
-            stderr=str(exc),
-        )
-
-    command = [
-        "gh",
-        "pr",
-        "list",
-        "--repo",
-        repo,
-        "--state",
-        "open",
-        "--head",
-        head,
-        "--json",
-        "number,url,headRefName,state",
-    ]
-    if shutil.which("gh") is None:
-        return _emit_active_pr_payload(
-            {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
-                "repo": repo,
-                "head": head,
-                "reason_code": "GH_NOT_FOUND",
-                "waiting_on": "github_cli",
-                "next_action": "Install GitHub CLI and ensure `gh` is available on PATH, then rerun active-pr.",
-                "exit_code": PR_IO_PREFLIGHT_EXIT,
-            },
-            stderr="Missing GitHub CLI `gh` on PATH.",
-        )
-    result = subprocess.run(command, text=True, capture_output=True)
-    if result.returncode != 0:
-        diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
-        return _emit_active_pr_payload(
-            {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
-                "repo": repo,
-                "head": head,
-                "reason_code": "ACTIVE_PR_QUERY_FAILED",
-                "waiting_on": github_waiting_on(diagnostics),
-                "next_action": "Fix the GitHub CLI query failure, then rerun `gh-address-cr active-pr`.",
-                "exit_code": PR_IO_PREFLIGHT_EXIT,
-                "diagnostics": diagnostics,
-            },
-            stderr=result.stderr.strip() or result.stdout.strip() or "GitHub active PR lookup failed.",
-        )
-    try:
-        pull_requests = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        return _emit_active_pr_payload(
-            {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
-                "repo": repo,
-                "head": head,
-                "reason_code": "ACTIVE_PR_INVALID_JSON",
-                "waiting_on": "github_cli",
-                "next_action": "Inspect `gh pr list` output; it must be a JSON array.",
-                "exit_code": PR_IO_PREFLIGHT_EXIT,
-            },
-            stderr=f"GitHub active PR lookup returned invalid JSON: {exc}",
-        )
-    if not isinstance(pull_requests, list):
-        pull_requests = []
-
-    if not pull_requests:
-        return _emit_active_pr_payload(
-            {
-                "status": "NO_ACTIVE_PR",
-                "repo": repo,
-                "head": head,
-                "reason_code": "NO_ACTIVE_PR",
-                "waiting_on": "open_pr",
-                "next_action": f"Open a PR or run `gh pr list --repo {repo} --state open --head {head}` to inspect candidates.",
-                "pull_requests": [],
-                "exit_code": 4,
-            }
-        )
-    if len(pull_requests) > 1:
-        return _emit_active_pr_payload(
-            {
-                "status": "AMBIGUOUS_ACTIVE_PR",
-                "repo": repo,
-                "head": head,
-                "reason_code": "AMBIGUOUS_ACTIVE_PR",
-                "waiting_on": "open_pr",
-                "next_action": "Multiple OPEN PRs match this branch. Pass the intended PR number to review/address.",
-                "pull_requests": pull_requests,
-                "exit_code": 5,
-            },
-            stderr="Multiple OPEN PRs matched the active branch.",
-        )
-
-    pr = pull_requests[0] if isinstance(pull_requests[0], dict) else {}
-    pr_number = str(pr.get("number") or "").strip()
-    if not pr_number or not pr_number.isdigit():
-        return _emit_active_pr_payload(
-            {
-                "status": "ACTIVE_PR_LOOKUP_FAILED",
-                "repo": repo,
-                "head": head,
-                "reason_code": "ACTIVE_PR_INVALID_RESPONSE",
-                "waiting_on": "github_cli",
-                "next_action": f"Inspect `gh pr list --repo {repo} --state open --head {head}` output; each row must include a PR number.",
-                "pull_requests": pull_requests,
-                "exit_code": PR_IO_PREFLIGHT_EXIT,
-            },
-            stderr="GitHub active PR lookup returned a row without a valid PR number.",
-        )
-    return _emit_active_pr_payload(
-        {
-            "status": "ACTIVE_PR_FOUND",
-            "repo": repo,
-            "head": head,
-            "pr_number": pr_number,
-            "url": pr.get("url"),
-            "state": pr.get("state"),
-            "reason_code": "ACTIVE_PR_FOUND",
-            "waiting_on": None,
-            "next_action": f"Run `gh-address-cr address {repo} {pr_number} --lean`.",
-            "exit_code": 0,
-        }
-    )
-
-
-def handle_command_session(passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="gh-address-cr command-session")
-    parser.add_argument("--input", required=True)
-    parsed = parser.parse_args(passthrough)
-    try:
-        raw = sys.stdin.read() if parsed.input == "-" else Path(parsed.input).read_text(encoding="utf-8")
-        payload = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
-        summary = {
-            "status": "FAILED",
-            "reason_code": "COMMAND_SESSION_INPUT_INVALID",
-            "waiting_on": "command_session_input",
-            "next_action": "Provide JSON with an operations array.",
-            "results": [],
-            "exit_code": 2,
-            "diagnostics": [str(exc)],
-        }
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-        return 2
-    operations = payload.get("operations") if isinstance(payload, dict) else None
-    if not isinstance(operations, list):
-        summary = {
-            "status": "FAILED",
-            "reason_code": "COMMAND_SESSION_INPUT_INVALID",
-            "waiting_on": "command_session_input",
-            "next_action": "Provide JSON with an operations array.",
-            "results": [],
-            "exit_code": 2,
-        }
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-        return 2
-
-    results = []
-    for index, operation in enumerate(operations):
-        operation_id = str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
-        argv = operation.get("argv") if isinstance(operation, dict) else None
-        if not isinstance(argv, list) or not all(isinstance(arg, str) for arg in argv):
-            results.append(
-                {
-                    "id": operation_id,
-                    "status": "FAILED",
-                    "reason_code": "COMMAND_SESSION_OPERATION_INVALID",
-                    "exit_code": 2,
-                    "stdout": "",
-                    "stderr": "operation argv must be a string array",
-                }
-            )
-            continue
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            try:
-                exit_code = main(list(argv))
-            except SystemExit as exc:
-                exit_code = exc.code if isinstance(exc.code, int) else 2
-            except Exception as exc:
-                stderr.write(f"Unhandled exception: {exc}\n")
-                exit_code = 2
-        results.append(
-            {
-                "id": operation_id,
-                "status": "SUCCESS" if exit_code == 0 else "FAILED",
-                "reason_code": "COMMAND_SESSION_STEP_OK" if exit_code == 0 else "COMMAND_SESSION_STEP_FAILED",
-                "exit_code": exit_code,
-                "stdout": stdout.getvalue(),
-                "stderr": stderr.getvalue(),
-            }
-        )
-    session_exit = 0 if all(result["exit_code"] == 0 for result in results) else 2
-    summary = {
-        "status": "SUCCESS" if session_exit == 0 else "PARTIAL",
-        "reason_code": "COMMAND_SESSION_COMPLETE" if session_exit == 0 else "COMMAND_SESSION_PARTIAL",
-        "results": results,
-        "exit_code": session_exit,
-    }
-    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    return session_exit
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1128,9 +808,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-
+def _dispatch_management_commands(args) -> int | None:
+    """Handle commands that run before target-arg expansion. Returns None if unhandled."""
     if args.command == "version":
         sys.stdout.write(f"gh-address-cr {__version__}\n")
         return 0
@@ -1180,6 +859,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
         return 0
 
+    return None
+
+
+def _expand_target_args(args) -> None:
+    """Fold the leading repo/pr_number positionals back into args.args."""
     full_args = list(args.args)
     if args.pr_number:
         full_args = [args.pr_number, *full_args]
@@ -1187,6 +871,9 @@ def main(argv: list[str] | None = None) -> int:
         full_args = [args.repo, *full_args]
     args.args = full_args
 
+
+def _dispatch_passthrough_commands(args) -> int | None:
+    """Handle commands that delegate to a sub-handler module. Returns None if unhandled."""
     if args.command == "submit-action":
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
@@ -1225,6 +912,11 @@ def main(argv: list[str] | None = None) -> int:
         rc = submit_feedback_handler.main(args.args)
         return rc if rc is not None else 0
 
+    return None
+
+
+def _dispatch_high_level_commands(args) -> int:
+    """Handle legacy, unknown, and native high-level commands. Always returns a code."""
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:
         print(
             f"Unsupported legacy command: {args.command}. "
@@ -1254,6 +946,22 @@ def main(argv: list[str] | None = None) -> int:
         if preflight_rc is not None:
             return preflight_rc
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    rc = _dispatch_management_commands(args)
+    if rc is not None:
+        return rc
+
+    _expand_target_args(args)
+
+    rc = _dispatch_passthrough_commands(args)
+    if rc is not None:
+        return rc
+
+    return _dispatch_high_level_commands(args)
 
 
 if __name__ == "__main__":

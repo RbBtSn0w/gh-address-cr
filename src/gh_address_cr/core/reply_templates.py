@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 SEVERITY_RISK_NOTES = {
     "P0": "Blocker path validated for critical system integrity and safety.",
     "P1": "High-severity path validated with targeted regression checks.",

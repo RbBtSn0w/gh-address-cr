@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
 from gh_address_cr.core import paths as core_paths
-from gh_address_cr.intake.findings import parse_finding_blocks
-from gh_address_cr.intake.findings import FindingsFormatError
+from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.intake.findings import FindingsFormatError, parse_finding_blocks
 
 
 def findings_file(repo: str, pr_number: str, name: str = "code-review-findings.json") -> Path:
@@ -59,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         output_path = findings_file(args.repo, args.pr_number)
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json_atomic(output_path, findings)
 
     json.dump(findings, sys.stdout, indent=2)
     sys.stdout.write("\n")

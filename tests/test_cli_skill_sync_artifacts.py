@@ -2,7 +2,6 @@ import unittest
 
 from tests.helpers import ROOT
 
-
 FEATURE_DIR = ROOT / "specs" / "012-cli-skill-sync"
 SPEC_MD = FEATURE_DIR / "spec.md"
 PLAN_MD = FEATURE_DIR / "plan.md"

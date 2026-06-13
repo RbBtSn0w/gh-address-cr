@@ -1,8 +1,7 @@
 import json
 import sys
-
-
 from pathlib import Path
+
 from tests.helpers import (
     CLI_PY,
     PythonScriptTestCase,

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 import argparse
 import json
 import os
-import sys
 import shlex
-from pathlib import Path
 import subprocess
+import sys
+from pathlib import Path
+
+from gh_address_cr.core.io import write_json_atomic
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -94,8 +97,8 @@ def parse_files(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
-def parse_validation_commands(values: list[str], *, legacy: bool) -> list[dict[str, str]] | list[str]:
-    if legacy:
+def parse_validation_commands(values: list[str], *, structured: bool) -> list[dict[str, str]] | list[str]:
+    if not structured:
         return values
     commands: list[dict[str, str]] = []
     for value in values:
@@ -164,7 +167,7 @@ def build_runtime_response(req: dict, args: argparse.Namespace) -> dict:
         "agent_id": args.agent_id,
         "resolution": args.resolution,
         "note": args.note,
-        "validation_commands": parse_validation_commands(args.validation_cmd, legacy=False),
+        "validation_commands": parse_validation_commands(args.validation_cmd, structured=True),
     }
     if files:
         action["files"] = files
@@ -175,7 +178,7 @@ def build_runtime_response(req: dict, args: argparse.Namespace) -> dict:
     return action
 
 
-def build_legacy_action(args: argparse.Namespace) -> dict:
+def build_loop_payload(args: argparse.Namespace) -> dict:
     files = parse_files(args.files)
     action = {
         "resolution": args.resolution,
@@ -193,7 +196,7 @@ def build_legacy_action(args: argparse.Namespace) -> dict:
             "test_result": args.test_result,
         }
     if args.validation_cmd:
-        action["validation_commands"] = parse_validation_commands(args.validation_cmd, legacy=True)
+        action["validation_commands"] = parse_validation_commands(args.validation_cmd, structured=False)
     return action
 
 
@@ -240,13 +243,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     item_id = safe_item_id(item)
-    action = build_runtime_response(req, args) if runtime else build_legacy_action(args)
+    action = build_runtime_response(req, args) if runtime else build_loop_payload(args)
     output_prefix = "action-response" if runtime else "fixer-payload"
     output_dir = Path(args.output_dir) if args.output_dir else req_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{output_prefix}-{item_id}.json"
 
-    output_path.write_text(json.dumps(action, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(output_path, action)
 
     script_path = output_dir / f"fixer-{item_id}.sh"
     script_path.write_text(f"#!/bin/sh\ncat {shlex.quote(str(output_path))}\n", encoding="utf-8")

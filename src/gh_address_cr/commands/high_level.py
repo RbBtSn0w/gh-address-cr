@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from gh_address_cr.core import command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.github_thread_state import (
@@ -20,8 +21,11 @@ from gh_address_cr.core.github_thread_state import (
 )
 from gh_address_cr.core.handoff import (
     ensure_handoff_state as _ensure_handoff_state,
+)
+from gh_address_cr.core.handoff import (
     record_producer_result,
 )
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -44,7 +48,7 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
 
 def _persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
     path = _workspace_root(repo, pr_number) / "last-machine-summary.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(path, payload)
 
 
 def _build_preflight_summary(
@@ -94,12 +98,9 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict:
         created = True
     _ensure_native_session_fields(session)
     if created:
-        try:
-            from gh_address_cr.core.telemetry import SessionTelemetry
+        from gh_address_cr.core.telemetry import configure_context_safely
 
-            SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-        except Exception:
-            pass
+        configure_context_safely(repo, pr_number)
     return session
 
 
@@ -271,7 +272,7 @@ def _write_native_action_request(repo: str, pr_number: str, item: dict, *, comma
         ],
         "resume_command": f"gh-address-cr {command} {repo} {pr_number}",
     }
-    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(request_path, request)
     return request_path
 
 
@@ -334,27 +335,7 @@ def _native_summary(
 
 
 def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
-    return {
-        "address": f"gh-address-cr address {repo} {pr_number} --lean",
-        "review_auto_simple": f"gh-address-cr review --auto-simple {repo} {pr_number} --lean",
-        "threads": f"gh-address-cr threads {repo} {pr_number} --lean",
-        "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
-        "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
-        "batch_next": f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id>",
-        "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-        "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
-        "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
-        "fix_all_homogeneous": (
-            f"gh-address-cr agent fix-all {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
-        ),
-        "resolve_stale": (
-            f"gh-address-cr agent resolve-stale {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
-        ),
-        "publish": f"gh-address-cr agent publish {repo} {pr_number}",
-        "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
-    }
+    return command_templates.common_summary_commands(repo, pr_number)
 
 
 def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
@@ -437,7 +418,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         ],
         "commands": summary_commands(repo, pr_number),
     }
-    request_path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(request_path, request)
     return request_path
 
 
@@ -523,9 +504,12 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if not argv:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
+
     from gh_address_cr.core.telemetry import (
         SessionTelemetry,
         command_label,
+    )
+    from gh_address_cr.core.telemetry import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
 
@@ -554,8 +538,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
                 end_time=end_time,
                 exit_code=exit_code,
             )
-        except Exception:
-            pass
+        except Exception as exc:  # intentionally broad: telemetry must not break command execution
+            from gh_address_cr.core.command_runner import telemetry_debug_enabled
+
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
 
     if error is not None:
         return None, error

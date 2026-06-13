@@ -6,7 +6,7 @@ import sys
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from tests.helpers import PythonScriptTestCase, IMPLEMENTATIONS_DIR
+from tests.helpers import IMPLEMENTATIONS_DIR, PythonScriptTestCase
 
 
 @contextmanager

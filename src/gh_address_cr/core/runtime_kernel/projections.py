@@ -22,7 +22,6 @@ from gh_address_cr.core.runtime_kernel.events import (
 )
 from gh_address_cr.core.runtime_kernel.identity import planned_command_id, planned_command_payload
 
-
 JsonDict = dict[str, Any]
 
 REQUIRED_THREAD_COMMANDS = ("reply_thread", "resolve_thread")

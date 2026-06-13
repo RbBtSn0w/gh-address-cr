@@ -6,7 +6,6 @@ from typing import Any
 
 from gh_address_cr.core.models import stable_payload_hash
 
-
 JsonDict = dict[str, Any]
 
 

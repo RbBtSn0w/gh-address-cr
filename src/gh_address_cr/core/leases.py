@@ -6,13 +6,24 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
+)
+from gh_address_cr.core.utils import (
     get_field as _get,
+)
+from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
     json_ready as _json_ready,
+)
+from gh_address_cr.core.utils import (
     return_expired_items_to_open as _return_expired_items_to_open,
+)
+from gh_address_cr.core.utils import (
     set_field as _set,
 )
 
@@ -240,7 +251,7 @@ def submit_lease(
     if _get(lease, "request_hash") != request_hash:
         _raise_submission_error(
             session,
-            "STALE_REQUEST_CONTEXT",
+            protocol_codes.STALE_REQUEST_CONTEXT,
             lease_id,
             lease=lease,
             agent_id=agent_id,
@@ -417,7 +428,7 @@ def calculate_lease_recovery_state(
     item_active_lease_id = _get(item, "active_lease_id") if item is not None else None
 
     recovery_outcome = "refresh_state"
-    reason_code = "STALE_REQUEST_CONTEXT"
+    reason_code = protocol_codes.STALE_REQUEST_CONTEXT
     if item is not None and (_get(item, "handled") or item_state == "handled"):
         recovery_outcome = "already_completed"
         reason_code = "LEASE_ALREADY_COMPLETED"
@@ -426,16 +437,16 @@ def calculate_lease_recovery_state(
         reason_code = "LEASE_ALREADY_COMPLETED"
     elif lease is not None and (lease_agent_id != str(agent_id) or lease_role != str(role)):
         recovery_outcome = "stop"
-        reason_code = "LEASE_RECOVERY_STOP"
+        reason_code = protocol_codes.LEASE_RECOVERY_STOP
     elif item_active_lease_id and str(item_active_lease_id) != str(lease_id):
         recovery_outcome = "stop"
-        reason_code = "LEASE_RECOVERY_STOP"
+        reason_code = protocol_codes.LEASE_RECOVERY_STOP
     elif item_claimed_by and str(item_claimed_by) != str(agent_id):
         recovery_outcome = "stop"
-        reason_code = "LEASE_RECOVERY_STOP"
+        reason_code = protocol_codes.LEASE_RECOVERY_STOP
     elif lease_status == "active" and lease_request_hash != str(request_hash):
         recovery_outcome = "refresh_state"
-        reason_code = "STALE_REQUEST_CONTEXT"
+        reason_code = protocol_codes.STALE_REQUEST_CONTEXT
     elif lease_status == "active" and lease is not None and _is_expired(lease, now):
         recovery_outcome = "renew"
         reason_code = "EXPIRED_LEASE_RENEWABLE"
@@ -444,13 +455,13 @@ def calculate_lease_recovery_state(
         reason_code = "EXPIRED_LEASE_RECLAIMABLE"
     elif lease_status in {"rejected", "released"}:
         recovery_outcome = "reclaim" if item_state == "open" else "refresh_state"
-        reason_code = "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else "STALE_REQUEST_CONTEXT"
+        reason_code = "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else protocol_codes.STALE_REQUEST_CONTEXT
     elif lease_status == "active":
         recovery_outcome = "stop"
         reason_code = "LEASE_ACTIVE"
     elif lease_status not in {"active", "submitted"}:
         recovery_outcome = "stop"
-        reason_code = "LEASE_RECOVERY_STOP"
+        reason_code = protocol_codes.LEASE_RECOVERY_STOP
 
     resume_command = (
         _lease_recovery_resume_command(session, lease_item_id, role=role, agent_id=agent_id)
@@ -684,7 +695,7 @@ def _items(session: Any) -> dict[str, Any]:
     items = getattr(session, "items", None)
     if items is None:
         items = {}
-        setattr(session, "items", items)
+        session.items = items
     return items
 
 
@@ -694,7 +705,7 @@ def _leases(session: Any) -> dict[str, Any]:
     leases = getattr(session, "leases", None)
     if leases is None:
         leases = {}
-        setattr(session, "leases", leases)
+        session.leases = leases
     return leases
 
 
@@ -704,7 +715,7 @@ def _lease_events(session: Any) -> list[dict[str, Any]]:
     events = getattr(session, "lease_events", None)
     if events is None:
         events = []
-        setattr(session, "lease_events", events)
+        session.lease_events = events
     return events
 
 
