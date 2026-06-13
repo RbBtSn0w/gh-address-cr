@@ -217,11 +217,11 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("batch_action_response.v1", payload["output_formats"])
         self.assertIn("work_item_boundary.v1", payload["output_formats"])
 
-    def test_agent_submit_batch_help_documents_batch_contract(self):
-        result = self.run_runtime_module("agent", "submit-batch", "--help")
+    def test_agent_resolve_help_documents_batch_contract(self):
+        result = self.run_runtime_module("agent", "resolve", "--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: gh-address-cr agent submit-batch", result.stdout)
+        self.assertIn("usage: gh-address-cr agent resolve", result.stdout)
         self.assertIn("BatchActionResponse", result.stdout)
 
     def test_missing_gh_preflight_fails_before_session_mutation(self):

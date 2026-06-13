@@ -177,7 +177,7 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
             waiting_on="batch_action_response",
             exit_code=2,
             message=(
-                "agent fix-all --input requires each batch item to supply item-level summary and why. "
+                "agent resolve --batch requires each batch item to supply item-level summary and why. "
                 "Common fix_reply summary/why cannot stand in for per-thread reviewer-answer evidence."
             ),
             payload={"missing_item_indexes": missing},
@@ -208,8 +208,8 @@ def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict
         return
 
     next_action = (
-        f"Use `gh-address-cr agent resolve-stale {repo} {pr_number} "
-        "--commit <sha> --files <paths> --validation <cmd=passed> --match-files` "
+        f"Use `gh-address-cr agent resolve {repo} {pr_number} "
+        "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files` "
         "for stale or outdated GitHub review threads."
     )
     raise WorkflowError(
@@ -377,7 +377,7 @@ def fast_fix_item(
             reason_code="MISSING_FILES",
             waiting_on="fast_fix_input",
             exit_code=2,
-            message="agent fix requires --files or --file.",
+            message="agent resolve requires --files or --file.",
             payload={"item_id": item_id},
         )
     if not normalized_validation:
@@ -386,7 +386,7 @@ def fast_fix_item(
             reason_code="MISSING_VALIDATION_COMMANDS",
             waiting_on="fast_fix_input",
             exit_code=2,
-            message="agent fix requires --validation.",
+            message="agent resolve requires --validation.",
             payload={"item_id": item_id},
         )
     if not commit_hash.strip():
@@ -395,7 +395,7 @@ def fast_fix_item(
             reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
             waiting_on="fast_fix_input",
             exit_code=2,
-            message="agent fix requires --commit for GitHub thread replies.",
+            message="agent resolve requires --commit for GitHub thread replies.",
             payload={"item_id": item_id},
         )
     if not summary.strip() or not why.strip():
@@ -404,7 +404,7 @@ def fast_fix_item(
             reason_code="MISSING_SUMMARY_OR_WHY",
             waiting_on="fast_fix_input",
             exit_code=2,
-            message="agent fix requires --summary and --why.",
+            message="agent resolve requires --summary and --why.",
             payload={"item_id": item_id},
         )
     normalized_severity = _validate_requested_severity(
@@ -436,7 +436,7 @@ def fast_fix_item(
             reason_code="INVALID_REVIEW_PRIORITY",
             waiting_on="fast_fix_input",
             exit_code=2,
-            message="agent fix --review-priority must be high, medium, or low.",
+            message="agent resolve --review-priority must be high, medium, or low.",
             payload={"item_id": item_id},
         )
 
@@ -606,7 +606,7 @@ def _build_fast_fix_context(
     status_prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
     rejected_status = f"{status_prefix}_REJECTED"
     input_waiting_on = "stale_resolution_input" if stale_only else "fast_fix_input"
-    command_name = "agent resolve-stale" if stale_only else "agent fix-all"
+    command_name = "agent resolve --stale" if stale_only else "agent resolve --homogeneous"
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
@@ -707,8 +707,8 @@ def _enforce_fast_fix_routing(
         return
     if any(is_stale_or_outdated_github_thread(item) for item in matches):
         next_action = (
-            f"Use `gh-address-cr agent resolve-stale {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files` "
+            f"Use `gh-address-cr agent resolve {repo} {pr_number} "
+            "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files` "
             "for stale or outdated GitHub review threads."
         )
         raise WorkflowError(
@@ -724,7 +724,7 @@ def _enforce_fast_fix_routing(
         next_action = (
             f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton, then fill per-thread summary/why entries and submit it. "
-            "Rerun fix-all with `--homogeneous-reason <why>` only for a homogeneous repeated concern."
+            "Rerun `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern."
         )
         raise WorkflowError(
             status=ctx.rejected_status,
@@ -737,8 +737,7 @@ def _enforce_fast_fix_routing(
                 "files": sorted(normalized_file_set),
                 "commands": {
                     "batch_next": batch_command,
-                    "submit_batch": command_templates.submit_batch(repo, str(pr_number), input_path="<batch-response.json>"),
-                    "fix_all_input": command_templates.fix_all_input(repo, str(pr_number), input_path="<batch-response.json>"),
+                    "resolve_batch": command_templates.resolve_batch(repo, str(pr_number), input_path="<batch-response.json>"),
                 },
             },
         )
@@ -747,7 +746,7 @@ def _enforce_fast_fix_routing(
         next_action = (
             f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton with per-thread summary/why entries. The matched threads have missing "
-            "or distinct thread bodies, so fix-all cannot prove a homogeneous repeated concern."
+            "or distinct thread bodies, so resolve cannot prove a homogeneous repeated concern."
         )
         raise WorkflowError(
             status=ctx.rejected_status,
@@ -760,8 +759,7 @@ def _enforce_fast_fix_routing(
                 "files": sorted(normalized_file_set),
                 "commands": {
                     "batch_next": batch_command,
-                    "submit_batch": command_templates.submit_batch(repo, str(pr_number), input_path="<batch-response.json>"),
-                    "fix_all_input": command_templates.fix_all_input(repo, str(pr_number), input_path="<batch-response.json>"),
+                    "resolve_batch": command_templates.resolve_batch(repo, str(pr_number), input_path="<batch-response.json>"),
                 },
             },
         )

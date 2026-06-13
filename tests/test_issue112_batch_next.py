@@ -56,8 +56,8 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(response["status"], "BATCH_ACTION_REQUESTED")
         self.assertEqual(response["lease_count"], 2)
         self.assertEqual(len(response["leased_items"]), 2)
-        self.assertIn("agent submit-batch octo/example 77 --input", response["next_action"])
-        self.assertIn("submit_batch", response["commands"])
+        self.assertIn("agent resolve octo/example 77 --batch --input", response["next_action"])
+        self.assertIn("resolve_batch", response["commands"])
 
         session = self.load_session()
         self.assertEqual(session["items"]["thread-1"]["state"], "claimed")
@@ -93,11 +93,11 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         submitted = self.run_runtime_module(
-            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(skeleton_path), "--now", TEST_NOW
         )
         self.assertEqual(submitted.returncode, 0, submitted.stderr)
         submitted_payload = json.loads(submitted.stdout)
-        self.assertEqual(submitted_payload["status"], "BATCH_ACTION_ACCEPTED")
+        self.assertEqual(submitted_payload["status"], "FAST_FIX_ALL_ACCEPTED")
         self.assertEqual(submitted_payload["accepted_count"], 2)
 
     def test_submit_batch_rejection_returns_skeleton_recovery_guidance(self):
@@ -143,7 +143,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         rejected = self.run_runtime_module(
-            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(skeleton_path), "--now", TEST_NOW
         )
 
         self.assertEqual(rejected.returncode, 5)
@@ -152,7 +152,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "MISSING_FILES")
         self.assertEqual(payload["batch_response_skeleton_path"], str(skeleton_path))
         self.assertEqual(payload["recovery_action"], "edit_batch_response_skeleton")
-        self.assertIn(str(skeleton_path), payload["commands"]["submit_batch"])
+        self.assertIn(str(skeleton_path), payload["commands"]["resolve_batch"])
         self.assertIn("--batch", payload["commands"]["batch_next"])
         self.assertIn("Edit", payload["next_action"])
 
@@ -327,7 +327,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         submitted = self.run_runtime_module(
-            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(skeleton_path), "--now", TEST_NOW
         )
         self.assertEqual(submitted.returncode, 0, submitted.stderr)
 
@@ -521,7 +521,7 @@ class BatchNextTestCase(PythonScriptTestCase):
 
         # Submit should fail with BATCH_ACTION_REJECTED due to expired lease and return lease recovery guidance
         rejected = self.run_runtime_module(
-            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(skeleton_path), "--now", TEST_NOW
         )
         self.assertEqual(rejected.returncode, 5)
         payload = json.loads(rejected.stdout)

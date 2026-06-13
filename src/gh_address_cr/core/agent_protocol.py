@@ -1273,8 +1273,7 @@ def _batch_recovery_payload(
     repo = session_paths.repo
     pr_number = session_paths.pr_number
     batch_next_command = command_templates.batch_next(repo, pr_number)
-    submit_batch_command = command_templates.submit_batch(repo, pr_number, input_path=str(target_path))
-    fix_all_command = command_templates.fix_all_input(repo, pr_number, input_path=str(target_path))
+    resolve_batch_command = command_templates.resolve_batch(repo, pr_number, input_path=str(target_path))
 
     payload: dict[str, Any] = {
         "recovery_action": (
@@ -1282,8 +1281,7 @@ def _batch_recovery_payload(
         ),
         "commands": {
             "batch_next": batch_next_command,
-            "submit_batch": submit_batch_command,
-            "fix_all": fix_all_command,
+            "resolve_batch": resolve_batch_command,
         },
     }
     if agent_id:
@@ -1291,13 +1289,13 @@ def _batch_recovery_payload(
     if target_path.is_file():
         payload["batch_response_skeleton_path"] = str(target_path)
         payload["recovery_message"] = (
-            f"BatchActionResponse rejected. Edit {target_path} and submit it with `{submit_batch_command}`. "
+            f"BatchActionResponse rejected. Edit {target_path} and submit it with `{resolve_batch_command}`. "
             "The active leases were kept for retry; no partial evidence was accepted."
         )
     else:
         payload["recovery_message"] = (
             f"BatchActionResponse rejected. Regenerate a runtime-owned skeleton with `{batch_next_command}`, "
-            f"then submit it with `{submit_batch_command}`. The active leases were kept for retry; "
+            f"then submit it with `{resolve_batch_command}`. The active leases were kept for retry; "
             "no partial evidence was accepted."
         )
     return payload

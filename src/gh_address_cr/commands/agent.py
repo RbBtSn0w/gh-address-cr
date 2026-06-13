@@ -72,9 +72,7 @@ def build_agent_manifest() -> dict:
             "produce_findings",
             "triage",
             "classify",
-            "fix",
-            "trivial_fix",
-            "fix_all",
+            "resolve",
             "evidence",
             "clarify",
             "defer",
@@ -82,7 +80,6 @@ def build_agent_manifest() -> dict:
             "verify",
             "publish",
             "gate",
-            "resolve_stale",
         ],
         "input_formats": [
             "action_request.v1",
@@ -111,7 +108,7 @@ def build_agent_manifest() -> dict:
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,submit-batch,fix,trivial-fix,fix-all,resolve-stale,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
+            "usage: gh-address-cr agent {manifest,classify,next,submit,resolve,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
             "Agent protocol utilities.\n"
         )
         return 0
@@ -124,16 +121,8 @@ def handle_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_next(args.pr_number, args.args)
     if args.repo == "submit":
         return handle_agent_submit(args.pr_number, args.args)
-    if args.repo == "submit-batch":
-        return handle_agent_submit_batch(args.pr_number, args.args)
-    if args.repo == "fix":
-        return handle_agent_fix(args.pr_number, args.args)
-    if args.repo == "trivial-fix":
-        return handle_agent_trivial_fix(args.pr_number, args.args)
-    if args.repo == "fix-all":
-        return handle_agent_fix_all(args.pr_number, args.args)
-    if args.repo == "resolve-stale":
-        return handle_agent_resolve_stale(args.pr_number, args.args)
+    if args.repo == "resolve":
+        return handle_agent_resolve(args.pr_number, args.args)
     if args.repo == "evidence":
         return handle_agent_evidence(args.pr_number, args.args)
     if args.repo == "publish":
@@ -145,7 +134,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
     print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, submit-batch, fix, trivial-fix, fix-all, resolve-stale, evidence, publish, leases, reclaim, orchestrate.",
+        "Unknown agent command. Supported commands: manifest, classify, next, submit, resolve, evidence, publish, leases, reclaim, orchestrate.",
         file=sys.stderr,
     )
     return 2
@@ -244,32 +233,6 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
     return 0
 
 
-def handle_agent_submit_batch(repo: str | None, passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="gh-address-cr agent submit-batch",
-        description="Submit a BatchActionResponse with common fix evidence for multiple GitHub review threads.",
-    )
-    parser.add_argument("repo")
-    parser.add_argument("pr_number")
-    parser.add_argument("--input", required=True, help="Path to a BatchActionResponse JSON file.")
-    parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
-    try:
-        now_dt = None
-        if parsed.now:
-            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = agent_protocol.submit_batch_action_response(
-            parsed.repo,
-            parsed.pr_number,
-            batch_path=parsed.input,
-            now=now_dt,
-        )
-    except WorkflowError as exc:
-        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    return 0
-
-
 def _parse_agent_files(files: str | None, extra_files: list[str] | None = None) -> list[str]:
     values: list[str] = []
     if files:
@@ -341,177 +304,144 @@ def _changed_files_for_commit(
     )
 
 
-def handle_agent_fix(repo: str | None, passthrough: list[str]) -> int:
+def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
+    """Unified GitHub review-thread resolution surface.
+
+    One command routes single, trivial, batch, homogeneous, and stale fixes
+    through the same lease/evidence/publish contract. Classification is recorded
+    internally, so no separate `agent classify` round-trip is required on this path.
+    """
     parser = argparse.ArgumentParser(
-        prog="gh-address-cr agent fix",
-        description="Classify, claim, submit, and optionally publish one GitHub review-thread fix.",
+        prog="gh-address-cr agent resolve",
+        description=(
+            "Resolve one or more GitHub review threads. Modes: default single item; "
+            "--trivial doc/typo item; --batch --input <BatchActionResponse>; "
+            "--homogeneous-reason <why> for a repeated concern; --stale --match-files."
+        ),
     )
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    parser.add_argument("item_id")
+    parser.add_argument("item_id", nargs="?")
     parser.add_argument("--agent-id", default="agent")
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--commit")
     parser.add_argument("--files")
     parser.add_argument("--file", action="append", default=[])
-    parser.add_argument("--summary", required=True)
-    parser.add_argument("--why", required=True)
+    parser.add_argument("--summary")
+    parser.add_argument("--why")
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
     parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
     parser.add_argument("--review-priority", choices=["high", "medium", "low"])
     parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
-    parser.add_argument("--publish", action="store_true")
-    parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
-    try:
-        now_dt = None
-        if parsed.now:
-            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = workflow.fast_fix_item(
-            parsed.repo,
-            parsed.pr_number,
-            item_id=parsed.item_id,
-            agent_id=parsed.agent_id,
-            commit_hash=parsed.commit,
-            files=_parse_agent_files(parsed.files, parsed.file),
-            validation_commands=_parse_agent_validation(parsed.validation),
-            summary=parsed.summary,
-            why=parsed.why,
-            severity=parsed.severity,
-            severity_note=parsed.severity_note,
-            review_priority=parsed.review_priority,
-            publish=parsed.publish,
-            now=now_dt,
-        )
-    except WorkflowError as exc:
-        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    return 0
-
-
-def handle_agent_trivial_fix(repo: str | None, passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="gh-address-cr agent trivial-fix",
-        description="Fast path for documentation or typo-only GitHub review-thread fixes.",
-    )
-    parser.add_argument("repo")
-    parser.add_argument("pr_number")
-    parser.add_argument("item_id")
-    parser.add_argument("--agent-id", default="agent")
-    parser.add_argument("--commit", required=True)
-    parser.add_argument("--files")
-    parser.add_argument("--file", action="append", default=[])
-    parser.add_argument("--summary", required=True)
-    parser.add_argument("--why", required=True)
-    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
+    parser.add_argument("--input", help="BatchActionResponse JSON for --batch mode.")
+    parser.add_argument("--batch", action="store_true", help="Resolve multiple threads from a BatchActionResponse.")
+    parser.add_argument("--trivial", action="store_true", help="Documentation/typo-only fast path.")
+    parser.add_argument("--stale", action="store_true", help="Resolve matching STALE/outdated threads.")
+    parser.add_argument("--homogeneous-reason", help="Rationale for the homogeneous repeated-concern shortcut.")
+    parser.add_argument("--concern-label", help="Short label for the homogeneous repeated concern.")
+    parser.add_argument("--match-files", action="store_true", help="Required for --stale: keep resolution file-scoped.")
+    parser.add_argument("--include-stale", action="store_true")
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
     scope_args, scope_error = _agent_args_with_scope(repo, passthrough)
     if scope_error is not None:
         return _emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scope_args)
+
+    selected_modes = [
+        name
+        for name, active in (
+            ("--batch", parsed.batch or bool(parsed.input)),
+            ("--trivial", parsed.trivial),
+            ("--stale", parsed.stale),
+        )
+        if active
+    ]
+    if len(selected_modes) > 1:
+        return output_workflow_error(
+            WorkflowError(
+                status=protocol_codes.FAST_FIX_REJECTED,
+                reason_code="CONFLICTING_RESOLVE_MODE",
+                waiting_on="resolve_mode",
+                exit_code=2,
+                message=f"agent resolve modes are mutually exclusive; got {', '.join(selected_modes)}.",
+            ),
+            repo=parsed.repo,
+            pr_number=parsed.pr_number,
+        )
+
     try:
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = workflow.trivial_fix_item(
-            parsed.repo,
-            parsed.pr_number,
-            item_id=parsed.item_id,
-            agent_id=parsed.agent_id,
-            commit_hash=parsed.commit,
-            files=_parse_agent_files(parsed.files, parsed.file),
-            validation_commands=_parse_agent_validation(parsed.validation),
-            summary=parsed.summary,
-            why=parsed.why,
-            publish=parsed.publish,
-            now=now_dt,
-        )
+        payload = _dispatch_agent_resolve(parsed, now_dt=now_dt)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    payload.setdefault("published", bool(parsed.publish) and "publish" in payload)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 
 
-def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="gh-address-cr agent fix-all",
-        description=(
-            "Submit per-thread batch evidence for matching GitHub review threads, or use an explicit "
-            "homogeneous repeated-concern shortcut."
-        ),
-    )
-    parser.add_argument("repo")
-    parser.add_argument("pr_number")
-    parser.add_argument("--agent-id", default="agent")
-    parser.add_argument("--input", help="BatchActionResponse JSON with per-thread summary/why evidence.")
-    parser.add_argument("--commit")
-    parser.add_argument("--files")
-    parser.add_argument("--file", action="append", default=[])
-    parser.add_argument("--homogeneous-reason", help="Required rationale for the homogeneous repeated-concern shortcut.")
-    parser.add_argument("--concern-label", help="Short label for the homogeneous repeated concern.")
-    parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
-    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
-    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
-    parser.add_argument("--publish", action="store_true")
-    parser.add_argument("--include-stale", action="store_true")
-    parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
-    try:
-        now_dt = None
-        if parsed.now:
-            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        if parsed.input:
-            conflicting_flags = []
-            if parsed.commit:
-                conflicting_flags.append("--commit")
-            if parsed.files:
-                conflicting_flags.append("--files")
-            if parsed.file:
-                conflicting_flags.append("--file")
-            if parsed.validation:
-                conflicting_flags.append("--validation")
-            if parsed.severity:
-                conflicting_flags.append("--severity")
-            if parsed.severity_note:
-                conflicting_flags.append("--severity-note")
-            if parsed.homogeneous_reason:
-                conflicting_flags.append("--homogeneous-reason")
-            if parsed.concern_label:
-                conflicting_flags.append("--concern-label")
-            if parsed.include_stale:
-                conflicting_flags.append("--include-stale")
-            if conflicting_flags:
-                raise WorkflowError(
-                    status=protocol_codes.FAST_FIX_ALL_REJECTED,
-                    reason_code="CONFLICTING_FIX_ALL_INPUT",
-                    waiting_on="fast_fix_input",
-                    exit_code=2,
-                    message=(
-                        "agent fix-all accepts either --input or evidence flags, not both. "
-                        f"Move {', '.join(conflicting_flags)} into the BatchActionResponse."
-                    ),
-                )
-            payload = workflow.fast_fix_from_batch_input(
-                parsed.repo,
-                parsed.pr_number,
-                batch_path=parsed.input,
-                publish=parsed.publish,
-                now=now_dt,
+def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    if parsed.batch or parsed.input:
+        if not parsed.input:
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_ALL_REJECTED,
+                reason_code="MISSING_BATCH_INPUT",
+                waiting_on="batch_action_response",
+                exit_code=2,
+                message="agent resolve --batch requires --input <BatchActionResponse>.",
             )
-            sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-            return 0
+        return workflow.fast_fix_from_batch_input(
+            parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
+        )
+
+    if parsed.stale:
+        if not parsed.match_files:
+            raise WorkflowError(
+                status="STALE_RESOLUTION_REJECTED",
+                reason_code="MISSING_MATCH_FILES",
+                waiting_on="stale_resolution_input",
+                exit_code=2,
+                message="agent resolve --stale requires --match-files so stale synchronization stays file-scoped.",
+            )
+        if not parsed.commit:
+            raise WorkflowError(
+                status="STALE_RESOLUTION_REJECTED",
+                reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
+                waiting_on="stale_resolution_input",
+                exit_code=2,
+                message="agent resolve --stale requires --commit.",
+            )
+        files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(
+            parsed.commit, rejected_status="STALE_RESOLUTION_REJECTED", command_name="agent resolve --stale"
+        )
+        return workflow.fast_fix_matching_threads(
+            parsed.repo,
+            parsed.pr_number,
+            agent_id=parsed.agent_id,
+            commit_hash=parsed.commit,
+            files=files,
+            validation_commands=_parse_agent_validation(parsed.validation),
+            include_stale=True,
+            stale_only=True,
+            severity=parsed.severity,
+            severity_note=parsed.severity_note,
+            publish=parsed.publish,
+            now=now_dt,
+        )
+
+    if not parsed.item_id:
+        # Match-all-by-files mode (was `fix-all`): homogeneous shortcut or per-thread rejection.
         if not parsed.commit:
             raise WorkflowError(
                 status=protocol_codes.FAST_FIX_ALL_REJECTED,
                 reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
                 waiting_on="fast_fix_input",
                 exit_code=2,
-                message="agent fix-all requires --commit unless --input supplies a BatchActionResponse.",
+                message="agent resolve requires --commit, or pass an <item_id> for a single-thread fix.",
             )
-        files = _parse_agent_files(parsed.files, parsed.file)
-        if not files:
-            files = _changed_files_for_commit(parsed.commit)
-        payload = workflow.fast_fix_matching_threads(
+        files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(parsed.commit)
+        return workflow.fast_fix_matching_threads(
             parsed.repo,
             parsed.pr_number,
             agent_id=parsed.agent_id,
@@ -526,67 +456,55 @@ def handle_agent_fix_all(repo: str | None, passthrough: list[str]) -> int:
             publish=parsed.publish,
             now=now_dt,
         )
-    except WorkflowError as exc:
-        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    return 0
 
-
-def handle_agent_resolve_stale(repo: str | None, passthrough: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="gh-address-cr agent resolve-stale",
-        description="Submit runtime-mediated evidence for stale GitHub review threads matching changed files.",
-    )
-    parser.add_argument("repo")
-    parser.add_argument("pr_number")
-    parser.add_argument("--agent-id", default="agent")
-    parser.add_argument("--commit", required=True)
-    parser.add_argument("--files")
-    parser.add_argument("--file", action="append", default=[])
-    parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
-    parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
-    parser.add_argument("--validation", "--validation-cmd", dest="validation", action="append", default=[])
-    parser.add_argument("--match-files", action="store_true")
-    parser.add_argument("--publish", action="store_true")
-    parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
-    try:
-        if not parsed.match_files:
-            raise WorkflowError(
-                status="STALE_RESOLUTION_REJECTED",
-                reason_code="MISSING_MATCH_FILES",
-                waiting_on="stale_resolution_input",
-                exit_code=2,
-                message="agent resolve-stale requires --match-files so stale synchronization stays file-scoped.",
-            )
-        now_dt = None
-        if parsed.now:
-            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        files = _parse_agent_files(parsed.files, parsed.file)
-        if not files:
-            files = _changed_files_for_commit(
-                parsed.commit,
-                rejected_status="STALE_RESOLUTION_REJECTED",
-                command_name="agent resolve-stale",
-            )
-        payload = workflow.fast_fix_matching_threads(
+    # Single-item modes (default fix or --trivial) require commit + summary + why.
+    missing = [
+        flag
+        for flag, value in (
+            ("--commit", parsed.commit),
+            ("--summary", parsed.summary),
+            ("--why", parsed.why),
+        )
+        if not value
+    ]
+    if missing:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="MISSING_RESOLVE_ARGS",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message=f"agent resolve {parsed.item_id} requires {', '.join(missing)} for a single-thread fix.",
+        )
+    if parsed.trivial:
+        return workflow.trivial_fix_item(
             parsed.repo,
             parsed.pr_number,
+            item_id=parsed.item_id,
             agent_id=parsed.agent_id,
             commit_hash=parsed.commit,
-            files=files,
+            files=_parse_agent_files(parsed.files, parsed.file),
             validation_commands=_parse_agent_validation(parsed.validation),
-            include_stale=True,
-            stale_only=True,
-            severity=parsed.severity,
-            severity_note=parsed.severity_note,
+            summary=parsed.summary,
+            why=parsed.why,
             publish=parsed.publish,
             now=now_dt,
         )
-    except WorkflowError as exc:
-        return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    return 0
+    return workflow.fast_fix_item(
+        parsed.repo,
+        parsed.pr_number,
+        item_id=parsed.item_id,
+        agent_id=parsed.agent_id,
+        commit_hash=parsed.commit,
+        files=_parse_agent_files(parsed.files, parsed.file),
+        validation_commands=_parse_agent_validation(parsed.validation),
+        summary=parsed.summary,
+        why=parsed.why,
+        severity=parsed.severity,
+        severity_note=parsed.severity_note,
+        review_priority=parsed.review_priority,
+        publish=parsed.publish,
+        now=now_dt,
+    )
 
 
 def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:

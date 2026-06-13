@@ -55,7 +55,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -103,7 +103,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -151,7 +151,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -211,7 +211,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -242,7 +242,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -285,7 +285,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -326,7 +326,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -403,7 +403,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "fix-all", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -463,58 +463,13 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "fix-all", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 4)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "STALE_THREADS_REQUIRE_RESOLVE_STALE")
-        self.assertIn("agent resolve-stale", payload["next_action"])
-
-    def test_agent_fix_all_input_rejects_conflicting_commit_argument(self):
-        self.workspace_dir().mkdir(parents=True, exist_ok=True)
-        batch_path = self.workspace_dir() / "empty-batch.json"
-        batch_path.write_text("{}", encoding="utf-8")
-
-        result = self.run_runtime_module(
-            "agent", "fix-all", self.repo, self.pr, "--input", str(batch_path), "--commit", "abc123"
-        )
-
-        self.assertEqual(result.returncode, 2)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
-        self.assertEqual(payload["reason_code"], "CONFLICTING_FIX_ALL_INPUT")
-
-    def test_agent_fix_all_input_rejects_conflicting_evidence_arguments(self):
-        self.workspace_dir().mkdir(parents=True, exist_ok=True)
-        batch_path = self.workspace_dir() / "empty-batch.json"
-        batch_path.write_text("{}", encoding="utf-8")
-
-        result = self.run_runtime_module(
-            "agent",
-            "fix-all",
-            self.repo,
-            self.pr,
-            "--input",
-            str(batch_path),
-            "--files",
-            "src/example.py",
-            "--validation",
-            "python3 -m unittest tests.test_example=passed",
-            "--severity",
-            "P2",
-            "--homogeneous-reason",
-            "Common repeated concern.",
-        )
-
-        self.assertEqual(result.returncode, 2)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
-        self.assertEqual(payload["reason_code"], "CONFLICTING_FIX_ALL_INPUT")
-        self.assertIn("--files", payload["next_action"])
-        self.assertIn("--validation", payload["next_action"])
-        self.assertIn("--severity", payload["next_action"])
-        self.assertIn("--homogeneous-reason", payload["next_action"])
+        self.assertIn("agent resolve", payload["next_action"])
 
     def test_agent_fix_all_input_preserves_per_item_summary_why_severity_and_validation(self):
         self.write_session(
@@ -579,7 +534,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "fix-all", self.repo, self.pr, "--input", str(batch_path)
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path)
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -605,7 +560,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--commit",
@@ -637,7 +592,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--commit",
@@ -653,7 +608,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "STALE_THREADS_REQUIRE_RESOLVE_STALE")
-        self.assertIn("agent resolve-stale", payload["next_action"])
+        self.assertIn("agent resolve", payload["next_action"])
 
     def test_agent_fix_all_excludes_stale_without_opt_in(self):
         self.write_session(
@@ -673,7 +628,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--commit",
@@ -709,7 +664,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--commit",
@@ -751,7 +706,8 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "resolve-stale",
+            "resolve",
+            "--stale",
             self.repo,
             self.pr,
             "--commit",
@@ -789,7 +745,8 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "resolve-stale",
+            "resolve",
+            "--stale",
             self.repo,
             self.pr,
             "--commit",
@@ -830,7 +787,8 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "resolve-stale",
+            "resolve",
+            "--stale",
             self.repo,
             self.pr,
             "--commit",
@@ -868,7 +826,8 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "resolve-stale",
+            "resolve",
+            "--stale",
             self.repo,
             self.pr,
             "--commit",
@@ -887,7 +846,8 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
     def test_agent_resolve_stale_missing_commit_files_uses_stale_status(self):
         result = self.run_runtime_module(
             "agent",
-            "resolve-stale",
+            "resolve",
+            "--stale",
             self.repo,
             self.pr,
             "--commit",
@@ -939,7 +899,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--agent-id",
@@ -983,7 +943,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix-all",
+            "resolve",
             self.repo,
             self.pr,
             "--commit",

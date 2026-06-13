@@ -338,9 +338,9 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "publish": command_templates.publish(repo, pr_number),
         "final_gate": command_templates.final_gate(repo, pr_number),
         "batch_next": command_templates.batch_next(repo, pr_number),
-        "submit_batch": command_templates.submit_batch(repo, pr_number),
-        "fix_all": command_templates.fix_all_input(repo, pr_number),
-        "fix_all_homogeneous": command_templates.fix_all_homogeneous(repo, pr_number),
+        "resolve": command_templates.resolve_single(repo, pr_number),
+        "resolve_batch": command_templates.resolve_batch(repo, pr_number),
+        "resolve_homogeneous": command_templates.resolve_homogeneous(repo, pr_number),
         "resolve_stale": command_templates.resolve_stale(repo, pr_number),
     }
 

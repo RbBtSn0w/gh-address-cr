@@ -410,11 +410,10 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         "claimable_item_ids": claimable_item_ids,
         "batch_response_skeleton": _batch_response_skeleton(claimable_item_ids),
         "instructions": [
-            "Use per-thread ActionResponse evidence, or agent submit-batch when one set of files/validation evidence addresses multiple threads.",
-            "For each actionable GitHub thread, run agent classify and agent next to acquire leases before submitting evidence.",
-            "When common files and validation evidence apply, submit one BatchActionResponse with per-thread summary/why entries; commit evidence is hydrated during publish.",
-            "Use agent fix-all only with --input batch-response.json, or with --homogeneous-reason for a homogeneous repeated concern.",
-            "After accepted evidence is present, run agent publish.",
+            "Resolve each actionable GitHub thread with `agent resolve <item_id> ...`; classification is recorded internally, no separate classify step is required.",
+            "When one set of files/validation evidence addresses multiple threads, run `agent next --batch` to write a BatchActionResponse skeleton, then `agent resolve --batch --input <file>` with per-thread summary/why entries.",
+            "Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, and `agent resolve --stale --match-files` for STALE/outdated threads.",
+            "After accepted evidence is present, run `agent publish`.",
         ],
         "commands": summary_commands(repo, pr_number),
     }

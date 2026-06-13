@@ -760,11 +760,11 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "BATCH_ACTION_ACCEPTED")
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_ACCEPTED")
         self.assertEqual(payload["accepted_count"], 2)
         self.assertEqual(
             payload["next_action"],
@@ -928,7 +928,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix",
+            "resolve",
             self.repo,
             self.pr,
             "github-thread:abc",
@@ -970,7 +970,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix",
+            "resolve",
             self.repo,
             self.pr,
             "github-thread:abc",
@@ -1016,7 +1016,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix",
+            "resolve",
             self.repo,
             self.pr,
             "github-thread:abc",
@@ -1063,7 +1063,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent",
-            "fix",
+            "resolve",
             self.repo,
             self.pr,
             "github-thread:abc",
@@ -1132,7 +1132,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
@@ -1193,12 +1193,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
-        self.assertEqual(result.returncode, 5)
+        self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
-        self.assertEqual(payload["reason_code"], "MISSING_BATCH_ITEM_WHY")
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_FIX_ALL_ITEM_REPLY_EVIDENCE")
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")
@@ -1244,6 +1244,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
                             "lease_id": request["lease_id"],
                             "item_id": "github-thread:abc",
                             "note": "Audit note for the accepted batch item.",
+                            "summary": "Fixed shared validation.",
                             "why": "The thread now validates the input before use.",
                         }
                     ],
@@ -1252,7 +1253,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         session = self.load_session()
@@ -1330,7 +1331,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
@@ -1347,11 +1348,11 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.write_session(items=[])
         missing_path = self.workspace_dir() / "missing-batch-action-response.json"
 
-        result = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(missing_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(missing_path))
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "BATCH_RESPONSE_FILE_NOT_FOUND")
         self.assertEqual(payload["waiting_on"], "batch_action_response")
         self.assertIn("BatchActionResponse file does not exist", payload["next_action"])
@@ -1440,7 +1441,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "submit-batch", self.repo, self.pr, "--input", str(batch_path), "--now", NOW.isoformat()
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path), "--now", NOW.isoformat()
         )
 
         self.assertEqual(result.returncode, 5)
