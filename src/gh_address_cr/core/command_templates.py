@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import shlex
 
+# This module builds human-readable command strings shown to the user/agent as
+# copy-paste suggestions. They are NOT executed here, so the goal is legibility,
+# not shell-safe construction. Never feed the output of these helpers to a shell;
+# build an argv list and run it without `shell=True` instead.
+
 
 def quote_arg(value: str) -> str:
     text = str(value)
+    # Keep angle-bracket placeholders (e.g. "<item_id>") literal so suggestions read
+    # naturally. Real argument values are never of this shape.
     if text.startswith("<") and text.endswith(">"):
         return text
     return shlex.quote(text)
@@ -67,7 +74,12 @@ def batch_next(repo: str, pr_number: str, *, files: list[str] | None = None) -> 
         "<agent_id>",
     ]
     if files:
-        parts.extend(["--files", ",".join(sorted(path for path in files if path))])
+        # `--files` is parsed as a comma-separated list downstream, so a path
+        # containing a comma cannot round-trip. Drop such paths rather than emit a
+        # suggestion that would be mis-split into bogus paths.
+        usable = sorted(path for path in files if path and "," not in path)
+        if usable:
+            parts.extend(["--files", ",".join(usable)])
     return shell_command(*parts)
 
 

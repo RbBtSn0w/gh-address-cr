@@ -9,6 +9,17 @@ from pathlib import Path
 
 
 def handle_command_session(passthrough: list[str]) -> int:
+    """Run a batch of CLI operations in-process and return a combined JSON summary.
+
+    Each operation's ``argv`` is dispatched through ``cli.main`` in the current
+    process (not a child process), so operations share interpreter state — module
+    globals, singletons (e.g. ``SessionTelemetry``), and cwd persist across them.
+    ``stdout``/``stderr`` are captured via ``redirect_stdout``/``redirect_stderr``,
+    which only intercept Python-level writes; output from any subprocess a command
+    spawns (e.g. ``gh``) goes to the inherited file descriptors and is NOT captured
+    here. Callers needing isolated, fully-captured execution should invoke the CLI
+    as separate processes instead.
+    """
     from gh_address_cr.cli import main
 
     parser = argparse.ArgumentParser(prog="gh-address-cr command-session")

@@ -4,12 +4,16 @@ import argparse
 import json
 import re
 import shutil
-import subprocess
 import sys
 
+from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
 
 PR_IO_PREFLIGHT_EXIT = 5
+# Local git introspection is fast; bound it so a wedged git process cannot hang the CLI.
+GIT_COMMAND_TIMEOUT_SECONDS = 15.0
+# `gh pr list` is a network call; allow more headroom but still cap it.
+GH_QUERY_TIMEOUT_SECONDS = 30.0
 
 
 def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
@@ -20,7 +24,8 @@ def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
 
 
 def _git_output(command: list[str]) -> str:
-    result = subprocess.run(command, text=True, capture_output=True)
+    # git is local and deterministic, so do not retry; just bound the wall-clock time.
+    result = run_cmd(command, retries=1, timeout=GIT_COMMAND_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"{' '.join(command)} failed.")
     return result.stdout.strip()
@@ -96,7 +101,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
             },
             stderr="Missing GitHub CLI `gh` on PATH.",
         )
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = run_cmd(command, timeout=GH_QUERY_TIMEOUT_SECONDS)
     if result.returncode != 0:
         diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, command)
         return _emit_active_pr_payload(

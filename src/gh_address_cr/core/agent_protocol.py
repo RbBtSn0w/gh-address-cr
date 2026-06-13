@@ -410,8 +410,15 @@ def _reconcile_existing_lease(session, repo, pr_number, *, item, item_id, existi
     return {"item_id": item_id, "lease_id": lease_id, "request_id": request_id}
 
 
-def _lease_new_github_thread(session, repo, pr_number, *, item, item_id, agent_id, ledger, current_time) -> dict[str, Any] | None:
-    """Claim a fresh fixer lease for a thread, returning its leased-item row or None to skip."""
+def _lease_new_github_thread(
+    session, repo, pr_number, *, item, item_id, agent_id, ledger, current_time, newly_leased_items
+) -> dict[str, Any] | None:
+    """Claim a fresh fixer lease for a thread, returning its leased-item row or None to skip.
+
+    Registers the lease in ``newly_leased_items`` immediately after ``claim_lease``
+    succeeds so the caller's rollback covers it even if a later write in this
+    function raises.
+    """
     if _has_classification_evidence(item):
         evidence = item.get("classification_evidence")
         decision = evidence.get("classification") if isinstance(evidence, dict) else None
@@ -452,6 +459,8 @@ def _lease_new_github_thread(session, repo, pr_number, *, item, item_id, agent_i
         resume_token=f"resume:{request_id}",
         allow_same_agent_github_thread_file_overlap=True,
     )
+    # Register for rollback before any further writes that could raise mid-claim.
+    newly_leased_items.append((lease_id, item))
 
     item["state"] = "claimed"
     item["active_lease_id"] = lease_id
@@ -624,11 +633,11 @@ def issue_batch_action_request(
                 agent_id=agent_id,
                 ledger=ledger,
                 current_time=current_time,
+                newly_leased_items=newly_leased_items,
             )
             if entry is None:
                 continue
             leased_items.append(entry)
-            newly_leased_items.append((entry["lease_id"], item))
             max_to_lease -= 1
     except Exception as exc:
         _rollback_newly_leased_items(session, newly_leased_items)
