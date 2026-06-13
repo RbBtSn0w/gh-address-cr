@@ -1004,8 +1004,28 @@ def _accept_action_response_submission(
         agent_id=str(response["agent_id"]),
         role=str(lease["role"]),
         event_type="response_accepted",
-        payload={"resolution": response["resolution"], "note": response["note"]},
+        # Carry the full applied response so session items remain a rebuildable
+        # projection of the ledger (#116), not only a forward-mutated cache.
+        payload={
+            "resolution": response["resolution"],
+            "note": response["note"],
+            "response": replayable_action_response(response),
+        },
     )
+
+
+def replayable_action_response(response: dict[str, Any]) -> dict[str, Any]:
+    """Subset of an ActionResponse needed to replay `_apply_response_to_item`."""
+    snapshot: dict[str, Any] = {
+        "resolution": response.get("resolution"),
+        "note": response.get("note"),
+        "files": response.get("files", []),
+        "validation_commands": response.get("validation_commands", []),
+    }
+    for key in ("reply_markdown", "fix_reply", "evidence_ref"):
+        if response.get(key) is not None:
+            snapshot[key] = response[key]
+    return snapshot
 
 
 def _record_validation_command_telemetry(
