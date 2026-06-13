@@ -8,8 +8,14 @@ from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
-from gh_address_cr.core import protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.agent_protocol_evidence import (
+    TERMINAL_RESOLUTIONS,
+)
+from gh_address_cr.core.agent_protocol_evidence import (
+    required_evidence_for as _required_evidence_for_impl,
+)
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_CLAIMABLE_STATES,
@@ -30,6 +36,7 @@ from gh_address_cr.core.leases import (
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
+from gh_address_cr.core.paths import SessionPaths
 from gh_address_cr.core.severity import first_scene_item_severity
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
@@ -65,7 +72,6 @@ from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundar
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
 MUTATING_ROLES = {"fixer"}
-TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
 
 
 def record_classification(
@@ -393,23 +399,25 @@ def submit_batch_action_response(
 ) -> dict[str, Any]:
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
+    session_paths = SessionPaths(repo, pr_number)
     ledger = _ledger(session)
-    batch = _load_response_json_object(
-        batch_path,
-        status=protocol_codes.BATCH_ACTION_REJECTED,
-        missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
-        invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
-        shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
-        shape_message="BatchActionResponse must be a JSON object.",
-        payload_name="BatchActionResponse",
-        waiting_on="batch_action_response",
-    )
-    responses = _batch_action_responses(batch)
     prepared_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
     seen_leases: set[str] = set()
     seen_items: set[str] = set()
 
+    batch: dict[str, Any] | None = None
     try:
+        batch = _load_response_json_object(
+            batch_path,
+            status=protocol_codes.BATCH_ACTION_REJECTED,
+            missing_reason_code="BATCH_RESPONSE_FILE_NOT_FOUND",
+            invalid_reason_code="INVALID_BATCH_RESPONSE_JSON",
+            shape_reason_code="INVALID_BATCH_RESPONSE_SHAPE",
+            shape_message="BatchActionResponse must be a JSON object.",
+            payload_name="BatchActionResponse",
+            waiting_on="batch_action_response",
+        )
+        responses = _batch_action_responses(batch)
         for response in responses:
             lease_id = str(response.get("lease_id") or "")
             if lease_id in seen_leases:
@@ -514,7 +522,8 @@ def submit_batch_action_response(
             )
             for response, prepared in prepared_rows
         ]
-    except WorkflowError:
+    except WorkflowError as exc:
+        _augment_batch_recovery_error(exc, session_paths, batch_path=batch_path, agent_id=_batch_agent_id(batch))
         session_store.save_session(repo, pr_number, session)
         raise
 
@@ -1209,6 +1218,92 @@ def _raise_response_rejected(
     )
 
 
+def _batch_agent_id(batch: dict[str, Any] | None) -> str | None:
+    if not isinstance(batch, dict):
+        return None
+    common = batch.get("common")
+    common_agent_id = common.get("agent_id") if isinstance(common, dict) else None
+    agent_id = batch.get("agent_id") or common_agent_id
+    text = str(agent_id or "").strip()
+    return text or None
+
+
+def _augment_batch_recovery_error(
+    exc: WorkflowError,
+    session_paths: SessionPaths,
+    *,
+    batch_path: str | Path | None = None,
+    agent_id: str | None = None,
+) -> WorkflowError:
+    if exc.status != protocol_codes.BATCH_ACTION_REJECTED:
+        return exc
+    original_message = str(exc)
+    recovery = _batch_recovery_payload(session_paths, batch_path=batch_path, agent_id=agent_id)
+    recovery_message = str(recovery.pop("recovery_message"))
+    payload = dict(recovery)
+    payload.update(exc.payload)
+    exc.payload = payload
+
+    lease_recovery = exc.payload.get("lease_recovery")
+    lease_msg = None
+    if lease_recovery and isinstance(lease_recovery, dict):
+        outcome = lease_recovery.get("recovery_outcome")
+        resume = lease_recovery.get("resume_command")
+        if outcome == "renew" and resume:
+            lease_msg = f"Please renew the expired lease by running `{resume}`."
+        elif outcome == "reclaim" and resume:
+            lease_msg = f"Please reclaim the expired lease by running `{resume}`."
+        elif outcome == "refresh_state" and resume:
+            lease_msg = f"Please refresh the stale session state by running `{resume}`."
+
+    if lease_msg:
+        exc.args = (f"{original_message} {lease_msg} (Once the lease is recovered, you can retry submitting your batch).",)
+    else:
+        exc.args = (f"{original_message} {recovery_message}",)
+    return exc
+
+
+def _batch_recovery_payload(
+    session_paths: SessionPaths,
+    *,
+    batch_path: str | Path | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    skeleton_path = session_paths.workspace_dir / "batch-response-skeleton.json"
+    target_path = Path(batch_path) if batch_path is not None else skeleton_path
+    repo = session_paths.repo
+    pr_number = session_paths.pr_number
+    batch_next_command = command_templates.batch_next(repo, pr_number)
+    submit_batch_command = command_templates.submit_batch(repo, pr_number, input_path=str(target_path))
+    fix_all_command = command_templates.fix_all_input(repo, pr_number, input_path=str(target_path))
+
+    payload: dict[str, Any] = {
+        "recovery_action": (
+            "edit_batch_response_skeleton" if target_path.is_file() else "regenerate_batch_response_skeleton"
+        ),
+        "commands": {
+            "batch_next": batch_next_command,
+            "submit_batch": submit_batch_command,
+            "fix_all": fix_all_command,
+        },
+    }
+    if agent_id:
+        payload["agent_id"] = agent_id
+    if target_path.is_file():
+        payload["batch_response_skeleton_path"] = str(target_path)
+        payload["recovery_message"] = (
+            f"BatchActionResponse rejected. Edit {target_path} and submit it with `{submit_batch_command}`. "
+            "The active leases were kept for retry; no partial evidence was accepted."
+        )
+    else:
+        payload["recovery_message"] = (
+            f"BatchActionResponse rejected. Regenerate a runtime-owned skeleton with `{batch_next_command}`, "
+            f"then submit it with `{submit_batch_command}`. The active leases were kept for retry; "
+            "no partial evidence was accepted."
+        )
+    return payload
+
+
 def _lease_recovery_payload_for_response(
     session: dict[str, Any],
     response: dict[str, Any],
@@ -1415,16 +1510,7 @@ def _has_classification_evidence(item: dict[str, Any]) -> bool:
 
 
 def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
-    evidence = item.get("classification_evidence")
-    classification = evidence.get("classification") if isinstance(evidence, dict) else None
-    if classification in TERMINAL_RESOLUTIONS and classification != "fix":
-        return ["note", "reply_markdown"]
-    if role == "fixer":
-        fields = ["note", "files", "validation_commands"]
-        if item.get("item_kind") == "github_thread":
-            fields.append("fix_reply")
-        return fields
-    return ["note", "reply_markdown"]
+    return _required_evidence_for_impl(item, role)
 
 
 def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:

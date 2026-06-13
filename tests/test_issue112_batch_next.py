@@ -100,6 +100,69 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(submitted_payload["status"], "BATCH_ACTION_ACCEPTED")
         self.assertEqual(submitted_payload["accepted_count"], 2)
 
+    def test_submit_batch_rejection_returns_skeleton_recovery_guidance(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "title": "Concern 1",
+                "body": "First issue",
+                "path": "src/a.py",
+                "line": 10,
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+            {
+                "item_id": "thread-2",
+                "item_kind": "github_thread",
+                "source": "github",
+                "title": "Concern 2",
+                "body": "Second issue",
+                "path": "src/b.py",
+                "line": 20,
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            },
+        ]
+        self.init_session(items)
+        requested = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
+        )
+        self.assertEqual(requested.returncode, 0, requested.stderr)
+        request_payload = json.loads(requested.stdout)
+        skeleton_path = Path(request_payload["response_skeleton_path"])
+        skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        skeleton["common"]["files"] = []
+        skeleton["common"]["validation_commands"][0]["command"] = "python3 -m unittest tests.test_issue112_batch_next"
+        skeleton["common"]["fix_reply"]["test_command"] = "python3 -m unittest tests.test_issue112_batch_next"
+        skeleton["common"]["fix_reply"]["test_result"] = "passed"
+        for item in skeleton["items"]:
+            item["fix_reply"]["summary"] = f"Fixed {item['item_id']}"
+            item["fix_reply"]["why"] = f"The validation covers {item['item_id']}."
+        skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        rejected = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+        )
+
+        self.assertEqual(rejected.returncode, 5)
+        payload = json.loads(rejected.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertEqual(payload["reason_code"], "MISSING_FILES")
+        self.assertEqual(payload["batch_response_skeleton_path"], str(skeleton_path))
+        self.assertEqual(payload["recovery_action"], "edit_batch_response_skeleton")
+        self.assertIn(str(skeleton_path), payload["commands"]["submit_batch"])
+        self.assertIn("--batch", payload["commands"]["batch_next"])
+        self.assertIn("Edit", payload["next_action"])
+
+        session = self.load_session()
+        lease_ids = [item_info["lease_id"] for item_info in request_payload["leased_items"]]
+        for lease_id in lease_ids:
+            self.assertEqual(session["leases"][lease_id]["status"], "active")
+        event_types = [json.loads(line)["event_type"] for line in Path(session["ledger_path"]).read_text().splitlines()]
+        self.assertNotIn("response_accepted", event_types)
+
     def test_batch_next_with_files_filter(self):
         items = [
             {
@@ -418,3 +481,51 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         session = self.load_session()
         self.assertEqual(session["items"]["thread-classified"]["state"], "claimed")
+
+    def test_submit_batch_rejection_prioritizes_lease_recovery(self):
+        items = [
+            {
+                "item_id": "thread-1",
+                "item_kind": "github_thread",
+                "source": "github",
+                "title": "Concern 1",
+                "body": "First issue",
+                "path": "src/a.py",
+                "line": 10,
+                "state": "open",
+                "allowed_actions": ["fix", "clarify", "defer", "reject"],
+            }
+        ]
+        self.init_session(items)
+        requested = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
+        )
+        self.assertEqual(requested.returncode, 0)
+        request_payload = json.loads(requested.stdout)
+        skeleton_path = Path(request_payload["response_skeleton_path"])
+        skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+        skeleton["common"]["files"] = ["src/a.py"]
+        skeleton["common"]["validation_commands"][0]["command"] = "python3 -m unittest"
+        skeleton["common"]["fix_reply"]["test_command"] = "python3 -m unittest"
+        skeleton["common"]["fix_reply"]["test_result"] = "passed"
+        for item in skeleton["items"]:
+            item["fix_reply"]["summary"] = "Fixed"
+            item["fix_reply"]["why"] = "Why fixed"
+        skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Artificially expire the lease in the session so it triggers EXPIRED_LEASE
+        session = self.load_session()
+        lease_id = list(session["leases"].keys())[0]
+        session["leases"][lease_id]["expires_at"] = "2020-01-01T00:00:00Z"
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        # Submit should fail with BATCH_ACTION_REJECTED due to expired lease and return lease recovery guidance
+        rejected = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+        )
+        self.assertEqual(rejected.returncode, 5)
+        payload = json.loads(rejected.stdout)
+        self.assertEqual(payload["status"], "BATCH_ACTION_REJECTED")
+        self.assertIn("lease_recovery", payload)
+        self.assertEqual(payload["lease_recovery"]["recovery_outcome"], "renew")
+        self.assertIn("Please renew the expired lease", payload["next_action"])
