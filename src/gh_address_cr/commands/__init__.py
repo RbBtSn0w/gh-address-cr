@@ -1,1 +1,1 @@
-# legacy handlers
+# Command handler package.

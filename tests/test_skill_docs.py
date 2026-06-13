@@ -11,6 +11,7 @@ README_MD = ROOT / "README.md"
 DOCS_DIR = ROOT / "docs"
 ARCHITECTURE_MD = DOCS_DIR / "architecture.md"
 CLI_REFERENCE_MD = DOCS_DIR / "cli-reference.md"
+COMPATIBILITY_INVENTORY_MD = DOCS_DIR / "compatibility-inventory.md"
 DEVELOPMENT_MD = DOCS_DIR / "development.md"
 INSTALLATION_MD = DOCS_DIR / "installation.md"
 TROUBLESHOOTING_MD = DOCS_DIR / "troubleshooting.md"
@@ -337,6 +338,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+        workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
@@ -344,9 +346,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`commit_hash`", matrix_text)
         self.assertIn("`files`", matrix_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
-        self.assertIn("for GitHub thread `fix`: `fix_reply`", cli_text)
-        self.assertIn("`summary`", cli_text)
-        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", cli_text)
+        self.assertIn("for GitHub thread `fix`: `fix_reply`", workflow_text)
+        self.assertIn("`summary`", workflow_text)
+        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", workflow_text)
         self.assertIn("`fix_reply` **must be a JSON object**", protocol_text)
         self.assertIn("`commit_hash`", protocol_text)
         self.assertIn("`files`", protocol_text)
@@ -478,6 +480,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertTrue(path.exists(), msg=str(path))
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
+    def test_compatibility_inventory_documents_preserved_and_removed_surfaces(self):
+        text = COMPATIBILITY_INVENTORY_MD.read_text(encoding="utf-8")
+        self.assertIn("Preserved Public Contracts", text)
+        self.assertIn("Unsupported historical root commands", text)
+        self.assertIn("submit-action", text)
+        self.assertIn("Removed Or Unsupported Surfaces", text)
+        self.assertIn("legacy_scripts", text)
+        self.assertIn("Internal Naming Rule", text)
+
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
         self.assertIn("Primary commands:", text)
@@ -573,12 +584,14 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("AMBIGUOUS_ACTIVE_PR", text)
 
     def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
-        text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
-        self.assertLess(text.index("## Public Interface"), text.index("## Automatic Review Workflow"))
-        self.assertLess(text.index("## Automatic Review Workflow"), text.index("Advanced producer categories:"))
+        cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+        workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
+        self.assertIn("docs/workflows.md", cli_text)
+        self.assertNotIn("## Automatic Review Workflow", cli_text)
+        self.assertLess(workflow_text.index("## Automatic Review Workflow"), workflow_text.index("Advanced producer categories:"))
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
-        text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+        text = WORKFLOWS_MD.read_text(encoding="utf-8")
         self.assertEqual(text.count("Minimal user prompt:"), 1)
         self.assertEqual(text.count("Ready-to-use prompt variants:"), 1)
         self.assertNotIn("## Prompt Templates", text)
@@ -643,20 +656,21 @@ class SkillDocumentationContractTest(unittest.TestCase):
                 self.assertNotIn(command, text)
 
     def test_readme_documents_external_review_handoff_contract(self):
-        readme_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
-        self.assertIn("any external review producer may satisfy the handoff", readme_text)
-        self.assertIn("producer-request.md", readme_text)
-        self.assertIn("incoming-findings.json", readme_text)
-        self.assertIn("incoming-findings.md", readme_text)
-        self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)
-        self.assertIn("source-scoped producer result", readme_text)
-        self.assertIn("`[]` is a valid explicit producer result", readme_text)
-        self.assertIn("如果你自己就是外部 review producer", readme_text)
-        self.assertIn("不要只输出普通 Markdown 审查报告", readme_text)
-        self.assertIn("Ready-to-use prompt variants:", readme_text)
-        self.assertIn("Short generic:", readme_text)
-        self.assertIn("Explicit `$code-review` producer:", readme_text)
-        self.assertIn("Any external review producer:", readme_text)
+        cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+        workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
+        self.assertIn("any external review producer may satisfy the handoff", cli_text)
+        self.assertIn("producer-request.md", cli_text)
+        self.assertIn("incoming-findings.json", cli_text)
+        self.assertIn("incoming-findings.md", cli_text)
+        self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", cli_text)
+        self.assertIn("source-scoped producer result", cli_text)
+        self.assertIn("`[]` is a valid explicit producer result", cli_text)
+        self.assertIn("如果你自己就是外部 review producer", workflow_text)
+        self.assertIn("不要只输出普通 Markdown 审查报告", workflow_text)
+        self.assertIn("Ready-to-use prompt variants:", workflow_text)
+        self.assertIn("Short generic:", workflow_text)
+        self.assertIn("Explicit `$code-review` producer:", workflow_text)
+        self.assertIn("Any external review producer:", workflow_text)
 
     def test_readme_documents_feedback_target_repo_and_source_fields(self):
         readme_text = DEVELOPMENT_MD.read_text(encoding="utf-8")

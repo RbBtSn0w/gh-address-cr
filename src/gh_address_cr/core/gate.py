@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from gh_address_cr.core import command_templates
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_TERMINAL_STATES,
     is_stale_or_outdated_github_thread,
@@ -334,20 +335,14 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
     if not repo or not pr_number:
         return {}
     return {
-        "address": f"gh-address-cr address {repo} {pr_number} --lean",
-        "publish": f"gh-address-cr agent publish {repo} {pr_number}",
-        "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
-        "batch_next": f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id>",
-        "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
-        "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
-        "fix_all_homogeneous": (
-            f"gh-address-cr agent fix-all {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
-        ),
-        "resolve_stale": (
-            f"gh-address-cr agent resolve-stale {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
-        ),
+        "address": command_templates.address(repo, pr_number),
+        "publish": command_templates.publish(repo, pr_number),
+        "final_gate": command_templates.final_gate(repo, pr_number),
+        "batch_next": command_templates.batch_next(repo, pr_number),
+        "submit_batch": command_templates.submit_batch(repo, pr_number),
+        "fix_all": command_templates.fix_all_input(repo, pr_number),
+        "fix_all_homogeneous": command_templates.fix_all_homogeneous(repo, pr_number),
+        "resolve_stale": command_templates.resolve_stale(repo, pr_number),
     }
 
 

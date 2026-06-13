@@ -215,6 +215,7 @@ generated community distribution artifact.
 - [CLI reference](docs/cli-reference.md)
 - [Workflows](docs/workflows.md)
 - [Architecture](docs/architecture.md)
+- [Compatibility inventory](docs/compatibility-inventory.md)
 - [Development and release](docs/development.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Privacy](PRIVACY.md)

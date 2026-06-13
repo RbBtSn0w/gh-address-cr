@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core import command_templates
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
     is_resolved_github_thread,
@@ -334,27 +335,7 @@ def _native_summary(
 
 
 def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
-    return {
-        "address": f"gh-address-cr address {repo} {pr_number} --lean",
-        "review_auto_simple": f"gh-address-cr review --auto-simple {repo} {pr_number} --lean",
-        "threads": f"gh-address-cr threads {repo} {pr_number} --lean",
-        "classify": f"gh-address-cr agent classify {repo} {pr_number} <item_id> --classification fix --note <note>",
-        "next": f"gh-address-cr agent next {repo} {pr_number} --role fixer --agent-id <agent_id>",
-        "batch_next": f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id>",
-        "submit": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
-        "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
-        "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
-        "fix_all_homogeneous": (
-            f"gh-address-cr agent fix-all {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
-        ),
-        "resolve_stale": (
-            f"gh-address-cr agent resolve-stale {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
-        ),
-        "publish": f"gh-address-cr agent publish {repo} {pr_number}",
-        "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
-    }
+    return command_templates.common_summary_commands(repo, pr_number)
 
 
 def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:

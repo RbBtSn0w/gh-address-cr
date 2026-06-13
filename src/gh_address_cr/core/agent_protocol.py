@@ -16,6 +16,7 @@ from gh_address_cr.core.github_thread_state import (
     is_github_thread_item,
     is_stale_github_thread_item,
 )
+from gh_address_cr.core.ids import stable_id as _stable_id
 from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
@@ -32,7 +33,6 @@ from gh_address_cr.core.severity import first_scene_item_severity
 from gh_address_cr.evidence.ledger import EvidenceLedger
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
-    json_ready as _json_ready,
     get_session_items as _items,
     get_session_ledger as _ledger,
     normalize_string_list as _normalize_string_list,
@@ -1950,13 +1950,3 @@ def _required_response_field(response: dict[str, Any], field: str, *, status: st
             message=f"ActionResponse is missing `{field}`.",
         )
     return str(value)
-
-
-def _stable_id(prefix: str, payload: dict[str, Any]) -> str:
-    return f"{prefix}_{_hash_payload(payload)[:20]}"
-
-
-def _hash_payload(payload: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(_json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
