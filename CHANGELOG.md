@@ -1,3 +1,9 @@
+## [2.10.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.10...v2.10.11) (2026-06-13)
+
+### Bug Fixes
+
+* **agent:** enhance batch action handling and recovery guidance ([#127](https://github.com/RbBtSn0w/gh-address-cr/issues/127)) ([3fbefa8](https://github.com/RbBtSn0w/gh-address-cr/commit/3fbefa856d75847aa9ea84a734464c9ceafcc474))
+
 ## [2.10.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.9...v2.10.10) (2026-06-13)
 
 ## [2.10.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.8...v2.10.9) (2026-06-13)
