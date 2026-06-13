@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from tests.helpers import PythonScriptTestCase
 
+TEST_NOW = "2026-06-12T22:30:00+00:00"
+
 
 class BatchNextTestCase(PythonScriptTestCase):
     def init_session(self, items, leases=None):
@@ -45,7 +47,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.init_session(items)
 
         result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -89,7 +91,9 @@ class BatchNextTestCase(PythonScriptTestCase):
             item["fix_reply"]["why"] = f"The validation covers {item['item_id']}."
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        submitted = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path))
+        submitted = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+        )
         self.assertEqual(submitted.returncode, 0, submitted.stderr)
         submitted_payload = json.loads(submitted.stdout)
         self.assertEqual(submitted_payload["status"], "BATCH_ACTION_ACCEPTED")
@@ -154,7 +158,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.init_session(items)
 
         result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
@@ -195,7 +199,7 @@ class BatchNextTestCase(PythonScriptTestCase):
 
         # 由于 MAX_PARALLEL_CLAIMS 被配置为 2 (可以从 CapabilityManifest.constraints 查看)
         result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
@@ -234,7 +238,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.init_session(items, leases)
 
         result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
@@ -258,7 +262,9 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton["items"][0]["fix_reply"]["why"] = "reconstructed successfully"
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        submitted = self.run_runtime_module("agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path))
+        submitted = self.run_runtime_module(
+            "agent", "submit-batch", self.repo, self.pr, "--input", str(skeleton_path), "--now", TEST_NOW
+        )
         self.assertEqual(submitted.returncode, 0, submitted.stderr)
 
     def test_batch_next_rolls_back_on_conflict(self):
@@ -297,7 +303,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.init_session(items, leases)
 
         result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
+            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent", "--now", TEST_NOW
         )
         # 应该发生 LEASE_REJECTED
         self.assertEqual(result.returncode, 5, result.stderr)

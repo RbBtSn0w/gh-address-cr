@@ -27,6 +27,9 @@ Other public top-level commands:
 
 Advanced/internal integration entrypoints:
 
+The advanced surface is split between top-level integration commands above and
+the structured agent protocol commands below.
+
 Agent protocol entrypoints:
 
 - `agent manifest`
@@ -309,7 +312,7 @@ Stable machine summary fields:
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
-`commands` contains executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
+`commands` contains shell-quoted executable templates for common next steps such as `address --lean`, `agent publish`, `agent fix-all`, `agent resolve-stale`, and `final-gate`.
 The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Full output includes `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
 ### Metadata Commands

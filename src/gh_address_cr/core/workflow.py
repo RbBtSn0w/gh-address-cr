@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -669,7 +670,7 @@ def fast_fix_matching_threads(
         )
     if not stale_only and not normalized_homogeneous_reason:
         files_str = ",".join(sorted(normalized_file_set))
-        batch_command = f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id> --files {files_str}"
+        batch_command = f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id> --files {shlex.quote(files_str)}"
         next_action = (
             f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton, then fill per-thread summary/why entries and submit it. "
@@ -693,7 +694,7 @@ def fast_fix_matching_threads(
         )
     if not stale_only and normalized_homogeneous_reason and not _has_homogeneous_thread_bodies(matches):
         files_str = ",".join(sorted(normalized_file_set))
-        batch_command = f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id> --files {files_str}"
+        batch_command = f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id> --files {shlex.quote(files_str)}"
         next_action = (
             f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton with per-thread summary/why entries. The matched threads have missing "

@@ -1,4 +1,5 @@
 import json
+import shlex
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
@@ -1228,12 +1229,65 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertIn("agent next", payload["next_action"])
         self.assertIn("--batch", payload["next_action"])
         self.assertEqual(
-            payload["commands"]["batch_next"],
-            f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id> --files src/shared.py",
+            shlex.split(payload["commands"]["batch_next"]),
+            [
+                "gh-address-cr",
+                "agent",
+                "next",
+                self.repo,
+                self.pr,
+                "--batch",
+                "--agent-id",
+                "<agent_id>",
+                "--files",
+                "src/shared.py",
+            ],
         )
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+
+    def test_agent_fix_all_quotes_batch_next_file_filter(self):
+        risky_path = "src/shared path/unsafe;$(echo pwn).py"
+        self.write_session(
+            items=[
+                github_thread(
+                    "github-thread:abc",
+                    path=risky_path,
+                    body="Why does this branch skip nil validation?",
+                    classification_evidence={"classification": "fix", "record_id": "ev_abc"},
+                ),
+                github_thread(
+                    "github-thread:def",
+                    path=risky_path,
+                    body="Can this log expose private data?",
+                    classification_evidence={"classification": "fix", "record_id": "ev_def"},
+                ),
+            ]
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "fix-all",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            risky_path,
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
+        argv = shlex.split(payload["commands"]["batch_next"])
+        self.assertEqual(argv[:7], ["gh-address-cr", "agent", "next", self.repo, self.pr, "--batch", "--agent-id"])
+        self.assertEqual(argv[7], "<agent_id>")
+        self.assertEqual(argv[8:10], ["--files", risky_path])
 
     def test_agent_fix_all_rejects_distinct_thread_bodies_with_homogeneous_reason(self):
         self.write_session(
