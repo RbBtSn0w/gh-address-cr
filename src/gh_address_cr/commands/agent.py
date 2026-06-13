@@ -140,6 +140,16 @@ def handle_agent_command(args: argparse.Namespace) -> int:
     return 2
 
 
+def _parse_with_scope(
+    parser: argparse.ArgumentParser, repo: str | None, passthrough: list[str]
+) -> tuple[argparse.Namespace | None, int]:
+    """Parse agent-subcommand args with uniform cached-PR-scope resolution (#122)."""
+    scope_args, scope_error = _agent_args_with_scope(repo, passthrough)
+    if scope_error is not None:
+        return None, _emit_scope_resolution_error(scope_error)
+    return parser.parse_args(scope_args), 0
+
+
 def handle_agent_classify(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr agent classify")
     parser.add_argument("repo")
@@ -148,7 +158,9 @@ def handle_agent_classify(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--classification", required=True, choices=["fix", "clarify", "defer", "reject"])
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--note", required=True)
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     try:
         payload = agent_protocol.record_classification(
             parsed.repo,
@@ -174,7 +186,9 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--now")
     parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response-skeleton.json for all unresolved threads.")
     parser.add_argument("--files", help="Only batch lease threads that affect these files (comma-separated).")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     if not parsed.batch and not parsed.role:
         parser.error("one of the following arguments is required: --role or --batch")
     if parsed.batch and parsed.role:
@@ -215,7 +229,9 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--input", required=True)
     parser.add_argument("--publish", action="store_true", help="Publish accepted GitHub-thread fix evidence immediately.")
     parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     try:
         now_dt = None
         if parsed.now:
@@ -569,7 +585,9 @@ def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("pr_number")
     parser.add_argument("--agent-id", default="gh-address-cr-publisher")
     parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     try:
         now_dt = None
         if parsed.now:
@@ -592,7 +610,9 @@ def handle_agent_leases(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr agent leases")
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     try:
         payload = leases.list_leases(parsed.repo, parsed.pr_number)
     except WorkflowError as exc:
@@ -608,7 +628,9 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--now")
-    parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
     now = datetime.fromisoformat(parsed.now.replace("Z", "+00:00")) if parsed.now else None
     try:
         payload = leases.reclaim_leases(parsed.repo, parsed.pr_number, now=now)

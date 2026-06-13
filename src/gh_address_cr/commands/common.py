@@ -11,6 +11,7 @@ from gh_address_cr.core import paths as core_paths
 IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--agent-id",
     "--audit-id",
+    "--classification",
     "--commit",
     "--concern-label",
     "--file",
