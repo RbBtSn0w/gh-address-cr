@@ -4,31 +4,47 @@
 
 `gh-address-cr` should be understood first as a PR-scoped workflow orchestrator.
 
-Primary commands:
+Primary workflow commands:
 
 - `active-pr`
 - `review`
 - `address`
 - `final-gate`
 
-Advanced/internal integration entrypoints:
+Other public top-level commands:
 
 - `threads`
 - `findings`
 - `adapter`
+- `telemetry ingest`
+- `telemetry summary`
+- `command-session`
 - `review-to-findings`
+- `submit-action`
+- `submit-feedback`
+- `doctor`
+- `version`
+
+Advanced/internal integration entrypoints:
+
+Agent protocol entrypoints:
+
 - `agent manifest`
 - `agent classify`
 - `agent next`
+- `agent next --batch`
 - `agent submit`
 - `agent submit-batch`
 - `agent fix`
+- `agent trivial-fix`
 - `agent fix-all`
 - `agent resolve-stale`
-- `agent evidence`
+- `agent evidence add`
+- `agent evidence list`
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
+- `agent orchestrate`
 
 Fail-fast contract:
 
@@ -59,6 +75,218 @@ Minimal invocation model:
 ```
 
 Advanced/internal integrations are documented later in this reference.
+
+## Command Topology (ASCII)
+
+This map is the CLI coverage checklist. Every public command is either a
+session producer, a session mutator, a side-effect publisher, a gate, a telemetry
+observer, or an operator utility. Arrows show the intended upstream/downstream
+handoff. Commands that emit a `next_action` or `commands` object must point to a
+downstream command in this map.
+
+```text
++-------------------+
+| gh-address-cr CLI |
++---------+---------+
+          |
+          +-- active-pr
+          |      |
+          |      +--> address --lean
+          |      +--> review
+          |
+          +-- review [--auto-simple]
+          |      |
+          |      +--> WAITING_FOR_EXTERNAL_REVIEW
+          |      |      |
+          |      |      +--> review-to-findings
+          |      |      +--> findings --input <json|-|fixed-blocks> --source <producer>
+          |      |      +--> adapter <adapter_cmd...>
+          |      |      +--> review (same command, after producer handoff)
+          |      |
+          |      +--> WAITING_FOR_SIMPLE_ADDRESS
+          |      |      |
+          |      |      +--> address --lean
+          |      |      +--> threads --lean
+          |      |      +--> agent classify
+          |      |      +--> agent next --role fixer
+          |      |      +--> agent next --batch
+          |      |
+          |      +--> session work items
+          |
+          +-- address [--lean|--summary]
+          |      |
+          |      +--> threads [--lean|--summary]
+          |      +--> agent fix
+          |      +--> agent next --batch
+          |      +--> agent submit-batch
+          |      +--> agent publish
+          |
+          +-- threads [--lean|--summary]
+          |      |
+          |      +--> agent classify
+          |      +--> agent next
+          |      +--> agent fix
+          |      +--> agent resolve-stale
+          |
+          +-- findings --input <json|->
+          |      |
+          |      +--> agent classify
+          |      +--> agent next
+          |      +--> agent submit
+          |
+          +-- adapter <adapter_cmd...>
+          |      |
+          |      +--> findings contract
+          |      +--> review/address session sync
+          |
+          +-- agent <subcommand>
+          |      |
+          |      +--> manifest
+          |      |
+          |      +--> classify
+          |      |      |
+          |      |      +--> next --role fixer
+          |      |
+          |      +--> next --role <role>
+          |      |      |
+          |      |      +--> ActionRequest
+          |      |      +--> ActionResponse skeleton
+          |      |      +--> submit
+          |      |
+          |      +--> next --batch
+          |      |      |
+          |      |      +--> BatchActionResponse skeleton
+          |      |      +--> submit-batch or fix-all --input <batch-response.json>
+          |      |
+          |      +--> submit
+          |      |      |
+          |      |      +--> accepted evidence
+          |      |      +--> publish (GitHub thread fixes)
+          |      |      +--> final-gate
+          |      |
+          |      +--> submit-batch
+          |      |      |
+          |      |      +--> per-item accepted evidence
+          |      |      +--> publish
+          |      |      +--> final-gate
+          |      |
+          |      +--> fix
+          |      |      |
+          |      |      +--> classify + next + submit shortcut
+          |      |      +--> publish (--publish or explicit publish)
+          |      |
+          |      +--> trivial-fix
+          |      |      |
+          |      |      +--> narrow documentation/typo fix shortcut
+          |      |      +--> publish (--publish or explicit publish)
+          |      |
+          |      +--> fix-all
+          |      |      |
+          |      |      +--> --input <batch-response.json> -> submit-batch path
+          |      |      +--> --homogeneous-reason <why> -> homogeneous batch shortcut
+          |      |      +--> PER_THREAD_EVIDENCE_REQUIRED -> next --batch
+          |      |
+          |      +--> resolve-stale
+          |      |      |
+          |      |      +--> stale/outdated thread evidence
+          |      |      +--> publish
+          |      |      +--> final-gate
+          |      |
+          |      +--> evidence add
+          |      |      |
+          |      |      +--> evidence_ref in ActionResponse or BatchActionResponse
+          |      |
+          |      +--> evidence list
+          |      |
+          |      +--> publish
+          |      |      |
+          |      |      +--> GitHub reply + resolve side effects
+          |      |      +--> final-gate
+          |      |
+          |      +--> leases
+          |      +--> reclaim
+          |      |
+          |      +--> orchestrate start
+          |      +--> orchestrate step
+          |      +--> orchestrate status
+          |      +--> orchestrate resume
+          |      +--> orchestrate stop
+          |      +--> orchestrate submit
+          |      +--> orchestrate autopilot
+          |
+          +-- final-gate [--require-checks|--require-required-checks]
+          |      |
+          |      +--> PASS -> completion_summary_line + audit summary
+          |      +--> FAIL -> address/threads/agent publish/agent next --batch
+          |
+          +-- telemetry ingest
+          |      |
+          |      +--> telemetry summary
+          |      +--> final-gate telemetry coverage
+          |
+          +-- telemetry summary
+          |      |
+          |      +--> efficiency report artifact
+          |
+          +-- command-session --input <operations.json|->
+          |      |
+          |      +--> repeated gh-address-cr operations
+          |
+          +-- review-to-findings --input <finding-blocks.md|->
+          |      |
+          |      +--> findings --input <json|->
+          |
+          +-- submit-action <action-request.json>
+          |      |
+          |      +--> generated ActionResponse
+          |      +--> agent submit
+          |
+          +-- submit-feedback
+          |      |
+          |      +--> maintainer issue intake for repeatable skill/runtime gaps
+          |
+          +-- doctor
+          |      |
+          |      +--> rerun blocked command after environment repair
+          |
+          +-- version / --version
+          |
+          +-- global output flags
+                 |
+                 +--> --machine
+                 +--> --human
+```
+
+Verification boundaries:
+
+```text
+producer output
+  -> review-to-findings/findings/adapter
+  -> session items
+  -> agent classify
+  -> agent next or agent next --batch
+  -> ActionResponse or BatchActionResponse
+  -> agent submit or agent submit-batch
+  -> accepted evidence
+  -> agent publish (GitHub thread side effects only)
+  -> final-gate
+  -> completion_summary_line
+```
+
+Batch-specific verification:
+
+```text
+fix-all PER_THREAD_EVIDENCE_REQUIRED
+  -> commands.batch_next
+  -> agent next --batch
+  -> runtime-owned leases + request_id values
+  -> batch-response-skeleton.json
+  -> agent fills common evidence + per-item summary/why
+  -> agent submit-batch validates lease ownership and request context
+  -> agent fix-all --input routes to the same batch evidence validation path
+  -> agent publish posts replies and resolves threads
+  -> final-gate verifies no unresolved threads remain
+```
 
 Stable machine summary fields:
 
@@ -102,18 +330,21 @@ The runtime is the coordinator. AI agents consume structured requests and return
 gh-address-cr agent manifest
 gh-address-cr agent classify owner/repo 123 local-finding:abc --classification fix --note "Real defect."
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
+gh-address-cr agent next owner/repo 123 --batch --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent submit-batch owner/repo 123 --input batch-response.json
 gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>]
+gh-address-cr agent evidence list owner/repo 123
 gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>] --publish
+gh-address-cr agent trivial-fix owner/repo 123 github-thread:THREAD_ID --commit <sha> --files docs/example.md --summary "Fixed typo." --validation "docs-only=passed" --publish
 gh-address-cr agent fix-all owner/repo 123 --input batch-response.json
 gh-address-cr agent fix-all owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" --homogeneous-reason "Repeated same-file thread concern." [--severity P0|P1|P2|P3|P4 --severity-note <why>]
 gh-address-cr agent resolve-stale owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
 gh-address-cr agent reclaim owner/repo 123
-gh-address-cr agent orchestrate {start,step,status,stop,resume,submit} owner/repo 123
+gh-address-cr agent orchestrate {start,step,status,stop,resume,submit,autopilot} owner/repo 123
 gh-address-cr doctor owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```

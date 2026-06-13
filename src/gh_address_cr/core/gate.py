@@ -337,6 +337,7 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "address": f"gh-address-cr address {repo} {pr_number} --lean",
         "publish": f"gh-address-cr agent publish {repo} {pr_number}",
         "final_gate": f"gh-address-cr final-gate {repo} {pr_number}",
+        "batch_next": f"gh-address-cr agent next {repo} {pr_number} --batch --agent-id <agent_id>",
         "submit_batch": f"gh-address-cr agent submit-batch {repo} {pr_number} --input batch-response.json",
         "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input batch-response.json",
         "fix_all_homogeneous": (

@@ -103,6 +103,7 @@ Advanced integration commands:
 - `agent manifest`
 - `agent classify`
 - `agent next`
+- `agent next --batch`
 - `agent submit`
 - `agent submit-batch`
 - `agent fix`
@@ -155,7 +156,9 @@ hydrated by the runtime during publish, so independent worker evidence does not
 need to wait for a final commit hash. Use
 `agent fix-all --input <batch-response.json>` to route explicit per-thread batch
 evidence, or `agent fix-all --homogeneous-reason <why>` only for a homogeneous
-repeated concern.
+repeated concern. When `fix-all` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
+`agent next --batch --agent-id <id>` to claim eligible GitHub review threads and
+write a fillable `batch-response-skeleton.json` before `agent submit-batch`.
 
 When exactly one PR session is cached, PR-scoped commands such as `address`,
 `review`, `threads`, `final-gate`, and `telemetry summary` may omit

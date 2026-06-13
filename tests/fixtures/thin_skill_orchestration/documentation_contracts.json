@@ -4,6 +4,7 @@
     "final-gate",
     "agent manifest",
     "agent next",
+    "agent next --batch",
     "agent submit",
     "agent submit-batch",
     "adapter check-runtime"

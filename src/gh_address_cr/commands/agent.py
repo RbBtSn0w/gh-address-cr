@@ -88,6 +88,7 @@ def build_agent_manifest() -> dict:
         "output_formats": [
             "action_response.v1",
             "batch_action_response.v1",
+            "batch_action_response_skeleton.v1",
             "evidence_record.v1",
             "evidence_profile.v1",
             "gate_report.v1",
@@ -172,23 +173,40 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr agent next")
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    parser.add_argument("--role", required=True)
+    parser.add_argument("--role")
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--item-id")
     parser.add_argument("--now")
+    parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response-skeleton.json for all unresolved threads.")
+    parser.add_argument("--files", help="Only batch lease threads that affect these files (comma-separated).")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
+    if not parsed.batch and not parsed.role:
+        parser.error("one of the following arguments is required: --role or --batch")
+    if parsed.batch and parsed.role:
+        parser.error("arguments --role and --batch are mutually exclusive")
+    if not parsed.batch and parsed.files:
+        parser.error("argument --files can only be used with --batch")
     try:
         now_dt = None
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
-        payload = agent_protocol.issue_action_request(
-            parsed.repo,
-            parsed.pr_number,
-            role=parsed.role,
-            agent_id=parsed.agent_id,
-            item_id=parsed.item_id,
-            now=now_dt,
-        )
+        if parsed.batch:
+            payload = agent_protocol.issue_batch_action_request(
+                parsed.repo,
+                parsed.pr_number,
+                agent_id=parsed.agent_id,
+                files=_parse_agent_files(parsed.files),
+                now=now_dt,
+            )
+        else:
+            payload = agent_protocol.issue_action_request(
+                parsed.repo,
+                parsed.pr_number,
+                role=parsed.role,
+                agent_id=parsed.agent_id,
+                item_id=parsed.item_id,
+                now=now_dt,
+            )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")

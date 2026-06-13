@@ -34,6 +34,7 @@ Agent protocol commands:
 /gh-address-cr agent manifest
 /gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>
 /gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>
+/gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
 /gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
 /gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
@@ -115,7 +116,7 @@ When exactly one cached PR session exists, PR-scoped commands may omit `<owner/r
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft structured fix evidence inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. For shared files/validation evidence, keep per-thread summary/why entries in the batch; use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern. Use `agent trivial-fix` only for documentation or typo-only GitHub threads; if the runtime reports `TRIVIAL_THREAD_NOT_ELIGIBLE`, return to the normal classify/next/submit path.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft structured fix evidence inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. For shared files/validation evidence, keep per-thread summary/why entries in the batch; when `fix-all` reports `PER_THREAD_EVIDENCE_REQUIRED`, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton. Use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern. Use `agent trivial-fix` only for documentation or typo-only GitHub threads; if the runtime reports `TRIVIAL_THREAD_NOT_ELIGIBLE`, return to the normal classify/next/submit path.
 
 Prefer `workflow_decision.v1` JSON for structured triage handoff when available. Required fields are `schema_version`, `request_id`, `item_id`, `decision`, and `reason`; Markdown decision blocks remain compatibility prose, not the preferred machine contract.
 

@@ -41,6 +41,13 @@ def read_repo_docs(*paths):
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
+def cli_topology_section():
+    text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
+    start = text.index("## Command Topology (ASCII)")
+    end = text.index("Stable machine summary fields:", start)
+    return text[start:end]
+
+
 class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_declares_packaged_skill_root_scope(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -149,6 +156,82 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`--input <batch-response.json>`", protocol_text)
         self.assertIn("`--homogeneous-reason <why>`", protocol_text)
         self.assertIn("agent resolve-stale", protocol_text)
+
+    def test_cli_reference_ascii_topology_covers_public_command_surface(self):
+        section = cli_topology_section()
+        self.assertTrue(section.isascii())
+        for command in (
+            "active-pr",
+            "review",
+            "review [--auto-simple]",
+            "address [--lean|--summary]",
+            "threads [--lean|--summary]",
+            "findings --input <json|->",
+            "adapter <adapter_cmd...>",
+            "doctor",
+            "telemetry ingest",
+            "telemetry summary",
+            "command-session --input <operations.json|->",
+            "final-gate",
+            "review-to-findings --input <finding-blocks.md|->",
+            "submit-feedback",
+            "submit-action <action-request.json>",
+            "version / --version",
+            "--machine",
+            "--human",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, section)
+
+    def test_cli_reference_ascii_topology_covers_agent_command_surface(self):
+        section = cli_topology_section()
+        for command in (
+            "manifest",
+            "classify",
+            "next --role <role>",
+            "next --batch",
+            "submit",
+            "submit-batch",
+            "fix",
+            "trivial-fix",
+            "fix-all",
+            "resolve-stale",
+            "evidence add",
+            "evidence list",
+            "publish",
+            "leases",
+            "reclaim",
+            "orchestrate start",
+            "orchestrate step",
+            "orchestrate status",
+            "orchestrate resume",
+            "orchestrate stop",
+            "orchestrate submit",
+            "orchestrate autopilot",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, section)
+
+    def test_cli_reference_ascii_topology_covers_upstream_downstream_verification(self):
+        section = cli_topology_section()
+        for edge in (
+            "WAITING_FOR_EXTERNAL_REVIEW",
+            "WAITING_FOR_SIMPLE_ADDRESS",
+            "PER_THREAD_EVIDENCE_REQUIRED -> next --batch",
+            "producer output",
+            "session items",
+            "agent classify",
+            "ActionResponse or BatchActionResponse",
+            "agent submit or agent submit-batch",
+            "accepted evidence",
+            "agent publish (GitHub thread side effects only)",
+            "final-gate",
+            "completion_summary_line",
+            "runtime-owned leases + request_id values",
+            "agent submit-batch validates lease ownership and request context",
+        ):
+            with self.subTest(edge=edge):
+                self.assertIn(edge, section)
 
     def test_skill_documents_runtime_complexity_additive_fields(self):
         skill_text = SKILL_MD.read_text(encoding="utf-8")
