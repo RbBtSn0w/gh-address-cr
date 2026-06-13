@@ -2,11 +2,14 @@
 
 import unittest
 
-from gh_address_cr.core.runtime_kernel.session_projection import apply_ledger_events
+from gh_address_cr.core.runtime_kernel.session_projection import AGENT_EVENT_TYPES, apply_ledger_events
 
 
-def _event(event_type, item_id, payload, record_id="rec"):
-    return {"event_type": event_type, "item_id": item_id, "payload": payload, "record_id": record_id}
+def _event(event_type, item_id, payload, record_id="rec", timestamp=None):
+    ev = {"event_type": event_type, "item_id": item_id, "payload": payload, "record_id": record_id}
+    if timestamp is not None:
+        ev["timestamp"] = timestamp
+    return ev
 
 
 class SessionProjectionTest(unittest.TestCase):
@@ -124,6 +127,25 @@ class SessionProjectionTest(unittest.TestCase):
         events = [_event("reply_posted", "github-thread:abc", {"reply_url": "https://x/reply"})]
         item = apply_ledger_events(base, events)["github-thread:abc"]
         self.assertEqual(item["reply_evidence"], {"reply_url": "https://x/reply"})
+
+    def test_local_finding_handled_at_is_deterministic_from_event_timestamp(self):
+        # CR: rebuild must not stamp handled_at with datetime.now() each run.
+        base = {"local:f1": {"item_id": "local:f1", "item_kind": "local_finding", "state": "open"}}
+        events = [
+            _event(
+                "response_accepted",
+                "local:f1",
+                {"response": {"resolution": "fix", "note": "n", "files": [], "validation_commands": []}},
+                timestamp="2026-06-13T00:00:00Z",
+            )
+        ]
+        once = apply_ledger_events(base, events)["local:f1"]
+        twice = apply_ledger_events(base, events)["local:f1"]
+        self.assertEqual(once["handled_at"], "2026-06-13T00:00:00Z")
+        self.assertEqual(once["handled_at"], twice["handled_at"])
+
+    def test_agent_event_types_documents_verification_rejected(self):
+        self.assertIn("verification_rejected", AGENT_EVENT_TYPES)
 
     def test_unknown_item_events_are_ignored(self):
         base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}

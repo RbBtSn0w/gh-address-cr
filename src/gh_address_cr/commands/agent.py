@@ -425,6 +425,16 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
             exit_code=2,
             message="agent resolve --trivial requires a single <item_id>.",
         )
+    if parsed.item_id and (parsed.batch or parsed.input or parsed.stale or parsed.homogeneous_reason):
+        # Match-all / batch modes are file/lease-scoped and do not consume an
+        # <item_id>; fail fast instead of silently ignoring it.
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="ITEM_ID_NOT_ALLOWED_FOR_MODE",
+            waiting_on="resolve_mode",
+            exit_code=2,
+            message="agent resolve <item_id> cannot be combined with --batch/--input, --stale, or --homogeneous-reason.",
+        )
     if parsed.batch or parsed.input:
         if not parsed.input:
             raise WorkflowError(

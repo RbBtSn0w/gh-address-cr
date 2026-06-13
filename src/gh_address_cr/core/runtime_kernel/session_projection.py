@@ -16,6 +16,7 @@ from typing import Any, Iterable, Mapping
 AGENT_EVENT_TYPES = (
     "classification_recorded",
     "response_accepted",
+    "verification_rejected",
     "reply_posted",
     "thread_resolved",
     "response_published",
@@ -60,6 +61,12 @@ def apply_ledger_events(
             response = payload.get("response")
             if isinstance(response, Mapping):
                 _apply_response_to_item(item, dict(response))
+                # `_apply_response_to_item` stamps local-finding `handled_at` with
+                # datetime.now(); pin it to the event's append time so a rebuild is
+                # deterministic and does not overwrite the original timestamp.
+                record_ts = _attr(record, "timestamp")
+                if record_ts and item.get("handled_at"):
+                    item["handled_at"] = record_ts
         elif event_type == "verification_rejected":
             # A verifier rejected a previously accepted fix: reopen the item so a
             # rebuild never reconstructs a rejected fix as terminal/handled (#117).

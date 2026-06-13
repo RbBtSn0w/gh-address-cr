@@ -40,6 +40,15 @@ class TrivialResolveGuardTest(unittest.TestCase):
             _dispatch_agent_resolve(self._ns(trivial=True, commit="abc", homogeneous_reason="x"), now_dt=None)
         self.assertEqual(ctx.exception.reason_code, "TRIVIAL_REQUIRES_ITEM_ID")
 
+    def test_item_id_with_batch_or_stale_is_rejected(self):
+        # CR: <item_id> with a match-all/batch mode must fail fast, not be ignored.
+        for kw in ({"batch": True, "input": "b.json"}, {"stale": True, "match_files": True, "commit": "abc"},
+                   {"homogeneous_reason": "x", "commit": "abc"}):
+            with self.subTest(kw=kw):
+                with self.assertRaises(WorkflowError) as ctx:
+                    _dispatch_agent_resolve(self._ns(item_id="github-thread:abc", **kw), now_dt=None)
+                self.assertEqual(ctx.exception.reason_code, "ITEM_ID_NOT_ALLOWED_FOR_MODE")
+
 
 if __name__ == "__main__":
     unittest.main()
