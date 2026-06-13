@@ -606,7 +606,7 @@ def _build_fast_fix_context(
     status_prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
     rejected_status = f"{status_prefix}_REJECTED"
     input_waiting_on = "stale_resolution_input" if stale_only else "fast_fix_input"
-    command_name = "agent resolve --stale" if stale_only else "agent resolve --homogeneous"
+    command_name = "agent resolve --stale" if stale_only else "agent resolve"
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:

@@ -180,7 +180,7 @@ Field normalization is intentionally broad so external tools can map in without 
 To record fix evidence for a local finding inside the PR session:
 
 ```bash
-gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed locally." --validation "python3 -m unittest=passed"
+gh-address-cr agent resolve owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed locally." --validation "python3 -m unittest=passed"
 gh-address-cr final-gate --no-auto-clean owner/repo 123
 ```
 
@@ -292,7 +292,7 @@ Example:
 gh-address-cr address owner/repo 123 --lean
 
 # inspect one unresolved GitHub thread
-gh-address-cr agent fix owner/repo 123 github-thread:THREAD_ID --commit abc123 --files src/app.py --summary "Added the missing guard." --why "Accepted reviewer finding." --validation "python3 -m unittest=passed" --severity P2
+gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --commit abc123 --files src/app.py --summary "Added the missing guard." --why "Accepted reviewer finding." --validation "python3 -m unittest=passed" --severity P2
 gh-address-cr agent publish owner/repo 123
 
 gh-address-cr final-gate --auto-clean --audit-id run-20260412 owner/repo 123
@@ -342,7 +342,7 @@ Example:
 ./adapter.sh --base main --head HEAD | gh-address-cr findings owner/repo 123 --input - --sync --source local-agent:codex
 
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
-gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Implemented fix." --why "Confirmed locally." --validation "python3 -m unittest=passed"
+gh-address-cr agent resolve owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Implemented fix." --why "Confirmed locally." --validation "python3 -m unittest=passed"
 
 gh-address-cr final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
@@ -385,7 +385,7 @@ Example:
 gh-address-cr adapter owner/repo 123 ./adapter.sh
 gh-address-cr agent next owner/repo 123 --role fixer --agent-id codex-fixer-1
 
-gh-address-cr agent fix owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Fixed local finding." --why "Confirmed locally." --validation "python3 -m unittest=passed"
+gh-address-cr agent resolve owner/repo 123 local-finding:FINGERPRINT --commit <sha> --files src/example.py --summary "Fixed local finding." --why "Confirmed locally." --validation "python3 -m unittest=passed"
 gh-address-cr final-gate --no-auto-clean owner/repo 123
 ```
 

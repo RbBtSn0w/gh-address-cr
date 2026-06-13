@@ -60,14 +60,25 @@ def apply_ledger_events(
             response = payload.get("response")
             if isinstance(response, Mapping):
                 _apply_response_to_item(item, dict(response))
+        elif event_type == "verification_rejected":
+            # A verifier rejected a previously accepted fix: reopen the item so a
+            # rebuild never reconstructs a rejected fix as terminal/handled (#117).
+            item["state"] = "open"
+            item["status"] = "OPEN"
+            item["blocking"] = True
+            item["handled"] = False
+            item["thread_resolved"] = False
+            note = payload.get("note")
+            if note is not None:
+                item["verification_rejection_note"] = note
         elif event_type == "reply_posted":
             reply_url = payload.get("reply_url")
             if reply_url:
                 item["reply_posted"] = True
                 item["reply_url"] = reply_url
-                item.setdefault("reply_evidence", {})
-                if isinstance(item.get("reply_evidence"), dict):
-                    item["reply_evidence"]["reply_url"] = reply_url
+                if not isinstance(item.get("reply_evidence"), dict):
+                    item["reply_evidence"] = {}
+                item["reply_evidence"]["reply_url"] = reply_url
         elif event_type == "thread_resolved":
             item["thread_resolved"] = True
         elif event_type == "response_published":
@@ -81,12 +92,14 @@ def apply_ledger_events(
     return items
 
 
-def rebuild_session_items(repo: str, pr_number: str) -> dict[str, Any]:
+def rebuild_session_items(repo: str, pr_number: str, *, persist: bool = True) -> dict[str, Any]:
     """Reload a session and re-derive its items by folding the full ledger.
 
     Crash recovery: an event appended before a session-cache write is replayed
     here, restoring the cache to match the durable ledger. Re-applying events that
-    are already reflected is idempotent, so this is safe to run at any time.
+    are already reflected is idempotent, so this is safe to run at any time. When
+    ``persist`` (default), the rebuilt `session.json` cache is written back so the
+    recovery actually takes effect; pass ``persist=False`` for a dry read.
     """
     from gh_address_cr.core import session as session_store
     from gh_address_cr.core.utils import get_session_ledger
@@ -95,6 +108,8 @@ def rebuild_session_items(repo: str, pr_number: str) -> dict[str, Any]:
     ledger = get_session_ledger(session)
     base_items = session.get("items") if isinstance(session.get("items"), Mapping) else {}
     session["items"] = apply_ledger_events(base_items, ledger.load())
+    if persist:
+        session_store.save_session(repo, pr_number, session)
     return session
 
 

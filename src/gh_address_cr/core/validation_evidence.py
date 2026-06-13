@@ -13,6 +13,13 @@ from typing import Any
 # (`<command>` with no `=result` suffix is treated as passed).
 VALIDATION_SUCCESS_PREFIXES = ("passed", "pass", "success", "succeeded", "ok")
 
+# Result tokens we recognise as an explicit pass/fail verdict on a `<cmd>=<result>`
+# string. Only a trailing token in this set is treated as a result, so commands
+# that contain `=` internally (e.g. `VAR=val ./cmd`) are not misparsed.
+KNOWN_VALIDATION_RESULT_TOKENS = frozenset(
+    {"passed", "pass", "success", "succeeded", "ok", "failed", "fail", "failure", "error", "skipped"}
+)
+
 
 def validation_result_is_success(result: Any) -> bool:
     """True when an explicit (or defaulted) validation result is success-like."""
@@ -31,7 +38,16 @@ def validation_evidence_has_success(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, str):
-        return bool(value.strip())
+        text = value.strip()
+        if not text:
+            return False
+        # Honour an explicit `<command>=<result>` verdict so a failing string
+        # (e.g. "pytest=failed") does not satisfy the gate (#117). A trailing
+        # token that is not a known verdict is treated as part of the command.
+        _command, separator, result = text.rpartition("=")
+        if separator and result.strip().lower() in KNOWN_VALIDATION_RESULT_TOKENS:
+            return validation_result_is_success(result)
+        return True
     if isinstance(value, dict):
         if "command" in value or "result" in value or "exit_code" in value:
             exit_code = value.get("exit_code")

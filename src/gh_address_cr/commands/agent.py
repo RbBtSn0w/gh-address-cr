@@ -358,10 +358,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--include-stale", action="store_true")
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
-    scope_args, scope_error = _agent_args_with_scope(repo, passthrough)
-    if scope_error is not None:
-        return _emit_scope_resolution_error(scope_error)
-    parsed = parser.parse_args(scope_args)
+    parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
+    if parsed is None:
+        return scope_rc
 
     selected_modes = [
         name
@@ -392,12 +391,40 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         payload = _dispatch_agent_resolve(parsed, now_dt=now_dt)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    payload.setdefault("published", bool(parsed.publish) and "publish" in payload)
+    payload.setdefault("published", _resolve_published_flag(payload))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return 0
 
 
+def _resolve_published_flag(payload: dict) -> bool:
+    """True only when a publish side effect actually posted at least one reply.
+
+    The publish result lives at different depths depending on resolve mode:
+    top-level `publish` (batch) or nested under `submit.publish` (single item via
+    `submit_action_response`). Derive from `published_count`, not key presence, so
+    `--publish` runs report `published` correctly and a no-op publish stays False.
+    """
+    candidates = [payload.get("publish")]
+    submit = payload.get("submit")
+    if isinstance(submit, dict):
+        candidates.append(submit.get("publish"))
+    for candidate in candidates:
+        if isinstance(candidate, dict) and int(candidate.get("published_count") or 0) > 0:
+            return True
+    return False
+
+
 def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    if parsed.trivial and not parsed.item_id:
+        # Without this guard, --trivial with no <item_id> would fall through to the
+        # match-all branch and bypass the trivial-eligibility check entirely (#117).
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="TRIVIAL_REQUIRES_ITEM_ID",
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent resolve --trivial requires a single <item_id>.",
+        )
     if parsed.batch or parsed.input:
         if not parsed.input:
             raise WorkflowError(

@@ -210,7 +210,7 @@ gh-address-cr address owner/repo 123 --lean
 gh-address-cr final-gate --no-auto-clean owner/repo 123
 gh-address-cr review owner/repo 123 --input -
 gh-address-cr findings owner/repo 123 --input -
-gh-address-cr agent fix owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
+gh-address-cr agent resolve owner/repo 123 local-finding:<fingerprint> --commit <sha> --files src/example.py --summary "Fixed locally." --why "Confirmed finding." --validation "python3 -m unittest=passed"
 ```
 
 

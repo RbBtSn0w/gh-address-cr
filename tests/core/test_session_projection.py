@@ -93,6 +93,38 @@ class SessionProjectionTest(unittest.TestCase):
         apply_ledger_events(base, events)
         self.assertNotIn("thread_resolved", base["github-thread:abc"])
 
+    def test_verification_rejection_reopens_accepted_item(self):
+        # #8: a verifier rejection after an accepted response must reopen the item,
+        # not leave it terminal, on rebuild.
+        base = {
+            "github-thread:abc": {
+                "item_id": "github-thread:abc",
+                "item_kind": "github_thread",
+                "thread_id": "abc",
+                "state": "open",
+            }
+        }
+        events = [
+            _event(
+                "response_accepted",
+                "github-thread:abc",
+                {"response": {"resolution": "fix", "note": "n", "files": [], "validation_commands": []}},
+            ),
+            _event("verification_rejected", "github-thread:abc", {"note": "Does not actually fix it."}),
+        ]
+        item = apply_ledger_events(base, events)["github-thread:abc"]
+        self.assertEqual(item["state"], "open")
+        self.assertTrue(item["blocking"])
+        self.assertFalse(item["handled"])
+        self.assertEqual(item["verification_rejection_note"], "Does not actually fix it.")
+
+    def test_reply_evidence_none_is_replaced(self):
+        # #1: reply_evidence stored as None must not silently drop the reply_url.
+        base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread", "reply_evidence": None}}
+        events = [_event("reply_posted", "github-thread:abc", {"reply_url": "https://x/reply"})]
+        item = apply_ledger_events(base, events)["github-thread:abc"]
+        self.assertEqual(item["reply_evidence"], {"reply_url": "https://x/reply"})
+
     def test_unknown_item_events_are_ignored(self):
         base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
         events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"})]
