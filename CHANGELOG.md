@@ -1,3 +1,5 @@
+## [2.10.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.9...v2.10.10) (2026-06-13)
+
 ## [2.10.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.8...v2.10.9) (2026-06-13)
 
 ### Bug Fixes
