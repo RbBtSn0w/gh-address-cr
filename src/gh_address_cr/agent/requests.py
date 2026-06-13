@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from gh_address_cr.agent.manifests import ManifestValidationError, ensure_manifest_eligible
-from gh_address_cr.agent.roles import AgentRole, GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS, is_ai_agent_role, parse_role
+from gh_address_cr.agent.roles import GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS, AgentRole, is_ai_agent_role, parse_role
 from gh_address_cr.core.models import ActionRequest, CapabilityManifest, EvidenceRecord, WorkItem
 
 

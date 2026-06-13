@@ -13,7 +13,6 @@ from gh_address_cr.core.runtime_kernel.identity import (
 from gh_address_cr.core.runtime_kernel.policies import PolicyDecision
 from gh_address_cr.core.runtime_kernel.projections import ReviewProjection, ReviewWorkItem
 
-
 JsonDict = dict[str, Any]
 
 

@@ -10,31 +10,40 @@ import sys
 from pathlib import Path
 
 from gh_address_cr import __version__
+from gh_address_cr.commands.active_pr import handle_active_pr_command
+from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
+)
+from gh_address_cr.commands.common import (
     maybe_prepend_implicit_scope as _maybe_prepend_implicit_scope,
+)
+from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
-from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.doctor import handle_doctor_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
     HighLevelReviewRuntime,
     summary_commands,
 )
 from gh_address_cr.commands.telemetry import handle_telemetry_command
-from gh_address_cr.commands.doctor import handle_doctor_command
-from gh_address_cr.commands.active_pr import handle_active_pr_command
-from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
 from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
+)
+from gh_address_cr.intake.findings import (
     normalize_finding as native_normalize_finding,
+)
+from gh_address_cr.intake.findings import (
     parse_finding_blocks as native_parse_finding_blocks,
+)
+from gh_address_cr.intake.findings import (
     parse_records as native_parse_records,
 )
-
 
 HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
 NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
@@ -798,9 +807,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-
+def _dispatch_management_commands(args) -> int | None:
+    """Handle commands that run before target-arg expansion. Returns None if unhandled."""
     if args.command == "version":
         sys.stdout.write(f"gh-address-cr {__version__}\n")
         return 0
@@ -850,6 +858,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
         return 0
 
+    return None
+
+
+def _expand_target_args(args) -> None:
+    """Fold the leading repo/pr_number positionals back into args.args."""
     full_args = list(args.args)
     if args.pr_number:
         full_args = [args.pr_number, *full_args]
@@ -857,6 +870,9 @@ def main(argv: list[str] | None = None) -> int:
         full_args = [args.repo, *full_args]
     args.args = full_args
 
+
+def _dispatch_passthrough_commands(args) -> int | None:
+    """Handle commands that delegate to a sub-handler module. Returns None if unhandled."""
     if args.command == "submit-action":
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
@@ -895,6 +911,11 @@ def main(argv: list[str] | None = None) -> int:
         rc = submit_feedback_handler.main(args.args)
         return rc if rc is not None else 0
 
+    return None
+
+
+def _dispatch_high_level_commands(args) -> int:
+    """Handle legacy, unknown, and native high-level commands. Always returns a code."""
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:
         print(
             f"Unsupported legacy command: {args.command}. "
@@ -924,6 +945,22 @@ def main(argv: list[str] | None = None) -> int:
         if preflight_rc is not None:
             return preflight_rc
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    rc = _dispatch_management_commands(args)
+    if rc is not None:
+        return rc
+
+    _expand_target_args(args)
+
+    rc = _dispatch_passthrough_commands(args)
+    if rc is not None:
+        return rc
+
+    return _dispatch_high_level_commands(args)
 
 
 if __name__ == "__main__":

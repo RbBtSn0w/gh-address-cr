@@ -20,7 +20,6 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
 
-
 HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
 HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
 HOST_TELEMETRY_FORMAT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT"

@@ -1,8 +1,9 @@
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
-import uuid
+
 from gh_address_cr.core import session as core_session
 
 STATE_INITIALIZED = "INITIALIZED"
@@ -232,5 +233,5 @@ def load_orchestration_session(repo: str, pr_number: str) -> OrchestrationSessio
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return OrchestrationSession.from_dict(data)
-    except json.JSONDecodeError:
-        raise OrchestrationSessionError("orchestration.json is corrupted. Session cannot be resumed.")
+    except json.JSONDecodeError as exc:
+        raise OrchestrationSessionError("orchestration.json is corrupted. Session cannot be resumed.") from exc

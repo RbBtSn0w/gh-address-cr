@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+
 from tests.helpers import PythonScriptTestCase
 
 TEST_NOW = "2026-06-12T22:30:00+00:00"

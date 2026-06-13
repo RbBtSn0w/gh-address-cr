@@ -7,7 +7,6 @@ from typing import Any
 from gh_address_cr.core import paths
 from gh_address_cr.core.io import JsonIOError, read_json_object, write_json_atomic
 
-
 DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 
 

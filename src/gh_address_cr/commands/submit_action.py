@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 import argparse
 import json
 import os
-import sys
 import shlex
-from pathlib import Path
 import subprocess
+import sys
+from pathlib import Path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -9,7 +9,6 @@ from typing import Any
 
 from gh_address_cr.agent.roles import AgentRole, parse_role
 
-
 JsonDict = dict[str, Any]
 
 LEASE_RECOVERY_OUTCOMES = ("renew", "reclaim", "refresh_state", "stop", "already_completed")

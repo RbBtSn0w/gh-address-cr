@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 SKILL_ROOT = ROOT / "skill"
@@ -73,10 +72,11 @@ class PythonScriptTestCase(unittest.TestCase):
     def run_runtime_module(self, *args, check=False, stdin=None):
         in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
         if in_process:
-            from gh_address_cr.cli import main
-            import io
             import contextlib
+            import io
             from unittest.mock import patch
+
+            from gh_address_cr.cli import main
 
             stdout_buf = io.StringIO()
             stderr_buf = io.StringIO()

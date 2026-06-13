@@ -5,28 +5,44 @@ from datetime import datetime
 from typing import Any
 
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.reply_templates import (
     clarify_reply as render_clarify_reply,
+)
+from gh_address_cr.core.reply_templates import (
     defer_reply as render_defer_reply,
+)
+from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
-from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.utils import (
+    coerce_now as _coerce_now,
+)
+from gh_address_cr.core.utils import (
+    fix_reply_severity_for_publish as _fix_reply_severity_for_publish,
+)
+from gh_address_cr.core.utils import (
+    format_timestamp as _format_timestamp,
+)
+from gh_address_cr.core.utils import (
+    get_session_items as _items,
+)
+from gh_address_cr.core.utils import (
+    get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
+    normalize_string_list as _normalize_string_list,
+)
+from gh_address_cr.core.utils import (
+    normalize_validation_commands as _normalize_validation_commands,
+)
 from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
-from gh_address_cr.core.utils import (
-    coerce_now as _coerce_now,
-    format_timestamp as _format_timestamp,
-    get_session_items as _items,
-    get_session_ledger as _ledger,
-    normalize_string_list as _normalize_string_list,
-    normalize_validation_commands as _normalize_validation_commands,
-    fix_reply_severity_for_publish as _fix_reply_severity_for_publish,
-)
 
 
 def publish_github_thread_responses(

@@ -4,7 +4,6 @@ import unittest
 
 from tests.helpers import ROOT, SRC_ROOT
 
-
 sys.path.insert(0, str(SRC_ROOT))
 
 
@@ -49,7 +48,7 @@ body: |
         self.assertIn("fixed `finding` blocks", str(caught.exception))
 
     def test_json_finding_records_normalize_aliases_and_envelopes(self):
-        from gh_address_cr.intake.findings import parse_records, normalize_finding
+        from gh_address_cr.intake.findings import normalize_finding, parse_records
 
         records = parse_records(
             json.dumps(

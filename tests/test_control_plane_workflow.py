@@ -7,9 +7,7 @@ from unittest.mock import patch
 
 from gh_address_cr.commands import agent
 from gh_address_cr.core.models import ActionRequest
-
 from tests.helpers import PythonScriptTestCase
-
 
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 

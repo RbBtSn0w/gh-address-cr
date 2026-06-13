@@ -10,9 +10,14 @@ from unittest.mock import patch
 from gh_address_cr import cli as runtime_cli
 from gh_address_cr.agent.responses import ResponseValidationError, validate_workflow_decision
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.leases import LeaseConflictError, LeaseSubmissionError, calculate_conflict_keys, claim_lease, submit_lease
+from gh_address_cr.core.leases import (
+    LeaseConflictError,
+    LeaseSubmissionError,
+    calculate_conflict_keys,
+    claim_lease,
+    submit_lease,
+)
 from gh_address_cr.core.telemetry import build_efficiency_report, import_external_telemetry
-
 from tests.helpers import CLI_PY, PythonScriptTestCase
 
 

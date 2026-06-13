@@ -61,12 +61,12 @@ class NativeFoundationTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "CLOSED")
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
-    def test_audit_ledger_appends_jsonl_events_with_exact_shape(self):
-        from gh_address_cr.core.ledger import AuditLedger
+    def test_audit_log_appends_jsonl_events_with_exact_shape(self):
+        from gh_address_cr.core.audit_log import AuditLog
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "audit.jsonl"
-            ledger = AuditLedger(path)
+            ledger = AuditLog(path)
 
             ledger.append("claim", "ok", "owner/repo", "123", message="Claimed item", details={"item_id": "local:1"})
             ledger.append("gate", "fail", "owner/repo", "123", message="Blocking item")

@@ -5,8 +5,8 @@ from gh_address_cr.core.leases import (
     LeaseConflictError,
     LeaseSubmissionError,
     accept_lease,
-    calculate_lease_recovery_state,
     calculate_conflict_keys,
+    calculate_lease_recovery_state,
     claim_lease,
     expire_leases,
     reclaim_lease,
@@ -14,7 +14,6 @@ from gh_address_cr.core.leases import (
     release_lease,
     submit_lease,
 )
-
 
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 

@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import unittest
+from datetime import datetime, timezone
 
 from gh_address_cr.core.ids import stable_id, stable_payload_hash
 

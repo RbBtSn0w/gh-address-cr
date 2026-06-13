@@ -17,7 +17,6 @@ from gh_address_cr.github.errors import (
     GitHubTransientError,
 )
 
-
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 
 TRANSIENT_MARKERS = (

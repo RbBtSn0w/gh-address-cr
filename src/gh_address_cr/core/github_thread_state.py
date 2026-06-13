@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
 GITHUB_THREAD_CLAIMABLE_STATES = frozenset({"open", "blocked", "waiting_for_fix", "stale"})
 GITHUB_THREAD_TERMINAL_STATES = frozenset(
     {

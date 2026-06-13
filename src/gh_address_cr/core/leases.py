@@ -9,10 +9,20 @@ from uuid import uuid4
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
+)
+from gh_address_cr.core.utils import (
     get_field as _get,
+)
+from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
     json_ready as _json_ready,
+)
+from gh_address_cr.core.utils import (
     return_expired_items_to_open as _return_expired_items_to_open,
+)
+from gh_address_cr.core.utils import (
     set_field as _set,
 )
 
@@ -684,7 +694,7 @@ def _items(session: Any) -> dict[str, Any]:
     items = getattr(session, "items", None)
     if items is None:
         items = {}
-        setattr(session, "items", items)
+        session.items = items
     return items
 
 
@@ -694,7 +704,7 @@ def _leases(session: Any) -> dict[str, Any]:
     leases = getattr(session, "leases", None)
     if leases is None:
         leases = {}
-        setattr(session, "leases", leases)
+        session.leases = leases
     return leases
 
 
@@ -704,7 +714,7 @@ def _lease_events(session: Any) -> list[dict[str, Any]]:
     events = getattr(session, "lease_events", None)
     if events is None:
         events = []
-        setattr(session, "lease_events", events)
+        session.lease_events = events
     return events
 
 

@@ -48,5 +48,11 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F"]
+# E/F: pyflakes + pycodestyle. B: bugbear (likely-bug patterns).
+# I: import sorting. C901: cyclomatic complexity guardrail against new god-functions.
+select = ["E", "F", "B", "I", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# Ratchet target: lower this over time as legacy hot-path functions are decomposed.
+max-complexity = 20

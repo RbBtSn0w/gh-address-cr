@@ -9,7 +9,6 @@ from pathlib import Path
 
 from tests.helpers import ROOT
 
-
 GENERATED_PLUGIN_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"
 PLUGIN_BUILDER = ROOT / "scripts" / "build_plugin_payload.py"
 PYPROJECT = ROOT / "pyproject.toml"

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -12,8 +13,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
+from gh_address_cr.core import audit_log as core_audit_log
 from gh_address_cr.core import io as core_io
-from gh_address_cr.core import ledger as core_ledger
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.command_runner import run_cmd as run_cmd_native
 
@@ -43,7 +44,7 @@ def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool =
 
 def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: str | None, message: str, details: dict | None) -> None:
     path = core_paths.audit_log_file(repo, pr_number)
-    core_ledger.AuditLedger(path).append(
+    core_audit_log.AuditLog(path).append(
         action, status, repo, pr_number, message=message, details=details, run_id=audit_id
     )
 

@@ -21,7 +21,6 @@ from gh_address_cr.core.runtime_kernel.events import (
     sort_runtime_facts,
 )
 
-
 JsonDict = dict[str, Any]
 
 FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"

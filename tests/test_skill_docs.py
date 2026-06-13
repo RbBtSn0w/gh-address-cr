@@ -1,10 +1,8 @@
-import unittest
 import json
+import unittest
 
 from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
-
 from tests.helpers import ROOT
-
 
 SKILL_MD = ROOT / "skill" / "SKILL.md"
 README_MD = ROOT / "README.md"

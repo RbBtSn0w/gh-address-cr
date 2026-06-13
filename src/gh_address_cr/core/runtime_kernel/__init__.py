@@ -10,7 +10,6 @@ from gh_address_cr.core.runtime_kernel.events import (
 from gh_address_cr.core.runtime_kernel.policies import PolicyDecision, evaluate_review_policy
 from gh_address_cr.core.runtime_kernel.projections import ReviewProjection, ReviewWorkItem, project_review_threads
 
-
 __all__ = [
     "CommandExecutionFact",
     "PlannedCommand",

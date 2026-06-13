@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from gh_address_cr.core import command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core import command_templates
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
     is_resolved_github_thread,
@@ -21,6 +21,8 @@ from gh_address_cr.core.github_thread_state import (
 )
 from gh_address_cr.core.handoff import (
     ensure_handoff_state as _ensure_handoff_state,
+)
+from gh_address_cr.core.handoff import (
     record_producer_result,
 )
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
@@ -504,9 +506,12 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     if not argv:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
+
     from gh_address_cr.core.telemetry import (
         SessionTelemetry,
         command_label,
+    )
+    from gh_address_cr.core.telemetry import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
 

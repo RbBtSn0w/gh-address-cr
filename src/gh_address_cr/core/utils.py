@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
-from gh_address_cr.core import session as session_store
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
 

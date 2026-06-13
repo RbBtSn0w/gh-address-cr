@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -26,10 +26,10 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     FINAL_GATE_UNRESOLVED_REMOTE_THREADS,
     build_final_gate_facts,
     evaluate_final_gate_policy,
+    has_content,
     project_final_gate,
     thread_identifier,
     thread_is_resolved,
-    has_content,
 )
 from gh_address_cr.core.session import SessionError, SessionManager
 from gh_address_cr.core.severity import (
@@ -41,7 +41,6 @@ from gh_address_cr.core.severity import (
     severity_evidence,
 )
 from gh_address_cr.github.client import GitHubClient
-
 
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5

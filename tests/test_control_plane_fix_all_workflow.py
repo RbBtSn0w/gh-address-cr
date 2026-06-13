@@ -6,7 +6,6 @@ from pathlib import Path
 from tests.helpers import PythonScriptTestCase
 from tests.test_control_plane_workflow import github_thread, open_item
 
-
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
 

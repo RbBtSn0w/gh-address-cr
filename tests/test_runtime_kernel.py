@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 from tests.helpers import SRC_ROOT
 
-
 sys.path.insert(0, str(SRC_ROOT))
 
 

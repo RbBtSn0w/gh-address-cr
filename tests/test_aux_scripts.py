@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 
 from tests.helpers import (
-    PythonScriptTestCase,
     SUBMIT_FEEDBACK_PY,
+    PythonScriptTestCase,
 )
 
 

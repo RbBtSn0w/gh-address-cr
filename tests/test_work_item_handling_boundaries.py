@@ -5,7 +5,6 @@ from pathlib import Path
 
 from tests.helpers import ROOT, SRC_ROOT
 
-
 sys.path.insert(0, str(SRC_ROOT))
 
 from gh_address_cr.core.models import WorkItemHandlingBoundary  # noqa: E402
@@ -14,7 +13,6 @@ from gh_address_cr.core.work_item_handlers import (  # noqa: E402
     boundary_summary_for_item,
     select_handling_boundary,
 )
-
 
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "runtime_complexity" / "work_items.json"
 

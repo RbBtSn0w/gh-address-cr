@@ -7,7 +7,6 @@ from typing import Any
 
 from gh_address_cr.core.runtime_kernel.projections import ReviewProjection
 
-
 JsonDict = dict[str, Any]
 
 
