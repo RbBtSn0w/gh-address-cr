@@ -218,6 +218,22 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.counts["missing_validation_evidence_count"], 1)
         self.assertEqual(result.to_machine_summary()["waiting_on"], "validation_evidence")
 
+    def test_terminal_local_finding_with_failing_validation_fails(self):
+        # #117: failing validation logs must not satisfy the gate.
+        session = self.passing_session()
+        session["items"]["local-finding:FIXED"]["validation_evidence"] = [
+            {"command": "python3 -m unittest", "result": "failed"}
+        ]
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_VALIDATION_EVIDENCE")
+        self.assertEqual(result.counts["missing_validation_evidence_count"], 1)
+
     def test_logic_validation_blocking_signal_fails_final_gate(self):
         session = self.passing_session()
         session["items"]["github-thread:THREAD_DONE"]["completion_claim"] = "ready_to_publish"

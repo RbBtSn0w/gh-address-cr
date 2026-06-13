@@ -218,6 +218,53 @@ class LogicValidationSignalTest(unittest.TestCase):
 
         self.assertEqual(session, original)
 
+    def test_failing_validation_result_does_not_satisfy_evidence(self):
+        # #117: an explicit failing validation result must NOT count as evidence.
+        for value in (
+            [{"command": "python3 -m unittest", "result": "failed"}],
+            [{"command": "pytest", "result": "error"}],
+        ):
+            with self.subTest(value=value):
+                session = {
+                    "items": {
+                        "github-thread:fixed": {
+                            "item_id": "github-thread:fixed",
+                            "item_kind": "github_thread",
+                            "state": "published",
+                            "reply_evidence": {"reply_url": "https://example.test/reply"},
+                            "classification_evidence": {"classification": "fix"},
+                            "validation_commands": value,
+                        }
+                    }
+                }
+
+                signals = generate_logic_validation_signals(session)
+
+                self.assertEqual(len(signals), 1)
+                self.assertEqual(signals[0].signal_type, "missing_required_evidence")
+                self.assertEqual(signals[0].gate_effect, "blocking")
+
+    def test_mixed_validation_with_one_pass_satisfies_evidence(self):
+        session = {
+            "items": {
+                "github-thread:fixed": {
+                    "item_id": "github-thread:fixed",
+                    "item_kind": "github_thread",
+                    "state": "published",
+                    "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "classification_evidence": {"classification": "fix"},
+                    "validation_commands": [
+                        {"command": "lint", "result": "failed"},
+                        {"command": "python3 -m unittest", "result": "passed"},
+                    ],
+                }
+            }
+        }
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
+
 
 if __name__ == "__main__":
     unittest.main()

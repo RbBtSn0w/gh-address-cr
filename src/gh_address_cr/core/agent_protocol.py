@@ -68,6 +68,7 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     severity_override_note as _severity_override_note,
 )
+from gh_address_cr.core.validation_evidence import validation_result_is_success
 from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
@@ -1088,9 +1089,7 @@ def _validation_command_fingerprint(command: str) -> str:
 
 
 def _validation_result_exit_code(result: Any) -> int:
-    normalized = str(result or "passed").strip().lower()
-    success_prefixes = ("passed", "pass", "success", "succeeded", "ok")
-    return 0 if normalized.startswith(success_prefixes) else 1
+    return 0 if validation_result_is_success(result) else 1
 
 
 def _validate_batch_fix_contract(
