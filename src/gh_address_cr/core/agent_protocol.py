@@ -68,6 +68,7 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     severity_override_note as _severity_override_note,
 )
+from gh_address_cr.core.validation_evidence import validation_result_is_success
 from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
@@ -1003,8 +1004,28 @@ def _accept_action_response_submission(
         agent_id=str(response["agent_id"]),
         role=str(lease["role"]),
         event_type="response_accepted",
-        payload={"resolution": response["resolution"], "note": response["note"]},
+        # Carry the full applied response so session items remain a rebuildable
+        # projection of the ledger (#116), not only a forward-mutated cache.
+        payload={
+            "resolution": response["resolution"],
+            "note": response["note"],
+            "response": replayable_action_response(response),
+        },
     )
+
+
+def replayable_action_response(response: dict[str, Any]) -> dict[str, Any]:
+    """Subset of an ActionResponse needed to replay `_apply_response_to_item`."""
+    snapshot: dict[str, Any] = {
+        "resolution": response.get("resolution"),
+        "note": response.get("note"),
+        "files": response.get("files", []),
+        "validation_commands": response.get("validation_commands", []),
+    }
+    for key in ("reply_markdown", "fix_reply", "evidence_ref"):
+        if response.get(key) is not None:
+            snapshot[key] = response[key]
+    return snapshot
 
 
 def _record_validation_command_telemetry(
@@ -1088,9 +1109,7 @@ def _validation_command_fingerprint(command: str) -> str:
 
 
 def _validation_result_exit_code(result: Any) -> int:
-    normalized = str(result or "passed").strip().lower()
-    success_prefixes = ("passed", "pass", "success", "succeeded", "ok")
-    return 0 if normalized.startswith(success_prefixes) else 1
+    return 0 if validation_result_is_success(result) else 1
 
 
 def _validate_batch_fix_contract(
@@ -1274,8 +1293,7 @@ def _batch_recovery_payload(
     repo = session_paths.repo
     pr_number = session_paths.pr_number
     batch_next_command = command_templates.batch_next(repo, pr_number)
-    submit_batch_command = command_templates.submit_batch(repo, pr_number, input_path=str(target_path))
-    fix_all_command = command_templates.fix_all_input(repo, pr_number, input_path=str(target_path))
+    resolve_batch_command = command_templates.resolve_batch(repo, pr_number, input_path=str(target_path))
 
     payload: dict[str, Any] = {
         "recovery_action": (
@@ -1283,8 +1301,7 @@ def _batch_recovery_payload(
         ),
         "commands": {
             "batch_next": batch_next_command,
-            "submit_batch": submit_batch_command,
-            "fix_all": fix_all_command,
+            "resolve_batch": resolve_batch_command,
         },
     }
     if agent_id:
@@ -1292,13 +1309,13 @@ def _batch_recovery_payload(
     if target_path.is_file():
         payload["batch_response_skeleton_path"] = str(target_path)
         payload["recovery_message"] = (
-            f"BatchActionResponse rejected. Edit {target_path} and submit it with `{submit_batch_command}`. "
+            f"BatchActionResponse rejected. Edit {target_path} and submit it with `{resolve_batch_command}`. "
             "The active leases were kept for retry; no partial evidence was accepted."
         )
     else:
         payload["recovery_message"] = (
             f"BatchActionResponse rejected. Regenerate a runtime-owned skeleton with `{batch_next_command}`, "
-            f"then submit it with `{submit_batch_command}`. The active leases were kept for retry; "
+            f"then submit it with `{resolve_batch_command}`. The active leases were kept for retry; "
             "no partial evidence was accepted."
         )
     return payload

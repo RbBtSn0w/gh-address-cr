@@ -314,6 +314,7 @@ else:
                 "counts",
                 "exit_code",
                 "failure_codes",
+                "gate_scope",
                 "item_id",
                 "item_kind",
                 "logic_validation_signals",
@@ -598,27 +599,26 @@ else:
                 "next": f"gh-address-cr agent next {self.repo} {self.pr} --role fixer --agent-id <agent_id>",
                 "batch_next": f"gh-address-cr agent next {self.repo} {self.pr} --batch --agent-id <agent_id>",
                 "submit": f"gh-address-cr agent submit {self.repo} {self.pr} --input response.json",
-                "submit_batch": f"gh-address-cr agent submit-batch {self.repo} {self.pr} --input batch-response.json",
-                "fix_all": (
-                    f"gh-address-cr agent fix-all {self.repo} {self.pr} "
-                    "--input batch-response.json"
+                "resolve": (
+                    f"gh-address-cr agent resolve {self.repo} {self.pr} <item_id> "
+                    "--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>"
                 ),
-                "fix_all_homogeneous": (
-                    f"gh-address-cr agent fix-all {self.repo} {self.pr} "
+                "resolve_batch": f"gh-address-cr agent resolve {self.repo} {self.pr} --batch --input batch-response.json",
+                "resolve_homogeneous": (
+                    f"gh-address-cr agent resolve {self.repo} {self.pr} "
                     "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
                 ),
                 "resolve_stale": (
-                    f"gh-address-cr agent resolve-stale {self.repo} {self.pr} "
-                    "--commit <sha> --files <paths> --validation <cmd=passed> --match-files"
+                    f"gh-address-cr agent resolve {self.repo} {self.pr} "
+                    "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files"
                 ),
                 "publish": f"gh-address-cr agent publish {self.repo} {self.pr}",
                 "final_gate": f"gh-address-cr final-gate {self.repo} {self.pr}",
             },
         )
         self.assertNotIn("scripts/cli.py", json.dumps(request))
-        self.assertIn("submit-batch", request["commands"]["submit_batch"])
-        self.assertIn("--input batch-response.json", request["commands"]["fix_all"])
-        self.assertIn("--homogeneous-reason", request["commands"]["fix_all_homogeneous"])
+        self.assertIn("--batch --input batch-response.json", request["commands"]["resolve_batch"])
+        self.assertIn("--homogeneous-reason", request["commands"]["resolve_homogeneous"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
     def test_cli_threads_lean_omits_verbose_thread_context(self):
@@ -693,7 +693,7 @@ else:
         self.assertEqual(thread["thread_id"], "THREAD_SUMMARY")
         self.assertTrue(thread["claimable"])
         self.assertFalse(thread["reply_evidence_present"])
-        self.assertIn("submit_batch", summary["commands"])
+        self.assertIn("resolve_batch", summary["commands"])
         self.assertNotIn("body", thread)
 
     def test_cli_active_pr_uses_open_pr_for_current_branch(self):
@@ -1466,6 +1466,7 @@ else:
                 "commands",
                 "counts",
                 "exit_code",
+                "gate_scope",
                 "item_id",
                 "item_kind",
                 "next_action",

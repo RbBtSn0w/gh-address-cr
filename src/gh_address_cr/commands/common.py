@@ -11,6 +11,7 @@ from gh_address_cr.core import paths as core_paths
 IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--agent-id",
     "--audit-id",
+    "--classification",
     "--commit",
     "--concern-label",
     "--file",
@@ -167,6 +168,10 @@ def maybe_prepend_implicit_scope(
     value_options: set[str] | None = None,
     allow_trailing_positionals: bool = False,
 ) -> tuple[list[str], dict | None]:
+    # Let argparse handle help requests instead of resolving (or failing to
+    # resolve) the cached PR scope first.
+    if "-h" in args or "--help" in args:
+        return args, None
     positional = scope_positionals(args, value_options=value_options)
     if len(positional) >= 2:
         return args, None

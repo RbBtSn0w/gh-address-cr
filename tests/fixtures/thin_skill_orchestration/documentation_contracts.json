@@ -6,7 +6,7 @@
     "agent next",
     "agent next --batch",
     "agent submit",
-    "agent submit-batch",
+    "agent resolve",
     "adapter check-runtime"
   ],
   "forbidden_script_exports": [

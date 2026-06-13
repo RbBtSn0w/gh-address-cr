@@ -89,19 +89,36 @@ def submit(repo: str, pr_number: str, *, input_path: str = "response.json") -> s
     return shell_command("gh-address-cr", "agent", "submit", repo, pr_number, "--input", input_path)
 
 
-def submit_batch(repo: str, pr_number: str, *, input_path: str = "batch-response.json") -> str:
-    return shell_command("gh-address-cr", "agent", "submit-batch", repo, pr_number, "--input", input_path)
-
-
-def fix_all_input(repo: str, pr_number: str, *, input_path: str = "batch-response.json") -> str:
-    return shell_command("gh-address-cr", "agent", "fix-all", repo, pr_number, "--input", input_path)
-
-
-def fix_all_homogeneous(repo: str, pr_number: str) -> str:
+def resolve_single(repo: str, pr_number: str) -> str:
     return shell_command(
         "gh-address-cr",
         "agent",
-        "fix-all",
+        "resolve",
+        repo,
+        pr_number,
+        "<item_id>",
+        "--commit",
+        "<sha>",
+        "--files",
+        "<paths>",
+        "--summary",
+        "<text>",
+        "--why",
+        "<text>",
+        "--validation",
+        "<cmd=passed>",
+    )
+
+
+def resolve_batch(repo: str, pr_number: str, *, input_path: str = "batch-response.json") -> str:
+    return shell_command("gh-address-cr", "agent", "resolve", repo, pr_number, "--batch", "--input", input_path)
+
+
+def resolve_homogeneous(repo: str, pr_number: str) -> str:
+    return shell_command(
+        "gh-address-cr",
+        "agent",
+        "resolve",
         repo,
         pr_number,
         "--commit",
@@ -119,7 +136,7 @@ def resolve_stale(repo: str, pr_number: str) -> str:
     return shell_command(
         "gh-address-cr",
         "agent",
-        "resolve-stale",
+        "resolve",
         repo,
         pr_number,
         "--commit",
@@ -128,6 +145,7 @@ def resolve_stale(repo: str, pr_number: str) -> str:
         "<paths>",
         "--validation",
         "<cmd=passed>",
+        "--stale",
         "--match-files",
     )
 
@@ -149,9 +167,9 @@ def common_summary_commands(repo: str, pr_number: str) -> dict[str, str]:
         "next": next_fixer(repo, pr_number),
         "batch_next": batch_next(repo, pr_number),
         "submit": submit(repo, pr_number),
-        "submit_batch": submit_batch(repo, pr_number),
-        "fix_all": fix_all_input(repo, pr_number),
-        "fix_all_homogeneous": fix_all_homogeneous(repo, pr_number),
+        "resolve": resolve_single(repo, pr_number),
+        "resolve_batch": resolve_batch(repo, pr_number),
+        "resolve_homogeneous": resolve_homogeneous(repo, pr_number),
         "resolve_stale": resolve_stale(repo, pr_number),
         "publish": publish(repo, pr_number),
         "final_gate": final_gate(repo, pr_number),

@@ -20,6 +20,7 @@ from gh_address_cr.core.runtime_kernel.events import (
     RuntimeFact,
     sort_runtime_facts,
 )
+from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 
 JsonDict = dict[str, Any]
 
@@ -399,11 +400,13 @@ def _is_terminal_local_item(item: Mapping[str, Any]) -> bool:
 
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     for key in ("validation_evidence", "validation_commands", "validation_results"):
-        if has_content(item.get(key)):
+        if validation_evidence_has_success(item.get(key)):
             return True
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
-        return has_content(evidence.get("validation")) or has_content(evidence.get("validation_evidence"))
+        return validation_evidence_has_success(evidence.get("validation")) or validation_evidence_has_success(
+            evidence.get("validation_evidence")
+        )
     if has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
         "accept",
         "manual",

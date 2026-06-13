@@ -402,8 +402,10 @@ class Issue78AutopilotTests(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "PLAN_ONLY")
         self.assertEqual(payload["reason_code"], "AUTOPILOT_PLAN_READY")
         self.assertFalse(payload["side_effects_enabled"])
+        self.assertFalse(payload["executes_side_effects"])
         self.assertEqual(payload["steps"][0]["command"], "agent classify")
 
     def test_autopilot_trivial_detection_uses_word_boundaries(self):
@@ -528,7 +530,8 @@ class Issue78TrivialFastPathTests(PythonScriptTestCase):
                 sys.executable,
                 str(CLI_PY),
                 "agent",
-                "trivial-fix",
+                "resolve",
+                "--trivial",
                 self.repo,
                 self.pr,
                 "github-thread:1",
@@ -571,7 +574,8 @@ class Issue78TrivialFastPathTests(PythonScriptTestCase):
                 sys.executable,
                 str(CLI_PY),
                 "agent",
-                "trivial-fix",
+                "resolve",
+                "--trivial",
                 self.repo,
                 self.pr,
                 "github-thread:1",
@@ -614,7 +618,8 @@ class Issue78TrivialFastPathTests(PythonScriptTestCase):
                 sys.executable,
                 str(CLI_PY),
                 "agent",
-                "trivial-fix",
+                "resolve",
+                "--trivial",
                 self.repo,
                 self.pr,
                 "github-thread:1",

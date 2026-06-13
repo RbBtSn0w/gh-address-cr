@@ -410,7 +410,7 @@ def issue_batch_action_request(
     write_json_atomic(batch_skeleton_path, batch_skeleton)
     session_store.save_session(repo, pr_number, session)
 
-    submit_command = f"gh-address-cr agent submit-batch {repo} {pr_number} --input {batch_skeleton_path}"
+    resolve_command = f"gh-address-cr agent resolve {repo} {pr_number} --batch --input {batch_skeleton_path}"
     return {
         "status": "BATCH_ACTION_REQUESTED",
         "repo": repo,
@@ -419,11 +419,10 @@ def issue_batch_action_request(
         "lease_count": len(leased_items),
         "leased_items": leased_items,
         "commands": {
-            "submit_batch": submit_command,
-            "fix_all": f"gh-address-cr agent fix-all {repo} {pr_number} --input {batch_skeleton_path}",
+            "resolve_batch": resolve_command,
             "publish": f"gh-address-cr agent publish {repo} {pr_number}",
         },
-        "next_action": f"Edit {batch_skeleton_path} and submit it with `{submit_command}`.",
+        "next_action": f"Edit {batch_skeleton_path} and submit it with `{resolve_command}`.",
     }
 
 

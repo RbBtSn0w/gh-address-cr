@@ -12,6 +12,8 @@ Never output "done", "all resolved", "completed", or equivalent unless:
 - final-gate output includes a telemetry coverage label
 - final response includes the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`
 
+Only `gate_scope: "final"` output (from `gh-address-cr final-gate`) is completion proof. The `gate_scope: "inline"` summary emitted by `review`/`address`/`threads` is a pre-gate that does not evaluate pending reviews or PR checks; a `PASSED`/`PRELIM_PASSED` inline result is never sufficient to claim completion.
+
 Final output must include:
 
 1. the explicit `gh-address-cr final-gate <owner/repo> <pr_number>` command invocation used

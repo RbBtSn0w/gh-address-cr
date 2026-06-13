@@ -163,3 +163,26 @@ External fixer commands must read a JSON payload from stdin and return a JSON ob
   - `validation_commands` may be used as the default validation evidence when `test_command` / `test_result` are omitted
 - for GitHub thread `clarify` or `defer`: `reply_markdown`
 - optional `validation_commands`
+
+## Intake Decision Table (#124)
+
+Pick one intake route by what you already have; all converge on the same PR session.
+
+| You have | Run |
+| --- | --- |
+| Findings JSON file | `gh-address-cr findings <r> <pr> --input findings.json --sync --source <producer>` |
+| Findings on stdout/stdin | `<producer> | gh-address-cr findings <r> <pr> --input - --sync --source <producer>` (`[]` is a valid empty result; empty stdin is not) |
+| An executable that prints findings JSON | `gh-address-cr adapter <r> <pr> <adapter_cmd...>` |
+| Fixed Markdown `finding` blocks only | `<producer> | gh-address-cr review-to-findings <r> <pr> --input - > findings.json`, then `findings`/`review --input` |
+| GitHub review threads only | `gh-address-cr review <r> <pr> --auto-simple` (alias: `address`) |
+
+## Telemetry Import Decision Table (#124)
+
+Telemetry is optional, PR-scoped, and never mutates review state.
+
+| You have | Run |
+| --- | --- |
+| Generic agent JSONL | `gh-address-cr telemetry ingest <r> <pr> --source <source> --format agent-jsonl --input <path>|-` |
+| Codex host aggregate JSON | `gh-address-cr telemetry ingest <r> <pr> --source codex --format codex-host-json --input <path>|-` |
+| A safe JSONL feed the host can hand the gate | `export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path>` before `final-gate` (auto-imported) |
+| Just want the report | `gh-address-cr telemetry summary <r> <pr> --format markdown` |

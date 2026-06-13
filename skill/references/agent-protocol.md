@@ -35,19 +35,17 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Claims eligible non-stale GitHub review-thread `fix` items for the agent and writes a fillable `BatchActionResponse` skeleton.
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - Validates an `ActionResponse`, lease ownership, and required evidence.
-- `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>`
-  - Validates a `BatchActionResponse` for multiple leased GitHub review-thread `fix` items sharing common files/validation evidence while preserving per-thread summary/why.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
-- `gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
-  - Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix.
-- `gh-address-cr agent trivial-fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--publish]`
-  - Narrow shortcut for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json> [--publish]`
-  - Routes explicit per-thread batch evidence through the same lease and validation contract as `agent submit-batch`.
-- `gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
-  - Classifies, claims, and submits the homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session.
-- `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
+  - Single unified resolution surface. Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix. Classification is recorded internally, so no separate `agent classify` round-trip is required.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial ... [--publish]`
+  - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json> [--publish]`
+  - Routes explicit per-thread batch evidence (shared files/validation, per-thread summary/why) through the lease and validation contract, plus stale-thread rejection.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity ... --severity-note <why>] [--publish]`
+  - Homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session (no `<item_id>`; matches by files).
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files [--severity ... --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - Inspects active and terminal claims.
@@ -110,6 +108,6 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent submit-batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent fix-all` only with `--input <batch-response.json>` or with `--homogeneous-reason <why>` for a homogeneous repeated concern. When `fix-all` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent resolve --batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent resolve --batch` only with `--input <batch-response.json>` (it fails with `MISSING_BATCH_INPUT` otherwise); for a homogeneous repeated concern use the non-batch `agent resolve --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>` form instead. When `resolve` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.

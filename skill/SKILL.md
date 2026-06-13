@@ -36,12 +36,11 @@ Agent protocol commands:
 /gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>
 /gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
-/gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>
-/gh-address-cr agent fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
-/gh-address-cr agent trivial-fix <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
-/gh-address-cr agent fix-all <owner/repo> <pr_number> --input <batch-response.json>
-/gh-address-cr agent fix-all <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
-/gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files
+/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+/gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>
+/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
+/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files
 /gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>
 /gh-address-cr agent publish <owner/repo> <pr_number>
 /gh-address-cr agent leases <owner/repo> <pr_number>
@@ -116,7 +115,7 @@ When exactly one cached PR session exists, PR-scoped commands may omit `<owner/r
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. Draft structured fix evidence inside an `ActionResponse` or `BatchActionResponse`, submit it with `gh-address-cr agent submit` or `gh-address-cr agent submit-batch`, then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. For shared files/validation evidence, keep per-thread summary/why entries in the batch; when `fix-all` reports `PER_THREAD_EVIDENCE_REQUIRED`, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton. Use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern. Use `agent trivial-fix` only for documentation or typo-only GitHub threads; if the runtime reports `TRIVIAL_THREAD_NOT_ELIGIBLE`, return to the normal classify/next/submit path.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. The single mutating entrypoint is `gh-address-cr agent resolve`; it records classification internally, so no separate `agent classify` step is needed on this path. For one thread, run `agent resolve <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>`. When one set of files/validation evidence addresses multiple threads, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton, then `agent resolve --batch --input <batch-response.json>` keeping per-thread summary/why entries. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, `agent resolve --trivial` only for documentation or typo-only threads (else `TRIVIAL_THREAD_NOT_ELIGIBLE`), and `agent resolve --stale --match-files` for STALE/outdated threads. Then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. `agent publish` is the single canonical publish path; each `agent resolve` form also accepts `--publish` to publish accepted evidence immediately and reports `published` in its result. The granular `agent classify` / `agent next` / `agent submit` commands remain available as the low-level protocol that `resolve` is built on.
 
 Prefer `workflow_decision.v1` JSON for structured triage handoff when available. Required fields are `schema_version`, `request_id`, `item_id`, `decision`, and `reason`; Markdown decision blocks remain compatibility prose, not the preferred machine contract.
 
@@ -132,7 +131,7 @@ If an external producer result is already available, `findings --input <path>|- 
 - Do not post GitHub replies or resolve review threads directly. The runtime records evidence and performs deterministic side effects.
 - Do not treat `STALE` or outdated GitHub threads as clean. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
 - Do not invent severity. Only explicit `P0`, `P1`, `P2`, `P3`, or `P4` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping. Published fix replies should surface exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
-- Do not override first-scene severity silently. If `agent fix`, `agent fix-all`, `agent resolve-stale`, or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
+- Do not override first-scene severity silently. If `agent resolve` (any mode) or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
 - Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed and the final response includes the exact `completion_summary_line` or first bracketed line from `PR Completion Summary Guidance`.
 - Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.
 - Do not use this skill as the review engine itself; it manages intake, state, processing discipline, and gating.

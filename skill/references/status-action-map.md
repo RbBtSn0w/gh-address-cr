@@ -22,21 +22,21 @@ If `status` is `BLOCKED`:
 - **Command discipline**: If the machine summary includes `commands`, prefer those templates. They are the authoritative low-token route for agent recovery.
 
 If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
-- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent submit-batch` when one set of files/validation evidence addresses multiple matching GitHub threads; keep per-thread summary/why entries. Commit evidence is hydrated during publish. Use `agent fix-all --homogeneous-reason <why>` only for a homogeneous repeated concern, then run `agent publish`.
-- **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent submit-batch <owner/repo> <pr_number> --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
+- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent resolve --batch` when one set of files/validation evidence addresses multiple matching GitHub threads; keep per-thread summary/why entries. Commit evidence is hydrated during publish. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, then run `agent publish`.
+- **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
 - **Lean path**: Re-run `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr threads <owner/repo> <pr_number> --lean` when only item IDs, claimability, and evidence presence are needed.
 
 If `reason_code` is `PER_THREAD_EVIDENCE_REQUIRED`:
-- **Action**: Run the returned `commands.batch_next` or `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write `batch-response-skeleton.json`. Fill common files/validation plus per-thread summary/why, then run the returned `submit_batch` command and publish.
+- **Action**: Run the returned `commands.batch_next` or `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write `batch-response-skeleton.json`. Fill common files/validation plus per-thread summary/why, then run the returned `resolve_batch` command and publish.
 
 If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKING_GITHUB_ITEMS`:
-- **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent fix`. Use `gh-address-cr agent fix-all ... --homogeneous-reason <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
+- **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent resolve`. Use `gh-address-cr agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
 If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 - **Action**: Run `gh-address-cr agent publish <owner/repo> <pr_number>` when accepted evidence is present, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
 If a GitHub thread has `state=stale` or `status=STALE`:
-- **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve-stale <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --match-files`, then publish and rerun final-gate.
+- **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate.
 
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.

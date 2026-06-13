@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
+from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 
 TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
@@ -81,16 +82,18 @@ def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
 
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
     for key in ("validation_evidence", "validation_commands", "validation_results"):
-        if _has_content(item.get(key)):
+        if validation_evidence_has_success(item.get(key)):
             return True
     accepted_response = item.get("accepted_response")
     if isinstance(accepted_response, Mapping):
         for key in ("validation_evidence", "validation_commands", "validation_results"):
-            if _has_content(accepted_response.get(key)):
+            if validation_evidence_has_success(accepted_response.get(key)):
                 return True
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
-        return _has_content(evidence.get("validation")) or _has_content(evidence.get("validation_evidence"))
+        return validation_evidence_has_success(evidence.get("validation")) or validation_evidence_has_success(
+            evidence.get("validation_evidence")
+        )
     if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
         "accept",
         "manual",
