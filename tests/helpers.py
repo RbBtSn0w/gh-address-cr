@@ -71,18 +71,68 @@ class PythonScriptTestCase(unittest.TestCase):
         return [cmd[0], "-m", module, *cmd[2:]]
 
     def run_runtime_module(self, *args, check=False, stdin=None):
-        env = self.env.copy()
-        existing = env.get("PYTHONPATH")
-        env["PYTHONPATH"] = str(SRC_ROOT) if not existing else f"{SRC_ROOT}:{existing}"
-        return subprocess.run(
-            [sys.executable, "-m", "gh_address_cr", *args],
-            input=stdin,
-            text=True,
-            capture_output=True,
-            cwd=self.cwd,
-            env=env,
-            check=check,
-        )
+        in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+        if in_process:
+            from gh_address_cr.cli import main
+            import io
+            import contextlib
+            from unittest.mock import patch
+
+            stdout_buf = io.StringIO()
+            stderr_buf = io.StringIO()
+            stdin_buf = io.StringIO(stdin or "")
+
+            old_env = os.environ.copy()
+            os.environ.clear()
+            os.environ.update(self.env)
+            
+            old_argv = sys.argv
+            sys.argv = ["gh-address-cr", *args]
+            
+            exit_code = 0
+            try:
+                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf):
+                    exit_code = main(list(args))
+            except SystemExit as exc:
+                if exc.code is None:
+                    exit_code = 0
+                elif isinstance(exc.code, int):
+                    exit_code = exc.code
+                else:
+                    exit_code = 1
+            except Exception as exc:
+                import traceback
+                stderr_buf.write(f"In-process execution failed: {exc}\n")
+                traceback.print_exc(file=stderr_buf)
+                exit_code = 2
+            finally:
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            class CompletedProcessEmulation:
+                def __init__(self, returncode, stdout, stderr):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            res = CompletedProcessEmulation(exit_code, stdout_buf.getvalue(), stderr_buf.getvalue())
+            if check and exit_code != 0:
+                raise subprocess.CalledProcessError(exit_code, ["gh-address-cr", *args], output=res.stdout, stderr=res.stderr)
+            return res
+        else:
+            env = self.env.copy()
+            existing = env.get("PYTHONPATH")
+            env["PYTHONPATH"] = str(SRC_ROOT) if not existing else f"{SRC_ROOT}:{existing}"
+            return subprocess.run(
+                [sys.executable, "-m", "gh_address_cr", *args],
+                input=stdin,
+                text=True,
+                capture_output=True,
+                cwd=self.cwd,
+                env=env,
+                check=check,
+            )
 
     def workspace_dir(self):
         return self.state_dir / "octo__example" / f"pr-{self.pr}"
