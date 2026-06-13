@@ -1,3 +1,16 @@
+## [3.0.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.11...v3.0.0) (2026-06-13)
+
+### ⚠ BREAKING CHANGES
+
+* `agent fix`, `agent trivial-fix`, `agent fix-all`,
+`agent resolve-stale`, and `agent submit-batch` are removed; use `agent resolve`.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+### Features
+
+* CR-flow convergence — unified resolve, gate authority, gate_scope, event-sourced rebuild ([#128](https://github.com/RbBtSn0w/gh-address-cr/issues/128)) ([6147fa1](https://github.com/RbBtSn0w/gh-address-cr/commit/6147fa18d13bdec4b1b1146edfa064d6b19b4be7)), closes [#117](https://github.com/RbBtSn0w/gh-address-cr/issues/117) [#123](https://github.com/RbBtSn0w/gh-address-cr/issues/123) [#119](https://github.com/RbBtSn0w/gh-address-cr/issues/119) [#121](https://github.com/RbBtSn0w/gh-address-cr/issues/121) [#115](https://github.com/RbBtSn0w/gh-address-cr/issues/115) [#120](https://github.com/RbBtSn0w/gh-address-cr/issues/120) [#122](https://github.com/RbBtSn0w/gh-address-cr/issues/122) [#123](https://github.com/RbBtSn0w/gh-address-cr/issues/123) [#124](https://github.com/RbBtSn0w/gh-address-cr/issues/124) [#125](https://github.com/RbBtSn0w/gh-address-cr/issues/125) [#116](https://github.com/RbBtSn0w/gh-address-cr/issues/116) [#116](https://github.com/RbBtSn0w/gh-address-cr/issues/116) [#126](https://github.com/RbBtSn0w/gh-address-cr/issues/126) [#117](https://github.com/RbBtSn0w/gh-address-cr/issues/117)
+
 ## [2.10.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.10...v2.10.11) (2026-06-13)
 
 ### Bug Fixes
