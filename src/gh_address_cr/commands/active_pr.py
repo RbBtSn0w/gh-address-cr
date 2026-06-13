@@ -58,7 +58,20 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr active-pr")
     parser.add_argument("--repo")
     parser.add_argument("--head")
-    parsed, _ = parser.parse_known_args(passthrough)
+    parsed, remaining = parser.parse_known_args(passthrough)
+    if remaining:
+        return _emit_active_pr_payload(
+            {
+                "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
+                "repo": parsed.repo,
+                "head": parsed.head,
+                "reason_code": protocol_codes.INVALID_ARGUMENTS,
+                "waiting_on": "active_pr_target",
+                "next_action": f"Unrecognized arguments: {' '.join(remaining)}. Pass --repo <owner/repo> and --head <branch> only.",
+                "exit_code": 2,
+            },
+            stderr=f"Unrecognized arguments: {' '.join(remaining)}",
+        )
     try:
         repo = parsed.repo or _derive_current_repo()
         head = parsed.head or _derive_current_branch()

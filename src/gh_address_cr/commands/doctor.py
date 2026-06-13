@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.github.diagnostics import classify_github_failure
+
+# Bound the `gh` network probes the doctor runs; a wedged CLI should not hang the check.
+GH_DOCTOR_TIMEOUT_SECONDS = 30.0
 
 
 def _doctor_check(name: str, passed: bool, *, detail: str | None = None, diagnostics: dict | None = None) -> dict:
@@ -24,7 +27,7 @@ def _doctor_check(name: str, passed: bool, *, detail: str | None = None, diagnos
 
 
 def _run_doctor_gh_check(name: str, command: list[str]) -> dict:
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = run_cmd(command, timeout=GH_DOCTOR_TIMEOUT_SECONDS)
     if result.returncode == 0:
         detail = result.stdout.strip()
         return _doctor_check(name, True, detail=detail or None)

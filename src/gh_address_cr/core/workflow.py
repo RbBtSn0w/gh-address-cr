@@ -852,24 +852,19 @@ def _write_fast_fix_batch_file(
         common_fix_reply["severity"] = ctx.normalized_severity
     if severity_note and severity_note.strip():
         common_fix_reply["severity_note"] = severity_note.strip()
-    batch_path.write_text(
-        json.dumps(
-            {
-                "schema_version": PROTOCOL_VERSION,
-                "agent_id": agent_id,
-                "resolution": "fix",
-                "common": {
-                    "files": ctx.normalized_files,
-                    "validation_commands": ctx.normalized_validation,
-                    "fix_reply": common_fix_reply,
-                },
-                "items": batch_responses,
+    write_json_atomic(
+        batch_path,
+        {
+            "schema_version": PROTOCOL_VERSION,
+            "agent_id": agent_id,
+            "resolution": "fix",
+            "common": {
+                "files": ctx.normalized_files,
+                "validation_commands": ctx.normalized_validation,
+                "fix_reply": common_fix_reply,
             },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+            "items": batch_responses,
+        },
     )
     return batch_path
 

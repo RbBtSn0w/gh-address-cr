@@ -55,8 +55,11 @@ class TestBatchNext(unittest.TestCase):
         self.assertNotIn("a,b.py", out)
 
     def test_omits_files_flag_when_only_comma_paths(self):
+        # When every path contains a comma, none survive the filter. The
+        # command still includes --files with a literal placeholder so the
+        # suggestion doesn't silently widen the batch claim to all threads.
         out = t.batch_next("owner/repo", "1", files=["a,b.py"])
-        self.assertNotIn("--files", out)
+        self.assertIn("--files <paths>", out)
 
 
 class TestCommonSummaryCommands(unittest.TestCase):

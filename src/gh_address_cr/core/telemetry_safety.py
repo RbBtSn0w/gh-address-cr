@@ -208,7 +208,7 @@ def _is_unsafe_metadata_key(key: str) -> bool:
         return False
     if lowered in UNSAFE_METADATA_KEYS:
         return True
-    if any(marker in lowered for marker in UNSAFE_METADATA_KEY_MARKERS):
+    if any(re.search(rf"(^|[_-]){re.escape(marker)}($|[_-])", lowered) for marker in UNSAFE_METADATA_KEY_MARKERS):
         return True
     return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
 

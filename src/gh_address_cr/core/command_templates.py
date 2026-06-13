@@ -75,11 +75,13 @@ def batch_next(repo: str, pr_number: str, *, files: list[str] | None = None) -> 
     ]
     if files:
         # `--files` is parsed as a comma-separated list downstream, so a path
-        # containing a comma cannot round-trip. Drop such paths rather than emit a
-        # suggestion that would be mis-split into bogus paths.
+        # containing a comma cannot round-trip. Drop such paths; if none survive,
+        # emit a literal placeholder so the suggestion still includes --files.
         usable = sorted(path for path in files if path and "," not in path)
         if usable:
             parts.extend(["--files", ",".join(usable)])
+        else:
+            parts.extend(["--files", "<paths>"])
     return shell_command(*parts)
 
 

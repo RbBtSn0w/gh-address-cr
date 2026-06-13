@@ -424,7 +424,7 @@ def handle_step(args: List[str]) -> int:
                 _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
             return 0
 
-        if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION, "REQUEST_REJECTED"}:
+        if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION}:
             save_orchestration_session(session)
             warnings = session.pop_audit_warnings()
             _output_signal("WAITING", e.reason_code, "RETRY", str(e), warnings)

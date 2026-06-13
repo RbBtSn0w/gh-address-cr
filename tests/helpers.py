@@ -85,9 +85,10 @@ class PythonScriptTestCase(unittest.TestCase):
             old_env = os.environ.copy()
             os.environ.clear()
             os.environ.update(self.env)
-            
+
             old_argv = sys.argv
             sys.argv = ["gh-address-cr", *args]
+            old_cwd = os.getcwd()
             
             exit_code = 0
             try:
@@ -109,6 +110,7 @@ class PythonScriptTestCase(unittest.TestCase):
                 sys.argv = old_argv
                 os.environ.clear()
                 os.environ.update(old_env)
+                os.chdir(old_cwd)
 
             class CompletedProcessEmulation:
                 def __init__(self, returncode, stdout, stderr):
