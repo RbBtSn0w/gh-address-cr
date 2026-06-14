@@ -621,7 +621,15 @@ def _build_fast_fix_context(
         status_prefix = "FAST_FIX_ALL"
         command_name = "agent resolve"
     rejected_status = f"{status_prefix}_REJECTED"
-    input_waiting_on = "stale_resolution_input" if stale_only else "fast_fix_input"
+    if stale_only:
+        input_waiting_on = "stale_resolution_input"
+    elif is_decline:
+        # Keep parity with the CLI decline guards (commands/agent.py), which report
+        # waiting_on=decline_input, so a missing --files/--homogeneous-reason payload is
+        # actionable as a decline problem rather than a fast-fix one.
+        input_waiting_on = "decline_input"
+    else:
+        input_waiting_on = "fast_fix_input"
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
@@ -768,6 +776,34 @@ def _enforce_fast_fix_routing(
             },
         )
     if not _has_homogeneous_thread_bodies(matches):
+        if ctx.resolution != "fix":
+            # Decline (reject/clarify) cannot route through the BatchActionResponse channel
+            # — that channel is fix-only (agent_protocol._batch_action_responses rejects
+            # non-fix resolutions). Heterogeneous declines must be handled per thread.
+            classify_command = command_templates.classify(repo, str(pr_number))
+            next_action = (
+                "The matched threads have missing or distinct thread bodies, so a single shared "
+                f"--{ctx.resolution} reply cannot prove a homogeneous repeated concern. Decline each "
+                f"thread individually: `agent classify <item_id> --classification {ctx.resolution} "
+                "--note <why>`, then `agent next` and `agent submit` with a per-thread reply_markdown; "
+                "or narrow --files to threads that share the same concern."
+            )
+            raise WorkflowError(
+                status=ctx.rejected_status,
+                reason_code=FIX_ALL_PER_THREAD_EVIDENCE_REASON,
+                waiting_on="decline_input",
+                exit_code=4,
+                message=next_action,
+                payload={
+                    "matched_count": len(matches),
+                    "files": sorted(normalized_file_set),
+                    "commands": {
+                        "classify": classify_command,
+                        "next": command_templates.next_fixer(repo, str(pr_number)),
+                        "submit": command_templates.submit(repo, str(pr_number)),
+                    },
+                },
+            )
         batch_command = command_templates.batch_next(repo, str(pr_number), files=sorted(normalized_file_set))
         next_action = (
             f"Run `{batch_command}` to claim the matching GitHub review threads and write a "

@@ -97,6 +97,13 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "DECLINE_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "PER_THREAD_EVIDENCE_REQUIRED")
+        # Decline routing must NOT point at the fix-only BatchActionResponse channel; it
+        # routes to per-thread classify/next/submit instead (#136 review T4).
+        self.assertEqual(payload["waiting_on"], "decline_input")
+        self.assertNotIn("BatchActionResponse", payload["next_action"])
+        self.assertIn("classify", payload["next_action"])
+        self.assertIn("classify", payload["commands"])
+        self.assertNotIn("batch_next", payload["commands"])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
@@ -130,6 +137,8 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "DECLINE_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "MISSING_HOMOGENEOUS_REASON")
+        # Decline-mode validation failures report decline_input, not fast_fix_input (#136 T5).
+        self.assertEqual(payload["waiting_on"], "decline_input")
 
     def test_decline_conflicts_with_commit(self):
         self._two_identical_threads()

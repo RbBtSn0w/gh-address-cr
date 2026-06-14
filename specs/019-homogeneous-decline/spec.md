@@ -24,10 +24,13 @@ resolution.
   (`commands/agent.py:486-511`), which **requires `--commit`** and hardcodes
   `classification="fix"` (`core/workflow.py:807`). `--homogeneous-reason` only
   attaches here.
-- `--batch` (`agent_protocol.submit_batch_action_response`) *does* accept
-  `reject`/`clarify` resolutions (`TERMINAL_RESOLUTIONS = {fix, clarify, defer, reject}`),
-  but `_validate_fix_all_input_item_reply_evidence` (`core/workflow.py:160-184`)
-  **forbids a shared rationale**: every item must carry its own `summary` + `why`.
+- `--batch` (`agent_protocol.submit_batch_action_response`) is **fix-only**:
+  `_batch_action_responses` raises `BATCH_UNSUPPORTED_RESOLUTION` when the resolution is
+  not `fix` (`core/agent_protocol.py:746-748,771-776`), so `reject`/`clarify` cannot flow
+  through the batch channel at all. Even within `fix`,
+  `_validate_fix_all_input_item_reply_evidence` (`core/workflow.py:160-184`) requires each
+  item to carry its own `summary` + `why`. There is therefore no batch path that lets a
+  shared rationale decline many threads.
 - For a thread decline, the action-response shape is `resolution` (`reject`/`clarify`)
   + `reply_markdown` + `note` — no commit/files/validation needed
   (`agent_protocol.py:604-616`).
@@ -93,8 +96,11 @@ gh-address-cr agent resolve <repo> <pr> \
 - **R4** Stale/outdated matches route to the stale path, same as fix
   (`_enforce_fast_fix_routing`).
 - **R5** Each matched thread records `classification=reject|clarify`, issues the
-  decline action request, and submits a batch row with `reply_markdown` + `note`
-  = the shared rationale. Partial failures surface per-row like the fix path.
+  decline action request, and submits its **own per-thread `ActionResponse`** (via
+  `agent_protocol.submit_action_response`) with `reply_markdown` + `note` = the shared
+  rationale. Decline does **not** use the BatchActionResponse channel (that channel is
+  fix-only); the threads are looped and submitted individually. Partial failures surface
+  per-row like the fix path.
 - **R6** `--publish` publishes accepted decline replies; absent it, the next action
   points to `agent publish`.
 - **R7** Final-gate authority unchanged: declined threads count as resolved evidence
@@ -105,9 +111,11 @@ gh-address-cr agent resolve <repo> <pr> \
 - **R8** `--lean` output assigns each thread a short stable alias (e.g. `T1`, `T2`,
   ordered deterministically by file then thread creation) alongside the full
   `item_id`.
-- **R9** Commands that take an `<item_id>` also accept the alias and resolve it to
-  the canonical id within the session. Ambiguous/expired aliases fail with guidance
-  to re-run `--lean`.
+- **R9** `agent resolve` (single-item mode) accepts the alias in place of an
+  `<item_id>` and resolves it to the canonical id within the session; ambiguous/expired
+  aliases fail with guidance to re-run `--lean`. Extending alias resolution to other
+  item-id-taking commands (`agent classify`, `agent next`, …) is **out of scope** for this
+  change and tracked as follow-up.
 
 ## 7. Acceptance scenarios
 

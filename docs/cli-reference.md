@@ -313,7 +313,7 @@ Stable machine summary fields:
 `counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 When present, `diagnostics` includes the underlying `gh` command, `returncode`, `stderr_category` (`auth`, `network`, `sandbox`, `environment`, `rate_limit`, `not_found`, `api`, or `unknown`), and a bounded redacted `stderr_excerpt`.
 `commands` contains shell-quoted executable templates for common next steps such as `address --lean`, `agent publish`, `agent resolve --batch`, `agent resolve --stale`, and `final-gate`.
-The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Full output includes `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
+The `threads` command and lightweight address states may also include a `threads` array with actionable thread context for agents. Each thread row carries a stable per-session `alias` (`T1`, `T2`, …, assigned in sorted `item_id` order) that `agent resolve` accepts in place of the long `item_id`. Full output includes `item_id`, `alias`, `thread_id`, `path`, `line`, `body`, `url`, state/status, reply evidence, and accepted-response presence. Lean output keeps only `item_id`, `alias`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
 ### Metadata Commands
 
