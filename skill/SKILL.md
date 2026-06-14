@@ -155,7 +155,7 @@ The reference surface is intentionally split so this file stays a first-read ent
 - State machine index: `references/status-action-map.md`
 - Agent protocol details: `references/agent-protocol.md`
 - Completion contract: `references/completion-contract.md`
-- Feedback issue workflow: `references/feedback.md`
+- Feedback issue workflow: `references/feedback.md` — filing a `tooling-bug` feedback is an expected automatic step when a command crashes or returns an `_ERROR` reason_code (not for normal `*_REJECTED`/`WAITING_*`/input rejections)
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
 - Evidence ledger expectations: `references/evidence-ledger.md`
