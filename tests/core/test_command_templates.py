@@ -76,6 +76,7 @@ class TestCommonSummaryCommands(unittest.TestCase):
             "resolve",
             "resolve_batch",
             "resolve_homogeneous",
+            "resolve_decline",
             "resolve_stale",
             "publish",
             "final_gate",

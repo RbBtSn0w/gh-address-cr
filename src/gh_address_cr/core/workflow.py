@@ -590,6 +590,7 @@ class _FastFixContext:
     normalized_severity: str | None
     normalized_homogeneous_reason: str
     normalized_concern_label: str
+    resolution: str = "fix"
 
 
 def _build_fast_fix_context(
@@ -601,12 +602,26 @@ def _build_fast_fix_context(
     homogeneous_reason: str | None,
     concern_label: str | None,
     stale_only: bool,
+    resolution: str = "fix",
 ) -> _FastFixContext:
-    """Validate and normalize the raw fast-fix inputs, raising WorkflowError on bad input."""
-    status_prefix = "STALE_RESOLUTION" if stale_only else "FAST_FIX_ALL"
+    """Validate and normalize the raw fast-fix/decline inputs, raising WorkflowError on bad input.
+
+    For ``resolution == "fix"`` the run is a code-fix shortcut and requires a commit and
+    validation evidence. For decline resolutions (``reject``/``clarify``) the shared
+    ``homogeneous_reason`` is the reply body, so commit/validation evidence is not applicable.
+    """
+    is_decline = resolution != "fix"
+    if stale_only:
+        status_prefix = "STALE_RESOLUTION"
+        command_name = "agent resolve --stale"
+    elif is_decline:
+        status_prefix = "DECLINE_ALL"
+        command_name = f"agent resolve --{resolution}"
+    else:
+        status_prefix = "FAST_FIX_ALL"
+        command_name = "agent resolve"
     rejected_status = f"{status_prefix}_REJECTED"
     input_waiting_on = "stale_resolution_input" if stale_only else "fast_fix_input"
-    command_name = "agent resolve --stale" if stale_only else "agent resolve"
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
@@ -617,22 +632,32 @@ def _build_fast_fix_context(
             exit_code=2,
             message=f"{command_name} requires --files or a commit with changed files.",
         )
-    if not normalized_validation:
-        raise WorkflowError(
-            status=rejected_status,
-            reason_code="MISSING_VALIDATION_COMMANDS",
-            waiting_on=input_waiting_on,
-            exit_code=2,
-            message=f"{command_name} requires --validation.",
-        )
-    if not commit_hash.strip():
-        raise WorkflowError(
-            status=rejected_status,
-            reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
-            waiting_on=input_waiting_on,
-            exit_code=2,
-            message=f"{command_name} requires --commit.",
-        )
+    if is_decline:
+        if not str(homogeneous_reason or "").strip():
+            raise WorkflowError(
+                status=rejected_status,
+                reason_code="MISSING_HOMOGENEOUS_REASON",
+                waiting_on=input_waiting_on,
+                exit_code=2,
+                message=f"{command_name} requires --homogeneous-reason for the shared decline reply.",
+            )
+    else:
+        if not normalized_validation:
+            raise WorkflowError(
+                status=rejected_status,
+                reason_code="MISSING_VALIDATION_COMMANDS",
+                waiting_on=input_waiting_on,
+                exit_code=2,
+                message=f"{command_name} requires --validation.",
+            )
+        if not commit_hash.strip():
+            raise WorkflowError(
+                status=rejected_status,
+                reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
+                waiting_on=input_waiting_on,
+                exit_code=2,
+                message=f"{command_name} requires --commit.",
+            )
     normalized_severity = _validate_requested_severity(
         severity,
         status=rejected_status,
@@ -648,6 +673,7 @@ def _build_fast_fix_context(
         normalized_severity=normalized_severity,
         normalized_homogeneous_reason=str(homogeneous_reason or "").strip(),
         normalized_concern_label=str(concern_label or "").strip(),
+        resolution=resolution,
     )
 
 
@@ -1017,6 +1043,222 @@ def fast_fix_matching_threads(
         )
     payload["status"] = status
     return payload
+
+
+def decline_matching_threads(
+    repo: str,
+    pr_number: str,
+    *,
+    agent_id: str,
+    files: list[str],
+    resolution: str,
+    homogeneous_reason: str | None = None,
+    concern_label: str | None = None,
+    include_stale: bool = False,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Decline (reject/clarify) every matching GitHub review thread with one shared reply.
+
+    Symmetric with the homogeneous ``fix`` shortcut: the body-identity gate
+    (``_has_homogeneous_thread_bodies``) ensures only threads raising the *same*
+    concern are collapsed under a single rationale, and each thread still gets its
+    own classification, lease, and published reply.
+    """
+    if resolution not in {"reject", "clarify"}:
+        raise WorkflowError(
+            status="DECLINE_ALL_REJECTED",
+            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
+            waiting_on="resolve_mode",
+            exit_code=2,
+            message="Homogeneous decline supports only --reject or --clarify.",
+        )
+    current_time = _coerce_now(now)
+    ctx = _build_fast_fix_context(
+        files=files,
+        validation_commands=[],
+        commit_hash="",
+        severity=None,
+        homogeneous_reason=homogeneous_reason,
+        concern_label=concern_label,
+        stale_only=False,
+        resolution=resolution,
+    )
+    matches, normalized_file_set = _resolve_fast_fix_matches(
+        repo, pr_number, ctx, include_stale=include_stale, stale_only=False
+    )
+    _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=False)
+
+    accepted_count, accepted_rows, failed, item_ids = _process_decline_matches(
+        repo, pr_number, matches, ctx, agent_id=agent_id, current_time=current_time
+    )
+
+    publish_result = None
+    if publish and accepted_count:
+        from gh_address_cr.core import publisher
+
+        publish_result = publisher.publish_github_thread_responses(
+            repo,
+            pr_number,
+            github_client=github_client,
+            agent_id="gh-address-cr-publisher",
+            now=current_time,
+        )
+
+    status = f"{ctx.status_prefix}_COMPLETE" if publish else f"{ctx.status_prefix}_ACCEPTED"
+    payload = {
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "resolution": resolution,
+        "files": ctx.normalized_files,
+        "homogeneous_reason": ctx.normalized_homogeneous_reason,
+        "matched_count": len(matches),
+        "accepted_count": accepted_count,
+        "failed_count": len(failed),
+        "item_ids": item_ids,
+        "failed": failed,
+        "accepted": accepted_rows,
+        "publish": publish_result,
+        "next_action": (
+            "Accepted evidence was published. Rerun final-gate when all items are handled."
+            if publish
+            else f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence."
+        ),
+    }
+    if failed:
+        partial_status = f"{ctx.status_prefix}_PARTIAL" if accepted_count else f"{ctx.status_prefix}_NO_ACCEPTED"
+        next_action = (
+            f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
+            if accepted_count
+            else "No matching items were accepted. Inspect failed rows, resolve lease/input blockers, then rerun."
+        )
+        payload["next_action"] = next_action
+        raise WorkflowError(
+            status=partial_status,
+            reason_code=partial_status,
+            waiting_on="lease" if any(row.get("waiting_on") == "lease" for row in failed) else "work_item",
+            exit_code=5,
+            message=next_action,
+            payload=payload,
+        )
+    payload["status"] = status
+    return payload
+
+
+def _process_decline_matches(
+    repo: str,
+    pr_number: str,
+    matches: list[dict[str, Any]],
+    ctx: _FastFixContext,
+    *,
+    agent_id: str,
+    current_time: datetime,
+) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Classify, claim, and single-submit a decline reply for each matched thread."""
+    accepted_count = 0
+    accepted_rows: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    item_ids: list[str] = []
+    for item in matches:
+        item_id = str(item["item_id"])
+        try:
+            accepted_rows.append(
+                _submit_decline_thread(repo, pr_number, item, ctx, agent_id=agent_id, current_time=current_time)
+            )
+        except WorkflowError as exc:
+            failed.append(_fast_fix_failed_row(item_id, exc))
+            continue
+        accepted_count += 1
+        item_ids.append(item_id)
+    return accepted_count, accepted_rows, failed, item_ids
+
+
+def _submit_decline_thread(
+    repo: str,
+    pr_number: str,
+    item: dict[str, Any],
+    ctx: _FastFixContext,
+    *,
+    agent_id: str,
+    current_time: datetime,
+) -> dict[str, Any]:
+    """Record classification, claim a fixer lease, and submit one decline reply for a thread."""
+    item_id = str(item["item_id"])
+    reply = ctx.normalized_homogeneous_reason
+    agent_protocol.record_classification(
+        repo,
+        pr_number,
+        item_id=item_id,
+        classification=ctx.resolution,
+        agent_id=agent_id,
+        note=reply,
+    )
+    requested = agent_protocol.issue_action_request(
+        repo,
+        pr_number,
+        role="fixer",
+        agent_id=agent_id,
+        item_id=item_id,
+        now=current_time,
+    )
+    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+    response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
+    response = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": request["request_id"],
+        "lease_id": request["lease_id"],
+        "agent_id": agent_id,
+        "item_id": item_id,
+        "resolution": ctx.resolution,
+        "note": reply,
+        "reply_markdown": reply,
+    }
+    write_json_atomic(response_path, response)
+    submitted = agent_protocol.submit_action_response(
+        repo, pr_number, response_path=response_path, now=current_time
+    )
+    return {
+        "item_id": item_id,
+        "request_id": request["request_id"],
+        "response_path": str(response_path),
+        "submit": submitted,
+    }
+
+
+THREAD_ALIAS_RE = re.compile(r"^T(\d+)$")
+
+
+def resolve_thread_alias(repo: str, pr_number: str, token: str | None) -> str | None:
+    """Map a lean-output thread alias (``T1``..``Tn``) to its canonical ``item_id``.
+
+    Aliases are assigned in sorted ``github_thread`` item-id order, matching the
+    ``--lean`` thread rows, so they stay stable for a session as long as the thread
+    set is unchanged. A non-alias token is returned unchanged (no session load), and
+    an alias outside the current range raises so a stale handle is never mis-resolved.
+    """
+    match = THREAD_ALIAS_RE.match(str(token or "").strip())
+    if not match:
+        return token
+    index = int(match.group(1))
+    session = session_store.load_session(repo, pr_number)
+    thread_ids = [
+        str(item.get("item_id") or item_id)
+        for item_id, item in sorted(_items(session).items())
+        if isinstance(item, dict) and item.get("item_kind") == "github_thread"
+    ]
+    if 1 <= index <= len(thread_ids):
+        return thread_ids[index - 1]
+    raise WorkflowError(
+        status=protocol_codes.FAST_FIX_REJECTED,
+        reason_code="THREAD_ALIAS_NOT_FOUND",
+        waiting_on="work_item",
+        exit_code=2,
+        message=(
+            f"Thread alias {token} does not match any current thread; "
+            "re-run `address --lean` to refresh the T1..Tn aliases."
+        ),
+    )
 
 
 def _matches_fast_fix_thread(

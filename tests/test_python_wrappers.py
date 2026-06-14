@@ -608,6 +608,10 @@ else:
                     f"gh-address-cr agent resolve {self.repo} {self.pr} "
                     "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
                 ),
+                "resolve_decline": (
+                    f"gh-address-cr agent resolve {self.repo} {self.pr} "
+                    "--reject --match-files --files <paths> --homogeneous-reason <why>"
+                ),
                 "resolve_stale": (
                     f"gh-address-cr agent resolve {self.repo} {self.pr} "
                     "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files"

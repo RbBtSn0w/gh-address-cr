@@ -344,6 +344,7 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "resolve": command_templates.resolve_single(repo, pr_number),
         "resolve_batch": command_templates.resolve_batch(repo, pr_number),
         "resolve_homogeneous": command_templates.resolve_homogeneous(repo, pr_number),
+        "resolve_decline": command_templates.resolve_decline(repo, pr_number),
         "resolve_stale": command_templates.resolve_stale(repo, pr_number),
     }
 

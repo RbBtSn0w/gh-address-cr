@@ -132,6 +132,22 @@ def resolve_homogeneous(repo: str, pr_number: str) -> str:
     )
 
 
+def resolve_decline(repo: str, pr_number: str, *, resolution: str = "reject") -> str:
+    return shell_command(
+        "gh-address-cr",
+        "agent",
+        "resolve",
+        repo,
+        pr_number,
+        f"--{resolution}",
+        "--match-files",
+        "--files",
+        "<paths>",
+        "--homogeneous-reason",
+        "<why>",
+    )
+
+
 def resolve_stale(repo: str, pr_number: str) -> str:
     return shell_command(
         "gh-address-cr",
@@ -170,6 +186,7 @@ def common_summary_commands(repo: str, pr_number: str) -> dict[str, str]:
         "resolve": resolve_single(repo, pr_number),
         "resolve_batch": resolve_batch(repo, pr_number),
         "resolve_homogeneous": resolve_homogeneous(repo, pr_number),
+        "resolve_decline": resolve_decline(repo, pr_number),
         "resolve_stale": resolve_stale(repo, pr_number),
         "publish": publish(repo, pr_number),
         "final_gate": final_gate(repo, pr_number),

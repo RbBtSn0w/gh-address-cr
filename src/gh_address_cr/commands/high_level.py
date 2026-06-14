@@ -350,15 +350,20 @@ def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
 def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
     items = session.get("items") if isinstance(session.get("items"), dict) else {}
     rows = []
+    alias_index = 0
     for item_id, item in sorted(items.items()):
         if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
             continue
+        alias_index += 1
         status = str(item.get("status") or "")
         state = str(item.get("state") or "")
         thread_id = item.get("thread_id") or item.get("origin_ref") or str(item_id).removeprefix("github-thread:")
         reply_evidence = item.get("reply_evidence") if isinstance(item.get("reply_evidence"), dict) else None
         base = {
             "item_id": str(item.get("item_id") or item_id),
+            # Stable short per-session handle (T1..Tn) so agents can pass an alias to
+            # `agent resolve` instead of transcribing a long, confusable item_id (#135).
+            "alias": f"T{alias_index}",
             "thread_id": thread_id,
             "path": item.get("path"),
             "line": item.get("line"),
@@ -468,6 +473,7 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
             "Resolve each actionable GitHub thread with `agent resolve <item_id> ...`; classification is recorded internally, no separate classify step is required.",
             "When one set of files/validation evidence addresses multiple threads, run `agent next --batch` to write a BatchActionResponse skeleton, then `agent resolve --batch --input <file>` with per-thread summary/why entries.",
             "Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, and `agent resolve --stale --match-files` for STALE/outdated threads.",
+            "To decline (not fix) a repeated concern across threads with one shared reply, use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files`.",
             "After accepted evidence is present, run `agent publish`.",
         ],
         "commands": summary_commands(repo, pr_number),

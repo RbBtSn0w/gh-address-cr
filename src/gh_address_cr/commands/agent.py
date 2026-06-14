@@ -332,7 +332,8 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         description=(
             "Resolve one or more GitHub review threads. Modes: default single item; "
             "--trivial doc/typo item; --batch --input <BatchActionResponse>; "
-            "--homogeneous-reason <why> for a repeated concern; --stale --match-files."
+            "--homogeneous-reason <why> for a repeated concern; --stale --match-files; "
+            "--reject/--clarify --homogeneous-reason --match-files to decline a repeated concern."
         ),
     )
     parser.add_argument("repo")
@@ -352,6 +353,16 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--batch", action="store_true", help="Resolve multiple threads from a BatchActionResponse.")
     parser.add_argument("--trivial", action="store_true", help="Documentation/typo-only fast path.")
     parser.add_argument("--stale", action="store_true", help="Resolve matching STALE/outdated threads.")
+    parser.add_argument(
+        "--reject",
+        action="store_true",
+        help="Decline matching threads (reject) with one shared --homogeneous-reason; requires --match-files.",
+    )
+    parser.add_argument(
+        "--clarify",
+        action="store_true",
+        help="Decline matching threads (clarify) with one shared --homogeneous-reason; requires --match-files.",
+    )
     parser.add_argument("--homogeneous-reason", help="Rationale for the homogeneous repeated-concern shortcut.")
     parser.add_argument("--concern-label", help="Short label for the homogeneous repeated concern.")
     parser.add_argument("--match-files", action="store_true", help="Required for --stale: keep resolution file-scoped.")
@@ -368,6 +379,8 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
             ("--batch", parsed.batch or bool(parsed.input)),
             ("--trivial", parsed.trivial),
             ("--stale", parsed.stale),
+            ("--reject", parsed.reject),
+            ("--clarify", parsed.clarify),
         )
         if active
     ]
@@ -425,7 +438,9 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
             exit_code=2,
             message="agent resolve --trivial requires a single <item_id>.",
         )
-    if parsed.item_id and (parsed.batch or parsed.input or parsed.stale or parsed.homogeneous_reason):
+    if parsed.item_id and (
+        parsed.batch or parsed.input or parsed.stale or parsed.homogeneous_reason or parsed.reject or parsed.clarify
+    ):
         # Match-all / batch modes are file/lease-scoped and do not consume an
         # <item_id>; fail fast instead of silently ignoring it.
         raise WorkflowError(
@@ -433,7 +448,43 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
             reason_code="ITEM_ID_NOT_ALLOWED_FOR_MODE",
             waiting_on="resolve_mode",
             exit_code=2,
-            message="agent resolve <item_id> cannot be combined with --batch/--input, --stale, or --homogeneous-reason.",
+            message=(
+                "agent resolve <item_id> cannot be combined with --batch/--input, --stale, "
+                "--reject/--clarify, or --homogeneous-reason."
+            ),
+        )
+    if parsed.reject or parsed.clarify:
+        resolution = "reject" if parsed.reject else "clarify"
+        if not parsed.match_files:
+            raise WorkflowError(
+                status="DECLINE_ALL_REJECTED",
+                reason_code="MISSING_MATCH_FILES",
+                waiting_on="decline_input",
+                exit_code=2,
+                message=f"agent resolve --{resolution} requires --match-files so the decline stays file-scoped.",
+            )
+        if parsed.commit or parsed.validation:
+            raise WorkflowError(
+                status="DECLINE_ALL_REJECTED",
+                reason_code="CONFLICTING_RESOLVE_MODE",
+                waiting_on="resolve_mode",
+                exit_code=2,
+                message=(
+                    f"agent resolve --{resolution} declines threads with a shared reply and "
+                    "does not accept --commit or --validation (use the fix path for code changes)."
+                ),
+            )
+        return workflow.decline_matching_threads(
+            parsed.repo,
+            parsed.pr_number,
+            agent_id=parsed.agent_id,
+            files=_parse_agent_files(parsed.files, parsed.file),
+            resolution=resolution,
+            homogeneous_reason=parsed.homogeneous_reason,
+            concern_label=parsed.concern_label,
+            include_stale=parsed.include_stale,
+            publish=parsed.publish,
+            now=now_dt,
         )
     if parsed.batch or parsed.input:
         if not parsed.input:
@@ -509,6 +560,9 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
             publish=parsed.publish,
             now=now_dt,
         )
+
+    # Accept a lean thread alias (T1..Tn) in place of the long item_id (#135).
+    parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
 
     # Single-item modes (default fix or --trivial) require commit + summary + why.
     missing = [

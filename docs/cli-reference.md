@@ -37,7 +37,7 @@ Agent protocol entrypoints:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--stale --match-files`)
+- `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--reject`/`--clarify --match-files` | `--stale --match-files`)
 - `agent evidence add`
 - `agent evidence list`
 - `agent publish`
@@ -182,6 +182,11 @@ downstream command in this map.
           |      +--> resolve --homogeneous-reason
           |      |      |
           |      |      +--> --homogeneous-reason <why> -> homogeneous batch shortcut
+          |      |      +--> PER_THREAD_EVIDENCE_REQUIRED -> next --batch
+          |      |
+          |      +--> resolve --reject|--clarify --match-files
+          |      |      |
+          |      |      +--> --homogeneous-reason <why> -> homogeneous decline (no commit)
           |      |      +--> PER_THREAD_EVIDENCE_REQUIRED -> next --batch
           |      |
           |      +--> resolve --stale --match-files
@@ -337,6 +342,8 @@ gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --commit <sha
 gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --trivial --commit <sha> --files docs/example.md --summary "Fixed typo." --why "Doc-only typo." --validation "docs-only=passed" --publish
 gh-address-cr agent resolve owner/repo 123 --batch --input batch-response.json
 gh-address-cr agent resolve owner/repo 123 --commit <sha> --files src/shared.py --validation "python3 -m unittest tests.test_shared=passed" --homogeneous-reason "Repeated same-file thread concern." [--severity P0|P1|P2|P3|P4 --severity-note <why>]
+gh-address-cr agent resolve owner/repo 123 --reject --match-files --files src/shared.py --homogeneous-reason "Same backtick nit across threads; declining as non-blocking style."
+gh-address-cr agent resolve owner/repo 123 --clarify --match-files --files src/shared.py --homogeneous-reason "Same question across threads; one shared clarification."
 gh-address-cr agent resolve owner/repo 123 --commit <sha> --files src/stale.py --validation "python3 -m unittest tests.test_stale=passed" --stale --match-files
 gh-address-cr agent publish owner/repo 123
 gh-address-cr agent leases owner/repo 123
@@ -365,7 +372,7 @@ Role split:
 
 Parallel work is lease-based. Independent items may be claimed concurrently, but overlapping file, item, thread, or GitHub side-effect conflict keys are rejected. AI agents must not post replies or resolve GitHub threads directly; accepted evidence is published by the runtime.
 After `agent submit` returns `ACTION_ACCEPTED`, follow the returned `next_action`; GitHub-thread fixes publish through `agent publish`.
-Use `agent resolve --batch` only for GitHub review-thread `fix` evidence when one set of files/validation evidence addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Commit evidence is hydrated during publish instead of blocking worker submit. Use `agent resolve --batch --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent resolve --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve --stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip.
+Use `agent resolve --batch` only for GitHub review-thread `fix` evidence when one set of files/validation evidence addresses multiple leased threads. The batch payload still references each thread's issued `request_id` and `lease_id`, and each item supplies its own `summary`/`why`; the runtime expands it into per-item accepted evidence before `agent publish`. Commit evidence is hydrated during publish instead of blocking worker submit. Use `agent resolve --batch --input <batch-response.json>` to route explicit per-thread batch evidence, or `agent resolve --homogeneous-reason <why>` only when the matched threads are a homogeneous repeated concern. Use `agent resolve --stale --match-files` for matching `STALE` threads; stale synchronization is still runtime-mediated evidence and publish/final-gate work, not a direct state flip. To **decline** (not fix) a repeated concern across threads — e.g. the same reviewer nit you are rejecting with one rationale — use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files`. This is symmetric with the homogeneous fix shortcut but carries no commit/validation evidence: the shared `--homogeneous-reason` becomes each thread's reply, and the same body-identity gate (`PER_THREAD_EVIDENCE_REQUIRED`) prevents declining threads that raise distinct concerns.
 The default manifest advertises `max_parallel_claims: 2`. This is a lease-safety limit, not a batch-size target. The same agent may claim multiple GitHub review-thread fixer leases that overlap only by file path so one same-file patch can be submitted as common batch evidence; thread side effects remain item-scoped. For many small review-thread fixes, claim the currently allowed active leases, repair them together when one validation bundle covers them, submit a batch response, publish, then claim the next set.
 
 Reusable evidence profiles reduce repeated commit/files/validation text across responses:
