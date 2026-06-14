@@ -1,3 +1,9 @@
+## [3.0.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.0...v3.0.1) (2026-06-14)
+
+### Bug Fixes
+
+* implement homogeneous decline handling ([#136](https://github.com/RbBtSn0w/gh-address-cr/issues/136)) ([779fb94](https://github.com/RbBtSn0w/gh-address-cr/commit/779fb94037f3933b8a96c725f493a1270c521174))
+
 ## [3.0.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v2.10.11...v3.0.0) (2026-06-13)
 
 ### ⚠ BREAKING CHANGES
