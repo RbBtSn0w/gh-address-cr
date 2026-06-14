@@ -65,6 +65,8 @@ Fail-fast contract:
 
 High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias. Use `--lean` or `--summary` with `address`, `threads`, and `review --auto-simple` when agents need low-token thread rows.
 
+`--machine` and `--human` are global wrapper flags: place them **before** the command name (e.g. `gh-address-cr --machine final-gate <owner/repo> <pr_number>`), not after it. The same placement rule that applies to `adapter` applies to every high-level command — a trailing `gh-address-cr final-gate <owner/repo> <pr_number> --machine` is not honored as the global flag. (Default output is already machine JSON, so the explicit flag is only needed to force machine output where `--human` might otherwise be in effect.)
+
 Minimal invocation model:
 
 ```text
