@@ -331,6 +331,21 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("--artifact <loop-request.json>", feedback_text)
         self.assertNotIn("--artifact /tmp/loop-request.json", feedback_text)
 
+    def test_feedback_documents_auto_trigger_on_skill_exceptions_only(self):
+        feedback_text = FEEDBACK_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        # The automatic trigger is documented and scoped to genuine skill exceptions.
+        self.assertIn("Automatic feedback on skill exceptions", feedback_text)
+        self.assertIn("--category tooling-bug", feedback_text)
+        # Allowlist: crash, or a reason_code ending in _ERROR.
+        self.assertIn("ends in `_ERROR`", feedback_text)
+        self.assertIn("SYSTEM_ERROR", feedback_text)
+        # Denylist keeps the scope to exceptions only (must not auto-file these).
+        self.assertIn("`*_REJECTED`", feedback_text)
+        self.assertIn("`WAITING_*`", feedback_text)
+        # SKILL.md surfaces the auto-trigger without duplicating the full rule.
+        self.assertIn("expected automatic step", skill_text)
+
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
