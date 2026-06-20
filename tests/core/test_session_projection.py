@@ -147,10 +147,28 @@ class SessionProjectionTest(unittest.TestCase):
     def test_agent_event_types_documents_verification_rejected(self):
         self.assertIn("verification_rejected", AGENT_EVENT_TYPES)
 
-    def test_unknown_item_events_are_ignored(self):
+    def test_orphan_item_event_fails_loud(self):
+        # #137: a ledger event whose item is missing from the base map signals
+        # ledger/cache divergence and must fail loud, not be silently skipped — a
+        # silent skip would reconstruct a partial projection and quietly weaken the
+        # crash-recovery guarantee.
         base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
-        events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"})]
-        rebuilt = apply_ledger_events(base, events)
+        events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"}, record_id="ev_orphan")]
+        with self.assertRaises(ValueError) as ctx:
+            apply_ledger_events(base, events)
+        message = str(ctx.exception)
+        self.assertIn("github-thread:missing", message)
+        self.assertIn("thread_resolved", message)
+        self.assertIn("ev_orphan", message)
+
+    def test_unprojected_event_types_skip_orphan_guard(self):
+        # The orphan guard must only fire for event types this fold actually projects.
+        # Ledger events outside AGENT_EVENT_TYPES (e.g. request_issued) never mutate
+        # item state and may legitimately reference an item absent from the base map;
+        # they must be skipped, not crash crash-recovery replay.
+        base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
+        ignored = [_event("request_issued", "github-thread:missing", {"request_id": "missing"})]
+        rebuilt = apply_ledger_events(base, ignored)
         self.assertEqual(set(rebuilt), {"github-thread:abc"})
 
 

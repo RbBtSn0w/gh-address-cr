@@ -993,7 +993,7 @@ def _accept_action_response_submission(
             payload={"item_id": item_id, "lease_id": lease_id, "evidence_record_id": record.record_id},
         )
 
-    _apply_response_to_item(item, response)
+    apply_response_to_item(item, response)
 
     _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
 
@@ -1015,7 +1015,7 @@ def _accept_action_response_submission(
 
 
 def replayable_action_response(response: dict[str, Any]) -> dict[str, Any]:
-    """Subset of an ActionResponse needed to replay `_apply_response_to_item`."""
+    """Subset of an ActionResponse needed to replay `apply_response_to_item`."""
     snapshot: dict[str, Any] = {
         "resolution": response.get("resolution"),
         "note": response.get("note"),
@@ -1601,7 +1601,13 @@ def _expected_request_hash_for_response(
     return None, "REQUEST_CONTEXT_NOT_FOUND"
 
 
-def _apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
+def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
+    """Fold an accepted ActionResponse onto a session item in place.
+
+    Public projection helper: the event-sourcing fold in
+    `runtime_kernel.session_projection` replays this to rebuild agent deltas, so it
+    must stay a public symbol rather than a private cross-module import (#137).
+    """
     resolution = str(response["resolution"])
     if item.get("item_kind") == "github_thread":
         item["state"] = "publish_ready"

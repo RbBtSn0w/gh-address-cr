@@ -33,7 +33,7 @@ def apply_ledger_events(
     `payload`. Records are applied in iteration order, which the ledger preserves
     as append order.
     """
-    from gh_address_cr.core.agent_protocol import _apply_response_to_item
+    from gh_address_cr.core.agent_protocol import apply_response_to_item
 
     items: dict[str, dict[str, Any]] = {
         str(item_id): copy.deepcopy(dict(item)) for item_id, item in base_items.items()
@@ -41,11 +41,29 @@ def apply_ledger_events(
 
     for record in records:
         event_type = _attr(record, "event_type")
+        if event_type not in AGENT_EVENT_TYPES:
+            # Events this fold does not project (e.g. request_issued, response_rejected)
+            # never mutate item state and may legitimately reference an item_id absent
+            # from the base map; skip them before the orphan guard so non-agent events
+            # cannot trip a spurious crash-recovery failure.
+            continue
         item_id = str(_attr(record, "item_id") or "")
         payload = _attr(record, "payload") or {}
         item = items.get(item_id)
         if item is None:
-            continue
+            # Fail loud: a *projected* ledger event whose item is absent from the base
+            # map means the cache and the durable ledger have diverged. Silently
+            # skipping it (the old `continue`) would reconstruct a partial projection
+            # and quietly weaken the crash-recovery guarantee this module promises
+            # (#137). Carry record_id/timestamp so the offending ledger event is
+            # immediately locatable when debugging divergence.
+            raise ValueError(
+                f"orphan ledger event references unknown item_id {item_id!r} "
+                f"(event_type={event_type!r}, record_id={_attr(record, 'record_id')!r}, "
+                f"timestamp={_attr(record, 'timestamp')!r}); session base has "
+                f"{len(items)} item(s) — ledger/cache divergence breaks deterministic "
+                "crash-recovery replay"
+            )
 
         if event_type == "classification_recorded":
             classification = str(payload.get("classification") or "")
@@ -60,8 +78,8 @@ def apply_ledger_events(
         elif event_type == "response_accepted":
             response = payload.get("response")
             if isinstance(response, Mapping):
-                _apply_response_to_item(item, dict(response))
-                # `_apply_response_to_item` stamps local-finding `handled_at` with
+                apply_response_to_item(item, dict(response))
+                # `apply_response_to_item` stamps local-finding `handled_at` with
                 # datetime.now(); pin it to the event's append time so a rebuild is
                 # deterministic and does not overwrite the original timestamp.
                 record_ts = _attr(record, "timestamp")
