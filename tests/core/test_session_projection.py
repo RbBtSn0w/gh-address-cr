@@ -153,11 +153,23 @@ class SessionProjectionTest(unittest.TestCase):
         # silent skip would reconstruct a partial projection and quietly weaken the
         # crash-recovery guarantee.
         base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
-        events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"})]
+        events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"}, record_id="ev_orphan")]
         with self.assertRaises(ValueError) as ctx:
             apply_ledger_events(base, events)
-        self.assertIn("github-thread:missing", str(ctx.exception))
-        self.assertIn("thread_resolved", str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn("github-thread:missing", message)
+        self.assertIn("thread_resolved", message)
+        self.assertIn("ev_orphan", message)
+
+    def test_unprojected_event_types_skip_orphan_guard(self):
+        # The orphan guard must only fire for event types this fold actually projects.
+        # Ledger events outside AGENT_EVENT_TYPES (e.g. request_issued) never mutate
+        # item state and may legitimately reference an item absent from the base map;
+        # they must be skipped, not crash crash-recovery replay.
+        base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
+        ignored = [_event("request_issued", "github-thread:missing", {"request_id": "missing"})]
+        rebuilt = apply_ledger_events(base, ignored)
+        self.assertEqual(set(rebuilt), {"github-thread:abc"})
 
 
 if __name__ == "__main__":

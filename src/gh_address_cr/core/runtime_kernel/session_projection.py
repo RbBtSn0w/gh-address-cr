@@ -41,18 +41,28 @@ def apply_ledger_events(
 
     for record in records:
         event_type = _attr(record, "event_type")
+        if event_type not in AGENT_EVENT_TYPES:
+            # Events this fold does not project (e.g. request_issued, response_rejected)
+            # never mutate item state and may legitimately reference an item_id absent
+            # from the base map; skip them before the orphan guard so non-agent events
+            # cannot trip a spurious crash-recovery failure.
+            continue
         item_id = str(_attr(record, "item_id") or "")
         payload = _attr(record, "payload") or {}
         item = items.get(item_id)
         if item is None:
-            # Fail loud: a ledger event whose item is absent from the base map means
-            # the cache and the durable ledger have diverged. Silently skipping it
-            # (the old `continue`) would reconstruct a partial projection and quietly
-            # weaken the crash-recovery guarantee this module promises (#137).
+            # Fail loud: a *projected* ledger event whose item is absent from the base
+            # map means the cache and the durable ledger have diverged. Silently
+            # skipping it (the old `continue`) would reconstruct a partial projection
+            # and quietly weaken the crash-recovery guarantee this module promises
+            # (#137). Carry record_id/timestamp so the offending ledger event is
+            # immediately locatable when debugging divergence.
             raise ValueError(
                 f"orphan ledger event references unknown item_id {item_id!r} "
-                f"(event_type={event_type!r}); session base has {len(items)} item(s) — "
-                "ledger/cache divergence breaks deterministic crash-recovery replay"
+                f"(event_type={event_type!r}, record_id={_attr(record, 'record_id')!r}, "
+                f"timestamp={_attr(record, 'timestamp')!r}); session base has "
+                f"{len(items)} item(s) — ledger/cache divergence breaks deterministic "
+                "crash-recovery replay"
             )
 
         if event_type == "classification_recorded":
