@@ -147,11 +147,17 @@ class SessionProjectionTest(unittest.TestCase):
     def test_agent_event_types_documents_verification_rejected(self):
         self.assertIn("verification_rejected", AGENT_EVENT_TYPES)
 
-    def test_unknown_item_events_are_ignored(self):
+    def test_orphan_item_event_fails_loud(self):
+        # #137: a ledger event whose item is missing from the base map signals
+        # ledger/cache divergence and must fail loud, not be silently skipped — a
+        # silent skip would reconstruct a partial projection and quietly weaken the
+        # crash-recovery guarantee.
         base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread"}}
         events = [_event("thread_resolved", "github-thread:missing", {"thread_id": "missing"})]
-        rebuilt = apply_ledger_events(base, events)
-        self.assertEqual(set(rebuilt), {"github-thread:abc"})
+        with self.assertRaises(ValueError) as ctx:
+            apply_ledger_events(base, events)
+        self.assertIn("github-thread:missing", str(ctx.exception))
+        self.assertIn("thread_resolved", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -2467,7 +2467,7 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("gh_address_cr.core.agent_protocol.submit_lease")
     @patch("gh_address_cr.core.agent_protocol.accept_lease")
-    @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol.apply_response_to_item")
     def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
         import tempfile
         from pathlib import Path
@@ -2567,7 +2567,7 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("gh_address_cr.core.agent_protocol.submit_lease")
     @patch("gh_address_cr.core.agent_protocol.accept_lease")
-    @patch("gh_address_cr.core.agent_protocol._apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol.apply_response_to_item")
     def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
         import tempfile
         from pathlib import Path
