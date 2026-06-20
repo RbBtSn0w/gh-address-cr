@@ -1,3 +1,9 @@
+## [3.0.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.1...v3.0.2) (2026-06-20)
+
+### Bug Fixes
+
+* fail loud on orphan ledger events and promote response projector ([#137](https://github.com/RbBtSn0w/gh-address-cr/issues/137)) ([#138](https://github.com/RbBtSn0w/gh-address-cr/issues/138)) ([49391b2](https://github.com/RbBtSn0w/gh-address-cr/commit/49391b25af09b977a3f71b62f0c9b57a7b58f803))
+
 ## [3.0.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.0...v3.0.1) (2026-06-14)
 
 ### Bug Fixes
