@@ -665,6 +665,23 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
                 agent_id=parsed.agent_id,
                 now=now_dt,
             )
+        elif not parsed.name and (parsed.item_id or parsed.thread_id) and parsed.validation:
+            now_dt = None
+            if parsed.now:
+                now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+            payload = workflow.record_validation_evidence(
+                parsed.repo,
+                parsed.pr_number,
+                item_id=parsed.item_id,
+                thread_id=parsed.thread_id,
+                commit_hash=parsed.commit or "",
+                files=_parse_agent_files(parsed.files, parsed.file),
+                validation_commands=_parse_agent_validation(parsed.validation),
+                summary=parsed.summary,
+                why=parsed.why,
+                agent_id=parsed.agent_id,
+                now=now_dt,
+            )
         else:
             if not parsed.name:
                 raise WorkflowError(

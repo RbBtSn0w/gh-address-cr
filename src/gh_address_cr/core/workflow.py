@@ -26,12 +26,15 @@ from gh_address_cr.core.agent_protocol import (
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
+    GITHUB_THREAD_TERMINAL_STATES,
     is_claimable_github_thread,
     is_resolved_github_thread,
     is_stale_github_thread_item,
     is_stale_or_outdated_github_thread,
+    normalized_thread_state,
 )
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 from gh_address_cr.core.severity import (
     review_priority_evidence,
 )
@@ -446,6 +449,149 @@ def record_reply_evidence(
         "thread_id": payload_thread_id,
         "reply_url": normalized_reply,
         "author_login": normalized_login,
+        "evidence_record_id": record.record_id,
+    }
+
+
+def record_validation_evidence(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str | None = None,
+    thread_id: str | None = None,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, str]],
+    summary: str | None = None,
+    why: str | None = None,
+    agent_id: str = "agent",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Ingest validation evidence for a thread resolved out-of-band.
+
+    Symmetric to :func:`record_reply_evidence`. When a GitHub review thread is
+    resolved outside the runtime (manual ``Resolve``, reviewer dismiss, or
+    auto-outdated) after being classified ``fix``, the session has no
+    item-level validation evidence, so ``final-gate``'s logic-validation keeps
+    blocking with ``missing_required_evidence`` and no claim path exists to
+    attach it (``agent resolve --stale`` returns ``NO_MATCHING_GITHUB_THREADS``
+    once the thread is resolved). This records the same ``validation_evidence``
+    the fix path would have written so the gate can reconcile it.
+
+    Guarded so it cannot become a backdoor around normal resolution:
+    - only ``github_thread`` items already in a terminal state are eligible;
+    - ``--commit``/``--files``/``--validation`` are all required; and
+    - the validation result must be success-like (a failing verdict like
+      ``cmd=failed`` is rejected, matching #117).
+    """
+    normalized_commit = (commit_hash or "").strip()
+    if not normalized_commit:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="MISSING_VALIDATION_COMMIT",
+            waiting_on="validation_evidence",
+            exit_code=2,
+            message="agent evidence add --item-id requires --commit.",
+        )
+    normalized_files = _normalize_string_list(files)
+    if not normalized_files:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="MISSING_VALIDATION_FILES",
+            waiting_on="validation_evidence",
+            exit_code=2,
+            message="agent evidence add --item-id requires --files.",
+        )
+    normalized_validation = _normalize_validation_command_records(validation_commands)
+    if not normalized_validation:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="MISSING_VALIDATION_COMMANDS",
+            waiting_on="validation_evidence",
+            exit_code=2,
+            message="agent evidence add --item-id requires --validation.",
+        )
+    if not validation_evidence_has_success(normalized_validation):
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="VALIDATION_EVIDENCE_NOT_SUCCESS",
+            waiting_on="validation_evidence",
+            exit_code=2,
+            message="agent evidence add --item-id requires a success-like validation result.",
+        )
+
+    resolved_item_id = (item_id or "").strip()
+    thread_ref = (thread_id or "").strip()
+    if not resolved_item_id:
+        if not thread_ref:
+            raise WorkflowError(
+                status="VALIDATION_EVIDENCE_REJECTED",
+                reason_code="MISSING_THREAD_REFERENCE",
+                waiting_on="validation_evidence",
+                exit_code=2,
+                message="agent evidence add --item-id requires --thread-id or --item-id.",
+            )
+        resolved_item_id = thread_ref if thread_ref.startswith("github-thread:") else f"github-thread:{thread_ref}"
+
+    session = session_store.load_session(repo, pr_number)
+    item = _items(session).get(resolved_item_id)
+    if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="UNKNOWN_GITHUB_THREAD",
+            waiting_on="validation_evidence",
+            exit_code=4,
+            message=f"No github_thread item `{resolved_item_id}` exists in the session.",
+        )
+    if normalized_thread_state(item) not in GITHUB_THREAD_TERMINAL_STATES:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="THREAD_NOT_TERMINAL",
+            waiting_on="validation_evidence",
+            exit_code=4,
+            message=(
+                "Validation evidence reconcile is only for threads already resolved out-of-band; "
+                f"`{resolved_item_id}` is not terminal. Use `agent resolve` for claimable threads."
+            ),
+        )
+
+    timestamp = _format_timestamp(_coerce_now(now))
+    payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
+    idempotency_key = f"validation_evidence:{resolved_item_id}:{normalized_commit}"
+    record = _ledger(session).append_event(
+        session_id=str(session["session_id"]),
+        item_id=resolved_item_id,
+        lease_id=None,
+        agent_id=agent_id,
+        role="fixer",
+        event_type="validation_evidence_recorded",
+        payload={
+            "thread_id": payload_thread_id,
+            "commit_hash": normalized_commit,
+            "files": normalized_files,
+            "validation_commands": normalized_validation,
+            "idempotency_key": idempotency_key,
+            "source": "manual_reconcile",
+        },
+        timestamp=timestamp,
+    )
+    item["validation_evidence"] = normalized_validation
+    fix_reply = {"commit_hash": normalized_commit, "files": normalized_files}
+    if summary and summary.strip():
+        fix_reply["summary"] = summary.strip()
+    if why and why.strip():
+        fix_reply["why"] = why.strip()
+    item["validation_reconcile"] = fix_reply
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "VALIDATION_EVIDENCE_RECORDED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": resolved_item_id,
+        "thread_id": payload_thread_id,
+        "commit_hash": normalized_commit,
+        "files": normalized_files,
+        "validation_commands": normalized_validation,
         "evidence_record_id": record.record_id,
     }
 
