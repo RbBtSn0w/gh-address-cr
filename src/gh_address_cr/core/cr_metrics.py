@@ -186,3 +186,35 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
     }
     _write_artifact(artifact, report)
     return report
+
+
+def _ms(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "n/a"
+    return f"{value / 1000:.1f}s"
+
+
+def cr_summary_markdown(report: dict[str, Any]) -> str:
+    span = report.get("span_ms") or {}
+    lines = [
+        "## CR Processing Summary (latest session)",
+        f"- CRs: {report.get('cr_count_completed', 0)} completed, {report.get('cr_count_incomplete', 0)} incomplete",
+        f"- per-CR span: median {_ms(span.get('median'))} | p90 {_ms(span.get('p90'))} | max {_ms(span.get('max'))}",
+        f"- run wall-clock: {_ms(report.get('run_wall_clock_ms'))} | active CR time: {_ms(report.get('active_cr_time_ms'))} | compactness: {report.get('compactness_ratio')}",
+    ]
+    mix = report.get("classification_mix") or {}
+    if mix:
+        lines.append("- classification: " + ", ".join(f"{k} {v}" for k, v in sorted(mix.items())))
+    completed = [r for r in report.get("per_cr", []) if r.get("completed")]
+    if completed:
+        lines.extend(["", "### Slowest CRs"])
+        for row in completed[:5]:
+            lines.append(f"- {row['item_id']} : {_ms(row['span_ms'])} ({row.get('classification') or 'n/a'})")
+    incomplete = report.get("incomplete_crs") or []
+    lines.extend(["", "### Incomplete CRs"])
+    if incomplete:
+        for row in incomplete:
+            lines.append(f"- {row['item_id']} : {row['last_event_type']}")
+    else:
+        lines.append("- (none)")
+    return "\n".join(lines) + "\n"
