@@ -1,9 +1,12 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.cr_metrics import build_cr_summary, cr_summary_markdown
 
@@ -90,3 +93,33 @@ class EdgeAndMarkdownTests(unittest.TestCase):
             r = self._build(state, "")
             md = cr_summary_markdown(r)
             self.assertIn("0 completed", md)
+
+
+class CrSummaryCliTests(unittest.TestCase):
+    def _seed(self, state):
+        with patch("gh_address_cr.core.paths.state_dir", return_value=Path(state)):
+            wd = core_paths.workspace_dir("o/r", "5")
+            wd.mkdir(parents=True, exist_ok=True)
+            core_paths.evidence_ledger_file("o/r", "5").write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def test_cli_cr_summary_json(self):
+        with tempfile.TemporaryDirectory() as state:
+            self._seed(state)
+            with patch("gh_address_cr.core.paths.state_dir", return_value=Path(state)):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = handle_telemetry_command("cr-summary", "o/r", ["5"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["reason_code"], "CR_SUMMARY_READY")
+            self.assertEqual(payload["cr_count_completed"], 2)
+
+    def test_cli_cr_summary_markdown(self):
+        with tempfile.TemporaryDirectory() as state:
+            self._seed(state)
+            with patch("gh_address_cr.core.paths.state_dir", return_value=Path(state)):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = handle_telemetry_command("cr-summary", "o/r", ["5", "--format", "markdown"])
+            self.assertEqual(rc, 0)
+            self.assertIn("CR Processing Summary", buf.getvalue())

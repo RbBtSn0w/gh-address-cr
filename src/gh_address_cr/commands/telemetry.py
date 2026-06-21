@@ -10,6 +10,7 @@ from gh_address_cr.commands.common import (
     maybe_prepend_implicit_scope,
     prepend_optional,
 )
+from gh_address_cr.core import cr_metrics as core_cr_metrics
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.io import write_json_atomic
 
@@ -18,11 +19,12 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
     if repo in {"-h", "--help"}:
         print(
             "usage: gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-\n"
-            "       gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]"
+            "       gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]\n"
+            "       gh-address-cr telemetry cr-summary <owner/repo> <pr_number> [--format json|markdown]"
         )
         return 0
     if not repo:
-        print("telemetry requires a subcommand: ingest or summary", file=sys.stderr)
+        print("telemetry requires a subcommand: ingest, summary, or cr-summary", file=sys.stderr)
         return 2
 
     subcommand = repo
@@ -84,6 +86,25 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
             return 2
         if parsed.format == "markdown":
             print(core_telemetry.efficiency_report_markdown(report), end="")
+        else:
+            print(json.dumps(report, sort_keys=True))
+        return 0
+
+    if subcommand == "cr-summary":
+        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry cr-summary")
+        parser.add_argument("repo")
+        parser.add_argument("pr_number")
+        parser.add_argument("--format", choices=("json", "markdown"), default="json")
+        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+        if scope_error is not None:
+            return emit_scope_resolution_error(scope_error)
+        parsed = parser.parse_args(scoped_args)
+        report = core_cr_metrics.build_cr_summary(parsed.repo, parsed.pr_number)
+        if report["status"] == "FAILED":
+            print(json.dumps(report, sort_keys=True))
+            return 2
+        if parsed.format == "markdown":
+            print(core_cr_metrics.cr_summary_markdown(report), end="")
         else:
             print(json.dumps(report, sort_keys=True))
         return 0
