@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gh_address_cr.core.host_telemetry.attribution import lines_in_window, distinct_sessions_in_window
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
 
@@ -98,3 +99,23 @@ class PairedStrategyTests(unittest.TestCase):
         ]
         events, stats = paired_correlation_timestamp(lines, _cc_profile(), session_id="s1")
         self.assertEqual(stats["tool_use_seen"], 2)
+
+
+class AttributionTests(unittest.TestCase):
+    def _lines(self):
+        return [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:30Z"},  # in window
+            {"sessionId": "s1", "timestamp": "2026-06-21T09:59:00Z"},  # before window
+            {"sessionId": "s1", "timestamp": "not-a-date"},            # unparseable -> excluded
+        ]
+
+    def test_window_filters_by_time(self):
+        kept = lines_in_window(self._lines(), start_iso="2026-06-21T10:00:00Z", now_iso="2026-06-21T10:01:00Z")
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["timestamp"], "2026-06-21T10:00:30Z")
+
+    def test_distinct_sessions_detects_ambiguity(self):
+        lines = self._lines() + [{"sessionId": "s2", "timestamp": "2026-06-21T10:00:40Z"}]
+        sessions = distinct_sessions_in_window(lines, start_iso="2026-06-21T10:00:00Z",
+                                               now_iso="2026-06-21T10:01:00Z", session_id_path="sessionId")
+        self.assertEqual(sessions, {"s1", "s2"})
