@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-06-16
+### Removed
+
+- Removed the external `code-review` skill dependency from `check.md` diagnostics and `controller.md` Multi-Agent SDD Layer 2 fallback to maintain a pure Superpowers identity.
+
+## [1.6.0] - 2026-06-07
+<!-- planned-bump: minor -->
+<!-- next-release-version: 1.6.0 -->
+
+### Added
+
+- Added mandatory `plan-gate` command and `after_plan` hook to verify task list granularity and prevent placeholder leakage.
+- Integrated `subagent-driven-development` (SDD) orchestration logic (Controller-Worker-Reviewer pattern) into the TDD implementation gate (`controller.md`).
+- Supported concurrent subagent dispatch for tasks marked with `[P]`.
+- Implemented stateful `discoveries.md` log propagation across worker subagents for isolated context implementation.
+
+## [1.5.2] - 2026-06-05
+### Changed
+
+- Changed `/speckit.superb.verify` evidence capture to write run-local files in
+  the system temporary directory instead of creating project files under
+  `.specify/evidence/`.
+- Updated the Universal Bridge pre-commit hook so `Verified` specs require
+  completed tasks but no longer require repository-stored evidence files.
+
 ## [1.5.1] - 2026-06-04
+
 ### Fixed
 
 - Updated `/speckit.superb.review` to emit a stable workflow decision block that
@@ -89,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone command: `/speckit.superb.respond`
 - Standalone command: `/speckit.superb.critique`
 - Hookable command: `/speckit.superb.clarify`
-- Hookable command: `/speckit.superb.tdd`
+- Hookable command: `/speckit.superb.controller`
 - Hookable command: `/speckit.superb.review`
 - Hookable command: `/speckit.superb.verify`
 - TDD escalation guidance to invoke debug protocol after repeated failed fixes
@@ -106,10 +132,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.5.1...HEAD
+[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.6.1...HEAD
 [1.0.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.0.0
 [1.1.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.1.0
 [1.3.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.3.0
 [1.4.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.4.0
 [1.5.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.5.0
 [1.5.1]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.5.1
+[1.5.2]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.5.2
+[1.6.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.6.0
+[1.6.1]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.6.1

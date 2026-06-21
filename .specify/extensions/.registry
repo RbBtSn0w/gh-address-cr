@@ -65,33 +65,35 @@
       "installed_at": "2026-06-04T13:41:43.526151+00:00"
     },
     "superb": {
-      "version": "1.5.1",
+      "version": "1.6.1",
       "source": "local",
-      "manifest_hash": "sha256:0012e504896d4b7ae5cc8c1606b520e7fe2a1b111ddea2615450eb76d789a078",
+      "manifest_hash": "sha256:a3459eab51f8b5419481c86cd079167f1b6de20e3d932682c553a4c24a775053",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
         "agy": [
           "speckit.superb.check",
           "speckit.superb.brainstorm",
-          "speckit.superb.tdd",
+          "speckit.superb.controller",
           "speckit.superb.review",
           "speckit.superb.verify",
           "speckit.superb.critique",
           "speckit.superb.debug",
           "speckit.superb.finish",
-          "speckit.superb.respond"
+          "speckit.superb.respond",
+          "speckit.superb.plan-gate"
         ],
         "codex": [
           "speckit.superb.check",
           "speckit.superb.brainstorm",
-          "speckit.superb.tdd",
+          "speckit.superb.controller",
           "speckit.superb.review",
           "speckit.superb.verify",
           "speckit.superb.critique",
           "speckit.superb.debug",
           "speckit.superb.finish",
-          "speckit.superb.respond"
+          "speckit.superb.respond",
+          "speckit.superb.plan-gate"
         ]
       },
       "registered_skills": [],
