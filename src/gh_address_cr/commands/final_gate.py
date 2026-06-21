@@ -19,6 +19,10 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core.host_telemetry import attribution as host_attribution
+from gh_address_cr.core.host_telemetry import capture as host_capture
+from gh_address_cr.core.host_telemetry import discovery as host_discovery
+from gh_address_cr.core.host_telemetry import profile as host_profile
 from gh_address_cr.core.io import write_json_atomic
 
 HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
@@ -69,7 +73,8 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     if scope_error is not None:
         return emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scoped_args)
-    ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number)
+    if ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number) is None:
+        ingest_host_telemetry_via_autodiscovery(parsed.repo, parsed.pr_number)
     machine_requested = "--machine" in scoped_args and "--human" not in scoped_args
     try:
         result = core_gate.Gatekeeper().run(
@@ -199,6 +204,59 @@ def safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: s
         return core_telemetry.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
     except Exception:
         return None
+
+
+AUTO_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO"
+_CLAUDE_CODE_PROFILE = (
+    Path(__file__).resolve().parents[1] / "core" / "host_telemetry" / "profiles" / "claude_code.json"
+)
+
+
+def _autodiscovery_session_id() -> str | None:
+    value = os.environ.get("SESSION_ID")
+    return value or None
+
+
+def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, session_id: str | None = None) -> dict | None:
+    if os.environ.get(HOST_TELEMETRY_INPUT_ENV):
+        return None  # explicit input wins; handled by ingest_host_telemetry_from_environment
+    if os.environ.get(AUTO_ENV) == "0":
+        return None
+    session_id = session_id or _autodiscovery_session_id()
+    if not session_id:
+        return None
+    try:
+        profile = host_profile.load_profile(_CLAUDE_CODE_PROFILE)
+        slug = host_discovery.project_slug_from_cwd(os.getcwd())
+        resolved = host_discovery.resolve_glob(profile.discovery["glob"], project_slug=slug)
+        transcript = host_discovery.discover_transcript(resolved)
+        if transcript is None:
+            return None
+        start_iso = host_attribution.session_created_at(repo, pr_number)
+        now_iso = host_attribution.now_iso()
+        if not start_iso:
+            return None
+        all_lines = host_capture._read_lines(transcript)
+        sid_path = profile.record.get("session_id_path", "sessionId")
+        sessions = host_attribution.distinct_sessions_in_window(
+            all_lines, start_iso=start_iso, now_iso=now_iso, session_id_path=sid_path
+        )
+        if len(sessions) > 1:
+            return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
+        text, outcome = host_capture.capture_agent_jsonl(
+            profile, transcript=transcript, session_id=session_id, start_iso=start_iso, now_iso=now_iso
+        )
+        if outcome != "captured" or not text:
+            if outcome == "degraded":
+                return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
+            return None
+        marker = core_paths.state_dir() / ".host-telemetry-consent" / f"{profile.source}.marker"
+        host_discovery.consent_notice_once(profile.source, marker)
+        return core_telemetry.import_external_telemetry(
+            repo, pr_number, source=profile.source, fmt="agent-jsonl", raw=text
+        )
+    except Exception:
+        return safe_hook_unavailable_import_summary(repo, pr_number, source="claude-code", fmt="agent-jsonl")
 
 
 def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:

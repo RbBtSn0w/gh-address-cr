@@ -4,6 +4,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from gh_address_cr.core import paths as core_paths
 
 from gh_address_cr.core.host_telemetry.attribution import lines_in_window, distinct_sessions_in_window
 from gh_address_cr.core.host_telemetry.discovery import project_slug_from_cwd, discover_transcript, consent_notice_once
@@ -188,3 +191,40 @@ class CaptureTests(unittest.TestCase):
             )
             self.assertEqual(outcome, "degraded")
             self.assertEqual(text, "")
+
+
+class FinalGateAutodiscoveryTests(unittest.TestCase):
+    def _seed_session(self, repo, pr, created_at):
+        wd = core_paths.workspace_dir(repo, pr)
+        wd.mkdir(parents=True, exist_ok=True)
+        core_paths.session_file(repo, pr).write_text(json.dumps({"created_at": created_at}), encoding="utf-8")
+
+    @patch("gh_address_cr.commands.final_gate.host_attribution.now_iso", return_value="2026-06-21T10:01:00Z")
+    @patch("gh_address_cr.commands.final_gate.host_discovery.discover_transcript")
+    def test_autodiscovery_ingests_when_enabled(self, discover, _now):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp,
+                                           "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO": "1",
+                                           "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": ""}, clear=False):
+                self._seed_session("octo/example", "5", "2026-06-21T09:59:00Z")
+                transcript = Path(tmp) / "s1.jsonl"
+                rows = [
+                    {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+                     "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash"}]}},
+                    {"sessionId": "s1", "timestamp": "2026-06-21T10:00:03Z",
+                     "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False}]}},
+                ]
+                transcript.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+                discover.return_value = transcript
+
+                from gh_address_cr.commands import final_gate
+                summary = final_gate.ingest_host_telemetry_via_autodiscovery("octo/example", "5", session_id="s1")
+            self.assertIsNotNone(summary)
+            self.assertIn(summary["status"], {"SUCCESS", "PARTIAL"})
+
+    def test_autodiscovery_skipped_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from gh_address_cr.commands import final_gate
+            with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp,
+                                           "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO": "0"}, clear=False):
+                self.assertIsNone(final_gate.ingest_host_telemetry_via_autodiscovery("octo/example", "5", session_id="s1"))
