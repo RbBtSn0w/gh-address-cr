@@ -236,10 +236,11 @@ def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, sessio
         now_iso = host_attribution.now_iso()
         if not start_iso:
             return None
-        all_lines = host_capture._read_lines(transcript)
+        all_lines = host_capture.read_lines(transcript)
         sid_path = profile.record.get("session_id_path", "sessionId")
+        timestamp_path = profile.fields.get("timestamp_path", "timestamp")
         sessions = host_attribution.distinct_sessions_in_window(
-            all_lines, start_iso=start_iso, now_iso=now_iso, session_id_path=sid_path
+            all_lines, start_iso=start_iso, now_iso=now_iso, session_id_path=sid_path, timestamp_path=timestamp_path
         )
         if len(sessions) > 1:
             return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")

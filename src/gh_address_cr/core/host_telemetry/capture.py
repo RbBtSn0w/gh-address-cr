@@ -11,7 +11,7 @@ _MIN_PAIRING_RATIO = 0.5
 _STRATEGIES = {"paired-correlation-timestamp": paired_correlation_timestamp}
 
 
-def _read_lines(path: Path) -> list[dict]:
+def read_lines(path: Path) -> list[dict]:
     out = []
     try:
         for raw in Path(path).read_text(encoding="utf-8").splitlines():
@@ -29,6 +29,10 @@ def _read_lines(path: Path) -> list[dict]:
     return out
 
 
+# Backwards-compatible alias (kept so existing callers do not break).
+_read_lines = read_lines
+
+
 def capture_agent_jsonl(
     profile: HostProfile,
     *,
@@ -40,8 +44,9 @@ def capture_agent_jsonl(
     strategy = _STRATEGIES.get(profile.strategy)
     if strategy is None:
         return "", "unavailable"
-    all_lines = _read_lines(transcript)
-    scoped = lines_in_window(all_lines, start_iso=start_iso, now_iso=now_iso)
+    all_lines = read_lines(transcript)
+    timestamp_path = profile.fields.get("timestamp_path", "timestamp")
+    scoped = lines_in_window(all_lines, start_iso=start_iso, now_iso=now_iso, timestamp_path=timestamp_path)
     if not scoped:
         return "", "unavailable"
     events, stats = strategy(scoped, profile, session_id=session_id)

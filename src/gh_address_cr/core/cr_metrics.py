@@ -9,18 +9,10 @@ from typing import Any
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.utils import parse_iso_datetime
 
 TERMINAL_EVENT = "thread_resolved"
 CLASSIFY_EVENT = "classification_recorded"
-
-
-def _parse_ts(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _read_ledger(path: Path) -> tuple[list[dict[str, Any]], bool, list[str]]:
@@ -99,8 +91,11 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
             "report_artifact": str(artifact),
         }
 
-    valid = [(e, _parse_ts(e.get("timestamp"))) for e in events]
-    valid = [(e, t) for e, t in valid if t is not None]
+    parsed = [(e, parse_iso_datetime(e.get("timestamp"))) for e in events]
+    dropped_timestamp = sum(1 for _, t in parsed if t is None)
+    if dropped_timestamp:
+        diagnostics.append(f"skipped {dropped_timestamp} event(s) with missing or unparseable timestamp")
+    valid = [(e, t) for e, t in parsed if t is not None]
     if not valid:
         report = _empty_report(repo, pr_number, artifact, diagnostics)
         _write_artifact(artifact, report)
@@ -112,9 +107,11 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
     if len(session_ids) > 1:
         diagnostics.append(f"multiple sessions in ledger: {len(session_ids)}; using latest")
 
-    session_events = [
-        (e, t) for e, t in valid if str(e.get("session_id") or "") == latest_session and e.get("item_id")
-    ]
+    in_session = [(e, t) for e, t in valid if str(e.get("session_id") or "") == latest_session]
+    dropped_item_id = sum(1 for e, _ in in_session if not e.get("item_id"))
+    if dropped_item_id:
+        diagnostics.append(f"skipped {dropped_item_id} event(s) with missing item_id")
+    session_events = [(e, t) for e, t in in_session if e.get("item_id")]
     if not session_events:
         report = _empty_report(repo, pr_number, artifact, diagnostics, session_id=latest_session)
         _write_artifact(artifact, report)

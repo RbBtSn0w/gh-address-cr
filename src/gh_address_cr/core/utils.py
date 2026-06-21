@@ -34,6 +34,21 @@ def coerce_now(value: datetime | str | None) -> datetime:
     return value
 
 
+def parse_iso_datetime(value: Any) -> datetime | None:
+    """Parse an ISO-8601 string to a timezone-aware UTC datetime, or None.
+
+    Naive timestamps are coerced to UTC so mixing naive and aware values never
+    raises ``TypeError`` on comparison or subtraction.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def format_timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

@@ -8,7 +8,8 @@ from pathlib import Path
 
 def project_slug_from_cwd(cwd: str) -> str:
     # Claude Code slug = absolute cwd with path separators replaced by '-'.
-    return cwd.replace("/", "-")
+    # Handle both POSIX ('/') and Windows ('\\') separators.
+    return cwd.replace("\\", "-").replace("/", "-")
 
 
 def resolve_glob(pattern: str, *, project_slug: str) -> str:

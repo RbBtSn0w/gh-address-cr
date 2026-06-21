@@ -1,18 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from gh_address_cr.core.host_telemetry.profile import HostProfile
-
-
-def _parse_ts(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+from gh_address_cr.core.utils import parse_iso_datetime
 
 
 def _blocks(line: dict[str, Any]) -> list[dict[str, Any]]:
@@ -41,7 +32,7 @@ def paired_correlation_timestamp(
     for line in lines:
         if str(line.get(sid_path) or "") != session_id:
             continue
-        when = _parse_ts(line.get(ts_path))
+        when = parse_iso_datetime(line.get(ts_path))
         for block in _blocks(line):
             btype = block.get("type")
             if btype == tu["match"].get("type"):
@@ -67,13 +58,18 @@ def paired_correlation_timestamp(
             "kind": profile.kind_for(operation),
             "operation": operation,
             "status": "unknown",
+            "duration_ms": 0,
             "correlation_id": tool_id,
         }
         result = results.get(tool_id)
         if result is not None:
             paired += 1
-            key = str(bool(result.get("is_error"))).lower()
-            event["status"] = status_map.get(key, "unknown")
+            is_error = result.get("is_error")
+            if is_error is None:
+                event["status"] = "unknown"
+            else:
+                key = str(bool(is_error)).lower()
+                event["status"] = status_map.get(key, "unknown")
             if start["ts"] is not None and result["ts"] is not None:
                 event["duration_ms"] = max(0, int((result["ts"] - start["ts"]).total_seconds() * 1000))
         events.append(event)

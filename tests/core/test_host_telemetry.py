@@ -107,6 +107,29 @@ class PairedStrategyTests(unittest.TestCase):
         events, stats = paired_correlation_timestamp(lines, _cc_profile(), session_id="s1")
         self.assertEqual(stats["tool_use_seen"], 2)
 
+    def test_unpaired_tool_use_has_zero_duration(self):
+        # Regression: unpaired tool_use must still carry duration_ms (0) so
+        # import_external_telemetry does not reject the event for a missing field.
+        lines = [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+             "message": {"content": [{"type": "tool_use", "id": "u1", "name": "Bash"}]}},
+        ]
+        events, stats = paired_correlation_timestamp(lines, _cc_profile(), session_id="s1")
+        self.assertEqual(events[0]["duration_ms"], 0)
+        self.assertEqual(events[0]["status"], "unknown")
+        self.assertEqual(stats["paired"], 0)
+
+    def test_missing_is_error_is_unknown_not_success(self):
+        # Regression: a tool_result lacking is_error must not be counted as success.
+        lines = [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+             "message": {"content": [{"type": "tool_use", "id": "u1", "name": "Bash"}]}},
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:01Z",
+             "message": {"content": [{"type": "tool_result", "tool_use_id": "u1"}]}},
+        ]
+        events, _ = paired_correlation_timestamp(lines, _cc_profile(), session_id="s1")
+        self.assertEqual(events[0]["status"], "unknown")
+
 
 class AttributionTests(unittest.TestCase):
     def _lines(self):

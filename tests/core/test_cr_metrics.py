@@ -94,6 +94,22 @@ class EdgeAndMarkdownTests(unittest.TestCase):
             md = cr_summary_markdown(r)
             self.assertIn("0 completed", md)
 
+    def test_bad_timestamp_and_missing_item_id_emit_diagnostics(self):
+        # Regression: events dropped for unparseable timestamp or missing item_id
+        # must surface a diagnostic, not vanish silently.
+        ledger = (
+            '{"session_id":"s1","item_id":"A","event_type":"classification_recorded","timestamp":"2026-06-21T10:00:00Z","payload":{"classification":"fix"}}\n'
+            '{"session_id":"s1","item_id":"A","event_type":"thread_resolved","timestamp":"2026-06-21T10:00:04Z","payload":{}}\n'
+            '{"session_id":"s1","item_id":"B","event_type":"classification_recorded","timestamp":"not-a-date","payload":{}}\n'
+            '{"session_id":"s1","event_type":"reply_posted","timestamp":"2026-06-21T10:00:05Z","payload":{}}\n'
+        )
+        with tempfile.TemporaryDirectory() as state:
+            r = self._build(state, ledger)
+            self.assertEqual(r["status"], "SUCCESS")
+            self.assertEqual(r["cr_count_completed"], 1)
+            self.assertTrue(any("unparseable timestamp" in d for d in r["diagnostics"]))
+            self.assertTrue(any("missing item_id" in d for d in r["diagnostics"]))
+
 
 class CrSummaryCliTests(unittest.TestCase):
     def _seed(self, state):

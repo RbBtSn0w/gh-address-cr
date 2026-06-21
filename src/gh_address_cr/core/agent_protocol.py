@@ -1405,12 +1405,13 @@ def _strip_validation_duration_suffix(value: str) -> tuple[str, float | None]:
     Returns ``(token_without_suffix, duration_seconds_or_None)``. Durations are
     normalized to seconds to match the existing validation ``duration`` contract.
     """
-    match = _VALIDATION_DURATION_SUFFIX_RE.search(value.strip())
+    stripped = value.strip()
+    match = _VALIDATION_DURATION_SUFFIX_RE.search(stripped)
     if match is None:
         return value, None
     number = float(match.group(1))
     seconds = number / 1000.0 if match.group(2) == "ms" else number
-    return value[: match.start()], seconds
+    return stripped[: match.start()], seconds
 
 
 def _split_validation_command_record(raw: str) -> tuple[str, str, float | None]:
