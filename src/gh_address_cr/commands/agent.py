@@ -614,6 +614,16 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
     )
 
 
+def _resolve_viewer_login() -> str:
+    """Best-effort authenticated gh login, used as the default reply author."""
+    try:
+        from gh_address_cr.github.client import GitHubClient
+
+        return GitHubClient().viewer_login() or ""
+    except Exception:
+        return ""
+
+
 def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr agent evidence")
     parser.add_argument("subcommand", choices=["add", "list"])
@@ -631,11 +641,30 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--test-result")
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
     parser.add_argument("--severity-note", "--severity-override-note", dest="severity_note")
+    parser.add_argument("--reply-url")
+    parser.add_argument("--thread-id")
+    parser.add_argument("--item-id")
+    parser.add_argument("--author-login")
     parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
         if parsed.subcommand == "list":
             payload = workflow.list_evidence_profiles(parsed.repo, parsed.pr_number)
+        elif parsed.reply_url:
+            now_dt = None
+            if parsed.now:
+                now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+            author_login = parsed.author_login or _resolve_viewer_login()
+            payload = workflow.record_reply_evidence(
+                parsed.repo,
+                parsed.pr_number,
+                reply_url=parsed.reply_url,
+                author_login=author_login,
+                thread_id=parsed.thread_id,
+                item_id=parsed.item_id,
+                agent_id=parsed.agent_id,
+                now=now_dt,
+            )
         else:
             if not parsed.name:
                 raise WorkflowError(

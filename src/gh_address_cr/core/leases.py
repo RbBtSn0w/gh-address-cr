@@ -314,6 +314,36 @@ def release_lease(
     return lease
 
 
+def release_self_stale_lease(session: Any, item_id: str, *, agent_id: str, now: datetime | None = None) -> bool:
+    """Release the resolving agent's own active lease on a now-stale thread.
+
+    A thread batch-claimed via ``agent next --batch`` keeps a non-expired lease
+    plus ``state="claimed"``. Once GitHub marks it STALE the agent that still
+    holds that lease must be able to re-claim it through ``agent resolve
+    --stale``; releasing the dangling self-lease here clears the
+    ``_next_item`` block (issue #142). Leases held by *other* agents are never
+    touched. Returns ``True`` when a lease was released.
+    """
+    now = _coerce_now(now)
+    released = False
+    for lease in list(_leases(session).values()):
+        if _get(lease, "status") not in ACTIVE_LEASE_STATUSES:
+            continue
+        if str(_get(lease, "item_id")) != str(item_id):
+            continue
+        if str(_get(lease, "agent_id")) != str(agent_id):
+            continue
+        release_lease(session, str(_get(lease, "lease_id")), now=now, reason="stale_reclaim")
+        released = True
+    if released:
+        item = _items(session).get(str(item_id))
+        if isinstance(item, dict):
+            item.pop("active_lease_id", None)
+            item["state"] = "stale"
+            item["status"] = "STALE"
+    return released
+
+
 def expire_leases(session: Any, *, now: datetime | None = None) -> list[Any]:
     now = _coerce_now(now)
     expired = []

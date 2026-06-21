@@ -15,7 +15,7 @@ from gh_address_cr import (
     SUPPORTED_SKILL_CONTRACT_VERSIONS,
     __version__,
 )
-from gh_address_cr.core import agent_protocol, command_templates, protocol_codes
+from gh_address_cr.core import agent_protocol, command_templates, leases, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _chunks,
@@ -27,6 +27,7 @@ from gh_address_cr.core.agent_protocol import (
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
     is_claimable_github_thread,
+    is_resolved_github_thread,
     is_stale_github_thread_item,
     is_stale_or_outdated_github_thread,
 )
@@ -348,6 +349,104 @@ def list_evidence_profiles(repo: str, pr_number: str) -> dict[str, Any]:
         "repo": repo,
         "pr_number": str(pr_number),
         "profiles": [_json_ready(profile) for _, profile in sorted(profiles.items()) if isinstance(profile, dict)],
+    }
+
+
+def record_reply_evidence(
+    repo: str,
+    pr_number: str,
+    *,
+    reply_url: str,
+    author_login: str,
+    thread_id: str | None = None,
+    item_id: str | None = None,
+    agent_id: str = "agent",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Ingest reply evidence for a thread resolved out-of-band (issue #142).
+
+    A reply posted directly through ``gh`` leaves no ledger footprint, so
+    ``final-gate`` reports ``FINAL_GATE_MISSING_REPLY_EVIDENCE`` even though the
+    thread is resolved on GitHub. This records the same ``reply_posted`` ledger
+    event and session mutation the publisher would have written, so the gate can
+    reconcile it. ``author_login`` must match the login that runs ``final-gate``
+    (``viewer_login()``) for the evidence to count.
+    """
+    normalized_reply = (reply_url or "").strip()
+    if not normalized_reply:
+        raise WorkflowError(
+            status="REPLY_EVIDENCE_REJECTED",
+            reason_code="MISSING_REPLY_URL",
+            waiting_on="reply_evidence",
+            exit_code=2,
+            message="agent evidence add --reply-url requires a non-empty URL.",
+        )
+    normalized_login = (author_login or "").strip()
+    if not normalized_login:
+        raise WorkflowError(
+            status="REPLY_EVIDENCE_REJECTED",
+            reason_code="MISSING_AUTHOR_LOGIN",
+            waiting_on="reply_evidence",
+            exit_code=2,
+            message="agent evidence add --reply-url requires --author-login (or an authenticated gh login).",
+        )
+
+    resolved_item_id = (item_id or "").strip()
+    thread_ref = (thread_id or "").strip()
+    if not resolved_item_id:
+        if not thread_ref:
+            raise WorkflowError(
+                status="REPLY_EVIDENCE_REJECTED",
+                reason_code="MISSING_THREAD_REFERENCE",
+                waiting_on="reply_evidence",
+                exit_code=2,
+                message="agent evidence add --reply-url requires --thread-id or --item-id.",
+            )
+        resolved_item_id = thread_ref if thread_ref.startswith("github-thread:") else f"github-thread:{thread_ref}"
+
+    session = session_store.load_session(repo, pr_number)
+    item = (session.get("items") or {}).get(resolved_item_id)
+    if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
+        raise WorkflowError(
+            status="REPLY_EVIDENCE_REJECTED",
+            reason_code="UNKNOWN_GITHUB_THREAD",
+            waiting_on="reply_evidence",
+            exit_code=4,
+            message=f"No github_thread item `{resolved_item_id}` exists in the session.",
+        )
+
+    timestamp = _format_timestamp(_coerce_now(now))
+    payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
+    idempotency_key = f"reply_evidence:{resolved_item_id}:{normalized_reply}"
+    record = _ledger(session).append_event(
+        session_id=str(session["session_id"]),
+        item_id=resolved_item_id,
+        lease_id=None,
+        agent_id=agent_id,
+        role="fixer",
+        event_type="reply_posted",
+        payload={
+            "thread_id": payload_thread_id,
+            "reply_url": normalized_reply,
+            "author_login": normalized_login,
+            "idempotency_key": idempotency_key,
+            "source": "manual_reconcile",
+        },
+        timestamp=timestamp,
+    )
+    item["reply_posted"] = True
+    item["reply_url"] = normalized_reply
+    item["reply_evidence"] = {"reply_url": normalized_reply, "author_login": normalized_login}
+    session_store.save_session(repo, pr_number, session)
+    return {
+        "status": "REPLY_EVIDENCE_RECORDED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": resolved_item_id,
+        "thread_id": payload_thread_id,
+        "reply_url": normalized_reply,
+        "author_login": normalized_login,
+        "evidence_record_id": record.record_id,
     }
 
 
@@ -692,6 +791,7 @@ def _resolve_fast_fix_matches(
     *,
     include_stale: bool,
     stale_only: bool,
+    agent_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Load session threads and return the matching items plus the normalized file set."""
     session = session_store.load_session(repo, pr_number)
@@ -709,11 +809,29 @@ def _resolve_fast_fix_matches(
             message=f"Run `gh-address-cr address {repo} {pr_number} --lean` first to sync GitHub review threads.",
         )
 
+    # #142: item-ids the resolving agent still holds an active lease on. In the
+    # stale path these are reclaimable-by-self even when ``state="claimed"``.
+    self_leased_item_ids: set[str] = set()
+    if stale_only and agent_id:
+        self_leased_item_ids = {
+            str(lease.get("item_id"))
+            for lease in (session.get("leases") or {}).values()
+            if isinstance(lease, dict)
+            and lease.get("status") in {"active", "submitted"}
+            and str(lease.get("agent_id")) == str(agent_id)
+        }
+
     normalized_file_set = {path.strip() for path in ctx.normalized_files if path.strip()}
     matches = [
         item
         for item in github_items
-        if _matches_fast_fix_thread(item, normalized_file_set, include_stale=include_stale, stale_only=stale_only)
+        if _matches_fast_fix_thread(
+            item,
+            normalized_file_set,
+            include_stale=include_stale,
+            stale_only=stale_only,
+            self_leased=str(item.get("item_id")) in self_leased_item_ids,
+        )
     ]
     if not matches:
         raise WorkflowError(
@@ -1013,9 +1131,21 @@ def fast_fix_matching_threads(
         stale_only=stale_only,
     )
     matches, normalized_file_set = _resolve_fast_fix_matches(
-        repo, pr_number, ctx, include_stale=include_stale, stale_only=stale_only
+        repo, pr_number, ctx, include_stale=include_stale, stale_only=stale_only, agent_id=agent_id
     )
     _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=stale_only)
+
+    if stale_only:
+        # #142: release this agent's own dangling lease on each matched stale
+        # thread before re-claim, persisting before ``_process_fast_fix_matches``
+        # reloads the session (its ``_next_item`` gate excludes leased items).
+        session = session_store.load_session(repo, pr_number)
+        released_any = False
+        for item_id in {str(match.get("item_id")) for match in matches}:
+            if leases.release_self_stale_lease(session, item_id, agent_id=agent_id, now=current_time):
+                released_any = True
+        if released_any:
+            session_store.save_session(repo, pr_number, session)
 
     accepted_count, batches, failed, item_ids = _process_fast_fix_matches(
         repo,
@@ -1303,6 +1433,7 @@ def _matches_fast_fix_thread(
     *,
     include_stale: bool,
     stale_only: bool,
+    self_leased: bool = False,
 ) -> bool:
     if not item.get("item_id") or not item.get("path"):
         return False
@@ -1311,7 +1442,15 @@ def _matches_fast_fix_thread(
         return False
     stale = is_stale_github_thread_item(item)
     if stale_only:
-        return stale and is_claimable_github_thread(item)
+        if not stale:
+            return False
+        # #142: a thread batch-claimed by this agent that later became STALE
+        # is ``state="claimed"`` (not claimable) but must still be reclaimable
+        # through stale resolution. The dangling self-lease is released before
+        # re-claim in ``fast_fix_matching_threads``.
+        if self_leased:
+            return not is_resolved_github_thread(item)
+        return is_claimable_github_thread(item)
     if stale and not include_stale:
         return False
     return is_claimable_github_thread(item)
