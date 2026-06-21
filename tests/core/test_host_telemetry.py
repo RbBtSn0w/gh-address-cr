@@ -7,13 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gh_address_cr.core import paths as core_paths
-
-from gh_address_cr.core.host_telemetry.attribution import lines_in_window, distinct_sessions_in_window
-from gh_address_cr.core.host_telemetry.discovery import project_slug_from_cwd, discover_transcript, consent_notice_once
-from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
+from gh_address_cr.core.host_telemetry.attribution import distinct_sessions_in_window, lines_in_window
 from gh_address_cr.core.host_telemetry.capture import capture_agent_jsonl
+from gh_address_cr.core.host_telemetry.discovery import consent_notice_once, discover_transcript, project_slug_from_cwd
+from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
-from gh_address_cr.core.telemetry import build_efficiency_report, SessionTelemetry
+from gh_address_cr.core.telemetry import SessionTelemetry, build_efficiency_report
 
 
 class HostProfileTests(unittest.TestCase):
@@ -138,8 +137,10 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "proj"
             d.mkdir()
-            old = d / "old.jsonl"; old.write_text("{}", encoding="utf-8")
-            new = d / "new.jsonl"; new.write_text("{}", encoding="utf-8")
+            old = d / "old.jsonl"
+            old.write_text("{}", encoding="utf-8")
+            new = d / "new.jsonl"
+            new.write_text("{}", encoding="utf-8")
             os.utime(old, (1, 1))
             os.utime(new, (time.time(), time.time()))
             found = discover_transcript(str(d / "*.jsonl"))
