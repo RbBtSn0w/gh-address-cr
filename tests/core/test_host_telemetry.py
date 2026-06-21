@@ -13,6 +13,7 @@ from gh_address_cr.core.host_telemetry.discovery import project_slug_from_cwd, d
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.capture import capture_agent_jsonl
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
+from gh_address_cr.core.telemetry import build_efficiency_report, SessionTelemetry
 
 
 class HostProfileTests(unittest.TestCase):
@@ -228,3 +229,40 @@ class FinalGateAutodiscoveryTests(unittest.TestCase):
             with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp,
                                            "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO": "0"}, clear=False):
                 self.assertIsNone(final_gate.ingest_host_telemetry_via_autodiscovery("octo/example", "5", session_id="s1"))
+
+
+class EndToEndReportTests(unittest.TestCase):
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_captured_transcript_flows_into_report(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            SessionTelemetry.reset()
+            fixture = Path(__file__).resolve().parents[1] / "fixtures" / "host_telemetry" / "claude-code-sample.jsonl"
+            text, outcome = capture_agent_jsonl(
+                _cc_profile(), transcript=fixture, session_id="sess-e2e",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+            self.assertEqual(outcome, "captured")
+            from gh_address_cr.core.telemetry import import_external_telemetry
+            summary = import_external_telemetry("octo/example", "5", source="claude-code", fmt="agent-jsonl", raw=text)
+            self.assertEqual(summary["status"], "SUCCESS")
+
+            report = build_efficiency_report("octo/example", "5")
+            self.assertTrue(report["duration_observed"])
+            ops = {row["operation"]: row for row in report["slowest_operations"]}
+            self.assertEqual(ops["Bash"]["duration_ms"], 4000)
+            self.assertNotIn("DO NOT LEAK", json.dumps(report))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_wait_kind_not_counted_as_command_failure(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            SessionTelemetry.reset()
+            fixture = Path(__file__).resolve().parents[1] / "fixtures" / "host_telemetry" / "claude-code-sample.jsonl"
+            text, _ = capture_agent_jsonl(
+                _cc_profile(), transcript=fixture, session_id="sess-e2e",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+            line_kinds = {json.loads(ln)["operation"]: json.loads(ln)["kind"] for ln in text.splitlines()}
+            self.assertEqual(line_kinds["AskUserQuestion"], "wait")
+            self.assertEqual(line_kinds["Bash"], "command")
