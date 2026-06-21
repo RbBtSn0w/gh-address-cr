@@ -7,8 +7,9 @@ If `gh-address-cr final-gate` fails:
 1. Read the pending table in terminal output and the printed audit summary path.
 2. Prefer the returned `next_action` and `commands` templates; common recovery starts with `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr agent publish <owner/repo> <pr_number>`.
 3. For each pending or invalid terminal thread, verify both operations were completed through the runtime: reply evidence and thread resolve.
-4. For file-matched stale threads, use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate.
+4. For file-matched stale threads, use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate. This also recovers a thread that was batch-claimed (`agent next --batch`) and then became STALE: the command releases the resolving agent's own dangling lease before re-claiming, so it no longer deadlocks between the `--batch` resolve path (`STALE_THREADS_REQUIRE_RESOLVE_STALE`) and the `--stale` resolve path (`NO_ELIGIBLE_ITEM`).
 5. If the summary reports missing reply evidence, publish the accepted evidence before re-running `gh-address-cr final-gate`.
+6. If a thread was resolved out-of-band (a manual `gh` reply the runtime never posted) and the summary still reports `FINAL_GATE_MISSING_REPLY_EVIDENCE`, ingest the reply with `gh-address-cr agent evidence add <owner/repo> <pr_number> --reply-url <comment_url> --thread-id <PRRT_id>`, then rerun final-gate. `--author-login` defaults to the authenticated `gh` login and must match the login that runs final-gate.
 
 
 ## Troubleshooting installation and release
