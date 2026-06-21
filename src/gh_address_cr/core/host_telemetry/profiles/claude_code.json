@@ -1,0 +1,22 @@
+{
+  "profile_version": "1.0",
+  "source": "claude-code",
+  "format": "claude-code-transcript",
+  "discovery": { "glob": "~/.claude/projects/{project_slug}/*.jsonl", "project_slug_from": "cwd" },
+  "record": { "container": "jsonl-lines", "session_id_path": "sessionId" },
+  "strategy": "paired-correlation-timestamp",
+  "fields": {
+    "event_blocks_path": "message.content[]",
+    "tool_use": { "match": {"type": "tool_use"}, "id_path": "id", "operation_path": "name" },
+    "tool_result": { "match": {"type": "tool_result"}, "correlation_path": "tool_use_id",
+                     "status_path": "is_error", "status_map": {"true": "failure", "false": "success"} },
+    "timestamp_path": "timestamp"
+  },
+  "kind_classification": {
+    "default": "tool_call",
+    "wait": ["AskUserQuestion", "ExitPlanMode"],
+    "by_operation": { "Bash": "command" }
+  },
+  "safety_allowlist": ["operation", "status", "timestamp", "correlation_id"],
+  "scope_attribution": { "mode": "active-pr-time-window" }
+}

@@ -1,0 +1,7 @@
+{"session_id":"s1","item_id":"A","event_type":"classification_recorded","timestamp":"2026-06-21T10:00:00Z","payload":{"classification":"reply","note":"x"}}
+{"session_id":"s1","item_id":"A","event_type":"classification_recorded","timestamp":"2026-06-21T10:00:01Z","payload":{"classification":"fix","note":"x"}}
+{"session_id":"s1","item_id":"A","event_type":"reply_posted","timestamp":"2026-06-21T10:00:03Z","payload":{}}
+{"session_id":"s1","item_id":"A","event_type":"thread_resolved","timestamp":"2026-06-21T10:00:04Z","payload":{}}
+{"session_id":"s1","item_id":"B","event_type":"classification_recorded","timestamp":"2026-06-21T10:00:05Z","payload":{"classification":"reply","note":"y"}}
+{"session_id":"s1","item_id":"B","event_type":"thread_resolved","timestamp":"2026-06-21T10:00:35Z","payload":{}}
+{"session_id":"s1","item_id":"C","event_type":"classification_recorded","timestamp":"2026-06-21T10:00:36Z","payload":{"classification":"defer","note":"z"}}

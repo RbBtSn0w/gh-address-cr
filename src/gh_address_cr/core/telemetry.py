@@ -889,8 +889,12 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     success_count = sum(1 for event in known_status_events if event.status == "success")
     success_rate = (success_count / len(known_status_events)) * 100.0 if known_status_events else 0.0
     total_duration = sum(event.duration_ms for event in events)
+    duration_observed = any(event.duration_ms > 0 for event in events)
     host_metrics = _aggregate_host_metrics(external_events)
-    slowest = sorted(events, key=lambda event: event.duration_ms, reverse=True)[:3]
+    timed_events = [event for event in events if event.duration_ms > 0]
+    slowest = sorted(timed_events, key=lambda event: event.duration_ms, reverse=True)[:3]
+    if events and not duration_observed and "TELEMETRY_TIMING_UNAVAILABLE" not in diagnostics:
+        diagnostics.append("TELEMETRY_TIMING_UNAVAILABLE")
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
     report_path = paths.efficiency_report_file
@@ -904,6 +908,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "total_events": total_events,
         "success_rate": success_rate,
         "total_observed_duration_ms": total_duration,
+        "duration_observed": duration_observed,
         "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
         "telemetry_overhead_ms": None,
         "host_metrics": host_metrics,
@@ -981,6 +986,8 @@ def efficiency_report_markdown(report: dict[str, Any]) -> str:
             f"- {row['operation']} [{row['source']}]: {row['duration_ms']}ms ({row['status']})"
             for row in report["slowest_operations"]
         )
+    elif report["total_events"] and not report.get("duration_observed", True):
+        lines.extend(["", "_Note: operation timing was not reported; duration analysis is unavailable._"])
     if report["inefficiency_flags"]:
         lines.extend(["", "### Inefficiency Flags"])
         lines.extend(f"- {flag}" for flag in report["inefficiency_flags"])

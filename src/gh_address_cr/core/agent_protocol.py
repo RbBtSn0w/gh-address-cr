@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1376,9 +1377,8 @@ def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
             end_time = entry.get("end_time")
         else:
             raw = str(entry or "").strip()
-            command, result = _split_validation_command_record(raw)
+            command, result, duration = _split_validation_command_record(raw)
             summary = ""
-            duration = None
             start_time = None
             end_time = None
         if not command or not result:
@@ -1396,11 +1396,30 @@ def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
     return commands
 
 
-def _split_validation_command_record(raw: str) -> tuple[str, str]:
+_VALIDATION_DURATION_SUFFIX_RE = re.compile(r"@(\d+(?:\.\d+)?)(ms|s)$")
+
+
+def _strip_validation_duration_suffix(value: str) -> tuple[str, float | None]:
+    """Split a trailing ``@<n>ms``/``@<n>s`` timing suffix off a validation result token.
+
+    Returns ``(token_without_suffix, duration_seconds_or_None)``. Durations are
+    normalized to seconds to match the existing validation ``duration`` contract.
+    """
+    stripped = value.strip()
+    match = _VALIDATION_DURATION_SUFFIX_RE.search(stripped)
+    if match is None:
+        return value, None
+    number = float(match.group(1))
+    seconds = number / 1000.0 if match.group(2) == "ms" else number
+    return stripped[: match.start()], seconds
+
+
+def _split_validation_command_record(raw: str) -> tuple[str, str, float | None]:
     command, separator, result = raw.rpartition("=")
-    if not separator or not _looks_like_validation_result(result):
-        return raw.strip(), "passed"
-    return command.strip(), result.strip()
+    result_token, duration = _strip_validation_duration_suffix(result)
+    if not separator or not _looks_like_validation_result(result_token):
+        return raw.strip(), "passed", None
+    return command.strip(), result_token.strip(), duration
 
 
 def _looks_like_validation_result(value: str) -> bool:

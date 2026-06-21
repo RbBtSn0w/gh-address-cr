@@ -38,7 +38,7 @@ Agent protocol entrypoints:
 - `agent next --batch`
 - `agent submit`
 - `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--reject`/`--clarify --match-files` | `--stale --match-files`)
-- `agent evidence add`
+- `agent evidence add` (evidence profile, or `--reply-url` to ingest an externally-posted reply)
 - `agent evidence list`
 - `agent publish`
 - `agent leases`
@@ -339,6 +339,7 @@ gh-address-cr agent next owner/repo 123 --batch --agent-id codex-fixer-1
 gh-address-cr agent submit owner/repo 123 --input action-response.json
 gh-address-cr agent submit owner/repo 123 --input action-response.json --publish
 gh-address-cr agent evidence add owner/repo 123 --name local-verified --commit <sha> --files src/example.py --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>]
+gh-address-cr agent evidence add owner/repo 123 --reply-url <comment_url> --thread-id <PRRT_id> [--author-login <login>]
 gh-address-cr agent evidence list owner/repo 123
 gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --commit <sha> --files src/example.py --summary "Fixed it." --why "The guarded path covers the review case." --validation "python3 -m unittest tests.test_example=passed" [--severity P0|P1|P2|P3|P4 --severity-note <why>] --publish
 gh-address-cr agent resolve owner/repo 123 github-thread:THREAD_ID --trivial --commit <sha> --files docs/example.md --summary "Fixed typo." --why "Doc-only typo." --validation "docs-only=passed" --publish
@@ -361,6 +362,8 @@ Classification and resolution are deliberately separate protocol phases:
 - `agent submit` consumes a fixer or verifier `ActionResponse`. Its `resolution` field is the response decision for an already leased request. If submit returns `MISSING_RESOLUTION`, add `"resolution": "fix|clarify|defer|reject"` to the response JSON and rerun `agent submit`. Use `--publish` only for accepted GitHub review-thread fix responses when the runtime should post the reply and resolve the thread in the same command.
 - Review signal is evidence-backed. The runtime preserves explicit `P0`, `P1`, `P2`, `P3`, or `P4` markers from the producer payload or the original GitHub review-thread comment. Reviewer words such as `high`, `medium`, or `low priority` are stored as raw priority evidence and are not converted to P-scale severity. Published fix replies use one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
 - `agent resolve` (any mode) and `agent evidence add` may pass `--severity P0|P1|P2|P3|P4` as an explicit override. If that override conflicts with first-scene severity evidence on the item, include `--severity-note <why>` or the response is rejected with `SEVERITY_OVERRIDE_NOTE_REQUIRED`.
+- `agent resolve --stale --match-files` self-heals a thread that was batch-claimed (`agent next --batch`) and then became STALE: it releases the resolving agent's own dangling lease on the matched stale thread before re-claiming, so the previously deadlocked thread resolves in one command. Leases held by other agents are never released.
+- `agent evidence add --reply-url <comment_url> --thread-id <PRRT_id>` ingests reply evidence for a thread that was resolved out-of-band (e.g. a manual `gh` reply the runtime never posted), so `final-gate` can reconcile it instead of failing with `FINAL_GATE_MISSING_REPLY_EVIDENCE`. `--author-login` defaults to the authenticated `gh` login; it must match the login that runs `final-gate` for the evidence to count. Use `--item-id` instead of `--thread-id` to target the item id directly.
 
 Role split:
 

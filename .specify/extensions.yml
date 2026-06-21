@@ -70,12 +70,13 @@ hooks:
     description: Auto-commit before implementation
     condition: null
   - extension: superb
-    command: speckit.superb.tdd
+    command: speckit.superb.controller
     enabled: true
     optional: false
-    prompt: Execute speckit.superb.tdd?
-    description: 'Mandatory TDD gate. Bridges an installed superpowers test-driven-development
-      skill into the spec-kit task structure before any code is written.
+    priority: 10
+    prompt: Execute speckit.superb.controller?
+    description: 'Mandatory Controller gate. Bridges installed execution and quality
+      skills to orchestrate task implementation.
 
       '
     condition: null
@@ -137,6 +138,7 @@ hooks:
     command: speckit.superb.brainstorm
     enabled: true
     optional: true
+    priority: 10
     prompt: Refine the new spec.md with Superpowers brainstorming before clarification
       or planning?
     description: 'Optional spec refinement gate. Uses an installed superpowers brainstorming
@@ -168,6 +170,17 @@ hooks:
     prompt: Execute speckit.agent-context.update?
     description: Refresh agent context after planning
     condition: null
+  - extension: superb
+    command: speckit.superb.plan-gate
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.superb.plan-gate?
+    description: 'Mandatory Plan gate. Verifies plan completeness and injects SDD
+      directives into plan.md for agentic workers.
+
+      '
+    condition: null
   after_tasks:
   - extension: git
     command: speckit.git.commit
@@ -180,6 +193,7 @@ hooks:
     command: speckit.superb.review
     enabled: true
     optional: true
+    priority: 10
     prompt: Review tasks.md for coverage and TDD-readiness before implementation?
     description: 'Catches missing or under-specified tasks at planning time. Produces
       a requirement coverage and TDD-readiness report. Bridge-native logic.
@@ -198,6 +212,7 @@ hooks:
     command: speckit.superb.verify
     enabled: true
     optional: false
+    priority: 10
     prompt: Execute speckit.superb.verify?
     description: 'Mandatory completion gate. Bridges an installed superpowers verification-before-completion
       skill and extends it with spec-kit spec-coverage checks. Prevents false completions.

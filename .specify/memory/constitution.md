@@ -1,33 +1,20 @@
 <!--
 Sync Impact Report
-Version change: 1.4.0 -> 1.5.0
+Version change: 1.5.0 -> 1.5.1
 Amendment reason:
-- Promote first-principles runtime-kernel design and architecture plateau
-  discipline into project governance.
-- Require state/event/projection/policy/outbox modeling before implementation
-  for runtime state, telemetry, final-gate, leases, artifacts, and GitHub IO.
-- Stop repeated edge-branch patching when feedback exposes the same unresolved
-  design axis.
+- Correct stale path reference to cli.py in Principle IV.
 Version bump rationale:
-- MINOR: Added Principle IX and materially expanded quality gates/templates for
-  architecture preflight and runtime-kernel modeling.
+- PATCH: Corrected stale path reference in Principle IV.
 Modified principles:
-- Runtime Architecture (expanded to include event/projection/policy/outbox kernel boundaries)
-- Development Workflow And Quality Gates (expanded with Architecture Preflight)
+- IV. Packaged Skill Boundary Is Explicit (corrected path reference)
 Added sections:
-- IX. First-Principles Runtime Kernel
+- None
 Removed sections:
 - None
 Templates requiring updates:
-- .specify/templates/plan-template.md: ✅ updated
-- .specify/templates/spec-template.md: ✅ updated
-- .specify/templates/tasks-template.md: ✅ updated
-- .specify/templates/checklist-template.md: ✅ updated
-- .specify/templates/commands/*.md: ✅ reviewed (directory not present)
+- None: ✅ updated
 Runtime guidance requiring updates:
-- AGENTS.md: ✅ updated
-- README.md: ✅ reviewed
-- docs/architecture.md: ✅ updated
+- None: ✅ updated
 Follow-up items:
 - None
 -->
@@ -99,7 +86,7 @@ how to use the runtime safely but MUST NOT contain authoritative business logic,
 state-machine transitions, or direct implementation of side effects.
 
 Path language MUST match the active scope. Repo-root docs and commands use
-paths such as `src/gh_address_cr/legacy_scripts/cli.py`; skill-owned docs use
+paths such as `src/gh_address_cr/cli.py`; skill-owned docs use
 paths such as `references/...` and `agents/openai.yaml`.
 
 Rationale: The project ships a skill. Blurring repo-root and skill-root paths
@@ -310,4 +297,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.5.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-05
+**Version**: 1.5.1 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-21

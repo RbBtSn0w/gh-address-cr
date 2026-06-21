@@ -49,6 +49,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 gh_address_cr = ["runtime-requirements.json"]
+"gh_address_cr.core.host_telemetry.profiles" = ["*.json"]
 
 [tool.ruff]
 line-length = 120

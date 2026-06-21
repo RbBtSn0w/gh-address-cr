@@ -1,0 +1,4 @@
+{"sessionId": "sess-e2e", "timestamp": "2026-06-21T10:00:00Z", "message": {"content": [{"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "DO NOT LEAK"}}]}}
+{"sessionId": "sess-e2e", "timestamp": "2026-06-21T10:00:04Z", "message": {"content": [{"type": "tool_result", "tool_use_id": "u1", "is_error": false, "content": "DO NOT LEAK OUTPUT"}]}}
+{"sessionId": "sess-e2e", "timestamp": "2026-06-21T10:00:05Z", "message": {"content": [{"type": "tool_use", "id": "u2", "name": "AskUserQuestion", "input": {}}]}}
+{"sessionId": "sess-e2e", "timestamp": "2026-06-21T10:00:35Z", "message": {"content": [{"type": "tool_result", "tool_use_id": "u2", "is_error": false}]}}

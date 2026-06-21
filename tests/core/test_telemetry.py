@@ -7,10 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
 from gh_address_cr.core.telemetry import (
     SessionTelemetry,
     build_efficiency_report,
     command_label,
+    efficiency_report_markdown,
     import_external_telemetry,
     is_inline_env_assignment,
 )
@@ -3379,6 +3381,73 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["rejected_count"], 1)
                 self.assertFalse(any("ghp_unsafe_token_as_key" in diag for diag in result["diagnostics"]))
                 self.assertTrue(any("[redacted]" in diag for diag in result["diagnostics"]))
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_marks_timing_unavailable_when_all_durations_zero(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            # start == end => duration 0 (the validation-backfill fallback case)
+            tracker.record("ruff check", 100.0, 100.0, 0)
+            tracker.record("python3 -m unittest discover -s tests", 100.0, 100.0, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 2)
+            self.assertFalse(report["duration_observed"])
+            self.assertEqual(report["total_observed_duration_ms"], 0)
+            self.assertEqual(report["slowest_operations"], [])
+            self.assertIn("TELEMETRY_TIMING_UNAVAILABLE", report["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_report_keeps_timing_when_durations_present(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("python3 -m unittest discover -s tests", 100.0, 102.0, 0)  # 2000ms
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertTrue(report["duration_observed"])
+            self.assertEqual(report["total_observed_duration_ms"], 2000)
+            self.assertEqual(len(report["slowest_operations"]), 1)
+            self.assertEqual(report["slowest_operations"][0]["duration_ms"], 2000)
+            self.assertNotIn("TELEMETRY_TIMING_UNAVAILABLE", report["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_markdown_omits_slowest_and_notes_when_timing_unavailable(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+            tracker.record("ruff check", 100.0, 100.0, 0)
+
+            report = build_efficiency_report("octo/example", "77")
+            markdown = efficiency_report_markdown(report)
+
+            self.assertNotIn("### Slowest Operations", markdown)
+            self.assertIn("operation timing was not reported", markdown)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_timed_validation_shorthand_yields_nonzero_report_duration(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_context("octo/example", "77")
+
+            # The skill reports a validation command with measured timing.
+            _record_validation_command_telemetry({}, ["ruff check=passed@1500ms"])
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["total_events"], 1)
+            self.assertTrue(report["duration_observed"])
+            self.assertGreaterEqual(report["total_observed_duration_ms"], 1400)
+            self.assertLessEqual(report["total_observed_duration_ms"], 1600)
+            self.assertEqual(len(report["slowest_operations"]), 1)
+            self.assertNotIn("TELEMETRY_TIMING_UNAVAILABLE", report["diagnostics"])
 
 if __name__ == "__main__":
     unittest.main()
