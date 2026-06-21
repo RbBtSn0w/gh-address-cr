@@ -34,7 +34,6 @@ from gh_address_cr.core.github_thread_state import (
     normalized_thread_state,
 )
 from gh_address_cr.core.io import write_json_atomic
-from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 from gh_address_cr.core.severity import (
     review_priority_evidence,
 )
@@ -56,6 +55,7 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     normalize_string_list as _normalize_string_list,
 )
+from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"

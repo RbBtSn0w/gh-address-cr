@@ -5,7 +5,6 @@ from typing import Any
 from gh_address_cr.core.host_telemetry.profile import HostProfile
 from gh_address_cr.core.utils import parse_iso_datetime
 
-
 _DEFAULT_EVENT_BLOCKS_PATH = "message.content[]"
 
 
