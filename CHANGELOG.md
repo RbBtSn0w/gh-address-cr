@@ -1,3 +1,9 @@
+## [3.1.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.2...v3.1.0) (2026-06-21)
+
+### Features
+
+* **telemetry:** implement timing and honest reporting (per-CR metrics & host telemetry) ([#141](https://github.com/RbBtSn0w/gh-address-cr/issues/141)) ([09169f4](https://github.com/RbBtSn0w/gh-address-cr/commit/09169f4d8d069256547ba2ded6605082a8f8cde7)), closes [#143](https://github.com/RbBtSn0w/gh-address-cr/issues/143) [#142](https://github.com/RbBtSn0w/gh-address-cr/issues/142) [#117](https://github.com/RbBtSn0w/gh-address-cr/issues/117)
+
 ## [3.0.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.1...v3.0.2) (2026-06-20)
 
 ### Bug Fixes
