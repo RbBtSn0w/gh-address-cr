@@ -6,11 +6,25 @@ from gh_address_cr.core.host_telemetry.profile import HostProfile
 from gh_address_cr.core.utils import parse_iso_datetime
 
 
-def _blocks(line: dict[str, Any]) -> list[dict[str, Any]]:
-    # event_blocks_path is fixed to message.content[] for this strategy.
-    message = line.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+_DEFAULT_EVENT_BLOCKS_PATH = "message.content[]"
+
+
+def _blocks(line: dict[str, Any], blocks_path: str = _DEFAULT_EVENT_BLOCKS_PATH) -> list[dict[str, Any]]:
+    # Resolve the configured ``event_blocks_path`` (e.g. "message.content[]") so a
+    # profile that points the blocks elsewhere is honored instead of silently
+    # ignored. The trailing "[]" marks the list segment; any shape mismatch
+    # fails open to an empty list rather than raising.
+    node: Any = line
+    for segment in blocks_path.split("."):
+        if not isinstance(node, dict):
+            return []
+        is_list = segment.endswith("[]")
+        node = node.get(segment[:-2] if is_list else segment)
+        if is_list:
+            if not isinstance(node, list):
+                return []
+            return [b for b in node if isinstance(b, dict)]
+    return []
 
 
 def paired_correlation_timestamp(
@@ -23,6 +37,7 @@ def paired_correlation_timestamp(
     tu = f["tool_use"]
     tr = f["tool_result"]
     ts_path = f["timestamp_path"]
+    blocks_path = str(f.get("event_blocks_path") or _DEFAULT_EVENT_BLOCKS_PATH)
     status_map = {str(k): str(v) for k, v in (tr.get("status_map") or {}).items()}
 
     starts: dict[str, dict[str, Any]] = {}
@@ -33,7 +48,7 @@ def paired_correlation_timestamp(
         if str(line.get(sid_path) or "") != session_id:
             continue
         when = parse_iso_datetime(line.get(ts_path))
-        for block in _blocks(line):
+        for block in _blocks(line, blocks_path):
             btype = block.get("type")
             if btype == tu["match"].get("type"):
                 starts[str(block.get(tu["id_path"]))] = {

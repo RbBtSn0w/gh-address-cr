@@ -130,6 +130,33 @@ class PairedStrategyTests(unittest.TestCase):
         events, _ = paired_correlation_timestamp(lines, _cc_profile(), session_id="s1")
         self.assertEqual(events[0]["status"], "unknown")
 
+    def test_honors_custom_event_blocks_path(self):
+        # A profile pointing event_blocks_path elsewhere must be honored, not
+        # ignored in favor of the hard-coded message.content[] shape.
+        profile = _cc_profile()
+        profile.fields["event_blocks_path"] = "event.blocks[]"
+        lines = [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+             "event": {"blocks": [{"type": "tool_use", "id": "t1", "name": "Bash"}]}},
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:02Z",
+             "event": {"blocks": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False}]}},
+        ]
+        events, stats = paired_correlation_timestamp(lines, profile, session_id="s1")
+        self.assertEqual(stats["paired"], 1)
+        self.assertEqual(events[0]["duration_ms"], 2000)
+
+    def test_blocks_path_shape_mismatch_fails_open(self):
+        # Wrong shape for the configured path yields no blocks instead of raising.
+        profile = _cc_profile()
+        profile.fields["event_blocks_path"] = "event.blocks[]"
+        lines = [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+             "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash"}]}},
+        ]
+        events, stats = paired_correlation_timestamp(lines, profile, session_id="s1")
+        self.assertEqual(stats["tool_use_seen"], 0)
+        self.assertEqual(events, [])
+
 
 class AttributionTests(unittest.TestCase):
     def _lines(self):
