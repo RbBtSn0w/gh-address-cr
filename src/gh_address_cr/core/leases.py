@@ -321,8 +321,10 @@ def release_self_stale_lease(session: Any, item_id: str, *, agent_id: str, now: 
     plus ``state="claimed"``. Once GitHub marks it STALE the agent that still
     holds that lease must be able to re-claim it through ``agent resolve
     --stale``; releasing the dangling self-lease here clears the
-    ``_next_item`` block (issue #142). Leases held by *other* agents are never
-    touched. Returns ``True`` when a lease was released.
+    ``_next_item`` block (issue #142). Only the agent's own *fixer* lease is
+    released — leases held by other agents, or non-fixer roles
+    (triage/verifier/etc.) on the same item, are never touched. Returns ``True``
+    when a lease was released.
     """
     now = _coerce_now(now)
     released = False
@@ -332,6 +334,8 @@ def release_self_stale_lease(session: Any, item_id: str, *, agent_id: str, now: 
         if str(_get(lease, "item_id")) != str(item_id):
             continue
         if str(_get(lease, "agent_id")) != str(agent_id):
+            continue
+        if str(_get(lease, "role")) != "fixer":
             continue
         release_lease(session, str(_get(lease, "lease_id")), now=now, reason="stale_reclaim")
         released = True

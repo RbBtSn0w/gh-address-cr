@@ -405,7 +405,7 @@ def record_reply_evidence(
         resolved_item_id = thread_ref if thread_ref.startswith("github-thread:") else f"github-thread:{thread_ref}"
 
     session = session_store.load_session(repo, pr_number)
-    item = (session.get("items") or {}).get(resolved_item_id)
+    item = _items(session).get(resolved_item_id)
     if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
         raise WorkflowError(
             status="REPLY_EVIDENCE_REJECTED",
@@ -819,6 +819,7 @@ def _resolve_fast_fix_matches(
             if isinstance(lease, dict)
             and lease.get("status") in {"active", "submitted"}
             and str(lease.get("agent_id")) == str(agent_id)
+            and str(lease.get("role")) == "fixer"
         }
 
     normalized_file_set = {path.strip() for path in ctx.normalized_files if path.strip()}

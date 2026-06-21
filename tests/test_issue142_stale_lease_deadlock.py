@@ -155,6 +155,45 @@ class Issue142StaleLeaseDeadlockTest(PythonScriptTestCase):
         self.assertEqual(session["leases"]["lease-other"]["status"], "active")
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "claimed")
 
+    def test_stale_resolve_does_not_release_non_fixer_self_lease(self):
+        """Self-healing is scoped to the agent's own *fixer* lease (#143): a
+        non-fixer lease (triage/verifier) the same agent holds on the stale
+        thread must not be auto-released."""
+        verifier_lease = _batch_lease("lease-verify", "github-thread:stale", "codex-1")
+        verifier_lease["role"] = "verifier"
+        self.write_session(
+            items=[self._stale_claimed_thread(lease_id="lease-verify")],
+            leases={"lease-verify": verifier_lease},
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve",
+            "--stale",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--match-files",
+            "--now",
+            NOW.isoformat(),
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_NO_MATCH")
+
+        session = self.load_session()
+        self.assertEqual(session["leases"]["lease-verify"]["status"], "active")
+        self.assertEqual(session["leases"]["lease-verify"]["role"], "verifier")
+        self.assertEqual(session["items"]["github-thread:stale"]["state"], "claimed")
+
 
 class Issue142ReplyEvidenceIngestTest(PythonScriptTestCase):
     def write_session(self, *, items):
@@ -231,14 +270,7 @@ class Issue142ReplyEvidenceIngestTest(PythonScriptTestCase):
         """End-to-end: a thread resolved on GitHub but with ``viewer_replied``
         false (manual ``gh`` reply the runtime never saw) must pass final-gate
         once its reply evidence has been ingested."""
-        import importlib
-        import sys
-
-        from tests.helpers import SRC_ROOT
-
-        if str(SRC_ROOT) not in sys.path:
-            sys.path.insert(0, str(SRC_ROOT))
-        gate = importlib.import_module("gh_address_cr.core.gate")
+        from gh_address_cr.core import gate
 
         reply_url = "https://github.com/octo/example/pull/77#discussion_r321"
         session = {
@@ -269,3 +301,34 @@ class Issue142ReplyEvidenceIngestTest(PythonScriptTestCase):
 
         self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
         self.assertTrue(result.passed, result.to_machine_summary())
+
+    def test_reply_posted_fold_preserves_author_login_on_rebuild(self):
+        """A ``reply_posted`` ledger event must carry ``author_login`` through a
+        cache rebuild (#143), so the login-match guarantee survives a
+        session.json rebuild from the durable ledger."""
+        from types import SimpleNamespace
+
+        from gh_address_cr.core.runtime_kernel.session_projection import apply_ledger_events
+
+        base = {
+            "github-thread:PRRT_x": {
+                "item_id": "github-thread:PRRT_x",
+                "item_kind": "github_thread",
+            }
+        }
+        record = SimpleNamespace(
+            event_type="reply_posted",
+            item_id="github-thread:PRRT_x",
+            payload={
+                "thread_id": "PRRT_x",
+                "reply_url": "https://example.test/reply",
+                "author_login": "agent-login",
+            },
+            record_id="rec-1",
+            timestamp="2026-06-21T12:00:00+00:00",
+        )
+
+        folded = apply_ledger_events(base, [record])
+        evidence = folded["github-thread:PRRT_x"]["reply_evidence"]
+        self.assertEqual(evidence["reply_url"], "https://example.test/reply")
+        self.assertEqual(evidence["author_login"], "agent-login")

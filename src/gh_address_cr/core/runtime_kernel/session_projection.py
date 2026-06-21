@@ -104,6 +104,11 @@ def apply_ledger_events(
                 if not isinstance(item.get("reply_evidence"), dict):
                     item["reply_evidence"] = {}
                 item["reply_evidence"]["reply_url"] = reply_url
+                # Preserve login-match evidence across cache rebuilds (#143):
+                # final-gate requires the recorded author to match its login.
+                author_login = payload.get("author_login")
+                if author_login:
+                    item["reply_evidence"]["author_login"] = author_login
         elif event_type == "thread_resolved":
             item["thread_resolved"] = True
         elif event_type == "response_published":
