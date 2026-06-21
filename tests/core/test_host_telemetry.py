@@ -8,6 +8,7 @@ from pathlib import Path
 from gh_address_cr.core.host_telemetry.attribution import lines_in_window, distinct_sessions_in_window
 from gh_address_cr.core.host_telemetry.discovery import project_slug_from_cwd, discover_transcript, consent_notice_once
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
+from gh_address_cr.core.host_telemetry.capture import capture_agent_jsonl
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
 
 
@@ -145,3 +146,45 @@ class DiscoveryTests(unittest.TestCase):
             marker = Path(tmp) / "consent.marker"
             self.assertTrue(consent_notice_once("claude-code", marker))
             self.assertFalse(consent_notice_once("claude-code", marker))
+
+
+class CaptureTests(unittest.TestCase):
+    def _transcript(self, path):
+        rows = [
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+             "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "x"}}]}},
+            {"sessionId": "s1", "timestamp": "2026-06-21T10:00:02Z",
+             "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False}]}},
+        ]
+        path.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    def test_capture_produces_agent_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp) / "s1.jsonl"
+            self._transcript(t)
+            text, outcome = capture_agent_jsonl(
+                _cc_profile(), transcript=t, session_id="s1",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+            self.assertEqual(outcome, "captured")
+            line = json.loads(text.splitlines()[0])
+            self.assertEqual(line["operation"], "Bash")
+            self.assertEqual(line["duration_ms"], 2000)
+            self.assertNotIn("input", text)
+
+    def test_capture_degraded_when_pairing_low(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp) / "s1.jsonl"
+            rows = [
+                {"sessionId": "s1", "timestamp": "2026-06-21T10:00:00Z",
+                 "message": {"content": [{"type": "tool_use", "id": "a", "name": "Bash"}]}},
+                {"sessionId": "s1", "timestamp": "2026-06-21T10:00:01Z",
+                 "message": {"content": [{"type": "tool_use", "id": "b", "name": "Edit"}]}},
+            ]
+            t.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+            text, outcome = capture_agent_jsonl(
+                _cc_profile(), transcript=t, session_id="s1",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+            self.assertEqual(outcome, "degraded")
+            self.assertEqual(text, "")
