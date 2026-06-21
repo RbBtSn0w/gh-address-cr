@@ -1,9 +1,12 @@
 import json
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from gh_address_cr.core.host_telemetry.attribution import lines_in_window, distinct_sessions_in_window
+from gh_address_cr.core.host_telemetry.discovery import project_slug_from_cwd, discover_transcript, consent_notice_once
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
 
@@ -119,3 +122,26 @@ class AttributionTests(unittest.TestCase):
         sessions = distinct_sessions_in_window(lines, start_iso="2026-06-21T10:00:00Z",
                                                now_iso="2026-06-21T10:01:00Z", session_id_path="sessionId")
         self.assertEqual(sessions, {"s1", "s2"})
+
+
+class DiscoveryTests(unittest.TestCase):
+    def test_project_slug_replaces_separators(self):
+        self.assertEqual(project_slug_from_cwd("/Users/me/Documents/GitHub/repo"),
+                         "-Users-me-Documents-GitHub-repo")
+
+    def test_discover_picks_newest_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "proj"
+            d.mkdir()
+            old = d / "old.jsonl"; old.write_text("{}", encoding="utf-8")
+            new = d / "new.jsonl"; new.write_text("{}", encoding="utf-8")
+            os.utime(old, (1, 1))
+            os.utime(new, (time.time(), time.time()))
+            found = discover_transcript(str(d / "*.jsonl"))
+            self.assertEqual(found, new)
+
+    def test_consent_notice_only_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "consent.marker"
+            self.assertTrue(consent_notice_once("claude-code", marker))
+            self.assertFalse(consent_notice_once("claude-code", marker))
