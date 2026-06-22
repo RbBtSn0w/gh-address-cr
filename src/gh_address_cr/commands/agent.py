@@ -258,27 +258,20 @@ def _parse_agent_files(files: str | None, extra_files: list[str] | None = None) 
     return values
 
 
-def _parse_agent_validation(values: list[str] | None) -> list[dict[str, str]]:
-    commands: list[dict[str, str]] = []
+def _parse_agent_validation(values: list[str] | None) -> list[dict[str, str | float]]:
+    commands: list[dict[str, str | float]] = []
     for raw in values or []:
-        command, result = _split_agent_validation_record(raw.strip())
+        # Delegate to the core normalizer so the CLI honors the same result set
+        # and the `@<n>ms`/`@<n>s` timing suffix the runtime records for
+        # efficiency reporting. Splitting locally previously dropped the suffix
+        # into the command name and recorded zero duration.
+        command, result, duration = agent_protocol._split_validation_command_record(raw.strip())
         if command and result:
-            commands.append({"command": command, "result": result})
+            record: dict[str, str | float] = {"command": command, "result": result}
+            if duration is not None:
+                record["duration"] = duration
+            commands.append(record)
     return commands
-
-
-def _split_agent_validation_record(raw: str) -> tuple[str, str]:
-    command, separator, result = raw.rpartition("=")
-    if not separator or not _looks_like_agent_validation_result(result):
-        return raw.strip(), "passed"
-    return command.strip(), result.strip()
-
-
-def _looks_like_agent_validation_result(value: str) -> bool:
-    normalized = value.strip().lower()
-    if not normalized or any(char.isspace() for char in normalized):
-        return False
-    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
 def _changed_files_for_commit(
