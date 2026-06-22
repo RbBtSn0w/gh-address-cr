@@ -18,7 +18,6 @@ from gh_address_cr import (
 from gh_address_cr.core import agent_protocol, command_templates, leases, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
-    _chunks,
     _load_response_json_object,
     _normalize_validation_command_records,
     _validate_requested_severity,
@@ -96,6 +95,22 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS)
     + r")(?![A-Za-z0-9])"
 )
+MATCHING_THREAD_SUCCESS_STATUS = {
+    ("FAST_FIX_ALL", False): "FAST_FIX_ALL_ACCEPTED",
+    ("FAST_FIX_ALL", True): "FAST_FIX_ALL_COMPLETE",
+    ("STALE_RESOLUTION", False): "STALE_RESOLUTION_ACCEPTED",
+    ("STALE_RESOLUTION", True): "STALE_RESOLUTION_COMPLETE",
+    ("DECLINE_ALL", False): "DECLINE_ALL_ACCEPTED",
+    ("DECLINE_ALL", True): "DECLINE_ALL_COMPLETE",
+}
+MATCHING_THREAD_FAILURE_STATUS = {
+    ("FAST_FIX_ALL", False): "FAST_FIX_ALL_NO_ACCEPTED",
+    ("FAST_FIX_ALL", True): "FAST_FIX_ALL_PARTIAL",
+    ("STALE_RESOLUTION", False): "STALE_RESOLUTION_NO_ACCEPTED",
+    ("STALE_RESOLUTION", True): "STALE_RESOLUTION_PARTIAL",
+    ("DECLINE_ALL", False): "DECLINE_ALL_NO_ACCEPTED",
+    ("DECLINE_ALL", True): "DECLINE_ALL_PARTIAL",
+}
 
 
 
@@ -1019,9 +1034,9 @@ def _enforce_fast_fix_routing(
             payload={"matched_count": len(matches), "files": sorted(normalized_file_set)},
         )
     if not ctx.normalized_homogeneous_reason:
-        batch_command = command_templates.batch_next(repo, str(pr_number), files=sorted(normalized_file_set))
+        commands = _batch_response_commands(repo, pr_number, normalized_file_set)
         next_action = (
-            f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
+            f"Run `{commands['batch_next']}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton, then fill per-thread summary/why entries and submit it. "
             "Rerun `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern."
         )
@@ -1034,10 +1049,7 @@ def _enforce_fast_fix_routing(
             payload={
                 "matched_count": len(matches),
                 "files": sorted(normalized_file_set),
-                "commands": {
-                    "batch_next": batch_command,
-                    "resolve_batch": command_templates.resolve_batch(repo, str(pr_number), input_path="<batch-response.json>"),
-                },
+                "commands": commands,
             },
         )
     if not _has_homogeneous_thread_bodies(matches):
@@ -1069,9 +1081,9 @@ def _enforce_fast_fix_routing(
                     },
                 },
             )
-        batch_command = command_templates.batch_next(repo, str(pr_number), files=sorted(normalized_file_set))
+        commands = _batch_response_commands(repo, pr_number, normalized_file_set)
         next_action = (
-            f"Run `{batch_command}` to claim the matching GitHub review threads and write a "
+            f"Run `{commands['batch_next']}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton with per-thread summary/why entries. The matched threads have missing "
             "or distinct thread bodies, so resolve cannot prove a homogeneous repeated concern."
         )
@@ -1084,12 +1096,20 @@ def _enforce_fast_fix_routing(
             payload={
                 "matched_count": len(matches),
                 "files": sorted(normalized_file_set),
-                "commands": {
-                    "batch_next": batch_command,
-                    "resolve_batch": command_templates.resolve_batch(repo, str(pr_number), input_path="<batch-response.json>"),
-                },
+                "commands": commands,
             },
         )
+
+
+def _batch_response_commands(repo: str, pr_number: str, files: set[str]) -> dict[str, str]:
+    return {
+        "batch_next": command_templates.batch_next(repo, str(pr_number), files=sorted(files)),
+        "resolve_batch": command_templates.resolve_batch(repo, str(pr_number), input_path="<batch-response.json>"),
+    }
+
+
+def _chunks(values: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 def _build_fast_fix_batch_response(
@@ -1305,56 +1325,22 @@ def fast_fix_matching_threads(
         current_time=current_time,
     )
 
-    publish_result = None
-    if publish and accepted_count:
-        from gh_address_cr.core import publisher
-
-        publish_result = publisher.publish_github_thread_responses(
-            repo,
-            pr_number,
-            github_client=github_client,
-            agent_id="gh-address-cr-publisher",
-            now=current_time,
-        )
-
-    status = "STALE_RESOLUTION_ACCEPTED" if stale_only else "FAST_FIX_ALL_ACCEPTED"
-    if publish:
-        status = "STALE_RESOLUTION_COMPLETE" if stale_only else "FAST_FIX_ALL_COMPLETE"
-    payload = {
-        "repo": repo,
-        "pr_number": str(pr_number),
-        "commit_hash": commit_hash.strip(),
-        "files": ctx.normalized_files,
-        "matched_count": len(matches),
-        "accepted_count": accepted_count,
-        "failed_count": len(failed),
-        "item_ids": item_ids,
-        "failed": failed,
-        "batches": batches,
-        "publish": publish_result,
-        "next_action": (
-            "Accepted evidence was published. Rerun final-gate when all items are handled."
-            if publish
-            else f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence."
-        ),
-    }
-    if failed:
-        partial_status = f"{ctx.status_prefix}_PARTIAL" if accepted_count else f"{ctx.status_prefix}_NO_ACCEPTED"
-        next_action = (
-            f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
-            if accepted_count
-            else "No matching items were accepted. Inspect failed rows, resolve lease/input blockers, then rerun."
-        )
-        payload["next_action"] = next_action
-        raise WorkflowError(
-            status=partial_status,
-            reason_code=partial_status,
-            waiting_on="lease" if any(row.get("waiting_on") == "lease" for row in failed) else "work_item",
-            exit_code=5,
-            message=next_action,
-            payload=payload,
-        )
-    payload["status"] = status
+    payload = _finalize_matching_threads(
+        repo,
+        pr_number,
+        matches,
+        ctx,
+        accepted_count=accepted_count,
+        failed=failed,
+        item_ids=item_ids,
+        publish=publish,
+        github_client=github_client,
+        current_time=current_time,
+        extra_payload={
+            "commit_hash": commit_hash.strip(),
+            "batches": batches,
+        },
+    )
     return payload
 
 
@@ -1407,56 +1393,117 @@ def decline_matching_threads(
         repo, pr_number, matches, ctx, agent_id=agent_id, current_time=current_time
     )
 
-    publish_result = None
-    if publish and accepted_count:
-        from gh_address_cr.core import publisher
+    payload = _finalize_matching_threads(
+        repo,
+        pr_number,
+        matches,
+        ctx,
+        accepted_count=accepted_count,
+        failed=failed,
+        item_ids=item_ids,
+        publish=publish,
+        github_client=github_client,
+        current_time=current_time,
+        extra_payload={
+            "resolution": resolution,
+            "homogeneous_reason": ctx.normalized_homogeneous_reason,
+            "accepted": accepted_rows,
+        },
+    )
+    return payload
 
-        publish_result = publisher.publish_github_thread_responses(
-            repo,
-            pr_number,
-            github_client=github_client,
-            agent_id="gh-address-cr-publisher",
-            now=current_time,
-        )
 
-    status = f"{ctx.status_prefix}_COMPLETE" if publish else f"{ctx.status_prefix}_ACCEPTED"
+def _finalize_matching_threads(
+    repo: str,
+    pr_number: str,
+    matches: list[dict[str, Any]],
+    ctx: _FastFixContext,
+    *,
+    accepted_count: int,
+    failed: list[dict[str, Any]],
+    item_ids: list[str],
+    publish: bool,
+    github_client: Any | None,
+    current_time: datetime,
+    extra_payload: dict[str, Any],
+) -> dict[str, Any]:
+    publish_result = _publish_matching_thread_responses(
+        repo,
+        pr_number,
+        publish=publish,
+        accepted_count=accepted_count,
+        github_client=github_client,
+        current_time=current_time,
+    )
     payload = {
         "repo": repo,
         "pr_number": str(pr_number),
-        "resolution": resolution,
         "files": ctx.normalized_files,
-        "homogeneous_reason": ctx.normalized_homogeneous_reason,
         "matched_count": len(matches),
         "accepted_count": accepted_count,
         "failed_count": len(failed),
         "item_ids": item_ids,
         "failed": failed,
-        "accepted": accepted_rows,
+        **extra_payload,
         "publish": publish_result,
-        "next_action": (
-            "Accepted evidence was published. Rerun final-gate when all items are handled."
-            if publish
-            else f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence."
-        ),
+        "next_action": _matching_thread_next_action(repo, pr_number, publish=publish),
     }
     if failed:
-        partial_status = f"{ctx.status_prefix}_PARTIAL" if accepted_count else f"{ctx.status_prefix}_NO_ACCEPTED"
-        next_action = (
-            f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
-            if accepted_count
-            else "No matching items were accepted. Inspect failed rows, resolve lease/input blockers, then rerun."
-        )
+        status = _matching_thread_failure_status(ctx, accepted_count=accepted_count)
+        next_action = _matching_thread_failure_next_action(accepted_count)
         payload["next_action"] = next_action
         raise WorkflowError(
-            status=partial_status,
-            reason_code=partial_status,
+            status=status,
+            reason_code=status,
             waiting_on="lease" if any(row.get("waiting_on") == "lease" for row in failed) else "work_item",
             exit_code=5,
             message=next_action,
             payload=payload,
         )
-    payload["status"] = status
+    payload["status"] = _matching_thread_success_status(ctx, publish=publish)
     return payload
+
+
+def _publish_matching_thread_responses(
+    repo: str,
+    pr_number: str,
+    *,
+    publish: bool,
+    accepted_count: int,
+    github_client: Any | None,
+    current_time: datetime,
+) -> dict[str, Any] | None:
+    if not (publish and accepted_count):
+        return None
+    from gh_address_cr.core import publisher
+
+    return publisher.publish_github_thread_responses(
+        repo,
+        pr_number,
+        github_client=github_client,
+        agent_id="gh-address-cr-publisher",
+        now=current_time,
+    )
+
+
+def _matching_thread_success_status(ctx: _FastFixContext, *, publish: bool) -> str:
+    return MATCHING_THREAD_SUCCESS_STATUS[(ctx.status_prefix, publish)]
+
+
+def _matching_thread_failure_status(ctx: _FastFixContext, *, accepted_count: int) -> str:
+    return MATCHING_THREAD_FAILURE_STATUS[(ctx.status_prefix, bool(accepted_count))]
+
+
+def _matching_thread_next_action(repo: str, pr_number: str, *, publish: bool) -> str:
+    if publish:
+        return "Accepted evidence was published. Rerun final-gate when all items are handled."
+    return f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence."
+
+
+def _matching_thread_failure_next_action(accepted_count: int) -> str:
+    if accepted_count:
+        return f"Accepted {accepted_count} item(s); inspect failed rows, resolve lease/input blockers, then rerun."
+    return "No matching items were accepted. Inspect failed rows, resolve lease/input blockers, then rerun."
 
 
 def _process_decline_matches(

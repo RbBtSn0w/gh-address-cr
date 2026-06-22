@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import posixpath
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.models import ClaimLease, LeaseRecoveryState
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
 )
@@ -27,39 +27,9 @@ from gh_address_cr.core.utils import (
     set_field as _set,
 )
 
-try:
-    from gh_address_cr.core.models import ClaimLease as _ModelClaimLease
-    from gh_address_cr.core.models import LeaseRecoveryState
-except ImportError:
-    _ModelClaimLease = None
-    LeaseRecoveryState = None
-
-
 ACTIVE_LEASE_STATUSES = {"active", "submitted"}
 TERMINAL_LEASE_STATUSES = {"accepted", "rejected", "expired", "released"}
 READ_ONLY_ROLES = {"triage", "verifier", "review_producer", "gatekeeper"}
-
-
-@dataclass
-class _FallbackClaimLease:
-    lease_id: str
-    item_id: str
-    agent_id: str
-    role: str
-    status: str
-    created_at: datetime
-    expires_at: datetime
-    resume_token: str | None
-    request_hash: str
-    request_id: str | None = None
-    request_path: str | None = None
-    conflict_keys: tuple[str, ...] = ()
-    submitted_at: datetime | None = None
-    completed_at: datetime | None = None
-    reason: str | None = None
-
-
-ClaimLease = _ModelClaimLease or _FallbackClaimLease
 
 
 class LeaseError(ValueError):

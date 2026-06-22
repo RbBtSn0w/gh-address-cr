@@ -540,10 +540,6 @@ def submit_batch_action_response(
         "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
 
-def _chunks(values: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
-    return [values[index : index + size] for index in range(0, len(values), size)]
-
-
 def _load_response_json_object(
     response_path: str | Path,
     *,

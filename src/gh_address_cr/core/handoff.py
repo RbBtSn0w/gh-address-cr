@@ -1,3 +1,10 @@
+"""External producer handoff metadata helpers.
+
+The ``session["handoff"]`` block is non-event-sourced metadata for producer
+deduplication and bookkeeping. It is not authoritative runtime truth, does not
+participate in runtime-kernel replay, and cannot satisfy final-gate evidence.
+"""
+
 from __future__ import annotations
 
 import hashlib

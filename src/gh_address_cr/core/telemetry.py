@@ -171,6 +171,14 @@ class TelemetryParseResult:
 class TelemetryAdapter(ABC):
     @abstractmethod
     def parse(self, raw: str, source: str) -> TelemetryParseResult:
+        """Parse raw telemetry into a TelemetryParseResult.
+
+        Expected producer/input failures must be represented by a rejected
+        TelemetryParseResult or by raising ValueError/TypeError. Adapter
+        implementations should validate payload shape before indexing so
+        malformed input does not leak KeyError or IndexError; those exception
+        types are treated as adapter bugs and fail loud at the import boundary.
+        """
         pass
 
 
@@ -702,7 +710,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         parse_result = adapter.parse(raw, source)
         if not isinstance(parse_result, TelemetryParseResult):
             raise TypeError(f"Adapter parse must return a TelemetryParseResult instance, got {type(parse_result).__name__}")
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         return _failed_import_summary(
             paths,
             source=source,
@@ -724,7 +732,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         diagnostics: list[str] = []
         for diag in parse_result.diagnostics:
             diagnostics.append(_safe_diagnostic_text(str(diag)))
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         return _failed_import_summary(
             paths,
             source=source,
@@ -767,7 +775,7 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             existing_fingerprints.add(normalized_event.identity)
             accepted_fingerprints.append(normalized_event.identity)
             accepted.append(normalized_event)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         return _failed_import_summary(
             paths,
             source=source,
