@@ -2904,6 +2904,61 @@ else:
             )
         )
 
+    def test_cli_telemetry_doctor_reports_profile_and_health_checks(self):
+        self.env.pop("CODEX_THREAD_ID", None)
+        self.env.pop("SESSION_ID", None)
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "telemetry.jsonl").write_text(
+            json.dumps(
+                {
+                    "command": "gh api graphql",
+                    "start_time": 10.0,
+                    "end_time": 12.5,
+                    "exit_code": 1,
+                    "is_retry": False,
+                    "pid": 123,
+                    "execution_id": "runtime-failure-1",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "doctor", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "TELEMETRY_DOCTOR_PASSED")
+        profile_names = {check["profile"] for check in payload["profile_checks"]}
+        self.assertIn("codex", profile_names)
+        self.assertIn("claude-code", profile_names)
+        codex_check = next(check for check in payload["profile_checks"] if check["profile"] == "codex")
+        self.assertEqual(codex_check["reason_code"], "TELEMETRY_PROFILE_ENV_MISSING")
+        reason_codes = {issue["reason_code"] for issue in payload["cli_health_issues"]}
+        self.assertIn("CLI_COMMAND_FAILURE", reason_codes)
+        report = json.loads(Path(payload["telemetry_report_artifact"]).read_text(encoding="utf-8"))
+        self.assertIn("cli_health_issues", report)
+
+    def test_cli_telemetry_doctor_projects_last_machine_summary_reason_code(self):
+        self.env.pop("CODEX_THREAD_ID", None)
+        self.env.pop("SESSION_ID", None)
+        self.install_fake_gh_for_threads([])
+
+        review = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(review.returncode, 6, review.stderr)
+        review_summary = json.loads(review.stdout)
+        self.assertEqual(review_summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "doctor", self.repo, self.pr])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        issues = payload["cli_health_issues"]
+        issue = next(item for item in issues if item["reason_code"] == "CLI_WAIT_STATE")
+        self.assertEqual(issue["metadata"]["observed_reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+        self.assertEqual(issue["metadata"]["waiting_on"], "external_review")
+        self.assertIn("Provide findings JSON", issue["next_action"])
+
     def test_final_gate_fail_open_when_external_telemetry_is_corrupted(self):
         self.install_fake_gh_for_threads([])
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
@@ -2925,6 +2980,36 @@ else:
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
+
+    def test_final_gate_autodiscovery_miss_is_diagnose_loud_fail_open(self):
+        self.install_fake_gh_for_threads([])
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps({"created_at": "2026-01-01T00:00:00+00:00"}), encoding="utf-8")
+        self.env["CODEX_THREAD_ID"] = "missing-session"
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "autodiscovery-miss",
+                self.repo,
+                self.pr,
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("TELEMETRY_TRANSCRIPT_NOT_FOUND", result.stdout)
+        summary_text = self.audit_summary_file().read_text(encoding="utf-8")
+        self.assertIn("- telemetry_diagnostics: telemetry import host-autodiscovery:", summary_text)
+        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
+        reason_codes = {issue["reason_code"] for issue in report["cli_health_issues"]}
+        self.assertIn("TELEMETRY_AUTODISCOVERY_MISS", reason_codes)
 
     def test_final_gate_imports_host_telemetry_from_environment_hook(self):
         self.install_fake_gh_for_threads([])

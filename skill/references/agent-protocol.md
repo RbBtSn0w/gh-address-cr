@@ -58,6 +58,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Imports safe aggregate Codex host exports such as tokens, tool usage, duration, and status into the same canonical event model.
 - `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
   - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
+- `gh-address-cr telemetry doctor <owner/repo> <pr_number> [--format json|markdown]`
+  - Diagnoses CLI health telemetry, host profile autodiscovery, telemetry storage, and the latest CLI machine `reason_code`/`next_action`. This does not mutate review item state.
 - `gh-address-cr command-session --input <commands.json>|-`
   - Executes multiple one-shot runtime commands in one process and emits a discrete result for every operation.
 - `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
@@ -73,7 +75,7 @@ Supported `kind` values are `tool_call`, `command`, `wait`, `retry`, `validation
 
 Telemetry must be public-safe before import. Do not include tokens, credentials, raw prompts, usernames, private machine identifiers, or unnecessary absolute local paths. The runtime computes `event_fingerprint` after canonical normalization and uses it as the authoritative duplicate key. Duplicate or overlapping imports must appear in `duplicate_fingerprints` and must not inflate report counts, durations, or slowest-operation rankings.
 
-Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default.
+Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default. If coverage is degraded or `cli_health_issues` is non-empty, use `telemetry doctor` to identify the profile, storage, or CLI reason-code path that should feed the next fix.
 
 ## Workflow Decision JSON
 

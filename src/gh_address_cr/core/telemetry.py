@@ -865,6 +865,25 @@ def hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, f
     return summary
 
 
+def autodiscovery_miss_import_summary(repo: str, pr_number: str, *, diagnostics: list[str]) -> dict[str, Any]:
+    paths = core_paths.SessionPaths(repo, pr_number)
+    summary = _import_summary(
+        paths,
+        source="host-autodiscovery",
+        fmt="agent-jsonl",
+        status="FAILED",
+        reason_code="TELEMETRY_AUTODISCOVERY_MISS",
+        accepted_count=0,
+        rejected_count=0,
+        duplicate_count=0,
+        accepted_fingerprints=[],
+        duplicate_fingerprints=[],
+        diagnostics=[_safe_diagnostic_text(diagnostic) for diagnostic in diagnostics],
+    )
+    _append_import_summary_if_available(paths, summary)
+    return summary
+
+
 TELEMETRY_OVERHEAD_BUDGET_MS = 250
 
 
@@ -931,6 +950,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         ],
         "error_prone_operations": error_prone,
         "inefficiency_flags": flags,
+        "cli_health_issues": _cli_health_issues(paths=paths, events=events, diagnostics=diagnostics),
         "diagnostics": diagnostics,
         "confidence": _confidence_for_coverage(coverage_label),
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -946,6 +966,192 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
         report["diagnostics"].append("TELEMETRY_OVERHEAD_EXCEEDED")
     return report
+
+
+def _cli_health_issues(
+    *,
+    paths: core_paths.SessionPaths,
+    events: list[ExternalTelemetryEvent],
+    diagnostics: list[str],
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(
+        reason_code: str,
+        severity: str,
+        source: str,
+        retryable: bool,
+        detail: str,
+        next_action: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        key = (reason_code, detail)
+        if key in seen:
+            return
+        seen.add(key)
+        issue = {
+            "reason_code": reason_code,
+            "severity": severity,
+            "source": source,
+            "retryable": retryable,
+            "detail": _safe_diagnostic_text(detail),
+            "next_action": next_action,
+        }
+        if metadata:
+            issue["metadata"] = _safe_metadata(metadata)
+        issues.append(issue)
+
+    summary_issue = _last_machine_summary_health_issue(paths)
+    if summary_issue is not None:
+        add(**summary_issue)
+
+    for event in events:
+        if event.source != "runtime":
+            continue
+        if event.status == "timeout":
+            add(
+                "CLI_COMMAND_TIMEOUT",
+                "warning",
+                "runtime",
+                True,
+                f"{event.operation} timed out.",
+                "Inspect the timed-out CLI dependency and retry after it responds.",
+            )
+        elif event.status == "failure":
+            add(
+                "CLI_COMMAND_FAILURE",
+                "warning",
+                "runtime",
+                True,
+                f"{event.operation} exited with failure.",
+                "Inspect the command output and rerun the failed gh-address-cr workflow step.",
+            )
+        metadata = event.metadata or {}
+        if metadata.get("is_retry"):
+            add(
+                "CLI_RETRY_LOOP",
+                "warning",
+                "runtime",
+                True,
+                f"{event.operation} was retried.",
+                "Check whether the command failure is deterministic before retrying again.",
+            )
+
+    for diagnostic in diagnostics:
+        if "host telemetry autodiscovery" in diagnostic:
+            add(
+                "TELEMETRY_AUTODISCOVERY_MISS",
+                "info",
+                "host-autodiscovery",
+                True,
+                diagnostic,
+                "Run telemetry doctor to inspect profile environment, transcript discovery, and PR attribution.",
+            )
+        elif "telemetry input unavailable" in diagnostic:
+            add(
+                "TELEMETRY_STORE_UNAVAILABLE",
+                "warning",
+                "telemetry-store",
+                True,
+                diagnostic,
+                "Provide a readable telemetry input path or rerun from an agent host with telemetry enabled.",
+            )
+        elif "telemetry import summary" in diagnostic or "external telemetry" in diagnostic:
+            add(
+                "TELEMETRY_STORE_UNAVAILABLE",
+                "warning",
+                "telemetry-store",
+                True,
+                diagnostic,
+                "Repair or remove the malformed telemetry artifact, then rerun telemetry summary.",
+            )
+        elif diagnostic == "TELEMETRY_TIMING_UNAVAILABLE":
+            add(
+                "TELEMETRY_TIMING_UNAVAILABLE",
+                "info",
+                "runtime",
+                False,
+                diagnostic,
+                "Use sources that provide operation durations for timing analysis.",
+            )
+    return issues
+
+
+def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[str, Any] | None:
+    path = core_paths.last_machine_summary_file(paths.repo, paths.pr_number)
+    if not path.exists():
+        return None
+    if not path.is_file():
+        return {
+            "reason_code": "TELEMETRY_STORE_UNAVAILABLE",
+            "severity": "warning",
+            "source": "runtime-summary",
+            "retryable": True,
+            "detail": "last machine summary is not a regular file",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return {
+            "reason_code": "TELEMETRY_STORE_UNAVAILABLE",
+            "severity": "warning",
+            "source": "runtime-summary",
+            "retryable": True,
+            "detail": f"last machine summary unreadable: {type(exc).__name__}",
+            "next_action": "Repair the runtime summary artifact, then rerun telemetry doctor.",
+        }
+    except ValueError:
+        return {
+            "reason_code": "TELEMETRY_STORE_UNAVAILABLE",
+            "severity": "warning",
+            "source": "runtime-summary",
+            "retryable": True,
+            "detail": "last machine summary invalid JSON",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+        }
+    if not isinstance(payload, dict):
+        return {
+            "reason_code": "TELEMETRY_STORE_UNAVAILABLE",
+            "severity": "warning",
+            "source": "runtime-summary",
+            "retryable": True,
+            "detail": "last machine summary must be a JSON object",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+        }
+    status = str(payload.get("status") or "UNKNOWN")
+    observed_reason = str(payload.get("reason_code") or "UNKNOWN_REASON")
+    if status == "PASSED" or observed_reason == "PASSED":
+        return None
+    next_action = str(payload.get("next_action") or "Inspect the last CLI machine summary and rerun the workflow.")
+    waiting_on = payload.get("waiting_on")
+    if status.startswith("WAITING") or waiting_on:
+        reason_code = "CLI_WAIT_STATE"
+        severity = "info"
+        retryable = True
+    elif status in {"FAILED", "BLOCKED"}:
+        reason_code = "CLI_COMMAND_FAILURE"
+        severity = "warning"
+        retryable = True
+    else:
+        reason_code = "CLI_REASON_CODE_OBSERVED"
+        severity = "info"
+        retryable = True
+    detail = f"CLI summary reported {observed_reason}."
+    return {
+        "reason_code": reason_code,
+        "severity": severity,
+        "source": "runtime-summary",
+        "retryable": retryable,
+        "detail": detail,
+        "next_action": next_action,
+        "metadata": {
+            "observed_reason_code": observed_reason,
+            "observed_status": status,
+            "waiting_on": str(waiting_on) if waiting_on else "",
+        },
+    }
 
 
 def _safe_os_error_diagnostic(prefix: str, exc: OSError) -> str:

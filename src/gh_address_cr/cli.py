@@ -799,6 +799,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr final-gate owner/repo 123\n"
             "  gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl\n"
             "  gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]\n"
+            "  gh-address-cr telemetry doctor owner/repo 123 [--format json|markdown]\n"
             "  gh-address-cr command-session --input commands.json\n"
         ),
     )

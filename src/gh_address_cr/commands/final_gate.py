@@ -19,6 +19,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core import telemetry_health
 from gh_address_cr.core.host_telemetry import attribution as host_attribution
 from gh_address_cr.core.host_telemetry import capture as host_capture
 from gh_address_cr.core.host_telemetry import discovery as host_discovery
@@ -74,7 +75,13 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scoped_args)
     if ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number) is None:
-        ingest_host_telemetry_via_autodiscovery(parsed.repo, parsed.pr_number)
+        autodiscovery_summary = ingest_host_telemetry_via_autodiscovery(parsed.repo, parsed.pr_number)
+        if autodiscovery_summary is None:
+            telemetry_health.record_autodiscovery_miss(
+                parsed.repo,
+                parsed.pr_number,
+                telemetry_health.active_autodiscovery_misses(parsed.repo, parsed.pr_number),
+            )
     machine_requested = "--machine" in scoped_args and "--human" not in scoped_args
     try:
         result = core_gate.Gatekeeper().run(
