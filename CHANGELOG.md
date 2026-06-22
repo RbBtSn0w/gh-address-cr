@@ -1,3 +1,9 @@
+## [3.1.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.2...v3.1.3) (2026-06-22)
+
+### Bug Fixes
+
+* honor --validation timing suffix + front-load telemetry activation guidance ([#149](https://github.com/RbBtSn0w/gh-address-cr/issues/149)) ([e006fda](https://github.com/RbBtSn0w/gh-address-cr/commit/e006fda4b116839806202ebbff6efb44ee40721f))
+
 ## [3.1.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.1...v3.1.2) (2026-06-22)
 
 ## [3.1.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.0...v3.1.1) (2026-06-22)
