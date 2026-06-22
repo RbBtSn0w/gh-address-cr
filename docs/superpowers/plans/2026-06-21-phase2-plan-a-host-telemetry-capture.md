@@ -1,14 +1,14 @@
-# Phase 2 Plan A — Host Telemetry Auto-Capture (Claude Code) Implementation Plan
+# Phase 2 Plan A — Host Telemetry Auto-Capture Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Automatically capture whole-session efficiency telemetry by reading the Claude Code transcript, mapping it to agent-jsonl via a declarative profile + a `paired-correlation-timestamp` strategy, scoping it to the active PR, and feeding the existing ingest pipeline at `final-gate` — with first-run consent and fail-open everywhere.
+**Goal:** Automatically capture whole-session efficiency telemetry by reading Claude Code and Codex native transcripts, mapping them to agent-jsonl via declarative profiles + strategy primitives, scoping them to the active PR, and feeding the existing ingest pipeline at `final-gate` — with first-run consent and fail-open everywhere.
 
-**Architecture:** A new self-contained package `core/host_telemetry/` produces **agent-jsonl text** from a host log; that text is handed to the *existing* `core.telemetry.import_external_telemetry(raw=...)`, which already does normalize → redact → fingerprint → dedupe → store. So the new code is purely: profile model + JSONL extraction strategy + Claude Code profile + log discovery + PR-scope filtering + consent notice + a thin `final-gate` auto-discovery seam. No downstream telemetry code changes.
+**Architecture:** A new self-contained package `core/host_telemetry/` produces **agent-jsonl text** from a host log; that text is handed to the *existing* `core.telemetry.import_external_telemetry(raw=...)`, which already does normalize → redact → fingerprint → dedupe → store. So the new code is purely: profile model + JSONL extraction strategies + first-party host profiles + log discovery + PR-scope filtering + consent notice + a thin `final-gate` auto-discovery path. No downstream telemetry code changes.
 
 **Tech Stack:** Python 3.10+, stdlib only (`json`, `re`, `glob`, `datetime`, `pathlib`). Tests use `unittest`: `PYTHONPATH=src python -m unittest <module>`.
 
-**Scope (Plan A only):** Ships the `paired-correlation-timestamp` strategy + the Claude Code profile (the verifiable end-to-end loop). The `flat-duration-field` strategy is **deferred** — Codex already works via the existing `CodexHostJsonAdapter`; formalizing it as a named strategy is a later refactor. OTel increments (`error_type`, `parent_event_id`, fingerprint-repeat flag, profile validator) are **Plan B**.
+**Scope (Plan A only):** Ships the `paired-correlation-timestamp` strategy + the Claude Code profile, then adds the generic `record-pair-timestamp` strategy + Codex native profile so first-party hosts use profile-driven `agent-jsonl` projection without adding final-gate host branches. The explicit `codex-host-json` adapter remains supported for aggregate Codex exports. OTel increments (`error_type`, `parent_event_id`, fingerprint-repeat flag, profile validator) are **Plan B**.
 
 **Reference spec:** `docs/superpowers/specs/2026-06-21-phase2-host-telemetry-design.md`.
 

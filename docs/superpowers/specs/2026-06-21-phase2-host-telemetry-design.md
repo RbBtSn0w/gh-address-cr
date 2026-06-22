@@ -11,7 +11,7 @@ Phase 0/1 made telemetry *trustworthy* for the validation slice of a session: du
 - Runtime telemetry only records commands the runtime itself executes or that the agent reports back as validation evidence. The bulk of an agent-driven session (exploration, edits, tool calls, waits) is never captured.
 - The host-telemetry ingestion hook (`GH_ADDRESS_CR_HOST_TELEMETRY_INPUT`) already exists, but nobody produces the file or sets the variable, so it is empty in practice.
 
-**Phase 2 goal:** automatically capture whole-session performance/problem signals by *reading the host's own native session log*, mapping it into the existing normalized telemetry schema, with no per-session manual setup. First-party support: Claude Code. The mechanism is generalized so additional hosts are added by writing a declarative profile, not new code.
+**Phase 2 goal:** automatically capture whole-session performance/problem signals by *reading the host's own native session log*, mapping it into the existing normalized telemetry schema, with no per-session manual setup. First-party support: Claude Code and Codex. The mechanism is generalized so additional hosts are added by writing a declarative profile, not new final-gate branches.
 
 ### Capability survey evidence (decisive)
 
@@ -111,7 +111,8 @@ Key rules:
 Two ship in Phase 2:
 
 - **`paired-correlation-timestamp`** (Claude Code): iterate JSONL lines; index `tool_use` blocks by `id` (operation, start timestamp); index `tool_result` blocks by `correlation_path` (status, end timestamp); join by id; `duration_ms = end - start`; unpaired `tool_use` → event with no duration (Phase 0 reports it honestly). Parent turn (`agent_step`) → child `tool_call` parent-child link populated from the enclosing message uuid where available.
-- **`flat-duration-field`** (the Codex shape): events carry a direct `duration_ms` (or `started_at`+`ended_at`); no pairing needed. The existing `CodexHostJsonAdapter` is the reference implementation of this strategy's behavior; Phase 2 does *not* rewrite it, but documents it as the canonical `flat-duration-field` example so future hosts of that shape need only a profile.
+- **`record-pair-timestamp`** (top-level event-record logs such as Codex native sessions): profile-specified start/end records are paired by a profile-specified correlation id path; `duration_ms` is derived from timestamps; emitted fields are limited to operation/status/timing/correlation. Payload arguments, outputs, prompts, and file contents are never emitted.
+- **`flat-duration-field`** (Codex aggregate export shape): events carry a direct `duration_ms` (or `started_at`+`ended_at`); no pairing needed. The existing `CodexHostJsonAdapter` remains the public explicit-import adapter for aggregate Codex host exports.
 
 A profile naming a strategy that does not exist → fail-open with a diagnostic (§9), never a crash.
 
@@ -211,7 +212,7 @@ Tests use `unittest` (`PYTHONPATH=src python -m unittest <module>`). Layered to 
 
 This spec is intentionally split into two independent implementation plans so the verifiable closed loop ships first:
 
-- **Plan A — core whole-session capture (ship first):** profile registry + the two extraction strategies + Claude Code first-party profile + host discovery + PR-scope attribution (§6) + first-run consent notice (§7/R1) + auto-discovery wiring into `final-gate` + the safety/fail-open boundaries (§9) + the format health self-check (R3). Acceptance: a synthetic-transcript end-to-end test yields real, `wait`-excluded durations and `complete` coverage.
+- **Plan A — core whole-session capture (ship first):** profile registry + first-party Claude Code and Codex native profiles + host discovery + PR-scope attribution (§6) + first-run consent notice (§7/R1) + auto-discovery wiring into `final-gate` + the safety/fail-open boundaries (§9) + the format health self-check (R3). Acceptance: synthetic-transcript end-to-end tests yield real, `wait`-excluded durations and complete/partial coverage without leaking prompt, argument, output, or file content.
 - **Plan B — OTel-borrowed increments (ship after A):** optional `error_type` / `parent_event_id` fields (§8), the fingerprint-repeat-frequency inefficiency flag (§9), the OTel interop mapping doc (§10), and the profile validator / dry-run (R5). These are additive and independent of Plan A's closed loop.
 
 Each plan produces working, tested software on its own.

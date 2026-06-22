@@ -5,10 +5,13 @@ from pathlib import Path
 
 from gh_address_cr.core.host_telemetry.attribution import lines_in_window
 from gh_address_cr.core.host_telemetry.profile import HostProfile
-from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
+from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp, record_pair_timestamp
 
 _MIN_PAIRING_RATIO = 0.5
-_STRATEGIES = {"paired-correlation-timestamp": paired_correlation_timestamp}
+_STRATEGIES = {
+    "paired-correlation-timestamp": paired_correlation_timestamp,
+    "record-pair-timestamp": record_pair_timestamp,
+}
 
 
 def read_lines(path: Path) -> list[dict]:
@@ -50,7 +53,7 @@ def capture_agent_jsonl(
     if not scoped:
         return "", "unavailable"
     events, stats = strategy(scoped, profile, session_id=session_id)
-    seen = stats.get("tool_use_seen", 0)
+    seen = stats.get("tool_use_seen", stats.get("call_started", 0))
     if seen > 0 and (stats.get("paired", 0) / seen) < _MIN_PAIRING_RATIO:
         return "", "degraded"
     if not events:

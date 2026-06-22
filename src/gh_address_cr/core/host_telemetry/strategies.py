@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from gh_address_cr.core.host_telemetry.attribution import value_at_path
 from gh_address_cr.core.host_telemetry.profile import HostProfile
 from gh_address_cr.core.utils import parse_iso_datetime
 
@@ -90,3 +91,80 @@ def paired_correlation_timestamp(
 
     stats = {"tool_use_seen": len(starts), "paired": paired}
     return events, stats
+
+
+def record_pair_timestamp(
+    lines: list[dict[str, Any]],
+    profile: HostProfile,
+    *,
+    session_id: str,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    f = profile.fields
+    ts_path = str(f.get("timestamp_path") or "timestamp")
+    event_type_path = str(f.get("event_type_path") or "payload.type")
+    correlation_id_path = str(f.get("correlation_id_path") or "payload.call_id")
+    operation_path = str(f.get("operation_path") or "payload.name")
+    session_id_path = str(profile.record.get("session_id_path") or "payload.id")
+    session_record_match = f.get("session_record_match") or {"type": "session_meta"}
+    event_record_match = f.get("event_record_match") or {"type": "response_item"}
+    start_match = f.get("start_match") or {"payload.type": "function_call"}
+    end_match = f.get("end_match") or {"payload.type": "function_call_output"}
+
+    session_meta_seen = False
+    starts: dict[str, dict[str, Any]] = {}
+    results: dict[str, dict[str, Any]] = {}
+    for line in lines:
+        if _matches(line, session_record_match):
+            meta_session_id = value_at_path(line, session_id_path)
+            if meta_session_id and str(meta_session_id) != session_id:
+                return [], {"call_started": 0, "paired": 0}
+            session_meta_seen = True
+            continue
+        if not _matches(line, event_record_match):
+            continue
+        event_type = value_at_path(line, event_type_path)
+        call_id = value_at_path(line, correlation_id_path)
+        if not call_id:
+            continue
+        call_id = str(call_id)
+        when = parse_iso_datetime(value_at_path(line, ts_path))
+        if _matches(line, start_match):
+            starts[call_id] = {
+                "operation": str(value_at_path(line, operation_path) or event_type or "tool_call"),
+                "ts": when,
+            }
+        elif _matches(line, end_match):
+            results[call_id] = {"ts": when}
+
+    if not session_meta_seen:
+        return [], {"call_started": 0, "paired": 0}
+
+    events: list[dict[str, Any]] = []
+    paired = 0
+    for call_id, start in starts.items():
+        result = results.get(call_id)
+        duration_ms = 0
+        status = "unknown"
+        if result is not None:
+            paired += 1
+            if start["ts"] is not None and result["ts"] is not None:
+                duration_ms = max(0, int((result["ts"] - start["ts"]).total_seconds() * 1000))
+        events.append(
+            {
+                "schema_version": "1.0",
+                "source": profile.source,
+                "source_session_id": session_id,
+                "event_id": call_id,
+                "kind": profile.kind_for(start["operation"]),
+                "operation": start["operation"],
+                "status": status,
+                "duration_ms": duration_ms,
+                "correlation_id": call_id,
+            }
+        )
+
+    return events, {"call_started": len(starts), "paired": paired}
+
+
+def _matches(line: dict[str, Any], expected: dict[str, Any]) -> bool:
+    return all(value_at_path(line, path) == value for path, value in expected.items())

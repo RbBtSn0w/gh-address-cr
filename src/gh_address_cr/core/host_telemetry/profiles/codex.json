@@ -1,0 +1,32 @@
+{
+  "profile_version": "1.0",
+  "source": "codex",
+  "format": "codex-native-session-jsonl",
+  "discovery": {
+    "glob": "~/.codex/sessions/*/*/*/rollout-*{session_id}.jsonl",
+    "session_id_env": ["CODEX_THREAD_ID"]
+  },
+  "record": { "container": "jsonl-lines", "session_id_path": "payload.id" },
+  "strategy": "record-pair-timestamp",
+  "fields": {
+    "timestamp_path": "timestamp",
+    "record_type_path": "type",
+    "event_type_path": "payload.type",
+    "correlation_id_path": "payload.call_id",
+    "session_record_match": { "type": "session_meta" },
+    "event_record_match": { "type": "response_item" },
+    "start_match": { "payload.type": "function_call" },
+    "end_match": { "payload.type": "function_call_output" },
+    "operation_path": "payload.name"
+  },
+  "kind_classification": {
+    "default": "tool_call",
+    "by_operation": {
+      "exec_command": "command",
+      "write_stdin": "command",
+      "apply_patch": "command"
+    }
+  },
+  "safety_allowlist": ["operation", "status", "timestamp", "correlation_id"],
+  "scope_attribution": { "mode": "active-pr-time-window" }
+}

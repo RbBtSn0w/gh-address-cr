@@ -207,14 +207,21 @@ def safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: s
 
 
 AUTO_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO"
-_CLAUDE_CODE_PROFILE = (
-    Path(__file__).resolve().parents[1] / "core" / "host_telemetry" / "profiles" / "claude_code.json"
-)
+_HOST_PROFILE_DIR = Path(__file__).resolve().parents[1] / "core" / "host_telemetry" / "profiles"
 
 
-def _autodiscovery_session_id() -> str | None:
-    value = os.environ.get("SESSION_ID")
-    return value or None
+def _autodiscovery_session_id(profile: host_profile.HostProfile) -> str | None:
+    return host_discovery.first_env_value(profile.discovery.get("session_id_env") or ["SESSION_ID"])
+
+
+def _load_host_profiles() -> list[host_profile.HostProfile]:
+    profiles: list[host_profile.HostProfile] = []
+    for path in sorted(_HOST_PROFILE_DIR.glob("*.json")):
+        try:
+            profiles.append(host_profile.load_profile(path))
+        except ValueError:
+            continue
+    return profiles
 
 
 def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, session_id: str | None = None) -> dict | None:
@@ -222,13 +229,25 @@ def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, sessio
         return None  # explicit input wins; handled by ingest_host_telemetry_from_environment
     if os.environ.get(AUTO_ENV) == "0":
         return None
-    session_id = session_id or _autodiscovery_session_id()
-    if not session_id:
-        return None
+    for profile in _load_host_profiles():
+        active_session_id = session_id or _autodiscovery_session_id(profile)
+        if not active_session_id:
+            continue
+        summary = _ingest_profile_via_autodiscovery(repo, pr_number, profile, active_session_id)
+        if summary is not None:
+            return summary
+    return None
+
+
+def _ingest_profile_via_autodiscovery(
+    repo: str,
+    pr_number: str,
+    profile: host_profile.HostProfile,
+    session_id: str,
+) -> dict | None:
     try:
-        profile = host_profile.load_profile(_CLAUDE_CODE_PROFILE)
         slug = host_discovery.project_slug_from_cwd(os.getcwd())
-        resolved = host_discovery.resolve_glob(profile.discovery["glob"], project_slug=slug)
+        resolved = host_discovery.resolve_glob(profile.discovery["glob"], project_slug=slug, session_id=session_id)
         transcript = host_discovery.discover_transcript(resolved)
         if transcript is None:
             return None
@@ -257,7 +276,7 @@ def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, sessio
             repo, pr_number, source=profile.source, fmt="agent-jsonl", raw=text
         )
     except Exception:
-        return safe_hook_unavailable_import_summary(repo, pr_number, source="claude-code", fmt="agent-jsonl")
+        return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
 
 
 def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:

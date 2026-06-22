@@ -9,9 +9,14 @@ from unittest.mock import patch
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.host_telemetry.attribution import distinct_sessions_in_window, lines_in_window
 from gh_address_cr.core.host_telemetry.capture import capture_agent_jsonl
-from gh_address_cr.core.host_telemetry.discovery import consent_notice_once, discover_transcript, project_slug_from_cwd
+from gh_address_cr.core.host_telemetry.discovery import (
+    consent_notice_once,
+    discover_transcript,
+    first_env_value,
+    project_slug_from_cwd,
+)
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
-from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp
+from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp, record_pair_timestamp
 from gh_address_cr.core.telemetry import SessionTelemetry, build_efficiency_report
 
 
@@ -61,6 +66,34 @@ def _cc_profile():
             "timestamp_path": "timestamp",
         },
         kind_classification={"default": "tool_call", "wait": ["AskUserQuestion"], "by_operation": {"Bash": "command"}},
+        safety_allowlist=("operation", "status", "timestamp", "correlation_id"),
+    )
+
+
+def _codex_profile():
+    return HostProfile(
+        source="codex",
+        strategy="record-pair-timestamp",
+        discovery={
+            "glob": "~/.codex/sessions/*/*/*/rollout-*{session_id}.jsonl",
+            "session_id_env": ["CODEX_THREAD_ID"],
+        },
+        record={"container": "jsonl-lines", "session_id_path": "payload.id"},
+        fields={
+            "timestamp_path": "timestamp",
+            "record_type_path": "type",
+            "event_type_path": "payload.type",
+            "correlation_id_path": "payload.call_id",
+            "session_record_match": {"type": "session_meta"},
+            "event_record_match": {"type": "response_item"},
+            "start_match": {"payload.type": "function_call"},
+            "end_match": {"payload.type": "function_call_output"},
+            "operation_path": "payload.name",
+        },
+        kind_classification={
+            "default": "tool_call",
+            "by_operation": {"exec_command": "command", "write_stdin": "command", "apply_patch": "command"},
+        },
         safety_allowlist=("operation", "status", "timestamp", "correlation_id"),
     )
 
@@ -158,6 +191,46 @@ class PairedStrategyTests(unittest.TestCase):
         self.assertEqual(events, [])
 
 
+class RecordPairStrategyTests(unittest.TestCase):
+    def _lines(self):
+        return [
+            {"timestamp": "2026-06-21T10:00:00Z", "type": "session_meta",
+             "payload": {"id": "codex-s1", "cwd": "/repo"}},
+            {"timestamp": "2026-06-21T10:00:01Z", "type": "response_item",
+             "payload": {"type": "function_call", "name": "exec_command", "call_id": "call-1",
+                         "arguments": "SECRET ARGUMENTS"}},
+            {"timestamp": "2026-06-21T10:00:04Z", "type": "response_item",
+             "payload": {"type": "function_call_output", "call_id": "call-1", "output": "SECRET OUTPUT"}},
+        ]
+
+    def test_pairs_function_call_records(self):
+        events, stats = record_pair_timestamp(self._lines(), _codex_profile(), session_id="codex-s1")
+
+        self.assertEqual(stats["call_started"], 1)
+        self.assertEqual(stats["paired"], 1)
+        self.assertEqual(events[0]["source"], "codex")
+        self.assertEqual(events[0]["operation"], "exec_command")
+        self.assertEqual(events[0]["kind"], "command")
+        self.assertEqual(events[0]["duration_ms"], 3000)
+        self.assertEqual(events[0]["status"], "unknown")
+
+    def test_never_emits_arguments_or_output(self):
+        events, _ = record_pair_timestamp(self._lines(), _codex_profile(), session_id="codex-s1")
+        blob = json.dumps(events)
+
+        self.assertNotIn("SECRET ARGUMENTS", blob)
+        self.assertNotIn("SECRET OUTPUT", blob)
+        for event in events:
+            self.assertNotIn("arguments", event)
+            self.assertNotIn("output", event)
+
+    def test_rejects_other_session_meta(self):
+        events, stats = record_pair_timestamp(self._lines(), _codex_profile(), session_id="other")
+
+        self.assertEqual(events, [])
+        self.assertEqual(stats["call_started"], 0)
+
+
 class AttributionTests(unittest.TestCase):
     def _lines(self):
         return [
@@ -202,6 +275,19 @@ class DiscoveryTests(unittest.TestCase):
             self.assertTrue(consent_notice_once("claude-code", marker))
             self.assertFalse(consent_notice_once("claude-code", marker))
 
+    def test_resolve_glob_includes_session_id(self):
+        resolved = project_slug_from_cwd("/repo")
+        from gh_address_cr.core.host_telemetry.discovery import resolve_glob
+
+        self.assertIn("codex-s1", resolve_glob("/tmp/*{session_id}.jsonl", project_slug=resolved, session_id="codex-s1"))
+
+    def test_first_env_value_handles_single_and_multiple_names(self):
+        env = {"CODEX_THREAD_ID": "codex-s1"}
+
+        self.assertEqual(first_env_value("CODEX_THREAD_ID", env), "codex-s1")
+        self.assertEqual(first_env_value(["SESSION_ID", "CODEX_THREAD_ID"], env), "codex-s1")
+        self.assertIsNone(first_env_value(["SESSION_ID"], env))
+
 
 class CaptureTests(unittest.TestCase):
     def _transcript(self, path):
@@ -244,6 +330,24 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual(outcome, "degraded")
             self.assertEqual(text, "")
 
+    def test_capture_codex_session_produces_agent_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp) / "codex.jsonl"
+            t.write_text(
+                "\n".join(json.dumps(row) for row in RecordPairStrategyTests()._lines()),
+                encoding="utf-8",
+            )
+            text, outcome = capture_agent_jsonl(
+                _codex_profile(), transcript=t, session_id="codex-s1",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+
+            self.assertEqual(outcome, "captured")
+            line = json.loads(text.splitlines()[0])
+            self.assertEqual(line["source"], "codex")
+            self.assertEqual(line["operation"], "exec_command")
+            self.assertEqual(line["duration_ms"], 3000)
+
 
 class FinalGateAutodiscoveryTests(unittest.TestCase):
     def _seed_session(self, repo, pr, created_at):
@@ -271,6 +375,28 @@ class FinalGateAutodiscoveryTests(unittest.TestCase):
 
                 from gh_address_cr.commands import final_gate
                 summary = final_gate.ingest_host_telemetry_via_autodiscovery("octo/example", "5", session_id="s1")
+            self.assertIsNotNone(summary)
+            self.assertIn(summary["status"], {"SUCCESS", "PARTIAL"})
+
+    @patch("gh_address_cr.commands.final_gate.host_attribution.now_iso", return_value="2026-06-21T10:01:00Z")
+    @patch("gh_address_cr.commands.final_gate.host_discovery.discover_transcript")
+    def test_autodiscovery_ingests_codex_profile(self, discover, _now):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp,
+                                           "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO": "1",
+                                           "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT": "",
+                                           "CODEX_THREAD_ID": "codex-s1",
+                                           "SESSION_ID": ""}, clear=False):
+                self._seed_session("octo/example", "5", "2026-06-21T09:59:00Z")
+                transcript = Path(tmp) / "codex-s1.jsonl"
+                transcript.write_text(
+                    "\n".join(json.dumps(row) for row in RecordPairStrategyTests()._lines()),
+                    encoding="utf-8",
+                )
+                discover.return_value = transcript
+
+                from gh_address_cr.commands import final_gate
+                summary = final_gate.ingest_host_telemetry_via_autodiscovery("octo/example", "5")
             self.assertIsNotNone(summary)
             self.assertIn(summary["status"], {"SUCCESS", "PARTIAL"})
 
@@ -317,3 +443,23 @@ class EndToEndReportTests(unittest.TestCase):
             line_kinds = {json.loads(ln)["operation"]: json.loads(ln)["kind"] for ln in text.splitlines()}
             self.assertEqual(line_kinds["AskUserQuestion"], "wait")
             self.assertEqual(line_kinds["Bash"], "command")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_codex_captured_transcript_flows_into_report(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            SessionTelemetry.reset()
+            fixture = Path(__file__).resolve().parents[1] / "fixtures" / "host_telemetry" / "codex-session-sample.jsonl"
+            text, outcome = capture_agent_jsonl(
+                _codex_profile(), transcript=fixture, session_id="codex-sess-e2e",
+                start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
+            )
+            self.assertEqual(outcome, "captured")
+            from gh_address_cr.core.telemetry import import_external_telemetry
+            summary = import_external_telemetry("octo/example", "5", source="codex", fmt="agent-jsonl", raw=text)
+            self.assertEqual(summary["status"], "SUCCESS")
+
+            report = build_efficiency_report("octo/example", "5")
+            self.assertTrue(report["duration_observed"])
+            self.assertIn("codex", json.dumps(report))
+            self.assertNotIn("DO NOT LEAK", json.dumps(report))

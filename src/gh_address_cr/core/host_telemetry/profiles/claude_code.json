@@ -2,7 +2,7 @@
   "profile_version": "1.0",
   "source": "claude-code",
   "format": "claude-code-transcript",
-  "discovery": { "glob": "~/.claude/projects/{project_slug}/*.jsonl", "project_slug_from": "cwd" },
+  "discovery": { "glob": "~/.claude/projects/{project_slug}/*.jsonl", "project_slug_from": "cwd", "session_id_env": ["SESSION_ID"] },
   "record": { "container": "jsonl-lines", "session_id_path": "sessionId" },
   "strategy": "paired-correlation-timestamp",
   "fields": {
