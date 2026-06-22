@@ -36,13 +36,13 @@ Agent protocol commands:
 /gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>
 /gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>
 /gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
-/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
-/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>
+/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>
 /gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>
-/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
+/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --homogeneous-reason <why>
 /gh-address-cr agent resolve <owner/repo> <pr_number> --reject|--clarify --match-files --files <paths> --homogeneous-reason <why>
-/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files
-/gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed>
+/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files
+/gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>
 /gh-address-cr agent publish <owner/repo> <pr_number>
 /gh-address-cr agent leases <owner/repo> <pr_number>
 /gh-address-cr agent reclaim <owner/repo> <pr_number>
@@ -84,6 +84,31 @@ If the runtime is missing, execution must fail loudly before session mutation. D
 
 ## Telemetry Coverage
 
+### Telemetry activation (do this by default)
+
+To make `final-gate` produce a non-empty telemetry summary line, do two things during a normal run:
+
+1. **Carry measured timing on every `--validation`.** Add a `@<n>ms` (or `@<n>s`) suffix to each command result so the runtime records real duration. Bare `cmd=passed` records zero duration and emits a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic with an empty `duration`/`slowest` line.
+2. **Import host telemetry before `final-gate`** whenever the host can export safe PR-scoped JSONL.
+
+```text
+# 1. resolve with measured validation timing (suffix @<n>ms or @<n>s)
+gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> \
+  --files <paths> --summary "..." --why "..." \
+  --validation "typecheck=passed@1800ms" --validation "unit-tests=passed@4200ms"
+
+# 2. before final-gate, import host telemetry if the host can export safe PR-scoped JSONL
+#    (either an explicit ingest, or the env var consumed by the final-gate hook)
+gh-address-cr telemetry ingest <owner/repo> <pr_number> --source assistant-host \
+  --format agent-jsonl --input <safe.jsonl>
+#    or: export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<safe.jsonl>
+
+# 3. run the gate and paste its completion_summary_line verbatim
+gh-address-cr final-gate <owner/repo> <pr_number>
+```
+
+The host JSONL is a host-exported, safe PR-scoped telemetry file (one JSON event per line, aggregate token/tool/duration/status data). It must not contain tokens, prompt text, usernames, machine names, or absolute paths; its field shape is defined by the runtime, so validate against `telemetry ingest` / `telemetry summary` rather than hand-crafting events. Host import is optional: if no safe JSONL is available, coverage stays `runtime-only`, but as long as step 1 carries timing the line still reports a real `duration`/`slowest` and the `TELEMETRY_TIMING_UNAVAILABLE` diagnostic disappears.
+
 When the surrounding agent host can export safe PR-scoped telemetry, import it before the final gate:
 
 ```text
@@ -118,7 +143,9 @@ When exactly one cached PR session exists, PR-scoped commands may omit `<owner/r
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. The single mutating entrypoint is `gh-address-cr agent resolve`; it records classification internally, so no separate `agent classify` step is needed on this path. For one thread, run `agent resolve <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>`. When one set of files/validation evidence addresses multiple threads, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton, then `agent resolve --batch --input <batch-response.json>` keeping per-thread summary/why entries. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, `agent resolve --trivial` only for documentation or typo-only threads (else `TRIVIAL_THREAD_NOT_ELIGIBLE`), and `agent resolve --stale --match-files` for STALE/outdated threads. To **decline** (not fix) the same repeated concern across many threads with one shared reply, use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files` (no commit/validation); the same body-identity gate blocks declining threads that raise distinct concerns. Then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. `agent publish` is the single canonical publish path; each `agent resolve` form also accepts `--publish` to publish accepted evidence immediately and reports `published` in its result. The granular `agent classify` / `agent next` / `agent submit` commands remain available as the low-level protocol that `resolve` is built on.
+GitHub review comment reply tasks must be submitted to the runtime before they can be published. The single mutating entrypoint is `gh-address-cr agent resolve`; it records classification internally, so no separate `agent classify` step is needed on this path. For one thread, run `agent resolve <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>`. When one set of files/validation evidence addresses multiple threads, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton, then `agent resolve --batch --input <batch-response.json>` keeping per-thread summary/why entries. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, `agent resolve --trivial` only for documentation or typo-only threads (else `TRIVIAL_THREAD_NOT_ELIGIBLE`), and `agent resolve --stale --match-files` for STALE/outdated threads. To **decline** (not fix) the same repeated concern across many threads with one shared reply, use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files` (no commit/validation); the same body-identity gate blocks declining threads that raise distinct concerns. Then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. `agent publish` is the single canonical publish path; each `agent resolve` form also accepts `--publish` to publish accepted evidence immediately and reports `published` in its result. The granular `agent classify` / `agent next` / `agent submit` commands remain available as the low-level protocol that `resolve` is built on.
+
+When resolving, record each `--validation` with its measured timing suffix (`@<n>ms`/`@<n>s`) so efficiency reporting has real duration. Then, before running `final-gate`, attempt host-telemetry import whenever the host can export safe PR-scoped JSONL (`telemetry ingest ... --source assistant-host` or `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT`). Run `final-gate` last and surface its exact `completion_summary_line`; see the **Telemetry activation** worked example above.
 
 Prefer `workflow_decision.v1` JSON for structured triage handoff when available. Required fields are `schema_version`, `request_id`, `item_id`, `decision`, and `reason`; Markdown decision blocks remain compatibility prose, not the preferred machine contract.
 
@@ -136,6 +163,8 @@ If an external producer result is already available, `findings --input <path>|- 
 - Do not invent severity. Only explicit `P0`, `P1`, `P2`, `P3`, or `P4` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping. Published fix replies should surface exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
 - Do not override first-scene severity silently. If `agent resolve` (any mode) or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
 - Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed and the final response includes the exact `completion_summary_line` or first bracketed line from `PR Completion Summary Guidance`.
+- Do not record `--validation` without a measured timing suffix when the real duration is known. Bare `cmd=passed` yields a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic and an empty `duration`/`slowest` line; use `cmd=passed@<n>ms` (or `@<n>s`).
+- Do not run `final-gate` without first attempting host-telemetry import when the host can export safe PR-scoped JSONL. Missing host telemetry must be reported as `runtime-only` coverage, not silently accepted as the only option.
 - Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.
 - Do not use this skill as the review engine itself; it manages intake, state, processing discipline, and gating.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.

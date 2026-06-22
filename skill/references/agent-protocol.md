@@ -35,17 +35,17 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Claims eligible non-stale GitHub review-thread `fix` items for the agent and writes a fillable `BatchActionResponse` skeleton.
 - `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>`
   - Validates an `ActionResponse`, lease ownership, and required evidence.
-- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
-- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Single unified resolution surface. Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix. Classification is recorded internally, so no separate `agent classify` round-trip is required.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial ... [--publish]`
   - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json> [--publish]`
   - Routes explicit per-thread batch evidence (shared files/validation, per-thread summary/why) through the lease and validation contract, plus stale-thread rejection.
-- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why> [--concern-label <label>] [--severity ... --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --homogeneous-reason <why> [--concern-label <label>] [--severity ... --severity-note <why>] [--publish]`
   - Homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session (no `<item_id>`; matches by files).
-- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files [--severity ... --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files [--severity ... --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - Inspects active and terminal claims.
@@ -104,10 +104,10 @@ Review signal is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or 
 
 Clarify, defer, and reject responses require `reply_markdown`. GitHub side-effect claims from AI agents are invalid. Efficiency telemetry is reported through `final-gate`, `audit_summary.md`, and structured efficiency reports, not appended to individual GitHub review-thread replies; agents must not manually add telemetry summaries to PR thread comments.
 
-For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved.
+For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved. The result token may carry a trailing measured-duration suffix `@<n>ms` or `@<n>s` (e.g. `unit-tests=passed@4200ms`); the runtime records that duration for efficiency reporting. Omitting the suffix records zero duration and surfaces a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic instead of a misleading `0ms` slowest-operation row, so include real timing by default.
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent resolve --batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent resolve --batch` only with `--input <batch-response.json>` (it fails with `MISSING_BATCH_INPUT` otherwise); for a homogeneous repeated concern use the non-batch `agent resolve --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>` form instead. When `resolve` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent resolve --batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent resolve --batch` only with `--input <batch-response.json>` (it fails with `MISSING_BATCH_INPUT` otherwise); for a homogeneous repeated concern use the non-batch `agent resolve --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --homogeneous-reason <why>` form instead. When `resolve` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.
