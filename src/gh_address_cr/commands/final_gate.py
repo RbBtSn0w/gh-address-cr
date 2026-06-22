@@ -211,14 +211,7 @@ _HOST_PROFILE_DIR = Path(__file__).resolve().parents[1] / "core" / "host_telemet
 
 
 def _autodiscovery_session_id(profile: host_profile.HostProfile) -> str | None:
-    env_names = profile.discovery.get("session_id_env") or ["SESSION_ID"]
-    if isinstance(env_names, str):
-        env_names = [env_names]
-    for name in env_names:
-        value = os.environ.get(str(name))
-        if value:
-            return value
-    return None
+    return host_discovery.first_env_value(profile.discovery.get("session_id_env") or ["SESSION_ID"])
 
 
 def _load_host_profiles() -> list[host_profile.HostProfile]:

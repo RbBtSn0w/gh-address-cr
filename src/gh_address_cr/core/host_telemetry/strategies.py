@@ -167,4 +167,4 @@ def record_pair_timestamp(
 
 
 def _matches(line: dict[str, Any], expected: dict[str, Any]) -> bool:
-    return all(value_at_path(line, str(path)) == value for path, value in expected.items())
+    return all(value_at_path(line, path) == value for path, value in expected.items())

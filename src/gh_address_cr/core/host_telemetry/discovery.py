@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob as globlib
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -17,6 +18,16 @@ def resolve_glob(pattern: str, *, project_slug: str, session_id: str = "") -> st
         pattern.replace("{project_slug}", project_slug).replace("{session_id}", session_id)
     )
     return expanded
+
+
+def first_env_value(env_names: str | list[str] | tuple[str, ...], environ: Mapping[str, str] | None = None) -> str | None:
+    source = environ if environ is not None else os.environ
+    names = [env_names] if isinstance(env_names, str) else env_names
+    for name in names:
+        value = source.get(str(name))
+        if value:
+            return value
+    return None
 
 
 def discover_transcript(resolved_glob: str) -> Path | None:

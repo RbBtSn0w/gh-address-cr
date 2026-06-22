@@ -9,7 +9,12 @@ from unittest.mock import patch
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.host_telemetry.attribution import distinct_sessions_in_window, lines_in_window
 from gh_address_cr.core.host_telemetry.capture import capture_agent_jsonl
-from gh_address_cr.core.host_telemetry.discovery import consent_notice_once, discover_transcript, project_slug_from_cwd
+from gh_address_cr.core.host_telemetry.discovery import (
+    consent_notice_once,
+    discover_transcript,
+    first_env_value,
+    project_slug_from_cwd,
+)
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp, record_pair_timestamp
 from gh_address_cr.core.telemetry import SessionTelemetry, build_efficiency_report
@@ -275,6 +280,13 @@ class DiscoveryTests(unittest.TestCase):
         from gh_address_cr.core.host_telemetry.discovery import resolve_glob
 
         self.assertIn("codex-s1", resolve_glob("/tmp/*{session_id}.jsonl", project_slug=resolved, session_id="codex-s1"))
+
+    def test_first_env_value_handles_single_and_multiple_names(self):
+        env = {"CODEX_THREAD_ID": "codex-s1"}
+
+        self.assertEqual(first_env_value("CODEX_THREAD_ID", env), "codex-s1")
+        self.assertEqual(first_env_value(["SESSION_ID", "CODEX_THREAD_ID"], env), "codex-s1")
+        self.assertIsNone(first_env_value(["SESSION_ID"], env))
 
 
 class CaptureTests(unittest.TestCase):
