@@ -22,6 +22,17 @@ class TestTelemetry(unittest.TestCase):
     def setUp(self):
         SessionTelemetry.reset()
 
+    def test_telemetry_adapter_parse_documents_malformed_input_error_contract(self):
+        from gh_address_cr.core.telemetry import TelemetryAdapter
+
+        doc = TelemetryAdapter.parse.__doc__ or ""
+
+        self.assertIn("TelemetryParseResult", doc)
+        self.assertIn("ValueError", doc)
+        self.assertIn("TypeError", doc)
+        self.assertIn("KeyError", doc)
+        self.assertIn("IndexError", doc)
+
     def test_record_metric(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("ls -l", 100.0, 101.5, 0)
@@ -3037,6 +3048,32 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["accepted_count"], 0)
                 # Confirm we only expose the exception type name and NOT the raw exception message for safety
                 self.assertTrue(any(diag == "Adapter parsing failed: ValueError" for diag in result["diagnostics"]))
+
+    def test_custom_telemetry_adapter_unexpected_exception_fails_loud(self):
+        from gh_address_cr.core.telemetry import (
+            TelemetryAdapter,
+            TelemetryParseResult,
+            register_adapter,
+            unregister_adapter,
+        )
+
+        class MockCrashedAdapter(TelemetryAdapter):
+            def parse(self, raw: str, source: str) -> TelemetryParseResult:
+                raise RuntimeError("unexpected adapter bug")
+
+        register_adapter("mock-unexpected-crash", MockCrashedAdapter())
+        self.addCleanup(lambda: unregister_adapter("mock-unexpected-crash"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
+                with self.assertRaisesRegex(RuntimeError, "unexpected adapter bug"):
+                    import_external_telemetry(
+                        "octo/example",
+                        "77",
+                        source="custom-source",
+                        fmt="mock-unexpected-crash",
+                        raw="dummy_payload",
+                    )
 
     def test_custom_telemetry_adapter_nan_metadata_rejection(self):
         from gh_address_cr.core.telemetry import (

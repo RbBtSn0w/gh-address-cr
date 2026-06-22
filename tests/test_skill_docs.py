@@ -16,6 +16,7 @@ TROUBLESHOOTING_MD = DOCS_DIR / "troubleshooting.md"
 WORKFLOWS_MD = DOCS_DIR / "workflows.md"
 AGENTS_MD = ROOT / "AGENTS.md"
 CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
+HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
 OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
@@ -48,6 +49,13 @@ def cli_topology_section():
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
+    def test_handoff_module_documents_non_event_sourced_metadata_boundary(self):
+        text = HANDOFF_PY.read_text(encoding="utf-8")
+
+        self.assertIn("non-event-sourced metadata", text)
+        self.assertIn("not authoritative runtime truth", text)
+        self.assertIn("final-gate", text)
+
     def test_skill_declares_packaged_skill_root_scope(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("This file is part of the packaged `gh-address-cr` skill.", text)

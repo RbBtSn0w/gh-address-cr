@@ -14,6 +14,7 @@ from gh_address_cr.core.leases import (
     release_lease,
     submit_lease,
 )
+from tests.helpers import ROOT
 
 NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
@@ -37,6 +38,12 @@ def make_item(item_id, path=None, conflict_keys=(), item_kind="local_finding", t
 
 
 class ClaimLeaseLifecycleTest(unittest.TestCase):
+    def test_lease_module_does_not_silently_fallback_when_models_import_fails(self):
+        source = (ROOT / "src" / "gh_address_cr" / "core" / "leases.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("except ImportError", source)
+        self.assertNotIn("_FallbackClaimLease", source)
+
     def test_lifecycle_transitions_cover_active_submitted_and_terminal_states(self):
         session = make_session()
 
