@@ -1,3 +1,9 @@
+## [3.1.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.4...v3.1.5) (2026-06-22)
+
+### Bug Fixes
+
+* **telemetry:** implement CLI health telemetry tracking ([#151](https://github.com/RbBtSn0w/gh-address-cr/issues/151)) ([bfb1af5](https://github.com/RbBtSn0w/gh-address-cr/commit/bfb1af541acae5cc17954c9c9c09d2a62ca3fa79))
+
 ## [3.1.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.3...v3.1.4) (2026-06-22)
 
 ### Bug Fixes
