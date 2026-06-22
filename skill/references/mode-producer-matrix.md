@@ -183,6 +183,7 @@ Telemetry is optional, PR-scoped, and never mutates review state.
 | You have | Run |
 | --- | --- |
 | Generic agent JSONL | `gh-address-cr telemetry ingest <r> <pr> --source <source> --format agent-jsonl --input <path>|-` |
+| Codex native session log | Auto-discovered by `final-gate` from the packaged `codex` profile when `CODEX_THREAD_ID` is available |
 | Codex host aggregate JSON | `gh-address-cr telemetry ingest <r> <pr> --source codex --format codex-host-json --input <path>|-` |
 | A safe JSONL feed the host can hand the gate | `export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path>` before `final-gate` (auto-imported) |
 | Just want the report | `gh-address-cr telemetry summary <r> <pr> --format markdown` |

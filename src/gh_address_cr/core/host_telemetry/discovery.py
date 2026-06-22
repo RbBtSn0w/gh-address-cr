@@ -12,8 +12,10 @@ def project_slug_from_cwd(cwd: str) -> str:
     return cwd.replace("\\", "-").replace("/", "-")
 
 
-def resolve_glob(pattern: str, *, project_slug: str) -> str:
-    expanded = os.path.expanduser(pattern.replace("{project_slug}", project_slug))
+def resolve_glob(pattern: str, *, project_slug: str, session_id: str = "") -> str:
+    expanded = os.path.expanduser(
+        pattern.replace("{project_slug}", project_slug).replace("{session_id}", session_id)
+    )
     return expanded
 
 

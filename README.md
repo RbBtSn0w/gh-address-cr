@@ -141,6 +141,11 @@ gh-address-cr final-gate owner/repo 123
 
 `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`. The hook uses
 the same telemetry ingestion contract before final-gate artifacts are written.
+When `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` is not set, `final-gate` can
+auto-discover first-party Claude Code and Codex native session logs through
+packaged host profiles. Codex native capture emits the same `agent-jsonl`
+contract as other hosts; `codex-host-json` remains available for explicit
+aggregate Codex exports.
 
 Every final efficiency summary reports one coverage label: `complete`,
 `partial`, `runtime-only`, or `unavailable`. Imported events are normalized to

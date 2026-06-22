@@ -54,6 +54,7 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-`
   - Imports safe PR-scoped telemetry from a generic agent or host-specific adapter. This does not mutate review item state.
 - `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source codex --format codex-host-json --input <path>|-`
+- Codex native session logs can also be auto-discovered by `final-gate` through the packaged `codex` host profile when `CODEX_THREAD_ID` is available; that path emits the same `agent-jsonl` contract and does not emit raw arguments or outputs.
   - Imports safe aggregate Codex host exports such as tokens, tool usage, duration, and status into the same canonical event model.
 - `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
   - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
