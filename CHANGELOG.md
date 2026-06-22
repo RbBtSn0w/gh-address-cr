@@ -1,3 +1,9 @@
+## [3.1.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.0...v3.1.1) (2026-06-22)
+
+### Bug Fixes
+
+* harden runtime contract boundaries ([#147](https://github.com/RbBtSn0w/gh-address-cr/issues/147)) ([14b134d](https://github.com/RbBtSn0w/gh-address-cr/commit/14b134d37bb2adcabf7a4fcf578b30f7f8952092))
+
 ## [3.1.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.0.2...v3.1.0) (2026-06-21)
 
 ### Features
