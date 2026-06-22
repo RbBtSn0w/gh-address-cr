@@ -1,3 +1,9 @@
+## [3.1.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.3...v3.1.4) (2026-06-22)
+
+### Bug Fixes
+
+* **telemetry:** support Codex session profiling and fix validation timing ([#150](https://github.com/RbBtSn0w/gh-address-cr/issues/150)) ([743a110](https://github.com/RbBtSn0w/gh-address-cr/commit/743a110cff5395fb54a91f1bcfbb824214318e4f))
+
 ## [3.1.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.2...v3.1.3) (2026-06-22)
 
 ### Bug Fixes
