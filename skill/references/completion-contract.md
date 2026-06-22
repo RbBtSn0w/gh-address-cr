@@ -21,7 +21,7 @@ Final output must include:
 3. `Verified: 0 Pending Reviews found`
 4. unresolved GitHub threads = 0
 5. session blocking items = 0
-6. the compact metrics line, for example `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only/medium (2 events, 100.0%; runtime only, no host import) | sources: runtime 2 | duration: no observed duration | slowest: none | issues: none]`
+6. the compact metrics line. Degraded (no timing, no host import) looks like `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: runtime-only/medium (2 events, 100.0%; runtime only, no host import) | sources: runtime 2 | duration: no observed duration | slowest: none | issues: none]`. Activated (validation timing + host import) looks like `[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: partial/high (9 events, 100.0%; runtime+host import) | sources: runtime 2, assistant-host 7 | duration: 21.4s | slowest: unit-tests (4.2s) | issues: none]`. Prefer the activated shape by carrying `--validation cmd=passed@<n>ms` timing and importing host telemetry before the gate.
 7. telemetry coverage label and efficiency report path
 8. audit summary path + sha256
 

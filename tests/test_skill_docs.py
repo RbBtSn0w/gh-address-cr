@@ -108,7 +108,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "/gh-address-cr agent submit <owner/repo> <pr_number>",
             "/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id>",
             "/gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files",
             "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
             "/gh-address-cr agent publish <owner/repo> <pr_number>",
             "/gh-address-cr agent leases <owner/repo> <pr_number>",
