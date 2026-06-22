@@ -1,12 +1,7 @@
 import inspect
-import sys
 import unittest
 
-from tests.helpers import SRC_ROOT
-
-sys.path.insert(0, str(SRC_ROOT))
-
-from gh_address_cr.core import agent_batch, agent_protocol, workflow, workflow_matching  # noqa: E402
+from gh_address_cr.core import agent_batch, agent_protocol, workflow, workflow_matching
 
 
 class Issue139DecompositionTestCase(unittest.TestCase):
