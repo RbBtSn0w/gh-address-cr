@@ -24,6 +24,7 @@ from gh_address_cr.agent.responses import (  # noqa: E402
     validate_response_for_request,
 )
 from gh_address_cr.agent.roles import AgentRole  # noqa: E402
+from gh_address_cr.commands.agent import _parse_agent_validation  # noqa: E402
 from gh_address_cr.core.models import (  # noqa: E402
     LEASE_RECOVERY_OUTCOMES,
     LOGIC_VALIDATION_GATE_EFFECTS,
@@ -573,26 +574,18 @@ class CliValidationParseTimingTests(unittest.TestCase):
     `agent resolve ... --validation cmd=passed@1500ms` records zero duration."""
 
     def test_parse_agent_validation_captures_ms_suffix(self):
-        from gh_address_cr.commands.agent import _parse_agent_validation
-
         records = _parse_agent_validation(["unit-tests=passed@4200ms"])
         self.assertEqual(records, [{"command": "unit-tests", "result": "passed", "duration": 4.2}])
 
     def test_parse_agent_validation_captures_seconds_suffix(self):
-        from gh_address_cr.commands.agent import _parse_agent_validation
-
         records = _parse_agent_validation(["pytest=failed@3.5s"])
         self.assertEqual(records, [{"command": "pytest", "result": "failed", "duration": 3.5}])
 
     def test_parse_agent_validation_without_suffix_has_no_duration(self):
-        from gh_address_cr.commands.agent import _parse_agent_validation
-
         records = _parse_agent_validation(["ruff check=passed"])
         self.assertEqual(records, [{"command": "ruff check", "result": "passed"}])
 
     def test_parse_agent_validation_preserves_env_assignment_command(self):
-        from gh_address_cr.commands.agent import _parse_agent_validation
-
         records = _parse_agent_validation(["PYENV_VERSION=3.10.19 python -m unittest"])
         self.assertEqual(
             records,
