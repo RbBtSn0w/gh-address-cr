@@ -42,7 +42,7 @@ def load_host_profiles() -> tuple[list[host_profile.HostProfile], list[Telemetry
     for path in sorted(profile_dir().glob("*.json")):
         try:
             profiles.append(host_profile.load_profile(path))
-        except ValueError as exc:
+        except Exception as exc:
             issues.append(
                 TelemetryHealthIssue(
                     reason_code="TELEMETRY_PROFILE_INVALID",
@@ -77,7 +77,11 @@ def autodiscovery_profile_check(
     if not session_id:
         return base
 
-    slug = host_discovery.project_slug_from_cwd(cwd or os.getcwd())
+    try:
+        current_dir = os.getcwd()
+    except OSError:
+        current_dir = "."
+    slug = host_discovery.project_slug_from_cwd(cwd or current_dir)
     resolved_glob = host_discovery.resolve_glob(profile.discovery["glob"], project_slug=slug, session_id=session_id)
     matches = [Path(path) for path in glob.glob(resolved_glob) if Path(path).is_file()]
     if not matches:

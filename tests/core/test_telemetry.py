@@ -10,6 +10,7 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
 from gh_address_cr.core.telemetry import (
     SessionTelemetry,
+    autodiscovery_miss_import_summary,
     build_efficiency_report,
     command_label,
     efficiency_report_markdown,
@@ -159,6 +160,34 @@ class TestTelemetry(unittest.TestCase):
         self.assertNotIn("ghp_secret", label)
         self.assertNotIn("/Users/snow", label)
         self.assertNotIn("owner/repo", label)
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    @patch("gh_address_cr.core.telemetry._append_import_summary", side_effect=OSError("disk full"))
+    def test_autodiscovery_miss_summary_is_fail_open_when_import_ledger_unwritable(self, _append, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+
+            summary = autodiscovery_miss_import_summary(
+                "octo/example",
+                "77",
+                diagnostics=["host telemetry autodiscovery codex: TELEMETRY_TRANSCRIPT_NOT_FOUND"],
+            )
+
+            self.assertEqual(summary["reason_code"], "TELEMETRY_AUTODISCOVERY_MISS")
+            self.assertEqual(summary["diagnostics"][0], "host telemetry autodiscovery codex: TELEMETRY_TRANSCRIPT_NOT_FOUND")
+
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_invalid_utf8_last_machine_summary_becomes_health_issue(self, state_dir):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            path = core_paths.last_machine_summary_file("octo/example", "77")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"\xff\xfe\xfa")
+
+            report = build_efficiency_report("octo/example", "77")
+
+            reason_codes = {issue["reason_code"] for issue in report["cli_health_issues"]}
+            self.assertIn("TELEMETRY_STORE_UNAVAILABLE", reason_codes)
 
     def test_command_label_uses_shell_escaping_for_label_tokens(self):
         label = command_label(["/tmp/custom tool", "sub command", "--secret", "value"])

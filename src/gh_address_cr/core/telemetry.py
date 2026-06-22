@@ -880,7 +880,7 @@ def autodiscovery_miss_import_summary(repo: str, pr_number: str, *, diagnostics:
         duplicate_fingerprints=[],
         diagnostics=[_safe_diagnostic_text(diagnostic) for diagnostic in diagnostics],
     )
-    _append_import_summary(paths, summary)
+    _append_import_summary_if_available(paths, summary)
     return summary
 
 
@@ -1102,7 +1102,7 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "detail": f"last machine summary unreadable: {type(exc).__name__}",
             "next_action": "Repair the runtime summary artifact, then rerun telemetry doctor.",
         }
-    except json.JSONDecodeError:
+    except ValueError:
         return {
             "reason_code": "TELEMETRY_STORE_UNAVAILABLE",
             "severity": "warning",
