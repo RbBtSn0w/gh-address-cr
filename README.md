@@ -128,6 +128,7 @@ Telemetry commands are PR-scoped and do not mutate review item state:
 ```bash
 gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input agent-telemetry.jsonl
 gh-address-cr telemetry summary owner/repo 123 --format markdown
+gh-address-cr telemetry doctor owner/repo 123
 gh-address-cr telemetry ingest owner/repo 123 --source codex --format codex-host-json --input codex-host.json
 ```
 
@@ -154,6 +155,13 @@ reported through `accepted_fingerprints` and `duplicate_fingerprints` without
 inflating counts, durations, or slowest-operation rankings. Corrupted external
 telemetry remains fail-open for review and final-gate flows, while telemetry
 commands fail loudly with reason codes and diagnostics.
+
+Use `telemetry doctor` when coverage is `runtime-only` or `unavailable`, or
+when the efficiency report contains `cli_health_issues`. The doctor report
+checks packaged Codex/Claude Code profiles, host session environment, transcript
+discovery, PR attribution window availability, telemetry storage, and the latest
+CLI machine `reason_code`/`next_action` so telemetry can point to concrete
+repair work instead of only reporting slow or missing events.
 
 For GitHub review-thread replies, the single mutating entrypoint is
 `agent resolve`; it records classification internally, so no separate

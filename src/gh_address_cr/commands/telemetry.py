@@ -12,6 +12,7 @@ from gh_address_cr.commands.common import (
 )
 from gh_address_cr.core import cr_metrics as core_cr_metrics
 from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core import telemetry_health
 from gh_address_cr.core.io import write_json_atomic
 
 
@@ -20,11 +21,12 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         print(
             "usage: gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-\n"
             "       gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]\n"
-            "       gh-address-cr telemetry cr-summary <owner/repo> <pr_number> [--format json|markdown]"
+            "       gh-address-cr telemetry cr-summary <owner/repo> <pr_number> [--format json|markdown]\n"
+            "       gh-address-cr telemetry doctor <owner/repo> <pr_number> [--format json|markdown]"
         )
         return 0
     if not repo:
-        print("telemetry requires a subcommand: ingest, summary, or cr-summary", file=sys.stderr)
+        print("telemetry requires a subcommand: ingest, summary, cr-summary, or doctor", file=sys.stderr)
         return 2
 
     subcommand = repo
@@ -108,6 +110,22 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
         else:
             print(json.dumps(report, sort_keys=True))
         return 0
+
+    if subcommand == "doctor":
+        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry doctor")
+        parser.add_argument("repo")
+        parser.add_argument("pr_number")
+        parser.add_argument("--format", choices=("json", "markdown"), default="json")
+        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+        if scope_error is not None:
+            return emit_scope_resolution_error(scope_error)
+        parsed = parser.parse_args(scoped_args)
+        report = telemetry_health.build_doctor_report(parsed.repo, parsed.pr_number)
+        if parsed.format == "markdown":
+            print(telemetry_health.doctor_report_markdown(report), end="")
+        else:
+            print(json.dumps(report, sort_keys=True))
+        return 0 if report["status"] == "PASSED" else 2
 
     print(f"Unknown telemetry command: {subcommand}", file=sys.stderr)
     return 2
