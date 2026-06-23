@@ -40,6 +40,6 @@ Core review operations must remain fail-open for missing telemetry. Ingestion fa
 ---
 
 ## Verification Plan
-1. **Linting**: Run `ruff check src tests` (verify no McCain complexity violations when target-complexity is reduced).
+1. **Linting**: Run `ruff check src tests` (verify no McCabe complexity violations when target-complexity is reduced).
 2. **Type Checking**: Run `mypy src/gh_address_cr` (verify that error count is zero or significantly reduced).
 3. **Tests**: Run `python3 -m unittest discover -s tests` (verify no regressions).

@@ -96,7 +96,7 @@
 
 - [ ] **Step 1: Decompose HighLevelReviewRuntime.handle**
   Extract parameter checks and findings ingestion into helper functions `_preflight_check` and `_ingest_and_evaluate`.
-- [ ] **Step 2: Lower McCain complexity threshold in pyproject.toml**
+- [ ] **Step 2: Lower McCabe complexity threshold in pyproject.toml**
   Set `max-complexity = 15` under `[tool.ruff.lint.mccabe]`.
 - [ ] **Step 3: Narrow exception catch in orchestrator/harness.py check_runtime_version**
   Catch `(ValueError, IndexError, AttributeError, NameError)` instead of `Exception`.
