@@ -35,14 +35,14 @@ def gh_read_json(args: list[str]) -> Any:
     return json.loads(result.stdout)
 
 
-def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
+def gh_write_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess[str]:
     result = run_cmd_native(cmd, stdin=input_text, retries=1)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
     return result
 
 
-def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: str | None, message: str, details: dict | None) -> None:
+def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: str | None, message: str, details: dict[str, Any] | None) -> None:
     path = core_paths.audit_log_file(repo, pr_number)
     core_audit_log.AuditLog(path).append(
         action, status, repo, pr_number, message=message, details=details, run_id=audit_id
@@ -284,7 +284,7 @@ def unique_preserving_order(values: list[str]) -> list[str]:
     return ordered
 
 
-def load_json_file(path: Path, errors: list[str], *, label: str) -> dict:
+def load_json_file(path: Path, errors: list[str], *, label: str) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -386,7 +386,7 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict[str, 
     return context
 
 
-def merge_context(args: argparse.Namespace, context: dict) -> None:
+def merge_context(args: argparse.Namespace, context: dict[str, Any]) -> None:
     raw_summary = context.get("machine_summary")
     machine_summary: dict[str, Any] = raw_summary if isinstance(raw_summary, dict) else {}
 
@@ -426,7 +426,7 @@ def _format_diagnostics_args(args: argparse.Namespace) -> list[str]:
     return values
 
 
-def _format_diagnostics_context(context: dict) -> list[str]:
+def _format_diagnostics_context(context: dict[str, Any]) -> list[str]:
     values = []
     if context.get("head_sha"):
         values.append(f"- Head SHA: `{context['head_sha']}`")
@@ -453,12 +453,12 @@ def _format_diagnostics_context(context: dict) -> list[str]:
     return values
 
 
-def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
+def technical_diagnostics(args: argparse.Namespace, context: dict[str, Any]) -> list[str]:
     values = _format_diagnostics_args(args) + _format_diagnostics_context(context)
     return values or ["- Not provided."]
 
 
-def build_fingerprint_payload(args: argparse.Namespace) -> dict:
+def build_fingerprint_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "category": args.category,
         "title": args.title,
@@ -491,7 +491,7 @@ def parse_github_time(value: str | None) -> datetime | None:
         return None
 
 
-def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[dict]:
+def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[dict[str, Any]]:
     query = f"repo:{target_repo} is:issue {fingerprint} in:body"
     response = gh_read_json(
         ["api", f"search/issues?q={quote_plus(query)}&per_page={DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE}"]
@@ -506,10 +506,10 @@ def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[
 
 def find_existing_feedback_issue(
     target_repo: str, fingerprint: str, cooldown_hours: int
-) -> tuple[str | None, dict | None]:
+) -> tuple[str | None, dict[str, Any] | None]:
     now = datetime.now(timezone.utc)
     cooldown_cutoff = now - timedelta(hours=cooldown_hours)
-    recent_closed_match: dict | None = None
+    recent_closed_match: dict[str, Any] | None = None
     for issue in search_existing_feedback_issues(target_repo, fingerprint):
         issue_fingerprint = extract_feedback_fingerprint(str(issue.get("body") or ""))
         if issue_fingerprint != fingerprint:
@@ -524,7 +524,7 @@ def find_existing_feedback_issue(
     return None, None
 
 
-def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) -> str:
+def build_issue_body(args: argparse.Namespace, context: dict[str, Any], fingerprint: str) -> str:
     repo_context = f"`{sanitize_text(args.using_repo)}`" if args.using_repo else "Not provided."
     pr_context = f"`{sanitize_text(args.using_pr)}`" if args.using_pr else "Not provided."
     source_command = f"`{sanitize_text(args.source_command)}`" if args.source_command else "Not provided."
@@ -571,7 +571,7 @@ def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) 
     return "\n".join(lines)
 
 
-def emit_result(payload: dict, exit_code: int, *, error_message: str | None = None) -> int:
+def emit_result(payload: dict[str, Any], exit_code: int, *, error_message: str | None = None) -> int:
     sys.stdout.write(json.dumps(payload))
     if error_message:
         print(error_message, file=sys.stderr)
@@ -617,7 +617,7 @@ def audit_scope(args: argparse.Namespace) -> tuple[str, str]:
     return args.using_repo or args.target_repo, args.using_pr or DEFAULT_FEEDBACK_PR
 
 
-def write_feedback_audit(args: argparse.Namespace, status: str, message: str, details: dict) -> None:
+def write_feedback_audit(args: argparse.Namespace, status: str, message: str, details: dict[str, Any]) -> None:
     repo, pr_number = audit_scope(args)
     audit_event("submit_feedback", status, repo, pr_number, args.audit_id, message, details)
 

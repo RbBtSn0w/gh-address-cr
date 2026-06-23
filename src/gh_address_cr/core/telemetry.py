@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict, cast, TypedDict, cast
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes
@@ -68,7 +68,7 @@ class ExecutionMetric:
     def is_success(self) -> bool:
         return self.exit_code == 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "command": self.command,
             "start_time": self.start_time,
@@ -85,22 +85,43 @@ MAX_DURATION_SECONDS = 60.0
 MAX_ERROR_RATE_PERCENT = 20.0
 
 
-@dataclass
-class EfficiencyReport:
+class EfficiencyReport(TypedDict):
     total_invocations: int
     total_duration: float
     success_rate: float
     flagged_inefficiencies: list[str]
-    metrics: list[ExecutionMetric]
+    metrics: list[dict[str, Any]]
 
-    def to_dict(self) -> dict:
-        return {
-            "total_invocations": self.total_invocations,
-            "total_duration": self.total_duration,
-            "success_rate": self.success_rate,
-            "flagged_inefficiencies": self.flagged_inefficiencies,
-            "metrics": [m.to_dict() for m in self.metrics],
-        }
+
+class SlowestOperation(TypedDict):
+    source: str
+    operation: str
+    duration_ms: float
+    status: str
+
+
+class EfficiencyReportPayload(TypedDict):
+    status: str
+    reason_code: str
+    repo: str
+    pr_number: str
+    coverage_label: str
+    sources: list[dict[str, Any]]
+    total_events: int
+    success_rate: float
+    total_observed_duration_ms: float
+    duration_observed: bool
+    telemetry_overhead_budget_ms: int
+    telemetry_overhead_ms: float | None
+    host_metrics: dict[str, int]
+    slowest_operations: list[SlowestOperation]
+    error_prone_operations: list[dict[str, Any]]
+    inefficiency_flags: list[str]
+    cli_health_issues: list[dict[str, Any]]
+    diagnostics: list[str]
+    confidence: float
+    report_generated_at: str
+    report_artifact: str
 
 
 @dataclass(frozen=True)
@@ -170,7 +191,7 @@ class TelemetryAdapter(ABC):
 
 
 class TelemetryAdapterRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self._adapters: dict[tuple[str, str | None], TelemetryAdapter] = {}
 
     def register(self, fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
@@ -387,7 +408,7 @@ register_adapter("codex-host-json", CodexHostJsonAdapter(), source="codex")
 class SessionTelemetry:
     _instance: ClassVar[SessionTelemetry | None] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.metrics: list[ExecutionMetric] = []
         self.telemetry_file: Path | None = None
         self._loaded_files: set[Path] = set()
@@ -556,7 +577,13 @@ class SessionTelemetry:
     def get_report(self) -> EfficiencyReport:
         total_inv = len(self.metrics)
         if total_inv == 0:
-            return EfficiencyReport(0, 0.0, 0.0, [], [])
+            return {
+                "total_invocations": 0,
+                "total_duration": 0.0,
+                "success_rate": 0.0,
+                "flagged_inefficiencies": [],
+                "metrics": [],
+            }
 
         total_dur = sum(m.duration for m in self.metrics)
         successes = sum(1 for m in self.metrics if m.is_success)
@@ -564,30 +591,30 @@ class SessionTelemetry:
 
         flags = self.evaluate_efficiency()
 
-        return EfficiencyReport(
-            total_invocations=total_inv,
-            total_duration=total_dur,
-            success_rate=success_rate,
-            flagged_inefficiencies=flags,
-            metrics=list(self.metrics),
-        )
+        return {
+            "total_invocations": total_inv,
+            "total_duration": total_dur,
+            "success_rate": success_rate,
+            "flagged_inefficiencies": flags,
+            "metrics": [m.to_dict() for m in self.metrics],
+        }
 
     def get_summary_string(self) -> str | None:
         if not self.metrics:
             return None
 
         report = self.get_report()
-        summary = f"{report.total_invocations} tools invoked ({report.success_rate:.0f}% success). Total tool duration: {report.total_duration:.1f}s."
+        summary = f"{report["total_invocations"]} tools invoked ({report["success_rate"]:.0f}% success). Total tool duration: {report["total_duration"]:.1f}s."
 
-        if report.flagged_inefficiencies:
+        if report["flagged_inefficiencies"]:
             summary += "\n> ⚠️ **Inefficiencies Detected**:\n"
-            summary += "\n".join(f"> - {f}" for f in report.flagged_inefficiencies)
+            summary += "\n".join(f"> - {f}" for f in report["flagged_inefficiencies"])
 
         return summary
 
 
 def _failed_import_summary(
-    paths,
+    paths: core_paths.SessionPaths,
     *,
     source: str,
     fmt: str,
@@ -618,7 +645,7 @@ def _failed_import_summary(
 
 def _resolve_import_status(
     *,
-    accepted: list,
+    accepted: list[ExternalTelemetryEvent],
     rejected_count: int,
     duplicate_count: int,
     unsafe_seen: bool,
@@ -641,7 +668,7 @@ def _resolve_import_status(
     return "FAILED", protocol_codes.MALFORMED_TELEMETRY, "No telemetry events were provided."
 
 
-def _load_import_state(paths, *, source: str, fmt: str):
+def _load_import_state(paths: core_paths.SessionPaths, *, source: str, fmt: str) -> tuple[list[ExternalTelemetryEvent], set[str], None] | tuple[None, None, dict[str, Any]]:
     """Load existing events + fingerprints, returning a failure summary if storage is corrupt.
 
     Returns ``(existing, existing_fingerprints, None)`` on success, or
@@ -757,8 +784,8 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
         )
 
     existing, existing_fingerprints, load_failure = _load_import_state(paths, source=source, fmt=fmt)
-    if load_failure is not None:
-        return load_failure
+    if load_failure is not None or existing_fingerprints is None:
+        return load_failure or {}
 
     try:
         parse_result = adapter.parse(raw, source)
@@ -928,7 +955,7 @@ def autodiscovery_miss_import_summary(repo: str, pr_number: str, *, diagnostics:
 TELEMETRY_OVERHEAD_BUDGET_MS = 250
 
 
-def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
+def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayload:
     overhead_started_at = time.perf_counter()
     paths = core_paths.SessionPaths(repo, pr_number)
     runtime_events = _runtime_events(paths)
@@ -966,7 +993,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
     report_path = paths.efficiency_report_file
-    report: dict[str, Any] = {
+    report: EfficiencyReportPayload = {
         "status": "SUCCESS",
         "reason_code": "TELEMETRY_REPORT_READY",
         "repo": repo,
@@ -993,7 +1020,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         "inefficiency_flags": flags,
         "cli_health_issues": _cli_health_issues(paths=paths, events=events, diagnostics=diagnostics),
         "diagnostics": diagnostics,
-        "confidence": _confidence_for_coverage(coverage_label),
+        "confidence": float(_confidence_for_coverage(coverage_label)),
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "report_artifact": str(report_path),
     }
@@ -1270,7 +1297,7 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         raise ValueError(f"unsupported kind: {kind}")
     if status not in SAFE_STATUSES:
         raise ValueError(f"unsupported status: {status}")
-    duration_ms = _event_duration_ms(payload)
+    duration_ms = _event_duration_ms(cast(dict[str, Any], payload))
     metadata = _safe_metadata(payload.get("metadata") or {})
     session_id = _safe_source_session_id(str(payload.get("source_session_id") or "unknown-session"))
     operation_payload = payload["operation"]
@@ -1438,7 +1465,7 @@ def _sanitize_stored_identity_field(field: str, value: str) -> str:
     return value
 
 
-def _extract_stored_required_strings(payload: dict, source: str) -> dict[str, str]:
+def _extract_stored_required_strings(payload: dict[str, Any], source: str) -> dict[str, str]:
     """Validate and sanitize the required string fields of a stored telemetry record."""
     required_strings = ("schema_version", "source_session_id", "event_id", "kind", "operation", "status")
     values: dict[str, str] = {"source": _safe_source_label(source)}
@@ -1464,7 +1491,7 @@ def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
         raise ValueError("missing required field(s): source")
     if not isinstance(source, str):
         raise ValueError("source must be a string")
-    values = _extract_stored_required_strings(payload, source)
+    values = _extract_stored_required_strings(cast(dict[str, Any], payload), source)
     duration_ms = payload.get("duration_ms")
     if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
         raise ValueError("duration_ms must be an integer")

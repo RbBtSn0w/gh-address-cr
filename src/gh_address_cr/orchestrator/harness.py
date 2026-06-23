@@ -64,7 +64,7 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _parse_common_args(args: List[str]):
+def _parse_common_args(args: List[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")

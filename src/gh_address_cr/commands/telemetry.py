@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
+from typing import Any, cast
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
@@ -73,7 +75,7 @@ def _handle_telemetry_summary(args: list[str]) -> int:
         print(json.dumps(payload, sort_keys=True))
         return 2
     if parsed.format == "markdown":
-        print(core_telemetry.efficiency_report_markdown(report), end="")
+        print(core_telemetry.efficiency_report_markdown(cast(dict[str, Any], report)), end="")
     else:
         print(json.dumps(report, sort_keys=True))
     return 0
@@ -148,7 +150,7 @@ def reported_telemetry_source(source: str) -> str:
     return core_telemetry._reported_source_label(source)
 
 
-def telemetry_report_has_storage_diagnostics(report: dict) -> bool:
+def telemetry_report_has_storage_diagnostics(report: Any) -> bool:
     diagnostics = report.get("diagnostics")
     if not isinstance(diagnostics, list):
         return False

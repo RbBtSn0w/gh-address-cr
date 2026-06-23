@@ -9,7 +9,10 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
+if TYPE_CHECKING:
+    from gh_address_cr.core.telemetry import EfficiencyReportPayload
+    from gh_address_cr.core.telemetry import EfficiencyReportPayload
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
@@ -352,7 +355,7 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
         return
 
 
-def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: dict) -> None:
+def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: Any) -> None:
     try:
         current = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -428,11 +431,11 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
-def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: dict) -> str:
+def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: Any) -> str:
     return build_completion_summary_model(result, telemetry_report)["line"]
 
 
-def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: dict) -> dict[str, str]:
+def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: Any) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
@@ -812,9 +815,11 @@ def emit_final_gate_result(
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
     if telemetry_report is None:
-        telemetry_report = core_telemetry.build_efficiency_report(result.repo, result.pr_number)
+        telemetry_report = cast(dict, core_telemetry.build_efficiency_report(result.repo, result.pr_number))
     print()
     print("== Agent Efficiency Summary ==")
+    assert telemetry_report is not None
+    assert telemetry_report is not None
     print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
     print(f"telemetry_total_events={telemetry_report['total_events']}")
     print(f"telemetry_success_rate={telemetry_report['success_rate']:.1f}")
@@ -839,7 +844,7 @@ def write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> tuple[Path, dict]:
+) -> tuple[Path, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
     workspace = paths.workspace_dir
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -876,7 +881,7 @@ def write_native_final_gate_artifacts(
     if result.failure_codes:
         summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
     guidance_md = build_completion_summary_guidance(
-        result, telemetry_report, summary_path=summary_path, include_sha256=False
+        result, cast(dict, telemetry_report), summary_path=summary_path, include_sha256=False
     )
     summary_lines.extend(["", "## PR Completion Summary Guidance", guidance_md])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -922,7 +927,7 @@ def write_native_final_gate_artifacts(
     return summary_path, telemetry_report
 
 
-def telemetry_sources_summary(telemetry_report: dict) -> str:
+def telemetry_sources_summary(telemetry_report: Any) -> str:
     sources = telemetry_report.get("sources")
     if not isinstance(sources, list) or not sources:
         return "none"
@@ -938,7 +943,7 @@ def telemetry_sources_summary(telemetry_report: dict) -> str:
     return "; ".join(rows) if rows else "none"
 
 
-def telemetry_diagnostics_summary(telemetry_report: dict) -> str:
+def telemetry_diagnostics_summary(telemetry_report: Any) -> str:
     diagnostics = telemetry_report.get("diagnostics")
     if not isinstance(diagnostics, list) or not diagnostics:
         return "none"

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
+from typing import Any
+
 import argparse
 import hashlib
 import json
@@ -87,7 +91,7 @@ WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
 PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
 
-def _legacy_module(name: str):
+def _legacy_module(name: str) -> Any:
     raise RuntimeError(f"Legacy module imports are not supported by the native CLI path: {name}")
 
 
@@ -823,7 +827,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _dispatch_management_commands(args) -> int | None:
+def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
     """Handle commands that run before target-arg expansion. Returns None if unhandled."""
     if args.command == "version":
         sys.stdout.write(f"gh-address-cr {__version__}\n")
@@ -877,7 +881,7 @@ def _dispatch_management_commands(args) -> int | None:
     return None
 
 
-def _expand_target_args(args) -> None:
+def _expand_target_args(args: argparse.Namespace) -> None:
     """Fold the leading repo/pr_number positionals back into args.args."""
     full_args = list(args.args)
     if args.pr_number:
@@ -887,7 +891,7 @@ def _expand_target_args(args) -> None:
     args.args = full_args
 
 
-def _dispatch_passthrough_commands(args) -> int | None:
+def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
     """Handle commands that delegate to a sub-handler module. Returns None if unhandled."""
     if args.command == "submit-action":
         if args.args and args.args[0] in {"-h", "--help"}:
@@ -930,7 +934,7 @@ def _dispatch_passthrough_commands(args) -> int | None:
     return None
 
 
-def _dispatch_high_level_commands(args) -> int:
+def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     """Handle legacy, unknown, and native high-level commands. Always returns a code."""
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:
         print(
