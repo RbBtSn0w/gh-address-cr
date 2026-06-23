@@ -20,7 +20,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
-from gh_address_cr.core import telemetry_health
+from gh_address_cr.core import telemetry_health, telemetry_import, telemetry_reporting
 from gh_address_cr.core.host_telemetry import attribution as host_attribution
 from gh_address_cr.core.host_telemetry import capture as host_capture
 from gh_address_cr.core.host_telemetry import discovery as host_discovery
@@ -236,12 +236,12 @@ def ingest_host_telemetry_input(
         raw = Path(input_path).read_text(encoding="utf-8")
     except OSError:
         return safe_input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    return core_telemetry.import_external_telemetry(repo, pr_number, source=source, fmt=fmt, raw=raw)
+    return telemetry_import.import_external_telemetry(repo, pr_number, source=source, fmt=fmt, raw=raw)
 
 
 def safe_input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
     try:
-        return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
+        return telemetry_import.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
     except Exception as exc:
         core_telemetry._log_telemetry_failure("input unavailable summary creation", exc)
         return None
@@ -249,7 +249,7 @@ def safe_input_unavailable_import_summary(repo: str, pr_number: str, *, source: 
 
 def safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
     try:
-        return core_telemetry.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
+        return telemetry_import.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
     except Exception as exc:
         core_telemetry._log_telemetry_failure("hook unavailable summary creation", exc)
         return None
@@ -321,7 +321,7 @@ def _ingest_profile_via_autodiscovery(
             return None
         marker = core_paths.state_dir() / ".host-telemetry-consent" / f"{profile.source}.marker"
         host_discovery.consent_notice_once(profile.source, marker)
-        return core_telemetry.import_external_telemetry(
+        return telemetry_import.import_external_telemetry(
             repo, pr_number, source=profile.source, fmt="agent-jsonl", raw=text
         )
     except Exception as exc:
@@ -812,7 +812,7 @@ def emit_final_gate_result(
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
     if telemetry_report is None:
-        telemetry_report = core_telemetry.build_efficiency_report(result.repo, result.pr_number)
+        telemetry_report = telemetry_reporting.build_efficiency_report(result.repo, result.pr_number)
     print()
     print("== Agent Efficiency Summary ==")
     print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
@@ -859,7 +859,7 @@ def write_native_final_gate_artifacts(
         f"- check_requirement: {result.check_requirement or 'none'}",
     ]
     summary_lines.extend(f"- {key}: {result.counts[key]}" for key in core_gate.COUNT_KEYS)
-    telemetry_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    telemetry_report = telemetry_reporting.build_efficiency_report(repo, pr_number)
     summary_lines.extend(
         [
             "",

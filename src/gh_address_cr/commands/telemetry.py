@@ -11,8 +11,7 @@ from gh_address_cr.commands.common import (
     prepend_optional,
 )
 from gh_address_cr.core import cr_metrics as core_cr_metrics
-from gh_address_cr.core import telemetry as core_telemetry
-from gh_address_cr.core import telemetry_health
+from gh_address_cr.core import telemetry_health, telemetry_import, telemetry_reporting
 from gh_address_cr.core.io import write_json_atomic
 
 
@@ -33,7 +32,7 @@ def _handle_telemetry_ingest(args: list[str]) -> int:
         try:
             raw = Path(parsed.input).read_text(encoding="utf-8")
         except OSError:
-            payload = core_telemetry.input_unavailable_import_summary(
+            payload = telemetry_import.input_unavailable_import_summary(
                 parsed.repo,
                 parsed.pr_number,
                 source=parsed.source,
@@ -41,7 +40,7 @@ def _handle_telemetry_ingest(args: list[str]) -> int:
             )
             print(json.dumps(payload, sort_keys=True))
             return 2
-    summary = core_telemetry.import_external_telemetry(
+    summary = telemetry_import.import_external_telemetry(
         parsed.repo,
         parsed.pr_number,
         source=parsed.source,
@@ -61,7 +60,7 @@ def _handle_telemetry_summary(args: list[str]) -> int:
     if scope_error is not None:
         return emit_scope_resolution_error(scope_error)
     parsed = parser.parse_args(scoped_args)
-    report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
+    report = telemetry_reporting.build_efficiency_report(parsed.repo, parsed.pr_number)
     if telemetry_report_has_storage_diagnostics(report):
         payload = {
             **report,
@@ -73,7 +72,7 @@ def _handle_telemetry_summary(args: list[str]) -> int:
         print(json.dumps(payload, sort_keys=True))
         return 2
     if parsed.format == "markdown":
-        print(core_telemetry.efficiency_report_markdown(report), end="")
+        print(telemetry_reporting.efficiency_report_markdown(report), end="")
     else:
         print(json.dumps(report, sort_keys=True))
     return 0
@@ -145,7 +144,7 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
 
 
 def reported_telemetry_source(source: str) -> str:
-    return core_telemetry._reported_source_label(source)
+    return telemetry_import._reported_source_label(source)
 
 
 def telemetry_report_has_storage_diagnostics(report: dict) -> bool:

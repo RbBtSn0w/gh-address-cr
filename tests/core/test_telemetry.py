@@ -8,12 +8,14 @@ from unittest.mock import patch
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
-from gh_address_cr.core.telemetry import (
-    SessionTelemetry,
+from gh_address_cr.core.telemetry import SessionTelemetry
+from gh_address_cr.core.telemetry_import import (
     autodiscovery_miss_import_summary,
+    import_external_telemetry,
+)
+from gh_address_cr.core.telemetry_reporting import (
     build_efficiency_report,
     efficiency_report_markdown,
-    import_external_telemetry,
 )
 from gh_address_cr.core.telemetry_safety import (
     command_label,
@@ -26,7 +28,7 @@ class TestTelemetry(unittest.TestCase):
         SessionTelemetry.reset()
 
     def test_telemetry_adapter_parse_documents_malformed_input_error_contract(self):
-        from gh_address_cr.core.telemetry import TelemetryAdapter
+        from gh_address_cr.core.telemetry_import import TelemetryAdapter
 
         doc = TelemetryAdapter.parse.__doc__ or ""
 
@@ -261,7 +263,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["total_events"], 2)
             self.assertEqual(report["success_rate"], 100.0)
 
-    @patch("gh_address_cr.core.telemetry.write_json_atomic")
+    @patch("gh_address_cr.core.telemetry_reporting.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_artifact_write_failure_is_fail_open(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
@@ -280,7 +282,7 @@ class TestTelemetry(unittest.TestCase):
                 any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
             )
 
-    @patch("gh_address_cr.core.telemetry.write_json_atomic")
+    @patch("gh_address_cr.core.telemetry_reporting.write_json_atomic")
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_write_failure_diagnostic_omits_absolute_path(self, state_dir, write_json):
         with tempfile.TemporaryDirectory() as tmp:
@@ -300,7 +302,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertIn("efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic)
             self.assertNotIn("/private/tmp/secret", diagnostic)
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
+    @patch("gh_address_cr.core.telemetry_reporting.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_records_overhead_budget_diagnostics(self, state_dir, _perf_counter):
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,8 +314,8 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["telemetry_overhead_ms"], 300.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
-    @patch("gh_address_cr.core.telemetry.write_json_atomic")
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry_reporting.write_json_atomic")
+    @patch("gh_address_cr.core.telemetry_reporting.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_json):
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,7 +327,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
             self.assertEqual(write_json.call_count, 1)
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry_reporting.time.perf_counter", side_effect=[10.0, 10.4])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_artifact_marks_final_overhead_unembedded(self, state_dir, _perf_counter):
         with tempfile.TemporaryDirectory() as tmp:
@@ -424,10 +426,10 @@ class TestTelemetry(unittest.TestCase):
                 }
             )
 
-            from gh_address_cr.core import telemetry as telemetry_module
 
-            original = telemetry_module._normalize_external_event
-            with patch("gh_address_cr.core.telemetry._normalize_external_event", wraps=original) as normalize_event:
+            from gh_address_cr.core import telemetry_attribution
+            original = telemetry_attribution._normalize_external_event
+            with patch("gh_address_cr.core.telemetry_import._normalize_external_event", wraps=original) as normalize_event:
                 result = import_external_telemetry(
                     "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
                 )
@@ -459,10 +461,10 @@ class TestTelemetry(unittest.TestCase):
             )
             self.assertEqual(imported["status"], "SUCCESS")
 
-            from gh_address_cr.core import telemetry as telemetry_module
 
-            original = telemetry_module._normalize_external_event
-            with patch("gh_address_cr.core.telemetry._normalize_external_event", wraps=original) as normalize_event:
+            from gh_address_cr.core import telemetry_attribution
+            original = telemetry_attribution._normalize_external_event
+            with patch("gh_address_cr.core.telemetry_import._normalize_external_event", wraps=original) as normalize_event:
                 report = build_efficiency_report("octo/example", "77")
 
             self.assertEqual(report["status"], "SUCCESS")
@@ -2743,7 +2745,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
     def test_custom_telemetry_adapter_registration(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -2803,7 +2805,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(report["slowest_operations"][0]["operation"], "custom_op")
 
     def test_custom_telemetry_adapter_registration_duplicate_fails(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             TelemetryParseResult,
             register_adapter,
@@ -2830,7 +2832,7 @@ class TestTelemetry(unittest.TestCase):
         self.assertIn("already registered", str(context_src.exception))
 
     def test_custom_telemetry_adapter_source_override(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -2903,7 +2905,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(report_override["slowest_operations"][0]["operation"], "op-override")
 
     def test_custom_telemetry_adapter_unsafe_normalization_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -2952,7 +2954,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("unsafe key" in diag or "password" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_normalized_flag_still_revalidates_events(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3001,7 +3003,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("unsafe private identifier in operation label" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3050,7 +3052,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("non-JSON serializable" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_parsing_exception_handling(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             TelemetryParseResult,
             register_adapter,
@@ -3081,7 +3083,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any(diag == "Adapter parsing failed: ValueError" for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_unexpected_exception_fails_loud(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             TelemetryParseResult,
             register_adapter,
@@ -3107,7 +3109,7 @@ class TestTelemetry(unittest.TestCase):
                     )
 
     def test_custom_telemetry_adapter_nan_metadata_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3156,7 +3158,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("non-finite" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_non_json_diagnostics_coercion(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3203,7 +3205,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertIn("Non-JSON error object", result["diagnostics"])
 
     def test_custom_telemetry_adapter_invalid_return_type_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             register_adapter,
             unregister_adapter,
@@ -3232,7 +3234,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("Adapter parsing failed: TypeError" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_diagnostics_sanitization(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             TelemetryParseResult,
             register_adapter,
@@ -3271,7 +3273,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(redacted_count, 3)
 
     def test_custom_telemetry_adapter_invalid_diagnostics_container_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3319,7 +3321,7 @@ class TestTelemetry(unittest.TestCase):
                 )
 
     def test_import_external_telemetry_event_id_redaction_in_normalization_diagnostics(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,
@@ -3368,7 +3370,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
 
     def test_custom_telemetry_adapter_invalid_event_type_rejection(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             TelemetryAdapter,
             TelemetryParseResult,
             register_adapter,
@@ -3402,7 +3404,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertTrue(any("Adapter event processing failed: TypeError" in diag for diag in result["diagnostics"]))
 
     def test_import_external_telemetry_rejects_unsafe_metadata_keys(self):
-        from gh_address_cr.core.telemetry import (
+        from gh_address_cr.core.telemetry_import import (
             ExternalTelemetryEvent,
             TelemetryAdapter,
             TelemetryParseResult,

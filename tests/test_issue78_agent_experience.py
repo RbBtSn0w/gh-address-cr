@@ -17,7 +17,8 @@ from gh_address_cr.core.leases import (
     claim_lease,
     submit_lease,
 )
-from gh_address_cr.core.telemetry import build_efficiency_report, import_external_telemetry
+from gh_address_cr.core.telemetry_import import import_external_telemetry
+from gh_address_cr.core.telemetry_reporting import build_efficiency_report
 from tests.helpers import CLI_PY, PythonScriptTestCase
 
 

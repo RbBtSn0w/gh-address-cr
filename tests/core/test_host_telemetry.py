@@ -17,7 +17,8 @@ from gh_address_cr.core.host_telemetry.discovery import (
 )
 from gh_address_cr.core.host_telemetry.profile import HostProfile, load_profile
 from gh_address_cr.core.host_telemetry.strategies import paired_correlation_timestamp, record_pair_timestamp
-from gh_address_cr.core.telemetry import SessionTelemetry, build_efficiency_report
+from gh_address_cr.core.telemetry import SessionTelemetry
+from gh_address_cr.core.telemetry_reporting import build_efficiency_report
 
 
 class HostProfileTests(unittest.TestCase):
@@ -420,7 +421,7 @@ class EndToEndReportTests(unittest.TestCase):
                 start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
             )
             self.assertEqual(outcome, "captured")
-            from gh_address_cr.core.telemetry import import_external_telemetry
+            from gh_address_cr.core.telemetry_import import import_external_telemetry
             summary = import_external_telemetry("octo/example", "5", source="claude-code", fmt="agent-jsonl", raw=text)
             self.assertEqual(summary["status"], "SUCCESS")
 
@@ -455,7 +456,7 @@ class EndToEndReportTests(unittest.TestCase):
                 start_iso="2026-06-21T09:59:00Z", now_iso="2026-06-21T10:01:00Z",
             )
             self.assertEqual(outcome, "captured")
-            from gh_address_cr.core.telemetry import import_external_telemetry
+            from gh_address_cr.core.telemetry_import import import_external_telemetry
             summary = import_external_telemetry("octo/example", "5", source="codex", fmt="agent-jsonl", raw=text)
             self.assertEqual(summary["status"], "SUCCESS")
 

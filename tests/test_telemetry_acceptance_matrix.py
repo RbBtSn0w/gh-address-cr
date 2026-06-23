@@ -73,7 +73,7 @@ class TestTelemetryAcceptanceMatrix(unittest.TestCase):
         }
 
         stdout = io.StringIO()
-        with patch("gh_address_cr.commands.telemetry.core_telemetry.build_efficiency_report", return_value=report):
+        with patch("gh_address_cr.commands.telemetry.telemetry_reporting.build_efficiency_report", return_value=report):
             with contextlib.redirect_stdout(stdout):
                 exit_code = handle_telemetry_command("summary", None, ["octo/example", "77"])
 

@@ -106,7 +106,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_telemetry_source_redaction_delegates_to_core(self):
         source = (CLI_PY.parent / "commands" / "telemetry.py").read_text(encoding="utf-8")
 
-        self.assertIn("return core_telemetry._reported_source_label(source)", source)
+        self.assertIn("return telemetry_import._reported_source_label(source)", source)
         self.assertNotIn("core_telemetry._contains_token_marker(source)", source)
 
     def test_cli_review_help_uses_high_level_alias_text(self):
@@ -190,7 +190,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
                 },
             ),
-            patch.object(final_gate.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
+            patch.object(final_gate.telemetry_import, "input_unavailable_import_summary", side_effect=OSError("disk full")),
         ):
             result = final_gate.ingest_host_telemetry_from_environment(self.repo, self.pr)
 
@@ -210,15 +210,15 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
                 },
             ),
-            patch.object(final_gate.core_telemetry, "import_external_telemetry", side_effect=OSError("disk full")),
-            patch.object(final_gate.core_telemetry, "input_unavailable_import_summary") as unavailable,
+            patch.object(final_gate.telemetry_import, "import_external_telemetry", side_effect=OSError("disk full")),
+            patch.object(final_gate.telemetry_import, "input_unavailable_import_summary") as unavailable,
         ):
             result = final_gate.ingest_host_telemetry_from_environment(self.repo, self.pr)
 
         self.assertEqual(result["reason_code"], "TELEMETRY_HOOK_UNAVAILABLE")
         self.assertEqual(result["diagnostics"], ["host telemetry hook import unavailable"])
         unavailable.assert_not_called()
-        report = final_gate.core_telemetry.build_efficiency_report(self.repo, self.pr)
+        report = final_gate.telemetry_reporting.build_efficiency_report(self.repo, self.pr)
         self.assertIn(
             "telemetry import assistant-host: host telemetry hook import unavailable",
             report["diagnostics"],

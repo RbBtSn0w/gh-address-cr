@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from gh_address_cr.core import telemetry as core_telemetry
+from gh_address_cr.core import telemetry_import, telemetry_reporting
 from gh_address_cr.core.host_telemetry import attribution as host_attribution
 from gh_address_cr.core.host_telemetry import discovery as host_discovery
 from gh_address_cr.core.host_telemetry import profile as host_profile
@@ -143,7 +143,7 @@ def record_autodiscovery_miss(repo: str, pr_number: str, misses: list[dict[str, 
     ]
     if not diagnostics:
         return None
-    return core_telemetry.autodiscovery_miss_import_summary(repo, pr_number, diagnostics=diagnostics)
+    return telemetry_import.autodiscovery_miss_import_summary(repo, pr_number, diagnostics=diagnostics)
 
 
 def build_doctor_report(repo: str, pr_number: str) -> dict[str, Any]:
@@ -152,7 +152,7 @@ def build_doctor_report(repo: str, pr_number: str) -> dict[str, Any]:
         autodiscovery_profile_check(profile, repo=repo, pr_number=pr_number)
         for profile in profiles
     ]
-    efficiency_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    efficiency_report = telemetry_reporting.build_efficiency_report(repo, pr_number)
     cli_health_issues = [
         *[issue.to_dict() for issue in profile_issues],
         *efficiency_report.get("cli_health_issues", []),
