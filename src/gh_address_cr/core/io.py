@@ -53,7 +53,7 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 
 def _json_ready(value: Any) -> Any:
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return _json_ready(asdict(value))
     if isinstance(value, datetime):
         return value.isoformat()

@@ -320,8 +320,8 @@ def detect_skill_version() -> str | None:
     return match.group("version")
 
 
-def load_feedback_context(repo: str | None, pr_number: str | None) -> dict:
-    context = {
+def load_feedback_context(repo: str | None, pr_number: str | None) -> dict[str, Any]:
+    context: dict[str, Any] = {
         "errors": [],
         "artifacts": [],
         "head_sha": None,
@@ -387,7 +387,8 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict:
 
 
 def merge_context(args: argparse.Namespace, context: dict) -> None:
-    machine_summary = context.get("machine_summary") if isinstance(context.get("machine_summary"), dict) else {}
+    raw_summary = context.get("machine_summary")
+    machine_summary: dict[str, Any] = raw_summary if isinstance(raw_summary, dict) else {}
 
     args.status = args.status or machine_summary.get("status") or context.get("loop_status")
     args.reason_code = args.reason_code or machine_summary.get("reason_code")
@@ -406,7 +407,7 @@ def bullet_or_default(items: list[str], *, empty_value: str = "- Not provided.")
     return [f"- `{item}`" for item in items]
 
 
-def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
+def _format_diagnostics_args(args: argparse.Namespace) -> list[str]:
     values = []
     if args.failing_command:
         values.append(f"- Failing command: `{args.failing_command}`")
@@ -422,6 +423,11 @@ def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
         values.append(f"- Run ID: `{args.run_id}`")
     if args.skill_version:
         values.append(f"- Skill version: `{args.skill_version}`")
+    return values
+
+
+def _format_diagnostics_context(context: dict) -> list[str]:
+    values = []
     if context.get("head_sha"):
         values.append(f"- Head SHA: `{context['head_sha']}`")
     if context.get("current_item_id"):
@@ -444,6 +450,11 @@ def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
         values.append(f"- Efficiency report SHA256: `{context['efficiency_report_sha256']}`")
     for error in context.get("errors", []):
         values.append(f"- Context load warning: {sanitize_text(error)}")
+    return values
+
+
+def technical_diagnostics(args: argparse.Namespace, context: dict) -> list[str]:
+    values = _format_diagnostics_args(args) + _format_diagnostics_context(context)
     return values or ["- Not provided."]
 
 
@@ -567,7 +578,7 @@ def emit_result(payload: dict, exit_code: int, *, error_message: str | None = No
     return exit_code
 
 
-def format_lookup_error(exc: Exception) -> str:
+def format_lookup_error(exc: BaseException) -> str:
     if isinstance(exc, subprocess.CalledProcessError):
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
     else:

@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 from gh_address_cr import __version__
@@ -34,7 +34,7 @@ MAX_QUEUE_RECONCILIATION_SECONDS = 1.0
 
 
 def _output_signal(status: str, reason_code: str, next_action: str, message: str, warnings: Optional[List[str]] = None) -> None:
-    payload = {
+    payload: dict[str, Any] = {
         "status": status,
         "reason_code": reason_code,
         "next_action": next_action,
@@ -50,7 +50,7 @@ def check_runtime_version() -> bool:
         current = _version_tuple(__version__)
         required = _version_tuple(MIN_REQUIRED_VERSION)
         return current >= required
-    except Exception:
+    except (ValueError, IndexError, AttributeError, NameError):
         return True
 
 
@@ -354,6 +354,64 @@ def handle_start(args: List[str]) -> int:
         return 5
 
 
+def _prepare_session_for_step(
+    repo: str,
+    pr: str,
+    parsed: argparse.Namespace,
+    args: List[str],
+) -> tuple[OrchestrationSession | None, int]:
+    try:
+        session = load_orchestration_session(repo, pr)
+        if "--max-concurrency" in args:
+            session.config["max_concurrency"] = parsed.max_concurrency
+        if "--circuit-breaker-threshold" in args:
+            session.config["circuit_breaker_threshold"] = parsed.circuit_breaker_threshold
+
+        _sync_queue_from_runtime(session, enforce_budget=False)
+
+        if session.completed:
+            if not session.queued_items and not session.active_leases:
+                _output_signal("LOCKED", "SESSION_LOCKED", "HALT", "Session is locked and fully handled.")
+                return None, 0
+            else:
+                session.completed = False
+
+        if len(session.active_leases) >= session.config.get("max_concurrency", 3):
+            warnings = session.pop_audit_warnings()
+            _output_signal("WAITING", "MAX_CONCURRENCY_REACHED", "RETRY", f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.", warnings)
+            return None, 0
+        return session, 0
+
+    except (OrchestrationSessionError, SystemExit) as e:
+        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
+        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", msg)
+        return None, 2
+    except Exception as e:
+        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to synchronize runtime queue: {e}")
+        return None, 2
+
+
+def _handle_workflow_error(e: WorkflowError, session: OrchestrationSession, repo: str, pr: str) -> int:
+    if e.reason_code in {protocol_codes.NO_ELIGIBLE_ITEM}:
+        _sync_queue_from_runtime(session, enforce_budget=False)
+        save_orchestration_session(session)
+        warnings = session.pop_audit_warnings()
+        if not session.active_leases:
+            _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
+        else:
+            _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
+        return 0
+
+    if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION}:
+        save_orchestration_session(session)
+        warnings = session.pop_audit_warnings()
+        _output_signal("WAITING", e.reason_code, "RETRY", str(e), warnings)
+        return 0
+
+    _output_signal("FAILED", "WORKFLOW_DISPATCH_FAILED", "RETRY", f"Workflow dispatch failed: {e.reason_code}: {e}")
+    return 2
+
+
 def handle_step(args: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr agent orchestrate step", exit_on_error=False)
     parser.add_argument("repo")
@@ -368,34 +426,9 @@ def handle_step(args: List[str]) -> int:
         return 2
     repo, pr = parsed.repo, parsed.pr_number
 
-    try:
-        session = load_orchestration_session(repo, pr)
-        if "--max-concurrency" in args:
-            session.config["max_concurrency"] = parsed.max_concurrency
-        if "--circuit-breaker-threshold" in args:
-            session.config["circuit_breaker_threshold"] = parsed.circuit_breaker_threshold
-
-        _sync_queue_from_runtime(session, enforce_budget=False)
-
-        if session.completed:
-            if not session.queued_items and not session.active_leases:
-                _output_signal("LOCKED", "SESSION_LOCKED", "HALT", "Session is locked and fully handled.")
-                return 0
-            else:
-                session.completed = False
-
-        if len(session.active_leases) >= session.config.get("max_concurrency", 3):
-            warnings = session.pop_audit_warnings()
-            _output_signal("WAITING", "MAX_CONCURRENCY_REACHED", "RETRY", f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.", warnings)
-            return 0
-
-    except (OrchestrationSessionError, SystemExit) as e:
-        msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
-        _output_signal("FAILED", protocol_codes.SESSION_ERROR, "HALT", msg)
-        return 2
-    except Exception as e:
-        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to synchronize runtime queue: {e}")
-        return 2
+    session, exit_code = _prepare_session_for_step(repo, pr, parsed, args)
+    if session is None:
+        return exit_code
 
     # Simple dequeue logic
     if not session.queued_items:
@@ -418,24 +451,7 @@ def handle_step(args: List[str]) -> int:
             agent_id=f"orchestrator:{session.run_id}",
         )
     except WorkflowError as e:
-        if e.reason_code in {protocol_codes.NO_ELIGIBLE_ITEM}:
-            _sync_queue_from_runtime(session, enforce_budget=False)
-            save_orchestration_session(session)
-            warnings = session.pop_audit_warnings()
-            if not session.active_leases:
-                _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
-            else:
-                _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
-            return 0
-
-        if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION}:
-            save_orchestration_session(session)
-            warnings = session.pop_audit_warnings()
-            _output_signal("WAITING", e.reason_code, "RETRY", str(e), warnings)
-            return 0
-
-        _output_signal("FAILED", "WORKFLOW_DISPATCH_FAILED", "RETRY", f"Workflow dispatch failed: {e.reason_code}: {e}")
-        return 2
+        return _handle_workflow_error(e, session, repo, pr)
 
     try:
         item_id = str(action_result.get("item_id"))

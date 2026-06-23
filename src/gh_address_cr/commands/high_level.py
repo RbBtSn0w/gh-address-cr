@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from gh_address_cr.core import command_templates
@@ -313,7 +314,8 @@ def _native_summary(
     diagnostics: dict | None = None,
     lean: bool = False,
 ) -> dict:
-    metrics = session.get("metrics") if isinstance(session.get("metrics"), dict) else {}
+    raw_metrics = session.get("metrics")
+    metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
     summary = {
         "status": status,
         "repo": repo,
@@ -348,7 +350,8 @@ def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
 
 
 def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
-    items = session.get("items") if isinstance(session.get("items"), dict) else {}
+    raw_items = session.get("items")
+    items: dict[str, Any] = raw_items if isinstance(raw_items, dict) else {}
     rows = []
     alias_index = 0
     for item_id, item in sorted(items.items()):
@@ -391,7 +394,8 @@ def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
 
 
 def _blocking_local_items(session: dict) -> list[dict]:
-    items = session.get("items") if isinstance(session.get("items"), dict) else {}
+    raw_items = session.get("items")
+    items: dict[str, Any] = raw_items if isinstance(raw_items, dict) else {}
     return [
         item
         for item in items.values()
@@ -565,11 +569,11 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
 
-    from gh_address_cr.core.telemetry import (
-        SessionTelemetry,
+    from gh_address_cr.core.telemetry import SessionTelemetry
+    from gh_address_cr.core.telemetry_safety import (
         command_label,
     )
-    from gh_address_cr.core.telemetry import (
+    from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
 
@@ -629,14 +633,9 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
 
 
 class HighLevelReviewRuntime:
-    def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
-        parsed = _parse_native_high_level_args(command, passthrough_args)
-        repo = parsed.repo
-        pr_number = str(parsed.pr_number)
-        lean = bool(lean or parsed.lean or parsed.summary)
-        run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
-        auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
-        preloaded_findings_input: str | None = None
+    def _run_preflight_checks(
+        self, command: str, parsed: Any, repo: str, pr_number: str
+    ) -> tuple[int | None, str | None]:
         if parsed.sync and not parsed.source:
             summary = _build_preflight_summary(
                 command,
@@ -649,12 +648,13 @@ class HighLevelReviewRuntime:
                 next_action="`--sync` requires an explicit --source so missing findings stay scoped to one producer.",
             )
             sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-            return 2
+            return 2, None
         if command in {"review", "findings"} and parsed.input:
             try:
-                preloaded_findings_input = _read_findings_input(parsed.input)
-                if not preloaded_findings_input.strip():
+                preloaded = _read_findings_input(parsed.input)
+                if not preloaded.strip():
                     raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
+                return None, preloaded
             except (FindingsFormatError, OSError) as exc:
                 summary = _build_preflight_summary(
                     command,
@@ -667,37 +667,140 @@ class HighLevelReviewRuntime:
                     next_action=str(exc),
                 )
                 sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-                return 2
+                return 2, None
+        return None, None
+
+    def _ingest_and_load_threads(
+        self,
+        command: str,
+        parsed: Any,
+        session: dict[str, Any],
+        preloaded_findings_input: str | None,
+        repo: str,
+        pr_number: str,
+    ) -> tuple[dict[str, Any], list[dict]]:
+        if command in {"review", "findings"} and parsed.input:
+            _ingest_native_findings(
+                session,
+                raw=preloaded_findings_input or "",
+                source=parsed.source or "json",
+                sync=parsed.sync,
+                scan_id=parsed.scan_id,
+                handoff_sha256=parsed.handoff_sha256,
+            )
+        elif command == "adapter":
+            raw, error = _run_adapter_command(parsed.adapter_cmd)
+            if error:
+                raise FindingsFormatError(error)
+            _ingest_native_findings(
+                session,
+                raw=raw or "",
+                source=parsed.source or "adapter",
+                sync=parsed.sync,
+                scan_id=parsed.scan_id,
+            )
+
+        remote_threads: list[dict] = []
+        if command in {"address", "review", "threads", "adapter"}:
+            client = GitHubClient()
+            remote_threads = client.list_threads(repo, pr_number)
+            session = core_gate.session_with_remote_threads(session, remote_threads)
+        return session, remote_threads
+
+    def _handle_format_error(
+        self,
+        exc: Exception,
+        command: str,
+        repo: str,
+        pr_number: str,
+        run_id: str,
+        max_iterations: int,
+        session: dict[str, Any],
+        human: bool,
+        lean: bool,
+    ) -> int:
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=max_iterations,
+            last_error=str(exc),
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code="INVALID_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action=str(exc),
+            exit_code=2,
+            session=session,
+            lean=lean,
+        )
+        _emit_native_summary(summary, human=human)
+        return 2
+
+    def _handle_github_error(
+        self,
+        exc: GitHubError,
+        command: str,
+        repo: str,
+        pr_number: str,
+        run_id: str,
+        max_iterations: int,
+        session: dict[str, Any],
+        human: bool,
+        lean: bool,
+    ) -> int:
+        _set_loop_state(
+            session,
+            run_id=run_id,
+            status="BLOCKED",
+            iteration=1,
+            max_iterations=max_iterations,
+            last_error=str(exc),
+        )
+        _recalc_native_metrics(session)
+        session_store.save_session(repo, pr_number, session)
+        summary = _native_summary(
+            command=command,
+            repo=repo,
+            pr_number=pr_number,
+            status="BLOCKED",
+            reason_code=exc.reason_code,
+            waiting_on=github_waiting_on(exc.diagnostics),
+            next_action=str(exc),
+            exit_code=5,
+            session=session,
+            diagnostics=exc.diagnostics,
+            lean=lean,
+        )
+        _emit_native_summary(summary, human=human)
+        return 5
+
+    def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
+        parsed = _parse_native_high_level_args(command, passthrough_args)
+        repo = parsed.repo
+        pr_number = str(parsed.pr_number)
+        lean = bool(lean or parsed.lean or parsed.summary)
+        run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
+        auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
+
+        exit_code, preloaded_findings_input = self._run_preflight_checks(command, parsed, repo, pr_number)
+        if exit_code is not None:
+            return exit_code
+
         session = _load_or_create_session(repo, pr_number)
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:
-            if command in {"review", "findings"} and parsed.input:
-                _ingest_native_findings(
-                    session,
-                    raw=preloaded_findings_input or "",
-                    source=parsed.source or "json",
-                    sync=parsed.sync,
-                    scan_id=parsed.scan_id,
-                    handoff_sha256=parsed.handoff_sha256,
-                )
-            elif command == "adapter":
-                raw, error = _run_adapter_command(parsed.adapter_cmd)
-                if error:
-                    raise FindingsFormatError(error)
-                _ingest_native_findings(
-                    session,
-                    raw=raw or "",
-                    source=parsed.source or "adapter",
-                    sync=parsed.sync,
-                    scan_id=parsed.scan_id,
-                )
-
-            remote_threads: list[dict] = []
-            if command in {"address", "review", "threads", "adapter"}:
-                client = GitHubClient()
-                remote_threads = client.list_threads(repo, pr_number)
-                session = core_gate.session_with_remote_threads(session, remote_threads)
+            session, remote_threads = self._ingest_and_load_threads(
+                command, parsed, session, preloaded_findings_input, repo, pr_number
+            )
             _recalc_native_metrics(session)
             if auto_simple and _blocking_local_items(session):
                 return _emit_auto_simple_not_eligible(
@@ -713,56 +816,13 @@ class HighLevelReviewRuntime:
                 )
             result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
         except (FindingsFormatError, OSError) as exc:
-            _set_loop_state(
-                session,
-                run_id=run_id,
-                status="BLOCKED",
-                iteration=1,
-                max_iterations=parsed.max_iterations,
-                last_error=str(exc),
+            return self._handle_format_error(
+                exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
             )
-            _recalc_native_metrics(session)
-            session_store.save_session(repo, pr_number, session)
-            summary = _native_summary(
-                command=command,
-                repo=repo,
-                pr_number=pr_number,
-                status="BLOCKED",
-                reason_code="INVALID_FINDINGS_INPUT",
-                waiting_on="findings_input",
-                next_action=str(exc),
-                exit_code=2,
-                session=session,
-                lean=lean,
-            )
-            _emit_native_summary(summary, human=human)
-            return 2
         except GitHubError as exc:
-            _set_loop_state(
-                session,
-                run_id=run_id,
-                status="BLOCKED",
-                iteration=1,
-                max_iterations=parsed.max_iterations,
-                last_error=str(exc),
+            return self._handle_github_error(
+                exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
             )
-            _recalc_native_metrics(session)
-            session_store.save_session(repo, pr_number, session)
-            summary = _native_summary(
-                command=command,
-                repo=repo,
-                pr_number=pr_number,
-                status="BLOCKED",
-                reason_code=exc.reason_code,
-                waiting_on=github_waiting_on(exc.diagnostics),
-                next_action=str(exc),
-                exit_code=5,
-                session=session,
-                diagnostics=exc.diagnostics,
-                lean=lean,
-            )
-            _emit_native_summary(summary, human=human)
-            return 5
 
         if auto_simple and not result.passed:
             if _auto_simple_local_gate_failed(result):

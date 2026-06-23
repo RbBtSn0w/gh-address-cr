@@ -54,7 +54,8 @@ def run_cmd(
 ) -> subprocess.CompletedProcess[str]:
     import time
 
-    from gh_address_cr.core.telemetry import SessionTelemetry, command_label
+    from gh_address_cr.core.telemetry import SessionTelemetry
+    from gh_address_cr.core.telemetry_safety import command_label
 
     attempts = max(1, retries)
     start_time = time.time()

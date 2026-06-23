@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import textwrap
-from typing import Any
+from typing import Any, cast
 
 
 class FindingsFormatError(ValueError):
@@ -82,10 +82,10 @@ def normalize_finding(record: dict[str, Any]) -> dict[str, Any]:
 
     if not path:
         raise FindingsFormatError("Each finding must include path/file/filename.")
-    if line in (None, ""):
+    if line is None or line == "":
         raise FindingsFormatError("Each finding must include line/start_line/position.")
     try:
-        normalized_line = int(line)
+        normalized_line = int(cast(Any, line))
     except (TypeError, ValueError) as exc:
         raise FindingsFormatError(f"Invalid line value: {line}") from exc
 
@@ -164,7 +164,7 @@ def extract_finding_blocks(raw: str) -> list[str]:
     return blocks
 
 
-def parse_finding_block(block: str) -> dict[str, Any]:
+def _parse_block_lines(block: str) -> tuple[dict[str, str], list[str]]:
     fields: dict[str, str] = {}
     body_lines: list[str] = []
     in_body = False
@@ -193,6 +193,11 @@ def parse_finding_block(block: str) -> dict[str, Any]:
                 in_body = True
             continue
         fields[key] = value
+    return fields, body_lines
+
+
+def parse_finding_block(block: str) -> dict[str, Any]:
+    fields, body_lines = _parse_block_lines(block)
 
     for required in ("title", "path", "line"):
         if required not in fields or not str(fields[required]).strip():

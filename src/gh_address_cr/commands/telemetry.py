@@ -16,6 +16,106 @@ from gh_address_cr.core import telemetry_health
 from gh_address_cr.core.io import write_json_atomic
 
 
+def _handle_telemetry_ingest(args: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr telemetry ingest")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--format", default="agent-jsonl")
+    parser.add_argument("--input", required=True)
+    scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+    if scope_error is not None:
+        return emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scoped_args)
+    if parsed.input == "-":
+        raw = sys.stdin.read()
+    else:
+        try:
+            raw = Path(parsed.input).read_text(encoding="utf-8")
+        except OSError:
+            payload = core_telemetry.input_unavailable_import_summary(
+                parsed.repo,
+                parsed.pr_number,
+                source=parsed.source,
+                fmt=parsed.format,
+            )
+            print(json.dumps(payload, sort_keys=True))
+            return 2
+    summary = core_telemetry.import_external_telemetry(
+        parsed.repo,
+        parsed.pr_number,
+        source=parsed.source,
+        fmt=parsed.format,
+        raw=raw,
+    )
+    print(json.dumps(summary, sort_keys=True))
+    return 0 if summary["status"] in {"SUCCESS", "PARTIAL"} else 2
+
+
+def _handle_telemetry_summary(args: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr telemetry summary")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+    if scope_error is not None:
+        return emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scoped_args)
+    report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
+    if telemetry_report_has_storage_diagnostics(report):
+        payload = {
+            **report,
+            "status": "FAILED",
+            "reason_code": "TELEMETRY_REPORT_UNAVAILABLE",
+            "next_action": "FIX_TELEMETRY_STORAGE",
+        }
+        write_telemetry_report_payload(payload)
+        print(json.dumps(payload, sort_keys=True))
+        return 2
+    if parsed.format == "markdown":
+        print(core_telemetry.efficiency_report_markdown(report), end="")
+    else:
+        print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def _handle_telemetry_cr_summary(args: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr telemetry cr-summary")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+    if scope_error is not None:
+        return emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scoped_args)
+    report = core_cr_metrics.build_cr_summary(parsed.repo, parsed.pr_number)
+    if report["status"] == "FAILED":
+        print(json.dumps(report, sort_keys=True))
+        return 2
+    if parsed.format == "markdown":
+        print(core_cr_metrics.cr_summary_markdown(report), end="")
+    else:
+        print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def _handle_telemetry_doctor(args: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="gh-address-cr telemetry doctor")
+    parser.add_argument("repo")
+    parser.add_argument("pr_number")
+    parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    scoped_args, scope_error = maybe_prepend_implicit_scope(args)
+    if scope_error is not None:
+        return emit_scope_resolution_error(scope_error)
+    parsed = parser.parse_args(scoped_args)
+    report = telemetry_health.build_doctor_report(parsed.repo, parsed.pr_number)
+    if parsed.format == "markdown":
+        print(telemetry_health.doctor_report_markdown(report), end="")
+    else:
+        print(json.dumps(report, sort_keys=True))
+    return 0 if report["status"] == "PASSED" else 2
+
+
 def handle_telemetry_command(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
     if repo in {"-h", "--help"}:
         print(
@@ -32,100 +132,13 @@ def handle_telemetry_command(repo: str | None, pr_number: str | None, passthroug
     subcommand = repo
     args = prepend_optional(pr_number, passthrough)
     if subcommand == "ingest":
-        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry ingest")
-        parser.add_argument("repo")
-        parser.add_argument("pr_number")
-        parser.add_argument("--source", required=True)
-        parser.add_argument("--format", default="agent-jsonl")
-        parser.add_argument("--input", required=True)
-        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
-        if scope_error is not None:
-            return emit_scope_resolution_error(scope_error)
-        parsed = parser.parse_args(scoped_args)
-        if parsed.input == "-":
-            raw = sys.stdin.read()
-        else:
-            try:
-                raw = Path(parsed.input).read_text(encoding="utf-8")
-            except OSError:
-                payload = core_telemetry.input_unavailable_import_summary(
-                    parsed.repo,
-                    parsed.pr_number,
-                    source=parsed.source,
-                    fmt=parsed.format,
-                )
-                print(json.dumps(payload, sort_keys=True))
-                return 2
-        summary = core_telemetry.import_external_telemetry(
-            parsed.repo,
-            parsed.pr_number,
-            source=parsed.source,
-            fmt=parsed.format,
-            raw=raw,
-        )
-        print(json.dumps(summary, sort_keys=True))
-        return 0 if summary["status"] in {"SUCCESS", "PARTIAL"} else 2
-
+        return _handle_telemetry_ingest(args)
     if subcommand == "summary":
-        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry summary")
-        parser.add_argument("repo")
-        parser.add_argument("pr_number")
-        parser.add_argument("--format", choices=("json", "markdown"), default="json")
-        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
-        if scope_error is not None:
-            return emit_scope_resolution_error(scope_error)
-        parsed = parser.parse_args(scoped_args)
-        report = core_telemetry.build_efficiency_report(parsed.repo, parsed.pr_number)
-        if telemetry_report_has_storage_diagnostics(report):
-            payload = {
-                **report,
-                "status": "FAILED",
-                "reason_code": "TELEMETRY_REPORT_UNAVAILABLE",
-                "next_action": "FIX_TELEMETRY_STORAGE",
-            }
-            write_telemetry_report_payload(payload)
-            print(json.dumps(payload, sort_keys=True))
-            return 2
-        if parsed.format == "markdown":
-            print(core_telemetry.efficiency_report_markdown(report), end="")
-        else:
-            print(json.dumps(report, sort_keys=True))
-        return 0
-
+        return _handle_telemetry_summary(args)
     if subcommand == "cr-summary":
-        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry cr-summary")
-        parser.add_argument("repo")
-        parser.add_argument("pr_number")
-        parser.add_argument("--format", choices=("json", "markdown"), default="json")
-        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
-        if scope_error is not None:
-            return emit_scope_resolution_error(scope_error)
-        parsed = parser.parse_args(scoped_args)
-        report = core_cr_metrics.build_cr_summary(parsed.repo, parsed.pr_number)
-        if report["status"] == "FAILED":
-            print(json.dumps(report, sort_keys=True))
-            return 2
-        if parsed.format == "markdown":
-            print(core_cr_metrics.cr_summary_markdown(report), end="")
-        else:
-            print(json.dumps(report, sort_keys=True))
-        return 0
-
+        return _handle_telemetry_cr_summary(args)
     if subcommand == "doctor":
-        parser = argparse.ArgumentParser(prog="gh-address-cr telemetry doctor")
-        parser.add_argument("repo")
-        parser.add_argument("pr_number")
-        parser.add_argument("--format", choices=("json", "markdown"), default="json")
-        scoped_args, scope_error = maybe_prepend_implicit_scope(args)
-        if scope_error is not None:
-            return emit_scope_resolution_error(scope_error)
-        parsed = parser.parse_args(scoped_args)
-        report = telemetry_health.build_doctor_report(parsed.repo, parsed.pr_number)
-        if parsed.format == "markdown":
-            print(telemetry_health.doctor_report_markdown(report), end="")
-        else:
-            print(json.dumps(report, sort_keys=True))
-        return 0 if report["status"] == "PASSED" else 2
+        return _handle_telemetry_doctor(args)
 
     print(f"Unknown telemetry command: {subcommand}", file=sys.stderr)
     return 2

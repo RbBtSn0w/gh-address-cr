@@ -23,6 +23,69 @@ AGENT_EVENT_TYPES = (
 )
 
 
+def _apply_single_event(
+    item: dict[str, Any],
+    event_type: str,
+    record: Any,
+    payload: dict[str, Any],
+) -> None:
+    from gh_address_cr.core.agent_protocol import apply_response_to_item
+
+    if event_type == "classification_recorded":
+        classification = str(payload.get("classification") or "")
+        if classification:
+            item["classification_evidence"] = {
+                "event_type": "classification_recorded",
+                "classification": classification,
+                "note": payload.get("note"),
+                "record_id": _attr(record, "record_id"),
+            }
+            item["decision"] = classification
+    elif event_type == "response_accepted":
+        response = payload.get("response")
+        if isinstance(response, Mapping):
+            apply_response_to_item(item, dict(response))
+            # `apply_response_to_item` stamps local-finding `handled_at` with
+            # datetime.now(); pin it to the event's append time so a rebuild is
+            # deterministic and does not overwrite the original timestamp.
+            record_ts = _attr(record, "timestamp")
+            if record_ts and item.get("handled_at"):
+                item["handled_at"] = record_ts
+    elif event_type == "verification_rejected":
+        # A verifier rejected a previously accepted fix: reopen the item so a
+        # rebuild never reconstructs a rejected fix as terminal/handled (#117).
+        item["state"] = "open"
+        item["status"] = "OPEN"
+        item["blocking"] = True
+        item["handled"] = False
+        item["thread_resolved"] = False
+        note = payload.get("note")
+        if note is not None:
+            item["verification_rejection_note"] = note
+    elif event_type == "reply_posted":
+        reply_url = payload.get("reply_url")
+        if reply_url:
+            item["reply_posted"] = True
+            item["reply_url"] = reply_url
+            if not isinstance(item.get("reply_evidence"), dict):
+                item["reply_evidence"] = {}
+            item["reply_evidence"]["reply_url"] = reply_url
+            # Preserve login-match evidence across cache rebuilds (#143):
+            # final-gate requires the recorded author to match its login.
+            author_login = payload.get("author_login")
+            if author_login:
+                item["reply_evidence"]["author_login"] = author_login
+    elif event_type == "thread_resolved":
+        item["thread_resolved"] = True
+    elif event_type == "response_published":
+        item["state"] = "closed"
+        item["status"] = "CLOSED"
+        item["blocking"] = False
+        item["handled"] = True
+        item["thread_resolved"] = True
+        item.pop("active_lease_id", None)
+
+
 def apply_ledger_events(
     base_items: Mapping[str, Mapping[str, Any]],
     records: Iterable[Any],
@@ -33,8 +96,6 @@ def apply_ledger_events(
     `payload`. Records are applied in iteration order, which the ledger preserves
     as append order.
     """
-    from gh_address_cr.core.agent_protocol import apply_response_to_item
-
     items: dict[str, dict[str, Any]] = {
         str(item_id): copy.deepcopy(dict(item)) for item_id, item in base_items.items()
     }
@@ -65,59 +126,7 @@ def apply_ledger_events(
                 "crash-recovery replay"
             )
 
-        if event_type == "classification_recorded":
-            classification = str(payload.get("classification") or "")
-            if classification:
-                item["classification_evidence"] = {
-                    "event_type": "classification_recorded",
-                    "classification": classification,
-                    "note": payload.get("note"),
-                    "record_id": _attr(record, "record_id"),
-                }
-                item["decision"] = classification
-        elif event_type == "response_accepted":
-            response = payload.get("response")
-            if isinstance(response, Mapping):
-                apply_response_to_item(item, dict(response))
-                # `apply_response_to_item` stamps local-finding `handled_at` with
-                # datetime.now(); pin it to the event's append time so a rebuild is
-                # deterministic and does not overwrite the original timestamp.
-                record_ts = _attr(record, "timestamp")
-                if record_ts and item.get("handled_at"):
-                    item["handled_at"] = record_ts
-        elif event_type == "verification_rejected":
-            # A verifier rejected a previously accepted fix: reopen the item so a
-            # rebuild never reconstructs a rejected fix as terminal/handled (#117).
-            item["state"] = "open"
-            item["status"] = "OPEN"
-            item["blocking"] = True
-            item["handled"] = False
-            item["thread_resolved"] = False
-            note = payload.get("note")
-            if note is not None:
-                item["verification_rejection_note"] = note
-        elif event_type == "reply_posted":
-            reply_url = payload.get("reply_url")
-            if reply_url:
-                item["reply_posted"] = True
-                item["reply_url"] = reply_url
-                if not isinstance(item.get("reply_evidence"), dict):
-                    item["reply_evidence"] = {}
-                item["reply_evidence"]["reply_url"] = reply_url
-                # Preserve login-match evidence across cache rebuilds (#143):
-                # final-gate requires the recorded author to match its login.
-                author_login = payload.get("author_login")
-                if author_login:
-                    item["reply_evidence"]["author_login"] = author_login
-        elif event_type == "thread_resolved":
-            item["thread_resolved"] = True
-        elif event_type == "response_published":
-            item["state"] = "closed"
-            item["status"] = "CLOSED"
-            item["blocking"] = False
-            item["handled"] = True
-            item["thread_resolved"] = True
-            item.pop("active_lease_id", None)
+        _apply_single_event(item, event_type, record, payload)
 
     return items
 
@@ -135,8 +144,11 @@ def rebuild_session_items(repo: str, pr_number: str, *, persist: bool = True) ->
     from gh_address_cr.core.utils import get_session_ledger
 
     session = session_store.load_session(repo, pr_number)
+    if not isinstance(session, dict):
+        session = {}
     ledger = get_session_ledger(session)
-    base_items = session.get("items") if isinstance(session.get("items"), Mapping) else {}
+    raw_items = session.get("items")
+    base_items: Mapping[str, Mapping[str, Any]] = raw_items if isinstance(raw_items, Mapping) else {}
     session["items"] = apply_ledger_events(base_items, ledger.load())
     if persist:
         session_store.save_session(repo, pr_number, session)

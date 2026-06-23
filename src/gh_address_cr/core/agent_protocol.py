@@ -532,10 +532,12 @@ def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> s
     if not response.get("validation_commands") and profile_validation:
         response["validation_commands"] = profile_validation
 
-    profile_fix_reply = profile.get("fix_reply") if isinstance(profile.get("fix_reply"), dict) else {}
+    raw_profile_fix_reply = profile.get("fix_reply")
+    profile_fix_reply: dict[str, Any] = raw_profile_fix_reply if isinstance(raw_profile_fix_reply, dict) else {}
     if "fix_reply" in response and response.get("fix_reply") is not None and not isinstance(response.get("fix_reply"), dict):
         return "INVALID_FIX_REPLY"
-    response_fix_reply = response.get("fix_reply") if isinstance(response.get("fix_reply"), dict) else {}
+    raw_response_fix_reply = response.get("fix_reply")
+    response_fix_reply: dict[str, Any] = raw_response_fix_reply if isinstance(raw_response_fix_reply, dict) else {}
     merged_fix_reply = dict(profile_fix_reply)
     merged_fix_reply.update(response_fix_reply)
     if profile.get("commit_hash") and not merged_fix_reply.get("commit_hash"):
@@ -707,7 +709,7 @@ def _accept_action_response_submission(
         accept_lease(session, lease_id, now=now)
     except LeaseSubmissionError as exc:
         _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
-        payload = {"item_id": item_id, "lease_id": lease_id}
+        payload: dict[str, Any] = {"item_id": item_id, "lease_id": lease_id}
         if exc.recovery_state:
             payload["lease_recovery"] = exc.recovery_state
         raise WorkflowError(
@@ -789,7 +791,8 @@ def _record_validation_command_telemetry(
         import shlex
         import time
 
-        from gh_address_cr.core.telemetry import SessionTelemetry, command_label, is_inline_env_assignment
+        from gh_address_cr.core.telemetry import SessionTelemetry
+        from gh_address_cr.core.telemetry_safety import command_label, is_inline_env_assignment
 
         telemetry = SessionTelemetry.get_instance()
     except Exception:
@@ -1138,6 +1141,30 @@ def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
     return _required_evidence_for_impl(item, role)
 
 
+def _validate_fix_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
+    if not _has_classification_evidence(item):
+        return protocol_codes.MISSING_CLASSIFICATION
+    if not response.get("files"):
+        return "MISSING_FILES"
+    if not response.get("validation_commands"):
+        return "MISSING_VALIDATION_COMMANDS"
+    if item.get("item_kind") == "github_thread":
+        fix_reply = response.get("fix_reply")
+        if not fix_reply:
+            return "MISSING_FIX_REPLY"
+        if not isinstance(fix_reply, dict):
+            return "INVALID_FIX_REPLY"
+        severity_reason = _fix_reply_severity_rejection_reason(fix_reply, item)
+        if severity_reason:
+            return severity_reason
+        from gh_address_cr.core.publisher import validate_fix_reply_for_submit
+
+        submit_error = validate_fix_reply_for_submit(item, response)
+        if submit_error:
+            return submit_error
+    return None
+
+
 def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
     for field in ("request_id", "lease_id", "agent_id", "resolution", "note"):
         if not response.get(field):
@@ -1148,26 +1175,7 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     if resolution not in TERMINAL_RESOLUTIONS:
         return "UNSUPPORTED_RESOLUTION"
     if resolution == "fix":
-        if not _has_classification_evidence(item):
-            return protocol_codes.MISSING_CLASSIFICATION
-        if not response.get("files"):
-            return "MISSING_FILES"
-        if not response.get("validation_commands"):
-            return "MISSING_VALIDATION_COMMANDS"
-        if item.get("item_kind") == "github_thread":
-            fix_reply = response.get("fix_reply")
-            if not fix_reply:
-                return "MISSING_FIX_REPLY"
-            if not isinstance(fix_reply, dict):
-                return "INVALID_FIX_REPLY"
-            severity_reason = _fix_reply_severity_rejection_reason(fix_reply, item)
-            if severity_reason:
-                return severity_reason
-            from gh_address_cr.core.publisher import validate_fix_reply_for_submit
-
-            submit_error = validate_fix_reply_for_submit(item, response)
-            if submit_error:
-                return submit_error
+        return _validate_fix_response(response, item)
     else:
         if "validation_commands" in response and not _normalize_validation_command_records(response.get("validation_commands")):
             return "INVALID_VALIDATION_COMMANDS"

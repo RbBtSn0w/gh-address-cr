@@ -173,7 +173,7 @@ def build_final_gate_facts(
 
 
 def project_final_gate(
-    facts: Iterable[Mapping[str, Any] | RuntimeFact],
+    facts: Iterable[dict[str, Any] | RuntimeFact],
     *,
     current_login: str | None = None,
     check_requirement: str | None = None,

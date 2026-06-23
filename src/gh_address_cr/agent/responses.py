@@ -84,6 +84,26 @@ def _validate_validation_commands(commands: Any) -> None:
             )
 
 
+def _validate_fix_resolution(payload: dict[str, Any], item_kind: str | None) -> None:
+    _validate_validation_commands(payload.get("validation_commands"))
+    _require_non_empty(payload, "files")
+    if item_kind == "github_thread":
+        _require_non_empty(payload, "fix_reply")
+    fix_reply = payload.get("fix_reply")
+    if fix_reply is not None:
+        if not isinstance(fix_reply, dict):
+            raise ResponseValidationError("invalid_fix_reply", "fix_reply must be an object.")
+        if not fix_reply.get("summary"):
+            raise ResponseValidationError("missing_fix_reply_summary", "fix_reply requires summary.")
+        severity = fix_reply.get("severity")
+        if severity is not None:
+            if not isinstance(severity, str) or severity.upper() not in VALID_SEVERITIES:
+                raise ResponseValidationError(
+                    "invalid_severity",
+                    f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
+                )
+
+
 def validate_action_response(
     payload: ActionResponse | dict[str, Any], *, item_kind: str | None = None
 ) -> ActionResponse:
@@ -104,23 +124,7 @@ def validate_action_response(
     if resolution not in TERMINAL_RESOLUTIONS:
         raise ResponseValidationError("unsupported_resolution", f"Unsupported resolution: {resolution}.")
     if resolution == "fix":
-        _validate_validation_commands(payload.get("validation_commands"))
-        _require_non_empty(payload, "files")
-        if item_kind == "github_thread":
-            _require_non_empty(payload, "fix_reply")
-        fix_reply = payload.get("fix_reply")
-        if fix_reply is not None:
-            if not isinstance(fix_reply, dict):
-                raise ResponseValidationError("invalid_fix_reply", "fix_reply must be an object.")
-            if not fix_reply.get("summary"):
-                raise ResponseValidationError("missing_fix_reply_summary", "fix_reply requires summary.")
-            severity = fix_reply.get("severity")
-            if severity is not None:
-                if not isinstance(severity, str) or severity.upper() not in VALID_SEVERITIES:
-                    raise ResponseValidationError(
-                        "invalid_severity",
-                        f"Invalid severity: {severity} (expected {', '.join(sorted(VALID_SEVERITIES))})",
-                    )
+        _validate_fix_resolution(payload, item_kind)
     else:
         if "validation_commands" in payload:
             _validate_validation_commands(payload["validation_commands"])
