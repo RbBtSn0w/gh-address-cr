@@ -179,6 +179,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             print(message, file=sys.stderr)
         return 5
 
+    telemetry_report: dict[str, Any] | None
     summary_path, telemetry_report = write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
     summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
         parsed, result, summary_path, telemetry_report
