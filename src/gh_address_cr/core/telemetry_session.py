@@ -6,7 +6,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.telemetry_attribution import ExternalTelemetryEvent, _event_fingerprint

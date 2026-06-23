@@ -1,25 +1,63 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-from pathlib import Path
 from typing import Any
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.command_runner import telemetry_debug_enabled
+from gh_address_cr.core.telemetry_import import (
+    TelemetryAdapter as TelemetryAdapter,
+)
+from gh_address_cr.core.telemetry_import import (
+    TelemetryParseResult as TelemetryParseResult,
+)
+from gh_address_cr.core.telemetry_import import (
+    autodiscovery_miss_import_summary as autodiscovery_miss_import_summary,
+)
+from gh_address_cr.core.telemetry_import import (
+    get_adapter as get_adapter,
+)
+from gh_address_cr.core.telemetry_import import (
+    hook_unavailable_import_summary as hook_unavailable_import_summary,
+)
+from gh_address_cr.core.telemetry_import import (
+    import_external_telemetry as import_external_telemetry,
+)
+from gh_address_cr.core.telemetry_import import (
+    input_unavailable_import_summary as input_unavailable_import_summary,
+)
+from gh_address_cr.core.telemetry_import import (
+    register_adapter as register_adapter,
+)
+from gh_address_cr.core.telemetry_import import (
+    unregister_adapter as unregister_adapter,
+)
+from gh_address_cr.core.telemetry_reporting import (
+    build_efficiency_report as build_efficiency_report,
+)
+from gh_address_cr.core.telemetry_reporting import (
+    efficiency_report_markdown as efficiency_report_markdown,
+)
 from gh_address_cr.core.telemetry_session import (
-    MAX_DURATION_SECONDS,
-    MAX_ERROR_RATE_PERCENT,
-    EfficiencyReport,
-    ExecutionMetric,
-    SessionTelemetry,
-    _runtime_events,
+    MAX_DURATION_SECONDS as MAX_DURATION_SECONDS,
+)
+from gh_address_cr.core.telemetry_session import (
+    MAX_ERROR_RATE_PERCENT as MAX_ERROR_RATE_PERCENT,
+)
+from gh_address_cr.core.telemetry_session import (
+    EfficiencyReport as EfficiencyReport,
+)
+from gh_address_cr.core.telemetry_session import (
+    ExecutionMetric as ExecutionMetric,
+)
+from gh_address_cr.core.telemetry_session import (
+    SessionTelemetry as SessionTelemetry,
+)
+from gh_address_cr.core.telemetry_session import (
+    _runtime_events as _runtime_events,
 )
 
-# Constants re-exported for compatibility
-MAX_DURATION_SECONDS = MAX_DURATION_SECONDS
-MAX_ERROR_RATE_PERCENT = MAX_ERROR_RATE_PERCENT
 
 # Public API wrappers
 def configure_context_safely(repo: str, pr_number: str) -> None:
@@ -65,12 +103,8 @@ def _safe_os_error_diagnostic(prefix: str, exc: OSError) -> str:
     detail = exc.strerror or str(exc)
     return f"{prefix}: {type(exc).__name__}: {detail}"
 
-# Lazy imports to avoid circular dependencies while maintaining re-exports
-# These are placed at the end to ensure the module is partially initialized.
-
+# Internal helper used by telemetry_reporting
 def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[str, Any] | None:
-    # This logic is complex and depends on JSON parsing, keeping it here as a helper
-    # used by telemetry_reporting.
     path = core_paths.last_machine_summary_file(paths.repo, paths.pr_number)
     if not path.exists():
         return None
@@ -119,20 +153,3 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "waiting_on": str(waiting_on) if waiting_on else "",
         },
     }
-
-# Public re-exports
-from gh_address_cr.core.telemetry_reporting import (
-    build_efficiency_report as build_efficiency_report,
-    efficiency_report_markdown as efficiency_report_markdown,
-)
-from gh_address_cr.core.telemetry_import import (
-    TelemetryAdapter as TelemetryAdapter,
-    TelemetryParseResult as TelemetryParseResult,
-    autodiscovery_miss_import_summary as autodiscovery_miss_import_summary,
-    get_adapter as get_adapter,
-    hook_unavailable_import_summary as hook_unavailable_import_summary,
-    import_external_telemetry as import_external_telemetry,
-    input_unavailable_import_summary as input_unavailable_import_summary,
-    register_adapter as register_adapter,
-    unregister_adapter as unregister_adapter,
-)

@@ -26,6 +26,7 @@ from gh_address_cr.core.telemetry_safety import (
     _safe_diagnostic_text,
 )
 
+
 @dataclass
 class TelemetryParseResult:
     events: list[ExternalTelemetryEvent]
