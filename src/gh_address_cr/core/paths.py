@@ -118,4 +118,3 @@ class SessionPaths:
     @property
     def efficiency_report_file(self) -> Path:
         return efficiency_report_file(self.repo, self.pr_number)
-

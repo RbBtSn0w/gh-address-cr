@@ -96,9 +96,7 @@ def apply_ledger_events(
     `payload`. Records are applied in iteration order, which the ledger preserves
     as append order.
     """
-    items: dict[str, dict[str, Any]] = {
-        str(item_id): copy.deepcopy(dict(item)) for item_id, item in base_items.items()
-    }
+    items: dict[str, dict[str, Any]] = {str(item_id): copy.deepcopy(dict(item)) for item_id, item in base_items.items()}
 
     for record in records:
         event_type = _attr(record, "event_type")

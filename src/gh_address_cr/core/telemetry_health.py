@@ -148,10 +148,7 @@ def record_autodiscovery_miss(repo: str, pr_number: str, misses: list[dict[str, 
 
 def build_doctor_report(repo: str, pr_number: str) -> dict[str, Any]:
     profiles, profile_issues = load_host_profiles()
-    profile_checks = [
-        autodiscovery_profile_check(profile, repo=repo, pr_number=pr_number)
-        for profile in profiles
-    ]
+    profile_checks = [autodiscovery_profile_check(profile, repo=repo, pr_number=pr_number) for profile in profiles]
     efficiency_report = core_telemetry.build_efficiency_report(repo, pr_number)
     cli_health_issues = [
         *[issue.to_dict() for issue in profile_issues],
@@ -193,14 +190,9 @@ def doctor_report_markdown(report: dict[str, Any]) -> str:
         "### Profile Checks",
     ]
     for check in report.get("profile_checks", []):
-        lines.append(
-            f"- {check['profile']}: {check['status']} ({check['reason_code']}) - {check['detail']}"
-        )
+        lines.append(f"- {check['profile']}: {check['status']} ({check['reason_code']}) - {check['detail']}")
     issues = report.get("cli_health_issues") or []
     if issues:
         lines.extend(["", "### CLI Health Issues"])
-        lines.extend(
-            f"- {issue['reason_code']} [{issue['severity']}]: {issue['detail']}"
-            for issue in issues
-        )
+        lines.extend(f"- {issue['reason_code']} [{issue['severity']}]: {issue['detail']}" for issue in issues)
     return "\n".join(lines) + "\n"

@@ -74,7 +74,9 @@ def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
     state = str(item.get("state") or "")
     if claim not in {"ready_to_publish", "fixed", "handled"}:
         return False
-    terminal_states = TERMINAL_GITHUB_STATES if str(item.get("item_kind") or "") == "github_thread" else TERMINAL_LOCAL_STATES
+    terminal_states = (
+        TERMINAL_GITHUB_STATES if str(item.get("item_kind") or "") == "github_thread" else TERMINAL_LOCAL_STATES
+    )
     if state in terminal_states or state == "handled":
         return False
     return True

@@ -159,11 +159,7 @@ def _resolve_fast_fix_matches(
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Load session threads and return the matching items plus the normalized file set."""
     session = session_store.load_session(repo, pr_number)
-    github_items = [
-        item
-        for item in _items(session).values()
-        if item.get("item_kind") == "github_thread"
-    ]
+    github_items = [item for item in _items(session).values() if item.get("item_kind") == "github_thread"]
     if not github_items:
         raise WorkflowError(
             status=f"{ctx.status_prefix}_NO_MATCH",
@@ -454,7 +450,9 @@ def _process_fast_fix_matches(
             commit_hash=commit_hash,
             severity_note=severity_note,
         )
-        batch_result = agent_protocol.submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=current_time)
+        batch_result = agent_protocol.submit_batch_action_response(
+            repo, pr_number, batch_path=batch_path, now=current_time
+        )
         accepted_count += int(batch_result.get("accepted_count") or 0)
         item_ids.extend(str(item_id) for item_id in batch_result.get("item_ids") or [])
         batches.append(batch_result)
@@ -756,9 +754,7 @@ def _submit_decline_thread(
         "reply_markdown": reply,
     }
     write_json_atomic(response_path, response)
-    submitted = agent_protocol.submit_action_response(
-        repo, pr_number, response_path=response_path, now=current_time
-    )
+    submitted = agent_protocol.submit_action_response(repo, pr_number, response_path=response_path, now=current_time)
     return {
         "item_id": item_id,
         "request_id": request["request_id"],

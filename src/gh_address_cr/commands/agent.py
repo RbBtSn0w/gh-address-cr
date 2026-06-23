@@ -184,7 +184,11 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--item-id")
     parser.add_argument("--now")
-    parser.add_argument("--batch", action="store_true", help="Generate a skeleton batch-response-skeleton.json for all unresolved threads.")
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Generate a skeleton batch-response-skeleton.json for all unresolved threads.",
+    )
     parser.add_argument("--files", help="Only batch lease threads that affect these files (comma-separated).")
     parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
     if parsed is None:
@@ -227,7 +231,9 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--input", required=True)
-    parser.add_argument("--publish", action="store_true", help="Publish accepted GitHub-thread fix evidence immediately.")
+    parser.add_argument(
+        "--publish", action="store_true", help="Publish accepted GitHub-thread fix evidence immediately."
+    )
     parser.add_argument("--now")
     parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
     if parsed is None:

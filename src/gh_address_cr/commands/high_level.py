@@ -47,7 +47,7 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
     return session_store.workspace_dir(repo, pr_number)
 
 
-def _persist_machine_summary(repo: str, pr_number: str, payload: dict) -> None:
+def _persist_machine_summary(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     path = _workspace_root(repo, pr_number) / "last-machine-summary.json"
     write_json_atomic(path, payload)
 
@@ -63,8 +63,8 @@ def _build_preflight_summary(
     waiting_on: str | None,
     next_action: str,
     artifact_path: str | None = None,
-    diagnostics: dict | None = None,
-) -> dict:
+    diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     summary = {
         "status": status,
         "repo": repo,
@@ -90,7 +90,7 @@ def _build_preflight_summary(
     return summary
 
 
-def _load_or_create_session(repo: str, pr_number: str) -> dict:
+def _load_or_create_session(repo: str, pr_number: str) -> dict[str, Any]:
     manager = session_store.SessionManager(repo, str(pr_number))
     created = False
     try:
@@ -106,7 +106,7 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict:
     return session
 
 
-def _ensure_native_session_fields(session: dict) -> None:
+def _ensure_native_session_fields(session: dict[str, Any]) -> None:
     now = _utc_now()
     session.setdefault("schema_version", 1)
     session.setdefault("created_at", now)
@@ -157,7 +157,7 @@ def _set_loop_state(
     )
 
 
-def _recalc_native_metrics(session: dict) -> None:
+def _recalc_native_metrics(session: dict[str, Any]) -> None:
     items = [item for item in session.get("items", {}).values() if isinstance(item, dict)]
     session["metrics"] = {
         "blocking_items_count": sum(1 for item in items if item.get("blocking")),
@@ -195,7 +195,7 @@ def _ingest_native_findings(
     sync: bool = False,
     scan_id: str | None = None,
     handoff_sha256: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     if not raw.strip():
         raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
     format_source = "adapter" if source == "adapter" else "json"
@@ -283,14 +283,14 @@ def _write_native_action_request(repo: str, pr_number: str, item: dict, *, comma
     return request_path
 
 
-def _first_blocking_item(session: dict) -> dict | None:
+def _first_blocking_item(session: dict[str, Any]) -> dict[str, Any] | None:
     for item in session.get("items", {}).values():
         if isinstance(item, dict) and item.get("blocking"):
             return item
     return None
 
 
-def _first_local_item(session: dict) -> dict | None:
+def _first_local_item(session: dict[str, Any]) -> dict[str, Any] | None:
     for item in session.get("items", {}).values():
         if isinstance(item, dict) and item.get("item_kind") == "local_finding":
             return item
@@ -309,11 +309,11 @@ def _native_summary(
     exit_code: int,
     session: dict,
     artifact_path: str | None = None,
-    item: dict | None = None,
+    item: dict[str, Any] | None = None,
     include_threads: bool = False,
-    diagnostics: dict | None = None,
+    diagnostics: dict[str, Any] | None = None,
     lean: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     raw_metrics = session.get("metrics")
     metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
     summary = {
@@ -349,7 +349,7 @@ def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
     return command_templates.common_summary_commands(repo, pr_number)
 
 
-def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
+def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict[str, Any]]:
     raw_items = session.get("items")
     items: dict[str, Any] = raw_items if isinstance(raw_items, dict) else {}
     rows = []
@@ -393,7 +393,7 @@ def _native_thread_rows(session: dict, *, lean: bool = False) -> list[dict]:
     return rows
 
 
-def _blocking_local_items(session: dict) -> list[dict]:
+def _blocking_local_items(session: dict[str, Any]) -> list[dict[str, Any]]:
     raw_items = session.get("items")
     items: dict[str, Any] = raw_items if isinstance(raw_items, dict) else {}
     return [
@@ -422,7 +422,7 @@ def _emit_auto_simple_not_eligible(
     run_id: str,
     max_iterations: int,
     session: dict,
-    item: dict | None,
+    item: dict[str, Any] | None,
     human: bool,
     lean: bool,
 ) -> int:
@@ -486,15 +486,11 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
     return request_path
 
 
-def _claimable_github_thread_item_ids(threads: list[dict]) -> list[str]:
-    return [
-        str(row["item_id"])
-        for row in threads
-        if row.get("item_id") and is_claimable_github_thread(row)
-    ]
+def _claimable_github_thread_item_ids(threads: list[dict[str, Any]]) -> list[str]:
+    return [str(row["item_id"]) for row in threads if row.get("item_id") and is_claimable_github_thread(row)]
 
 
-def _batch_response_skeleton(item_ids: list[str]) -> dict:
+def _batch_response_skeleton(item_ids: list[str]) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "agent_id": "<agent_id>",
@@ -678,7 +674,7 @@ class HighLevelReviewRuntime:
         preloaded_findings_input: str | None,
         repo: str,
         pr_number: str,
-    ) -> tuple[dict[str, Any], list[dict]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if command in {"review", "findings"} and parsed.input:
             _ingest_native_findings(
                 session,
@@ -700,7 +696,7 @@ class HighLevelReviewRuntime:
                 scan_id=parsed.scan_id,
             )
 
-        remote_threads: list[dict] = []
+        remote_threads: list[dict[str, Any]] = []
         if command in {"address", "review", "threads", "adapter"}:
             client = GitHubClient()
             remote_threads = client.list_threads(repo, pr_number)

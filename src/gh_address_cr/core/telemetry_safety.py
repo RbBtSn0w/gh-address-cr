@@ -309,5 +309,3 @@ def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, 
         inline_env[key] = value
         index += 1
     return argv[index:], inline_env
-
-

@@ -52,7 +52,9 @@ from gh_address_cr.core.utils import return_expired_items_to_open as _return_exp
 from gh_address_cr.core.utils import return_item_to_claimable_state as _return_item_to_claimable_state
 
 
-def _select_batch_target_items(session, *, agent_id: str, files: list[str] | None):
+def _select_batch_target_items(
+    session: dict[str, Any], *, agent_id: str, files: list[str] | None
+) -> list[tuple[str, dict[str, Any]]]:
     """Return ``(item_id, item)`` pairs eligible for batch leasing, honoring the file filter."""
     target_items = []
     for item_id, item in _items(session).items():
@@ -68,7 +70,9 @@ def _select_batch_target_items(session, *, agent_id: str, files: list[str] | Non
     return target_items
 
 
-def _ensure_batch_classification_evidence(session, item, *, item_id, agent_id, ledger) -> None:
+def _ensure_batch_classification_evidence(
+    session: dict[str, Any], item: dict[str, Any], *, item_id: str, agent_id: str, ledger: Any
+) -> None:
     """Record a 'fix' classification for a batch-claimed thread if none exists yet."""
     if _has_classification_evidence(item):
         return
@@ -101,7 +105,9 @@ def _ensure_batch_classification_evidence(session, item, *, item_id, agent_id, l
     )
 
 
-def _build_fixer_action_request(session, repo, pr_number, *, item, lease_id, request_id) -> dict[str, Any]:
+def _build_fixer_action_request(
+    session: dict[str, Any], repo: str, pr_number: str, *, item: dict[str, Any], lease_id: str, request_id: str
+) -> dict[str, Any]:
     """Build the fixer ActionRequest payload (without the response-skeleton path)."""
     request_item = dict(item)
     request_item["state"] = "claimed"
@@ -124,7 +130,17 @@ def _build_fixer_action_request(session, repo, pr_number, *, item, lease_id, req
     return request
 
 
-def _reconcile_existing_lease(session, repo, pr_number, *, item, item_id, existing_lease, agent_id, ledger) -> dict[str, Any]:
+def _reconcile_existing_lease(
+    session: dict[str, Any],
+    repo: str,
+    pr_number: str,
+    *,
+    item: dict[str, Any],
+    item_id: str,
+    existing_lease: dict[str, Any],
+    agent_id: str,
+    ledger: Any,
+) -> dict[str, Any]:
     """Repair an already-active fixer lease's request context and return its leased-item row."""
     lease_id = existing_lease["lease_id"]
     request_id = existing_lease.get("request_id") or ""
@@ -146,10 +162,14 @@ def _reconcile_existing_lease(session, repo, pr_number, *, item, item_id, existi
                 "lease_id": lease_id,
             },
         )
-        request = _build_fixer_action_request(session, repo, pr_number, item=item, lease_id=lease_id, request_id=request_id)
+        request = _build_fixer_action_request(
+            session, repo, pr_number, item=item, lease_id=lease_id, request_id=request_id
+        )
         new_request_hash = ActionRequest.from_dict(request).stable_hash()
         new_request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
-        response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+        response_skeleton_path = (
+            session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+        )
         request["response_skeleton_path"] = str(response_skeleton_path)
 
         write_json_atomic(new_request_path, request)
@@ -166,7 +186,16 @@ def _reconcile_existing_lease(session, repo, pr_number, *, item, item_id, existi
 
 
 def _lease_new_github_thread(
-    session, repo, pr_number, *, item, item_id, agent_id, ledger, current_time, newly_leased_items
+    session: dict[str, Any],
+    repo: str,
+    pr_number: str,
+    *,
+    item: dict[str, Any],
+    item_id: str,
+    agent_id: str,
+    ledger: Any,
+    current_time: datetime,
+    newly_leased_items: list[tuple[str, dict[str, Any]]],
 ) -> dict[str, Any] | None:
     """Claim a fresh fixer lease for a thread, returning its leased-item row or None to skip.
 
@@ -198,7 +227,9 @@ def _lease_new_github_thread(
     request = _build_fixer_action_request(session, repo, pr_number, item=item, lease_id=lease_id, request_id=request_id)
     request_hash = ActionRequest.from_dict(request).stable_hash()
     request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
-    response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+    response_skeleton_path = (
+        session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+    )
     request["response_skeleton_path"] = str(response_skeleton_path)
 
     claim_lease(
@@ -241,7 +272,7 @@ def _lease_new_github_thread(
     return {"item_id": item_id, "lease_id": lease_id, "request_id": request_id}
 
 
-def _rollback_newly_leased_items(session, newly_leased_items) -> None:
+def _rollback_newly_leased_items(session: dict[str, Any], newly_leased_items: list[tuple[str, dict[str, Any]]]) -> None:
     """Roll back the leases newly created in this batch on failure."""
     leases = session.setdefault("leases", {})
     for lid, itm in newly_leased_items:
@@ -255,7 +286,7 @@ def _rollback_newly_leased_items(session, newly_leased_items) -> None:
         itm.pop("active_lease_id", None)
 
 
-def _load_existing_batch_skeleton(batch_skeleton_path) -> tuple[dict, dict]:
+def _load_existing_batch_skeleton(batch_skeleton_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """Read an existing batch skeleton, returning ``(item_replies, common)`` to merge."""
     existing_items_replies: dict = {}
     existing_common: dict = {}
@@ -280,7 +311,12 @@ def _load_existing_batch_skeleton(batch_skeleton_path) -> tuple[dict, dict]:
     return existing_items_replies, existing_common
 
 
-def _build_batch_skeleton(agent_id, leased_items, existing_items_replies, existing_common) -> dict[str, Any]:
+def _build_batch_skeleton(
+    agent_id: str,
+    leased_items: list[dict[str, Any]],
+    existing_items_replies: dict[str, Any],
+    existing_common: dict[str, Any],
+) -> dict[str, Any]:
     """Assemble the merged batch-response skeleton from the leased items and prior replies."""
     items_list = []
     for item_info in leased_items:
@@ -303,13 +339,15 @@ def _build_batch_skeleton(agent_id, leased_items, existing_items_replies, existi
         "common": {
             "files": existing_common.get("files") or [],
             "commit_hash": existing_common.get("commit_hash") or "",
-            "validation_commands": existing_common.get("validation_commands") or [
+            "validation_commands": existing_common.get("validation_commands")
+            or [
                 {
                     "command": "",
                     "result": "passed",
                 }
             ],
-            "fix_reply": existing_common.get("fix_reply") or {
+            "fix_reply": existing_common.get("fix_reply")
+            or {
                 "summary": "",
                 "why": "",
             },
@@ -611,7 +649,9 @@ def _build_batch_item_response(
     request_id = str(item.get("request_id") or "").strip()
     lease_id = str(item.get("lease_id") or "").strip()
     if not request_id:
-        _raise_batch_schema_error("MISSING_BATCH_ITEM_REQUEST_ID", f"BatchActionResponse item {index} needs request_id.")
+        _raise_batch_schema_error(
+            "MISSING_BATCH_ITEM_REQUEST_ID", f"BatchActionResponse item {index} needs request_id."
+        )
     if not lease_id:
         _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
 
@@ -816,7 +856,9 @@ def _augment_batch_recovery_error(
             lease_msg = f"Please refresh the stale session state by running `{resume}`."
 
     if lease_msg:
-        exc.args = (f"{original_message} {lease_msg} (Once the lease is recovered, you can retry submitting your batch).",)
+        exc.args = (
+            f"{original_message} {lease_msg} (Once the lease is recovered, you can retry submitting your batch).",
+        )
     else:
         exc.args = (f"{original_message} {recovery_message}",)
     return exc

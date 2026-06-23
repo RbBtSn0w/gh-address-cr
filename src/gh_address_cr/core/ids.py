@@ -15,4 +15,3 @@ def stable_payload_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(json_ready(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-

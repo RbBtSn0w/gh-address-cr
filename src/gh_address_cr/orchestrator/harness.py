@@ -33,12 +33,14 @@ MIN_REQUIRED_VERSION = "0.0.1"
 MAX_QUEUE_RECONCILIATION_SECONDS = 1.0
 
 
-def _output_signal(status: str, reason_code: str, next_action: str, message: str, warnings: Optional[List[str]] = None) -> None:
+def _output_signal(
+    status: str, reason_code: str, next_action: str, message: str, warnings: Optional[List[str]] = None
+) -> None:
     payload: dict[str, Any] = {
         "status": status,
         "reason_code": reason_code,
         "next_action": next_action,
-        "message": message
+        "message": message,
     }
     if warnings:
         payload["warnings"] = warnings
@@ -64,12 +66,18 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _parse_common_args(args: List[str]):
+def _parse_common_args(args: List[str]) -> tuple[argparse.Namespace, List[str]]:
     parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
     parser.add_argument("repo")
     parser.add_argument("pr_number")
-    parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
-    parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
+    parser.add_argument(
+        "--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3))
+    )
+    parser.add_argument(
+        "--circuit-breaker-threshold",
+        type=int,
+        default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)),
+    )
     try:
         return parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
@@ -85,7 +93,12 @@ def handle_agent_orchestrate(subcommand: str | None, passthrough: List[str]) -> 
 
         valid_subcommands = ["start", "status", "step", "resume", "stop", "submit", "autopilot"]
         if subcommand not in valid_subcommands:
-            _output_signal("FAILED", "INVALID_SUBCOMMAND", "HALT", f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}")
+            _output_signal(
+                "FAILED",
+                "INVALID_SUBCOMMAND",
+                "HALT",
+                f"Invalid subcommand: {subcommand}. Use one of {valid_subcommands}",
+            )
             return 2
 
         if subcommand == "start":
@@ -150,7 +163,12 @@ def handle_submit(args: List[str]) -> int:
                     session.active_leases[parsed.item_id].handoff_reason = str(e)
                     session.active_leases[parsed.item_id].artifact_path = parsed.input
                 save_orchestration_session(session)
-                _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: Max retries ({cb_threshold}) reached for {parsed.item_id}.")
+                _output_signal(
+                    "FAILED",
+                    "HUMAN_INTERVENTION_REQUIRED",
+                    "HANDOFF",
+                    f"CRITICAL: Human Handoff Required: Max retries ({cb_threshold}) reached for {parsed.item_id}.",
+                )
                 return 2
             save_orchestration_session(session)
             _output_signal("FAILED", "PAYLOAD_CORRUPT", "RETRY", f"Submission failed: {e}")
@@ -178,13 +196,7 @@ def handle_submit(args: List[str]) -> int:
         warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
-        _output_signal(
-            "SUCCESS",
-            "SUBMITTED",
-            "PROCEED",
-            f"Verified and submitted {parsed.item_id}",
-            warnings
-        )
+        _output_signal("SUCCESS", "SUBMITTED", "PROCEED", f"Verified and submitted {parsed.item_id}", warnings)
         return 0
     except (WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
         _output_signal("FAILED", protocol_codes.STALE_REQUEST_CONTEXT, "RETRY", f"Submission failed: {e}")
@@ -339,13 +351,13 @@ def handle_start(args: List[str]) -> int:
         warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
-        
+
         _output_signal(
-            "SUCCESS", 
-            "INITIALIZED", 
-            "PROCEED", 
+            "SUCCESS",
+            "INITIALIZED",
+            "PROCEED",
             f"Initialized session {session.run_id} for {repo}/pr-{pr} (queued={len(session.queued_items)})",
-            warnings
+            warnings,
         )
         return 0
     except (Exception, SystemExit) as e:
@@ -378,7 +390,13 @@ def _prepare_session_for_step(
 
         if len(session.active_leases) >= session.config.get("max_concurrency", 3):
             warnings = session.pop_audit_warnings()
-            _output_signal("WAITING", "MAX_CONCURRENCY_REACHED", "RETRY", f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.", warnings)
+            _output_signal(
+                "WAITING",
+                "MAX_CONCURRENCY_REACHED",
+                "RETRY",
+                f"Max concurrency ({session.config.get('max_concurrency', 3)}) reached.",
+                warnings,
+            )
             return None, 0
         return session, 0
 
@@ -399,7 +417,13 @@ def _handle_workflow_error(e: WorkflowError, session: OrchestrationSession, repo
         if not session.active_leases:
             _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
         else:
-            _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
+            _output_signal(
+                "WAITING",
+                "WAITING_FOR_LEASES",
+                "RETRY",
+                f"Waiting for {len(session.active_leases)} active leases.",
+                warnings,
+            )
         return 0
 
     if e.reason_code in {protocol_codes.MISSING_CLASSIFICATION}:
@@ -417,8 +441,14 @@ def handle_step(args: List[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--role", help="Role-based filtering (e.g., triage)")
-    parser.add_argument("--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3)))
-    parser.add_argument("--circuit-breaker-threshold", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)))
+    parser.add_argument(
+        "--max-concurrency", type=int, default=int(os.environ.get("GH_ADDRESS_CR_ORCH_MAX_CONCURRENCY", 3))
+    )
+    parser.add_argument(
+        "--circuit-breaker-threshold",
+        type=int,
+        default=int(os.environ.get("GH_ADDRESS_CR_ORCH_CIRCUIT_BREAKER_THRESHOLD", 3)),
+    )
     try:
         parsed, _ = parser.parse_known_args(args)
     except (argparse.ArgumentError, SystemExit) as e:
@@ -438,7 +468,13 @@ def handle_step(args: List[str]) -> int:
             return 0
         else:
             warnings = session.pop_audit_warnings()
-            _output_signal("WAITING", "WAITING_FOR_LEASES", "RETRY", f"Waiting for {len(session.active_leases)} active leases.", warnings)
+            _output_signal(
+                "WAITING",
+                "WAITING_FOR_LEASES",
+                "RETRY",
+                f"Waiting for {len(session.active_leases)} active leases.",
+                warnings,
+            )
             return 0
 
     role = parsed.role or "fixer"  # Default to fixer for MVP
@@ -459,7 +495,7 @@ def handle_step(args: List[str]) -> int:
         action_request = json.loads(Path(request_path).read_text(encoding="utf-8"))
 
         item_data = action_request.get("item", {})
-        
+
         context_key = str(item_data.get("path") or item_id)
         lease = session.grant_lease(item_id, role, agent_id=f"orchestrator:{session.run_id}", context_key=context_key)
         warnings = session.pop_audit_warnings()
@@ -480,13 +516,8 @@ def handle_step(args: List[str]) -> int:
         )
 
         save_orchestration_session(session)
-        
-        payload = {
-            "status": "DISPATCHED",
-            "reason_code": "NEW_TASK",
-            "next_action": "PROCEED",
-            "packet": packet
-        }
+
+        payload = {"status": "DISPATCHED", "reason_code": "NEW_TASK", "next_action": "PROCEED", "packet": packet}
         if warnings:
             payload["warnings"] = warnings
         sys.stdout.write(json.dumps(payload) + "\n")
@@ -504,8 +535,10 @@ def handle_resume(args: List[str]) -> int:
         _sync_queue_from_runtime(session, enforce_budget=False)
         warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
-        
-        _output_signal("SUCCESS", "RESUMED", "PROCEED", f"Resumed session {session.run_id} for {repo}/pr-{pr}", warnings)
+
+        _output_signal(
+            "SUCCESS", "RESUMED", "PROCEED", f"Resumed session {session.run_id} for {repo}/pr-{pr}", warnings
+        )
         return 0
     except (OrchestrationSessionError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)
@@ -524,7 +557,7 @@ def handle_status(args: List[str]) -> int:
         elapsed = _sync_queue_from_runtime(session, enforce_budget=True)
         warnings = session.pop_audit_warnings()
         save_orchestration_session(session)
-        
+
         payload = {
             "status": "READY",
             "reason_code": "STATUS_OK",
@@ -556,15 +589,21 @@ def handle_stop(args: List[str]) -> int:
     try:
         session = load_orchestration_session(repo, pr)
         if session.active_leases:
-            _output_signal("FAILED", "ACTIVE_LEASES_EXIST", "HALT", f"Cannot stop: {len(session.active_leases)} active leases exist.")
+            _output_signal(
+                "FAILED",
+                "ACTIVE_LEASES_EXIST",
+                "HALT",
+                f"Cannot stop: {len(session.active_leases)} active leases exist.",
+            )
             return 2
         gate_rc = _run_authoritative_gate(repo, pr)
         if gate_rc != 0:
             _output_signal("FAILED", "GATE_FAILED", "HALT", "Cannot stop: final-gate failed.")
             return 2
-        
+
         session.completed = True
         from datetime import datetime, timezone
+
         session.completed_at = datetime.now(timezone.utc).isoformat()
         session.completed_reason = "Manual stop via agent orchestrate stop"
         save_orchestration_session(session)
@@ -583,9 +622,7 @@ def _sync_queue_from_runtime(session: OrchestrationSession, *, enforce_budget: b
     session.queued_items = [item_id for item_id in queued if item_id not in session.active_leases]
     elapsed = time.perf_counter() - started
     if enforce_budget and elapsed > MAX_QUEUE_RECONCILIATION_SECONDS:
-        raise RuntimeError(
-            f"reconciliation exceeded {MAX_QUEUE_RECONCILIATION_SECONDS:.3f}s budget ({elapsed:.3f}s)"
-        )
+        raise RuntimeError(f"reconciliation exceeded {MAX_QUEUE_RECONCILIATION_SECONDS:.3f}s budget ({elapsed:.3f}s)")
     return elapsed
 
 

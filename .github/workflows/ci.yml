@@ -33,7 +33,7 @@ jobs:
         run: ruff check src tests
 
       - name: Mypy (blocking)
-        run: mypy
+        run: python3 scripts/check_mypy_ratchet.py
 
       - name: Unit tests (with coverage)
         env:

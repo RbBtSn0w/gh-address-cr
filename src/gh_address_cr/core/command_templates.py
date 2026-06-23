@@ -191,4 +191,3 @@ def common_summary_commands(repo: str, pr_number: str) -> dict[str, str]:
         "publish": publish(repo, pr_number),
         "final_gate": final_gate(repo, pr_number),
     }
-

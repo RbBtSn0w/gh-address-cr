@@ -240,7 +240,9 @@ def issue_action_request(
         request["handling_boundary"] = handling_boundary
     request_hash = ActionRequest.from_dict(request).stable_hash()
     request_path = session_store.workspace_dir(repo, pr_number) / f"action-request-{request_id}.json"
-    response_skeleton_path = session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+    response_skeleton_path = (
+        session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
+    )
     request["response_skeleton_path"] = str(response_skeleton_path)
     try:
         lease = claim_lease(
@@ -479,15 +481,15 @@ def _classified_resolution(item: dict[str, Any]) -> str | None:
     return None
 
 
-def _restore_classification_evidence_from_session(
-    session: dict[str, Any], item_id: str, item: dict[str, Any]
-) -> None:
+def _restore_classification_evidence_from_session(session: dict[str, Any], item_id: str, item: dict[str, Any]) -> None:
     decision = str(item.get("decision") or "").strip().lower()
     if decision in TERMINAL_RESOLUTIONS:
         item["classification_evidence"] = {
             "event_type": "classification_recorded",
             "classification": decision,
-            "note": str(item.get("classification_note") or item.get("resolution_note") or "Restored from item decision."),
+            "note": str(
+                item.get("classification_note") or item.get("resolution_note") or "Restored from item decision."
+            ),
             "record_id": str(item.get("classification_record_id") or "session-decision"),
         }
         return
@@ -510,6 +512,7 @@ def _restore_classification_evidence_from_session(
         }
         item["decision"] = classification
         return
+
 
 def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> str | None:
     evidence_ref = str(response.get("evidence_ref") or "").strip()
@@ -534,7 +537,11 @@ def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> s
 
     raw_profile_fix_reply = profile.get("fix_reply")
     profile_fix_reply: dict[str, Any] = raw_profile_fix_reply if isinstance(raw_profile_fix_reply, dict) else {}
-    if "fix_reply" in response and response.get("fix_reply") is not None and not isinstance(response.get("fix_reply"), dict):
+    if (
+        "fix_reply" in response
+        and response.get("fix_reply") is not None
+        and not isinstance(response.get("fix_reply"), dict)
+    ):
         return "INVALID_FIX_REPLY"
     raw_response_fix_reply = response.get("fix_reply")
     response_fix_reply: dict[str, Any] = raw_response_fix_reply if isinstance(raw_response_fix_reply, dict) else {}
@@ -948,8 +955,8 @@ def _lease_recovery_payload_for_response(
 def _response_rejection_message(payload_name: str, reason_code: str, *, repo: str, pr_number: str) -> str:
     if reason_code == "MISSING_RESOLUTION":
         return (
-            f"{payload_name} rejected: missing fixer response field \"resolution\". "
-            "Add \"resolution\": \"fix|clarify|defer|reject\" to the ActionResponse JSON and rerun "
+            f'{payload_name} rejected: missing fixer response field "resolution". '
+            'Add "resolution": "fix|clarify|defer|reject" to the ActionResponse JSON and rerun '
             f"`gh-address-cr agent submit {repo} {pr_number} --input <response.json>`."
         )
     return f"{payload_name} rejected: {reason_code}"
@@ -1021,9 +1028,6 @@ def _looks_like_validation_result(value: str) -> bool:
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
 
-
-
-
 def _validate_requested_severity(
     value: Any,
     *,
@@ -1044,9 +1048,6 @@ def _validate_requested_severity(
         message="Explicit severity override must be one of P0, P1, P2, P3, or P4.",
         payload=payload or {},
     )
-
-
-
 
 
 def _validate_severity_override_note(
@@ -1076,9 +1077,6 @@ def _validate_severity_override_note(
     )
 
 
-
-
-
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
     for lease_id, lease in session.get("leases", {}).items():
         if not isinstance(lease, dict):
@@ -1102,6 +1100,7 @@ def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent
         return str(lease_id)
     return None
 
+
 def _next_item(session: dict[str, Any], role: str, *, item_id: str | None = None) -> tuple[str, dict[str, Any] | None]:
     active_item_ids = {
         str(lease.get("item_id"))
@@ -1119,9 +1118,6 @@ def _next_item(session: dict[str, Any], role: str, *, item_id: str | None = None
         if _item_is_open(item):
             return item_id, item
     return "", None
-
-
-
 
 
 def _item_is_open(item: dict[str, Any]) -> bool:
@@ -1177,7 +1173,9 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     if resolution == "fix":
         return _validate_fix_response(response, item)
     else:
-        if "validation_commands" in response and not _normalize_validation_command_records(response.get("validation_commands")):
+        if "validation_commands" in response and not _normalize_validation_command_records(
+            response.get("validation_commands")
+        ):
             return "INVALID_VALIDATION_COMMANDS"
         if not response.get("reply_markdown"):
             return "MISSING_REPLY_MARKDOWN"
@@ -1307,10 +1305,9 @@ def _record_response_rejected(
     )
 
 
-
-
-
-def _required_response_field(response: dict[str, Any], field: str, *, status: str = protocol_codes.ACTION_REJECTED) -> str:
+def _required_response_field(
+    response: dict[str, Any], field: str, *, status: str = protocol_codes.ACTION_REJECTED
+) -> str:
     value = response.get(field)
     if not value:
         raise WorkflowError(

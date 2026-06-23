@@ -14,13 +14,13 @@ def project_slug_from_cwd(cwd: str) -> str:
 
 
 def resolve_glob(pattern: str, *, project_slug: str, session_id: str = "") -> str:
-    expanded = os.path.expanduser(
-        pattern.replace("{project_slug}", project_slug).replace("{session_id}", session_id)
-    )
+    expanded = os.path.expanduser(pattern.replace("{project_slug}", project_slug).replace("{session_id}", session_id))
     return expanded
 
 
-def first_env_value(env_names: str | list[str] | tuple[str, ...], environ: Mapping[str, str] | None = None) -> str | None:
+def first_env_value(
+    env_names: str | list[str] | tuple[str, ...], environ: Mapping[str, str] | None = None
+) -> str | None:
     source = environ if environ is not None else os.environ
     names = [env_names] if isinstance(env_names, str) else env_names
     for name in names:

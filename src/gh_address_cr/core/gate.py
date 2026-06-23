@@ -348,7 +348,6 @@ def _has_publish_ready_evidence(item: Mapping[str, Any]) -> bool:
     return has_content(item.get("publish_resolution"))
 
 
-
 def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
     if not repo or not pr_number:
         return {}

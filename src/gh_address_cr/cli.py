@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
@@ -87,7 +88,8 @@ WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
 PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
 
-def _legacy_module(name: str):
+
+def _legacy_module(name: str) -> Any:
     raise RuntimeError(f"Legacy module imports are not supported by the native CLI path: {name}")
 
 
@@ -101,8 +103,6 @@ def _parse_records(raw: str) -> list[dict]:
 
 def _parse_findings(raw: str) -> list[dict]:
     return native_parse_finding_blocks(raw)
-
-
 
 
 def workspace_root(repo: str, pr_number: str) -> Path:
@@ -330,10 +330,7 @@ def has_submitted_producer_result(repo: str, pr_number: str) -> bool:
     producer_results = handoff.get("producer_results")
     if not isinstance(producer_results, dict):
         return False
-    return any(
-        isinstance(result, dict) and result.get("status") == "submitted"
-        for result in producer_results.values()
-    )
+    return any(isinstance(result, dict) and result.get("status") == "submitted" for result in producer_results.values())
 
 
 def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None, str | None]:
@@ -631,7 +628,6 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
     )
 
 
-
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
     if shutil.which("gh") is None:
         diagnostics = classify_github_failure(
@@ -757,9 +753,6 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     return HighLevelReviewRuntime().handle(command, passthrough_args, human=human, lean=lean)
 
 
-
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -823,7 +816,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _dispatch_management_commands(args) -> int | None:
+def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
     """Handle commands that run before target-arg expansion. Returns None if unhandled."""
     if args.command == "version":
         sys.stdout.write(f"gh-address-cr {__version__}\n")
@@ -877,7 +870,7 @@ def _dispatch_management_commands(args) -> int | None:
     return None
 
 
-def _expand_target_args(args) -> None:
+def _expand_target_args(args: argparse.Namespace) -> None:
     """Fold the leading repo/pr_number positionals back into args.args."""
     full_args = list(args.args)
     if args.pr_number:
@@ -887,7 +880,7 @@ def _expand_target_args(args) -> None:
     args.args = full_args
 
 
-def _dispatch_passthrough_commands(args) -> int | None:
+def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
     """Handle commands that delegate to a sub-handler module. Returns None if unhandled."""
     if args.command == "submit-action":
         if args.args and args.args[0] in {"-h", "--help"}:
@@ -930,7 +923,7 @@ def _dispatch_passthrough_commands(args) -> int | None:
     return None
 
 
-def _dispatch_high_level_commands(args) -> int:
+def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     """Handle legacy, unknown, and native high-level commands. Always returns a code."""
     if args.command in UNSUPPORTED_LEGACY_COMMANDS:
         print(

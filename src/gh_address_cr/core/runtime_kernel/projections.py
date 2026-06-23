@@ -205,9 +205,8 @@ def _source_generation_matches(execution: CommandExecutionFact, latest: ReviewTh
 def _matches_direct_current_generation(execution: CommandExecutionFact, latest: ReviewThreadFact) -> bool:
     if execution.command_kind not in REQUIRED_THREAD_COMMANDS:
         return False
-    return (
-        _source_generation_matches(execution, latest)
-        and execution.command_id == _expected_command_id(execution.command_kind, latest)
+    return _source_generation_matches(execution, latest) and execution.command_id == _expected_command_id(
+        execution.command_kind, latest
     )
 
 
@@ -316,7 +315,9 @@ def _satisfied_command_kinds(
     return frozenset(command for command in satisfied_commands if command in REQUIRED_THREAD_COMMANDS)
 
 
-def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[CommandExecutionFact, ...]) -> ReviewWorkItem:
+def _project_item(
+    thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[CommandExecutionFact, ...]
+) -> ReviewWorkItem:
     latest = thread_facts[-1]
     latest_row = latest.row()
     latest_payload = latest.payload
@@ -381,7 +382,9 @@ def _project_item(thread_facts: tuple[ReviewThreadFact, ...], executions: tuple[
     )
 
 
-def project_review_threads(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict | RuntimeFact, ...]) -> ReviewProjection:
+def project_review_threads(
+    facts: list[JsonDict | RuntimeFact] | tuple[JsonDict | RuntimeFact, ...],
+) -> ReviewProjection:
     sorted_facts = sort_runtime_facts(tuple(facts))
     thread_facts_by_item: dict[str, list[ReviewThreadFact]] = defaultdict(list)
     executions_by_item: dict[str, list[CommandExecutionFact]] = defaultdict(list)
@@ -429,7 +432,9 @@ def project_review_threads(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict 
     waiting_item_ids = tuple(item.item_id for item in work_items if item.state == "waiting")
     evidence_pending_item_ids = tuple(item.item_id for item in work_items if item.state == "evidence_pending")
     final_gate_blocker_ids = tuple(
-        item.item_id for item in work_items if item.state in {"active", "stale", "reopened", "waiting", "evidence_pending"}
+        item.item_id
+        for item in work_items
+        if item.state in {"active", "stale", "reopened", "waiting", "evidence_pending"}
     )
 
     return ReviewProjection(

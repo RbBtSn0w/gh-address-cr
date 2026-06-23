@@ -134,7 +134,9 @@ class RuntimeFact:
         }
 
 
-def sort_runtime_facts(facts: list[JsonDict | RuntimeFact] | tuple[JsonDict | RuntimeFact, ...]) -> tuple[RuntimeFact, ...]:
+def sort_runtime_facts(
+    facts: list[JsonDict | RuntimeFact] | tuple[JsonDict | RuntimeFact, ...],
+) -> tuple[RuntimeFact, ...]:
     parsed_facts = tuple(RuntimeFact.from_dict(fact) for fact in facts)
     seen_keys = set()
     for fact in parsed_facts:
