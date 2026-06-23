@@ -147,6 +147,7 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
             incomplete.append({"item_id": item_id, "last_event_type": entries[-1][1].get("event_type")})
             per_cr.append({"item_id": item_id, "span_ms": None, "completed": False, "classification": classification})
 
+    span_ms: dict[str, Any]
     if completed_spans:
         span_ms = {
             "median": int(statistics.median(completed_spans)),

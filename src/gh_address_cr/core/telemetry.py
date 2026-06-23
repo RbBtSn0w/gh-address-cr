@@ -16,20 +16,12 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.command_runner import telemetry_debug_enabled
 from gh_address_cr.core.io import write_json_atomic
-
-# Content-safety/redaction helpers live in a dedicated module; re-exported here so
-# existing `telemetry.<name>` references (including tests) keep resolving.
-from gh_address_cr.core.telemetry_safety import (  # noqa: F401
-    TOKEN_MARKERS,
-    UNSAFE_METADATA_KEY_MARKERS,
-    UNSAFE_METADATA_KEYS,
+from gh_address_cr.core.telemetry_safety import (
     _contains_control_character,
     _contains_private_identifier,
     _contains_token_marker,
-    _is_unsafe_metadata_key,
     _json_loads_strict,
     _looks_like_unnecessary_absolute_path,
-    _reject_json_constant,
     _safe_correlation_id,
     _safe_diagnostic_text,
     _safe_identity_label,
@@ -39,11 +31,6 @@ from gh_address_cr.core.telemetry_safety import (  # noqa: F401
     _safe_runtime_operation,
     _safe_source_label,
     _safe_source_session_id,
-    _strip_inline_env_assignments,
-    _validate_safe_metadata_value,
-    command_label,
-    is_inline_env_assignment,
-    split_inline_env_assignments,
 )
 
 
@@ -509,7 +496,7 @@ class SessionTelemetry:
             return
 
     def evaluate_efficiency(self) -> list[str]:
-        flags = []
+        flags: list[str] = []
         if not self.metrics:
             return flags
 
@@ -689,6 +676,73 @@ def _load_import_state(paths, *, source: str, fmt: str):
     return existing, existing_fingerprints, None
 
 
+@dataclass
+class _ProcessedEventsResult:
+    accepted: list[ExternalTelemetryEvent]
+    accepted_fingerprints: list[str]
+    duplicate_fingerprints: list[str]
+    observed_sessions: set[str]
+    duplicate_count: int
+    unsafe_seen: bool
+    malformed_seen: bool
+    rejected_count: int
+
+
+def _process_imported_events(
+    accepted_events: list[ExternalTelemetryEvent],
+    trusted_normalized_events: bool,
+    source: str,
+    existing_fingerprints: set[str],
+    diagnostics: list[str],
+    unsafe_seen: bool,
+    malformed_seen: bool,
+    rejected_count: int,
+) -> _ProcessedEventsResult:
+    accepted: list[ExternalTelemetryEvent] = []
+    accepted_fingerprints: list[str] = []
+    duplicate_fingerprints: list[str] = []
+    observed_sessions: set[str] = set()
+    duplicate_count = 0
+
+    for idx, event in enumerate(accepted_events):
+        if not isinstance(event, ExternalTelemetryEvent):
+            raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
+        try:
+            normalized_event = event
+            if not trusted_normalized_events:
+                normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("UNSAFE:"):
+                unsafe_seen = True
+                diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message.removeprefix('UNSAFE:'))}")
+            else:
+                malformed_seen = True
+                diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message)}")
+            rejected_count += 1
+            continue
+
+        observed_sessions.add(normalized_event.source_session_id)
+        if normalized_event.identity in existing_fingerprints:
+            duplicate_count += 1
+            duplicate_fingerprints.append(normalized_event.identity)
+            continue
+        existing_fingerprints.add(normalized_event.identity)
+        accepted_fingerprints.append(normalized_event.identity)
+        accepted.append(normalized_event)
+
+    return _ProcessedEventsResult(
+        accepted=accepted,
+        accepted_fingerprints=accepted_fingerprints,
+        duplicate_fingerprints=duplicate_fingerprints,
+        observed_sessions=observed_sessions,
+        duplicate_count=duplicate_count,
+        unsafe_seen=unsafe_seen,
+        malformed_seen=malformed_seen,
+        rejected_count=rejected_count,
+    )
+
+
 def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: str, raw: str) -> dict[str, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
     adapter = get_adapter(fmt, source=source)
@@ -741,40 +795,27 @@ def import_external_telemetry(repo: str, pr_number: str, *, source: str, fmt: st
             diagnostics=[f"Adapter diagnostics processing failed: {type(exc).__name__}"],
         )
 
-    accepted: list[ExternalTelemetryEvent] = []
-    accepted_fingerprints: list[str] = []
-    duplicate_fingerprints: list[str] = []
-    observed_sessions: set[str] = set()
-    duplicate_count = 0
     trusted_normalized_events = parse_result.events_are_normalized and type(adapter) is GenericAgentJsonlAdapter
 
     try:
-        for idx, event in enumerate(accepted_events):
-            if not isinstance(event, ExternalTelemetryEvent):
-                raise TypeError(f"Event must be an ExternalTelemetryEvent instance, got {type(event).__name__}")
-            try:
-                normalized_event = event
-                if not trusted_normalized_events:
-                    normalized_event = _normalize_external_event(event.to_dict(), declared_source=source)
-            except ValueError as exc:
-                message = str(exc)
-                if message.startswith("UNSAFE:"):
-                    unsafe_seen = True
-                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message.removeprefix('UNSAFE:'))}")
-                else:
-                    malformed_seen = True
-                    diagnostics.append(f"event index {idx}: {_safe_diagnostic_text(message)}")
-                rejected_count += 1
-                continue
-
-            observed_sessions.add(normalized_event.source_session_id)
-            if normalized_event.identity in existing_fingerprints:
-                duplicate_count += 1
-                duplicate_fingerprints.append(normalized_event.identity)
-                continue
-            existing_fingerprints.add(normalized_event.identity)
-            accepted_fingerprints.append(normalized_event.identity)
-            accepted.append(normalized_event)
+        proc_result = _process_imported_events(
+            accepted_events,
+            trusted_normalized_events,
+            source,
+            existing_fingerprints,
+            diagnostics,
+            unsafe_seen,
+            malformed_seen,
+            rejected_count,
+        )
+        accepted = proc_result.accepted
+        accepted_fingerprints = proc_result.accepted_fingerprints
+        duplicate_fingerprints = proc_result.duplicate_fingerprints
+        observed_sessions = proc_result.observed_sessions
+        duplicate_count = proc_result.duplicate_count
+        unsafe_seen = proc_result.unsafe_seen
+        malformed_seen = proc_result.malformed_seen
+        rejected_count = proc_result.rejected_count
     except (TypeError, ValueError) as exc:
         return _failed_import_summary(
             paths,
@@ -925,7 +966,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
     error_prone = _error_prone_operations(events)
     flags = _inefficiency_flags(slowest, error_prone)
     report_path = paths.efficiency_report_file
-    report = {
+    report: dict[str, Any] = {
         "status": "SUCCESS",
         "reason_code": "TELEMETRY_REPORT_READY",
         "repo": repo,
@@ -960,11 +1001,11 @@ def build_efficiency_report(repo: str, pr_number: str) -> dict[str, Any]:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         write_json_atomic(report_path, report)
     except OSError as exc:
-        report["diagnostics"].append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
+        diagnostics.append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
     telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
     report["telemetry_overhead_ms"] = telemetry_overhead_ms
-    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in report["diagnostics"]:
-        report["diagnostics"].append("TELEMETRY_OVERHEAD_EXCEEDED")
+    if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in diagnostics:
+        diagnostics.append("TELEMETRY_OVERHEAD_EXCEEDED")
     return report
 
 

@@ -46,31 +46,15 @@ from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
 
 
-def publish_github_thread_responses(
+def _build_publish_plans(
+    session: dict[str, Any],
+    ledger: Any,
+    publish_items: list[tuple[str, dict[str, Any]]],
     repo: str,
     pr_number: str,
-    *,
-    github_client: Any | None = None,
-    agent_id: str = "gh-address-cr-publisher",
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    current_time = _coerce_now(now)
-    timestamp = _format_timestamp(current_time)
-    _configure_publish_telemetry(repo, pr_number)
-    session = session_store.load_session(repo, pr_number)
-    ledger = _ledger(session)
-    client = github_client or GitHubClient()
-    publish_items = _publish_ready_items(session)
-    if not publish_items:
-        return {
-            "status": "NO_PUBLISH_READY_ITEMS",
-            "repo": repo,
-            "pr_number": str(pr_number),
-            "published_count": 0,
-        }
-    publisher_login = _publisher_login(client, fallback=agent_id)
+    agent_id: str,
+) -> list[dict[str, Any]]:
     default_commit_hash = None
-
     plans: list[dict[str, Any]] = []
     for item_id, item in publish_items:
         response = item.get("accepted_response")
@@ -133,37 +117,34 @@ def publish_github_thread_responses(
                 "reply_body": reply_body,
             }
         )
+    return plans
 
-    published: list[str] = []
-    for plan in plans:
-        item_id = str(plan["item_id"])
-        item = plan["item"]
-        thread_id = str(plan["thread_id"])
-        lease_id = item.get("active_lease_id")
-        reply_url = item.get("reply_url") if item.get("reply_posted") else None
-        reply_key = _side_effect_key(session, item_id, "github_reply")
-        resolve_key = _side_effect_key(session, item_id, "github_resolve")
-        existing_reply_url = ledger.successful_side_effect_url(reply_key, "github_reply")
-        if existing_reply_url:
-            reply_url = existing_reply_url
-        if not reply_url:
-            try:
-                reply_url = client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"]))
-            except GitHubError as exc:
-                _record_side_effect_attempt(
-                    ledger,
-                    session=session,
-                    item_id=item_id,
-                    lease_id=lease_id,
-                    agent_id=agent_id,
-                    side_effect_type="github_reply",
-                    idempotency_key=reply_key,
-                    status="failed",
-                    timestamp=timestamp,
-                    last_error=str(exc),
-                )
-                session_store.save_session(repo, pr_number, session)
-                raise _publish_error(repo, pr_number, item_id, exc) from exc
+
+def _execute_single_publish_plan(
+    plan: dict[str, Any],
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    ledger: Any,
+    client: Any,
+    publisher_login: str,
+    agent_id: str,
+    timestamp: str,
+) -> str:
+    item_id = str(plan["item_id"])
+    item = plan["item"]
+    thread_id = str(plan["thread_id"])
+    lease_id = item.get("active_lease_id")
+    reply_url = item.get("reply_url") if item.get("reply_posted") else None
+    reply_key = _side_effect_key(session, item_id, "github_reply")
+    resolve_key = _side_effect_key(session, item_id, "github_resolve")
+    existing_reply_url = ledger.successful_side_effect_url(reply_key, "github_reply")
+    if existing_reply_url:
+        reply_url = existing_reply_url
+    if not reply_url:
+        try:
+            reply_url = client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"]))
+        except GitHubError as exc:
             _record_side_effect_attempt(
                 ledger,
                 session=session,
@@ -172,43 +153,43 @@ def publish_github_thread_responses(
                 agent_id=agent_id,
                 side_effect_type="github_reply",
                 idempotency_key=reply_key,
-                status="succeeded",
+                status="failed",
                 timestamp=timestamp,
-                external_url=reply_url,
+                last_error=str(exc),
             )
-            ledger.append_event(
-                session_id=str(session["session_id"]),
-                item_id=item_id,
-                lease_id=lease_id,
-                agent_id=agent_id,
-                role="publisher",
-                event_type="reply_posted",
-                payload={"thread_id": thread_id, "reply_url": reply_url, "idempotency_key": reply_key},
-                timestamp=timestamp,
-            )
-        item["reply_posted"] = True
-        item["reply_url"] = reply_url
-        item["reply_evidence"] = {"reply_url": reply_url, "author_login": publisher_login}
+            session_store.save_session(repo, pr_number, session)
+            raise _publish_error(repo, pr_number, item_id, exc) from exc
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_reply",
+            idempotency_key=reply_key,
+            status="succeeded",
+            timestamp=timestamp,
+            external_url=reply_url,
+        )
+        ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            role="publisher",
+            event_type="reply_posted",
+            payload={"thread_id": thread_id, "reply_url": reply_url, "idempotency_key": reply_key},
+            timestamp=timestamp,
+        )
+    item["reply_posted"] = True
+    item["reply_url"] = reply_url
+    item["reply_evidence"] = {"reply_url": reply_url, "author_login": publisher_login}
 
-        existing_resolve = ledger.successful_side_effect_url(resolve_key, "github_resolve")
-        if not existing_resolve and not item.get("thread_resolved"):
-            try:
-                client.resolve_thread(repo, str(pr_number), thread_id)
-            except GitHubError as exc:
-                _record_side_effect_attempt(
-                    ledger,
-                    session=session,
-                    item_id=item_id,
-                    lease_id=lease_id,
-                    agent_id=agent_id,
-                    side_effect_type="github_resolve",
-                    idempotency_key=resolve_key,
-                    status="failed",
-                    timestamp=timestamp,
-                    last_error=str(exc),
-                )
-                session_store.save_session(repo, pr_number, session)
-                raise _publish_error(repo, pr_number, item_id, exc) from exc
+    existing_resolve = ledger.successful_side_effect_url(resolve_key, "github_resolve")
+    if not existing_resolve and not item.get("thread_resolved"):
+        try:
+            client.resolve_thread(repo, str(pr_number), thread_id)
+        except GitHubError as exc:
             _record_side_effect_attempt(
                 ledger,
                 session=session,
@@ -217,40 +198,96 @@ def publish_github_thread_responses(
                 agent_id=agent_id,
                 side_effect_type="github_resolve",
                 idempotency_key=resolve_key,
-                status="succeeded",
+                status="failed",
                 timestamp=timestamp,
-                external_url=thread_id,
+                last_error=str(exc),
             )
-            ledger.append_event(
-                session_id=str(session["session_id"]),
-                item_id=item_id,
-                lease_id=lease_id,
-                agent_id=agent_id,
-                role="publisher",
-                event_type="thread_resolved",
-                payload={"thread_id": thread_id, "idempotency_key": resolve_key},
-                timestamp=timestamp,
-            )
-
-        item["state"] = "closed"
-        item["status"] = "CLOSED"
-        item["blocking"] = False
-        item["handled"] = True
-        item["thread_resolved"] = True
-        item["handled_at"] = timestamp
-        item["claimed_by"] = None
-        item["claimed_at"] = None
-        item["lease_expires_at"] = None
-        item.pop("active_lease_id", None)
+            session_store.save_session(repo, pr_number, session)
+            raise _publish_error(repo, pr_number, item_id, exc) from exc
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_resolve",
+            idempotency_key=resolve_key,
+            status="succeeded",
+            timestamp=timestamp,
+            external_url=thread_id,
+        )
         ledger.append_event(
             session_id=str(session["session_id"]),
             item_id=item_id,
             lease_id=lease_id,
             agent_id=agent_id,
             role="publisher",
-            event_type="response_published",
-            payload={"thread_id": thread_id, "reply_url": reply_url},
+            event_type="thread_resolved",
+            payload={"thread_id": thread_id, "idempotency_key": resolve_key},
             timestamp=timestamp,
+        )
+
+    item["state"] = "closed"
+    item["status"] = "CLOSED"
+    item["blocking"] = False
+    item["handled"] = True
+    item["thread_resolved"] = True
+    item["handled_at"] = timestamp
+    item["claimed_by"] = None
+    item["claimed_at"] = None
+    item["lease_expires_at"] = None
+    item.pop("active_lease_id", None)
+    ledger.append_event(
+        session_id=str(session["session_id"]),
+        item_id=item_id,
+        lease_id=lease_id,
+        agent_id=agent_id,
+        role="publisher",
+        event_type="response_published",
+        payload={"thread_id": thread_id, "reply_url": reply_url},
+        timestamp=timestamp,
+    )
+    return item_id
+
+
+def publish_github_thread_responses(
+    repo: str,
+    pr_number: str,
+    *,
+    github_client: Any | None = None,
+    agent_id: str = "gh-address-cr-publisher",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_time = _coerce_now(now)
+    timestamp = _format_timestamp(current_time)
+    _configure_publish_telemetry(repo, pr_number)
+    session = session_store.load_session(repo, pr_number)
+    ledger = _ledger(session)
+    client = github_client or GitHubClient()
+    publish_items = _publish_ready_items(session)
+    if not publish_items:
+        return {
+            "status": "NO_PUBLISH_READY_ITEMS",
+            "repo": repo,
+            "pr_number": str(pr_number),
+            "published_count": 0,
+        }
+    publisher_login = _publisher_login(client, fallback=agent_id)
+
+    plans = _build_publish_plans(session, ledger, publish_items, repo, pr_number, agent_id)
+
+    published: list[str] = []
+    for plan in plans:
+        item_id = _execute_single_publish_plan(
+            plan,
+            repo,
+            pr_number,
+            session,
+            ledger,
+            client,
+            publisher_login,
+            agent_id,
+            timestamp,
         )
         published.append(item_id)
 

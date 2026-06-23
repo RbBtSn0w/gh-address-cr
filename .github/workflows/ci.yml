@@ -32,8 +32,7 @@ jobs:
       - name: Ruff
         run: ruff check src tests
 
-      - name: Mypy (non-blocking ratchet)
-        continue-on-error: true
+      - name: Mypy (blocking)
         run: mypy
 
       - name: Unit tests (with coverage)

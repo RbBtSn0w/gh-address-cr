@@ -580,13 +580,88 @@ def submit_batch_action_response(
     }
 
 
+def _build_batch_item_response(
+    index: int,
+    item: dict[str, Any],
+    resolution: str,
+    schema_version: str,
+    agent_id: str,
+    common_fix_reply: dict[str, Any],
+    common_files: Any,
+    common_validation: Any,
+    common_commit_hash: str,
+    common_evidence_ref: str,
+) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        _raise_batch_schema_error("INVALID_BATCH_ITEM", f"BatchActionResponse item {index} must be an object.")
+    item_fix_reply = item.get("fix_reply") or {}
+    if not isinstance(item_fix_reply, dict):
+        _raise_batch_schema_error(
+            "INVALID_BATCH_ITEM_FIX_REPLY",
+            f"BatchActionResponse item {index} fix_reply must be an object.",
+        )
+
+    item_resolution = str(item.get("resolution") or resolution).strip().lower()
+    if item_resolution != "fix":
+        _raise_batch_schema_error(
+            "BATCH_UNSUPPORTED_RESOLUTION",
+            f"BatchActionResponse item {index} only supports fix evidence.",
+        )
+
+    request_id = str(item.get("request_id") or "").strip()
+    lease_id = str(item.get("lease_id") or "").strip()
+    if not request_id:
+        _raise_batch_schema_error("MISSING_BATCH_ITEM_REQUEST_ID", f"BatchActionResponse item {index} needs request_id.")
+    if not lease_id:
+        _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
+
+    summary = str(item.get("summary") or item_fix_reply.get("summary") or "").strip()
+    why = str(item.get("why") or item_fix_reply.get("why") or "").strip()
+    note = str(item.get("note") or summary or why).strip()
+    if not note:
+        _raise_batch_schema_error("MISSING_BATCH_ITEM_NOTE", f"BatchActionResponse item {index} needs note or summary.")
+
+    files = _normalize_string_list(item.get("files") or item_fix_reply.get("files") or common_files)
+    validation_commands = item.get("validation_commands") or common_validation
+    fix_reply = dict(common_fix_reply)
+    fix_reply.pop("why", None)
+    fix_reply.update(item_fix_reply)
+    if common_commit_hash and not fix_reply.get("commit_hash"):
+        fix_reply["commit_hash"] = common_commit_hash
+    if files:
+        fix_reply["files"] = files
+    if summary:
+        fix_reply["summary"] = summary
+    if why:
+        fix_reply["why"] = why
+
+    response = {
+        "schema_version": schema_version,
+        "request_id": request_id,
+        "lease_id": lease_id,
+        "agent_id": str(item.get("agent_id") or agent_id),
+        "resolution": "fix",
+        "note": note,
+        "files": files,
+        "validation_commands": validation_commands,
+        "fix_reply": fix_reply,
+    }
+    evidence_ref = str(item.get("evidence_ref") or common_evidence_ref).strip()
+    if evidence_ref:
+        response["evidence_ref"] = evidence_ref
+    if item.get("item_id"):
+        response["item_id"] = str(item["item_id"])
+    return response
+
+
 def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
     common = batch.get("common") or {}
     if not isinstance(common, dict):
         _raise_batch_schema_error("INVALID_BATCH_COMMON", "BatchActionResponse.common must be a JSON object.")
 
-    items = batch.get("items")
-    if not isinstance(items, list) or not items:
+    items_raw = batch.get("items")
+    items: list[Any] = items_raw if isinstance(items_raw, list) else []
+    if not items:
         _raise_batch_schema_error("BATCH_ITEMS_REQUIRED", "BatchActionResponse requires a non-empty items list.")
 
     agent_id = str(batch.get("agent_id") or common.get("agent_id") or "").strip()
@@ -609,65 +684,18 @@ def _batch_action_responses(batch: dict[str, Any]) -> list[dict[str, Any]]:
 
     responses: list[dict[str, Any]] = []
     for index, item in enumerate(items):
-        if not isinstance(item, dict):
-            _raise_batch_schema_error("INVALID_BATCH_ITEM", f"BatchActionResponse item {index} must be an object.")
-        item_fix_reply = item.get("fix_reply") or {}
-        if not isinstance(item_fix_reply, dict):
-            _raise_batch_schema_error(
-                "INVALID_BATCH_ITEM_FIX_REPLY",
-                f"BatchActionResponse item {index} fix_reply must be an object.",
-            )
-
-        item_resolution = str(item.get("resolution") or resolution).strip().lower()
-        if item_resolution != "fix":
-            _raise_batch_schema_error(
-                "BATCH_UNSUPPORTED_RESOLUTION",
-                f"BatchActionResponse item {index} only supports fix evidence.",
-            )
-
-        request_id = str(item.get("request_id") or "").strip()
-        lease_id = str(item.get("lease_id") or "").strip()
-        if not request_id:
-            _raise_batch_schema_error("MISSING_BATCH_ITEM_REQUEST_ID", f"BatchActionResponse item {index} needs request_id.")
-        if not lease_id:
-            _raise_batch_schema_error("MISSING_BATCH_ITEM_LEASE_ID", f"BatchActionResponse item {index} needs lease_id.")
-
-        summary = str(item.get("summary") or item_fix_reply.get("summary") or "").strip()
-        why = str(item.get("why") or item_fix_reply.get("why") or "").strip()
-        note = str(item.get("note") or summary or why).strip()
-        if not note:
-            _raise_batch_schema_error("MISSING_BATCH_ITEM_NOTE", f"BatchActionResponse item {index} needs note or summary.")
-
-        files = _normalize_string_list(item.get("files") or item_fix_reply.get("files") or common_files)
-        validation_commands = item.get("validation_commands") or common_validation
-        fix_reply = dict(common_fix_reply)
-        fix_reply.pop("why", None)
-        fix_reply.update(item_fix_reply)
-        if common_commit_hash and not fix_reply.get("commit_hash"):
-            fix_reply["commit_hash"] = common_commit_hash
-        if files:
-            fix_reply["files"] = files
-        if summary:
-            fix_reply["summary"] = summary
-        if why:
-            fix_reply["why"] = why
-
-        response = {
-            "schema_version": schema_version,
-            "request_id": request_id,
-            "lease_id": lease_id,
-            "agent_id": str(item.get("agent_id") or agent_id),
-            "resolution": "fix",
-            "note": note,
-            "files": files,
-            "validation_commands": validation_commands,
-            "fix_reply": fix_reply,
-        }
-        evidence_ref = str(item.get("evidence_ref") or common_evidence_ref).strip()
-        if evidence_ref:
-            response["evidence_ref"] = evidence_ref
-        if item.get("item_id"):
-            response["item_id"] = str(item["item_id"])
+        response = _build_batch_item_response(
+            index,
+            item,
+            resolution,
+            schema_version,
+            agent_id,
+            common_fix_reply,
+            common_files,
+            common_validation,
+            common_commit_hash,
+            common_evidence_ref,
+        )
         responses.append(response)
 
     return responses
@@ -702,8 +730,9 @@ def _validate_batch_fix_contract(
             item_id=item_id,
             lease_id=lease_id,
         )
-    validation_commands = response.get("validation_commands")
-    if not isinstance(validation_commands, list) or not validation_commands:
+    validation_commands_raw = response.get("validation_commands")
+    validation_commands: list[Any] = validation_commands_raw if isinstance(validation_commands_raw, list) else []
+    if not validation_commands:
         _raise_response_rejected(
             session,
             ledger,
@@ -724,8 +753,8 @@ def _validate_batch_fix_contract(
                 item_id=item_id,
                 lease_id=lease_id,
             )
-    fix_reply = response.get("fix_reply")
-    if not isinstance(fix_reply, dict):
+    fix_reply_raw = response.get("fix_reply")
+    if not isinstance(fix_reply_raw, dict):
         _raise_response_rejected(
             session,
             ledger,
@@ -735,6 +764,7 @@ def _validate_batch_fix_contract(
             item_id=item_id,
             lease_id=lease_id,
         )
+    fix_reply: dict[str, Any] = fix_reply_raw if isinstance(fix_reply_raw, dict) else {}
     if not str(fix_reply.get("why") or "").strip():
         _raise_response_rejected(
             session,

@@ -392,40 +392,14 @@ def extract_artifact_path(last_error: str) -> str | None:
     return None
 
 
-def build_machine_summary(command: str, repo: str, pr_number: str, result: subprocess.CompletedProcess[str]) -> dict:
-    session = load_session_payload(repo, pr_number)
-    loop_state = session.get("loop_state") if isinstance(session, dict) else {}
-    if not isinstance(loop_state, dict):
-        loop_state = {}
-    metrics = session.get("metrics") if isinstance(session, dict) else {}
-    if not isinstance(metrics, dict):
-        metrics = {}
-    items = session.get("items") if isinstance(session, dict) else {}
-    if not isinstance(items, dict):
-        items = {}
-
-    status = loop_state.get("status") or "FAILED"
-    if result.returncode == 0 and status == "IDLE":
-        status = "PASSED"
-    elif result.returncode == 0 and status not in {"PASSED", "FAILED", "NEEDS_HUMAN", "BLOCKED"}:
-        status = "PASSED"
-    elif result.returncode == 4:
-        status = "NEEDS_HUMAN"
-    elif result.returncode == 5:
-        status = "BLOCKED"
-    elif result.returncode != 0 and status == "IDLE":
-        status = "FAILED"
-
-    item_id = loop_state.get("current_item_id")
-    item = items.get(item_id, {}) if item_id else {}
-    item_kind = item.get("item_kind") if isinstance(item, dict) else None
-    artifact_path = extract_artifact_path(str(loop_state.get("last_error") or "")) or str(
-        workspace_root(repo, pr_number)
-    )
-    stderr_text = result.stderr or ""
-    last_error = str(loop_state.get("last_error") or "")
-    combined_error = "\n".join(part for part in [last_error, stderr_text] if part)
-
+def _evaluate_summary_actions(
+    status: str,
+    combined_error: str,
+    command: str,
+    repo: str,
+    pr_number: str,
+    artifact_path: str,
+) -> tuple[str, str | None, str]:
     reason_code = "COMMAND_FAILED"
     waiting_on = None
     next_action = "Inspect stderr and fix the failing command or input."
@@ -461,6 +435,46 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
         reason_code = "BLOCKING_ITEMS_REMAIN"
         waiting_on = "unresolved_items"
         next_action = "Continue processing unresolved items until the final gate passes."
+    return reason_code, waiting_on, next_action
+
+
+def build_machine_summary(command: str, repo: str, pr_number: str, result: subprocess.CompletedProcess[str]) -> dict:
+    session = load_session_payload(repo, pr_number)
+    loop_state = session.get("loop_state") if isinstance(session, dict) else {}
+    if not isinstance(loop_state, dict):
+        loop_state = {}
+    metrics = session.get("metrics") if isinstance(session, dict) else {}
+    if not isinstance(metrics, dict):
+        metrics = {}
+    items = session.get("items") if isinstance(session, dict) else {}
+    if not isinstance(items, dict):
+        items = {}
+
+    status = loop_state.get("status") or "FAILED"
+    if result.returncode == 0 and status == "IDLE":
+        status = "PASSED"
+    elif result.returncode == 0 and status not in {"PASSED", "FAILED", "NEEDS_HUMAN", "BLOCKED"}:
+        status = "PASSED"
+    elif result.returncode == 4:
+        status = "NEEDS_HUMAN"
+    elif result.returncode == 5:
+        status = "BLOCKED"
+    elif result.returncode != 0 and status == "IDLE":
+        status = "FAILED"
+
+    item_id = loop_state.get("current_item_id")
+    item = items.get(item_id, {}) if item_id else {}
+    item_kind = item.get("item_kind") if isinstance(item, dict) else None
+    artifact_path = extract_artifact_path(str(loop_state.get("last_error") or "")) or str(
+        workspace_root(repo, pr_number)
+    )
+    stderr_text = result.stderr or ""
+    last_error = str(loop_state.get("last_error") or "")
+    combined_error = "\n".join(part for part in [last_error, stderr_text] if part)
+
+    reason_code, waiting_on, next_action = _evaluate_summary_actions(
+        status, combined_error, command, repo, pr_number, artifact_path
+    )
 
     return {
         "status": status,

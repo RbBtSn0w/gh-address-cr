@@ -9,6 +9,7 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, cast
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
@@ -31,16 +32,9 @@ HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
 HOST_TELEMETRY_FORMAT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT"
 
 
-def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
-    if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
-        print(
-            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]\n\n"
-            "Host telemetry hook:\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl."
-        )
-        return 0
+def _parse_final_gate_args(
+    repo: str | None, pr_number: str | None, passthrough: list[str]
+) -> tuple[argparse.Namespace | None, int | None]:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr final-gate",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -72,17 +66,97 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     scoped_args = prepend_optional(repo, prepend_optional(pr_number, passthrough))
     scoped_args, scope_error = maybe_prepend_implicit_scope(scoped_args)
     if scope_error is not None:
-        return emit_scope_resolution_error(scope_error)
-    parsed = parser.parse_args(scoped_args)
-    if ingest_host_telemetry_from_environment(parsed.repo, parsed.pr_number) is None:
-        autodiscovery_summary = ingest_host_telemetry_via_autodiscovery(parsed.repo, parsed.pr_number)
+        return None, emit_scope_resolution_error(scope_error)
+    return parser.parse_args(scoped_args), None
+
+
+def _ingest_telemetry_if_needed(repo: str, pr_number: str) -> None:
+    if ingest_host_telemetry_from_environment(repo, pr_number) is None:
+        autodiscovery_summary = ingest_host_telemetry_via_autodiscovery(repo, pr_number)
         if autodiscovery_summary is None:
             telemetry_health.record_autodiscovery_miss(
-                parsed.repo,
-                parsed.pr_number,
-                telemetry_health.active_autodiscovery_misses(parsed.repo, parsed.pr_number),
+                repo,
+                pr_number,
+                telemetry_health.active_autodiscovery_misses(repo, pr_number),
             )
-    machine_requested = "--machine" in scoped_args and "--human" not in scoped_args
+
+
+def _archive_and_clean_workspace_if_passed(
+    parsed: argparse.Namespace,
+    result: core_gate.GateResult,
+    summary_path: Path,
+    telemetry_report: dict | None,
+) -> tuple[Path, dict | None]:
+    if result.passed and parsed.auto_clean:
+        workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
+        archive_target = archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
+        if archive_target is not None:
+            summary_path = archive_target / summary_path.name
+            if telemetry_report is not None:
+                paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
+                archived_report_path = archive_target / paths.efficiency_report_file.name
+                telemetry_report["report_artifact"] = str(archived_report_path)
+                telemetry_report = cast(dict, replace_path_occurrences(
+                    telemetry_report,
+                    str(workspace_path),
+                    str(archive_target),
+                ))
+                rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
+                rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
+                rewrite_archived_audit_artifacts(
+                    archive_target,
+                    original_workspace=workspace_path,
+                    summary_path=summary_path,
+                    telemetry_report=telemetry_report,
+                )
+    return summary_path, telemetry_report
+
+
+def _emit_machine_summary(
+    result: core_gate.GateResult,
+    summary_path: Path,
+    telemetry_report: dict | None,
+) -> None:
+    machine_summary = result.to_machine_summary()
+    if summary_path:
+        machine_summary["artifact_path"] = str(summary_path)
+    if telemetry_report is not None:
+        machine_summary["telemetry"] = {
+            "coverage_label": telemetry_report["coverage_label"],
+            "report_artifact": telemetry_report.get("report_artifact"),
+            "total_events": telemetry_report.get("total_events"),
+            "success_rate": telemetry_report.get("success_rate"),
+            "inefficiency_flags": telemetry_report.get("inefficiency_flags", []),
+            "diagnostics": telemetry_report.get("diagnostics", []),
+        }
+        completion_summary = build_completion_summary_model(result, telemetry_report)
+        machine_summary["completion_summary"] = completion_summary
+        machine_summary["completion_summary_line"] = completion_summary["line"]
+        machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
+            result, telemetry_report, summary_path=summary_path, include_sha256=True
+        )
+    sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
+
+
+def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
+    if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
+        print(
+            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]\n\n"
+            "Host telemetry hook:\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
+            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl."
+        )
+        return 0
+
+    parsed, error_code = _parse_final_gate_args(repo, pr_number, passthrough)
+    if error_code is not None:
+        return error_code
+    assert parsed is not None
+
+    _ingest_telemetry_if_needed(parsed.repo, parsed.pr_number)
+    machine_requested = bool(parsed.machine)
+
     try:
         result = core_gate.Gatekeeper().run(
             parsed.repo,
@@ -106,48 +180,12 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return 5
 
     summary_path, telemetry_report = write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
-    if result.passed and parsed.auto_clean:
-        workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
-        archive_target = archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
-        if archive_target is not None:
-            summary_path = archive_target / summary_path.name
-            if telemetry_report is not None:
-                paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
-                archived_report_path = archive_target / paths.efficiency_report_file.name
-                telemetry_report["report_artifact"] = str(archived_report_path)
-                telemetry_report = replace_path_occurrences(
-                    telemetry_report,
-                    str(workspace_path),
-                    str(archive_target),
-                )
-                rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
-                rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
-                rewrite_archived_audit_artifacts(
-                    archive_target,
-                    original_workspace=workspace_path,
-                    summary_path=summary_path,
-                    telemetry_report=telemetry_report,
-                )
+    summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
+        parsed, result, summary_path, telemetry_report
+    )
+
     if parsed.machine:
-        machine_summary = result.to_machine_summary()
-        if summary_path:
-            machine_summary["artifact_path"] = str(summary_path)
-        if telemetry_report is not None:
-            machine_summary["telemetry"] = {
-                "coverage_label": telemetry_report["coverage_label"],
-                "report_artifact": telemetry_report.get("report_artifact"),
-                "total_events": telemetry_report.get("total_events"),
-                "success_rate": telemetry_report.get("success_rate"),
-                "inefficiency_flags": telemetry_report.get("inefficiency_flags", []),
-                "diagnostics": telemetry_report.get("diagnostics", []),
-            }
-            completion_summary = build_completion_summary_model(result, telemetry_report)
-            machine_summary["completion_summary"] = completion_summary
-            machine_summary["completion_summary_line"] = completion_summary["line"]
-            machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
-                result, telemetry_report, summary_path=summary_path, include_sha256=True
-            )
-        sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
+        _emit_machine_summary(result, summary_path, telemetry_report)
     else:
         emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
     if not result.passed:
@@ -180,7 +218,8 @@ def ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | 
     fmt = os.environ.get(HOST_TELEMETRY_FORMAT_ENV) or "agent-jsonl"
     try:
         return ingest_host_telemetry_input(repo, pr_number, input_path=input_path, source=source, fmt=fmt)
-    except Exception:
+    except Exception as exc:
+        core_telemetry._log_telemetry_failure("host telemetry ingestion", exc)
         return safe_hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
 
 
@@ -202,14 +241,16 @@ def ingest_host_telemetry_input(
 def safe_input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
     try:
         return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    except Exception:
+    except Exception as exc:
+        core_telemetry._log_telemetry_failure("input unavailable summary creation", exc)
         return None
 
 
 def safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
     try:
         return core_telemetry.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    except Exception:
+    except Exception as exc:
+        core_telemetry._log_telemetry_failure("hook unavailable summary creation", exc)
         return None
 
 
@@ -282,7 +323,8 @@ def _ingest_profile_via_autodiscovery(
         return core_telemetry.import_external_telemetry(
             repo, pr_number, source=profile.source, fmt="agent-jsonl", raw=text
         )
-    except Exception:
+    except Exception as exc:
+        core_telemetry._log_telemetry_failure("auto-discovery session telemetry capture", exc)
         return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
 
 
@@ -312,7 +354,8 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
 def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: dict) -> None:
     try:
         current = json.loads(report_path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError) as exc:
+        core_telemetry._log_telemetry_failure("read/decode archived report", exc)
         current = {}
     current.update(telemetry_report)
     current["report_artifact"] = str(report_path)
@@ -525,7 +568,7 @@ def _safe_int(value: object, *, default: int) -> int:
             return default
         if isinstance(value, float):
             return int(value) if math.isfinite(value) else default
-        parsed = int(value)
+        parsed = int(cast(Any, value))
         return parsed
     except (OverflowError, TypeError, ValueError):
         return default
@@ -535,7 +578,7 @@ def _safe_float(value: object, *, default: float) -> float:
     try:
         if value is None:
             return default
-        parsed = float(value)
+        parsed = float(cast(Any, value))
         return parsed if math.isfinite(parsed) else default
     except (TypeError, ValueError):
         return default
@@ -552,47 +595,17 @@ def _string_list(value: object) -> list[str]:
     return []
 
 
-def build_completion_summary_guidance(
+def _gather_attention_items(
+    coverage: str,
+    total_events: int,
+    success_rate: float,
+    inefficiency_flags: list[str],
+    flags_str: str,
+    telemetry_diagnostics: list[str],
+    telemetry_diagnostics_str: str,
     result: core_gate.GateResult,
-    telemetry_report: dict,
-    summary_path: Path | None,
-    *,
-    include_sha256: bool = True,
-) -> str:
-    unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
-    pending_reviews = result.counts.get("pending_current_login_review_count", 0)
-    blocking_local = result.counts.get("blocking_local_items_count", 0)
-    blocking_github = result.counts.get("blocking_github_items_count", 0)
-    missing_reply = result.counts.get("github_threads_missing_reply_count", 0)
-    missing_validation = result.counts.get("missing_validation_evidence_count", 0)
-    blocking_items = result.counts.get("blocking_items_count", 0)
-    logic_validation_blocking = result.counts.get("logic_validation_blocking_count", 0)
-
-    checks_failed = result.counts.get("pr_checks_failed_count", 0)
-    checks_pending = result.counts.get("pr_checks_pending_count", 0)
-    checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
-
-    coverage = telemetry_report.get("coverage_label") or "unavailable"
-    total_events = _safe_int(telemetry_report.get("total_events"), default=0)
-    success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
-    inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
-    flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
-    telemetry_diagnostics = [
-        diagnostic
-        for diagnostic in _string_list(telemetry_report.get("diagnostics"))
-        if diagnostic.strip()
-    ]
-    telemetry_diagnostics_str = "; ".join(telemetry_diagnostics)
-    report_artifact = telemetry_report.get("report_artifact") or "N/A"
-
-    summary_path_str = str(summary_path) if summary_path else "N/A"
-    metrics_line = build_completion_summary_line(result, telemetry_report)
-
-    audit_summary_line = f"- Audit Summary: {summary_path_str}"
-    if include_sha256 and summary_path:
-        summary_sha256 = read_file_sha256(summary_path)
-        audit_summary_line += f" (sha256: {summary_sha256})"
-
+    threads_checks_remain: bool,
+) -> tuple[list[str], list[str]]:
     abnormal_implications = []
     abnormal_names = []
 
@@ -631,20 +644,18 @@ def build_completion_summary_guidance(
         abnormal_names.append("telemetry diagnostics present")
         abnormal_implications.append(f"- Telemetry diagnostics: {telemetry_diagnostics_str}")
 
-    threads_checks_remain = (
-        unresolved_threads > 0 or
-        pending_reviews > 0 or
-        blocking_items > 0 or
-        blocking_local > 0 or
-        blocking_github > 0 or
-        missing_reply > 0 or
-        missing_validation > 0 or
-        logic_validation_blocking > 0 or
-        checks_not_green > 0 or
-        checks_failed > 0
-    )
     if threads_checks_remain:
         remain_details = []
+        unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
+        pending_reviews = result.counts.get("pending_current_login_review_count", 0)
+        blocking_items = result.counts.get("blocking_items_count", 0)
+        missing_reply = result.counts.get("github_threads_missing_reply_count", 0)
+        missing_validation = result.counts.get("missing_validation_evidence_count", 0)
+        logic_validation_blocking = result.counts.get("logic_validation_blocking_count", 0)
+        checks_failed = result.counts.get("pr_checks_failed_count", 0)
+        checks_pending = result.counts.get("pr_checks_pending_count", 0)
+        checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
+
         if unresolved_threads > 0:
             remain_details.append(f"{unresolved_threads} unresolved threads")
         if pending_reviews > 0:
@@ -665,6 +676,73 @@ def build_completion_summary_guidance(
             f"- Session contains unresolved items: {remain_str}. "
             "PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed."
         )
+    return abnormal_implications, abnormal_names
+
+
+def build_completion_summary_guidance(
+    result: core_gate.GateResult,
+    telemetry_report: dict,
+    summary_path: Path | None,
+    *,
+    include_sha256: bool = True,
+) -> str:
+    unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
+    pending_reviews = result.counts.get("pending_current_login_review_count", 0)
+    blocking_local = result.counts.get("blocking_local_items_count", 0)
+    blocking_github = result.counts.get("blocking_github_items_count", 0)
+    missing_reply = result.counts.get("github_threads_missing_reply_count", 0)
+    missing_validation = result.counts.get("missing_validation_evidence_count", 0)
+    blocking_items = result.counts.get("blocking_items_count", 0)
+    logic_validation_blocking = result.counts.get("logic_validation_blocking_count", 0)
+
+    checks_failed = result.counts.get("pr_checks_failed_count", 0)
+    checks_not_green = result.counts.get("pr_checks_not_green_count", 0)
+
+    coverage = telemetry_report.get("coverage_label") or "unavailable"
+    total_events = _safe_int(telemetry_report.get("total_events"), default=0)
+    success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
+    inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
+    flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
+    telemetry_diagnostics = [
+        diagnostic
+        for diagnostic in _string_list(telemetry_report.get("diagnostics"))
+        if diagnostic.strip()
+    ]
+    telemetry_diagnostics_str = "; ".join(telemetry_diagnostics)
+    report_artifact = telemetry_report.get("report_artifact") or "N/A"
+
+    summary_path_str = str(summary_path) if summary_path else "N/A"
+    metrics_line = build_completion_summary_line(result, telemetry_report)
+
+    audit_summary_line = f"- Audit Summary: {summary_path_str}"
+    if include_sha256 and summary_path:
+        summary_sha256 = read_file_sha256(summary_path)
+        audit_summary_line += f" (sha256: {summary_sha256})"
+
+    threads_checks_remain = (
+        unresolved_threads > 0 or
+        pending_reviews > 0 or
+        blocking_items > 0 or
+        blocking_local > 0 or
+        blocking_github > 0 or
+        missing_reply > 0 or
+        missing_validation > 0 or
+        logic_validation_blocking > 0 or
+        checks_not_green > 0 or
+        checks_failed > 0
+    )
+
+    abnormal_implications, abnormal_names = _gather_attention_items(
+        coverage,
+        total_events,
+        success_rate,
+        inefficiency_flags,
+        flags_str,
+        telemetry_diagnostics,
+        telemetry_diagnostics_str,
+        result,
+        threads_checks_remain,
+    )
 
     header = (
         "Recommended user-facing completion summary:"

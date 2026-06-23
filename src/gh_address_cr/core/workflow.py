@@ -158,7 +158,8 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             continue
-        fix_reply = item.get("fix_reply") if isinstance(item.get("fix_reply"), dict) else {}
+        raw_fix_reply = item.get("fix_reply")
+        fix_reply: dict[str, Any] = raw_fix_reply if isinstance(raw_fix_reply, dict) else {}
         item_summary = str(item.get("summary") or fix_reply.get("summary") or "").strip()
         item_why = str(item.get("why") or fix_reply.get("why") or "").strip()
         if not item_summary or not item_why:
@@ -223,7 +224,7 @@ def record_evidence_profile(
     agent_id: str,
     commit_hash: str,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     summary: str | None = None,
     why: str | None = None,
     test_command: str | None = None,
@@ -335,7 +336,8 @@ def record_evidence_profile(
 
 def list_evidence_profiles(repo: str, pr_number: str) -> dict[str, Any]:
     session = session_store.load_session(repo, pr_number)
-    profiles = session.get("evidence_profiles") if isinstance(session.get("evidence_profiles"), dict) else {}
+    raw_profiles = session.get("evidence_profiles")
+    profiles: dict[str, Any] = raw_profiles if isinstance(raw_profiles, dict) else {}
     return {
         "status": "EVIDENCE_PROFILES_READY",
         "repo": repo,
@@ -450,7 +452,7 @@ def record_validation_evidence(
     thread_id: str | None = None,
     commit_hash: str,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     summary: str | None = None,
     why: str | None = None,
     agent_id: str = "agent",
@@ -593,7 +595,7 @@ def fast_fix_item(
     agent_id: str,
     commit_hash: str,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     summary: str,
     why: str,
     severity: str | None = None,
@@ -754,7 +756,7 @@ def trivial_fix_item(
     agent_id: str,
     commit_hash: str,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     summary: str,
     why: str,
     publish: bool = False,

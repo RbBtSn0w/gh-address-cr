@@ -226,6 +226,96 @@ def session_with_remote_threads(
     return _session_with_remote_threads(session, remote_threads, current_login=current_login)
 
 
+def _merge_single_remote_thread(
+    thread: Mapping[str, Any],
+    thread_id: str,
+    existing_item: Mapping[str, Any] | None,
+    current_login: str | None = None,
+) -> dict[str, Any]:
+    item_id = f"github-thread:{thread_id}"
+    item = dict(existing_item) if isinstance(existing_item, Mapping) else {}
+    item.setdefault("item_id", item_id)
+    item.setdefault("item_kind", "github_thread")
+    item.setdefault("source", "github")
+    item["thread_id"] = thread_id
+    item["origin_ref"] = thread_id
+    item["path"] = thread.get("path") or item.get("path")
+    item["line"] = thread.get("line") or item.get("line")
+    item["url"] = thread.get("url") or item.get("url")
+    item["body"] = thread.get("body") or item.get("body")
+    if thread.get("first_author_login"):
+        item["first_author_login"] = thread.get("first_author_login")
+    if thread.get("latest_author_login"):
+        item["latest_author_login"] = thread.get("latest_author_login")
+    first_body = thread.get("first_body")
+    if first_body is None and thread.get("comment_source") == "first":
+        first_body = thread.get("body")
+    first_url = thread.get("first_url") or thread.get("url")
+    raw_severity = thread.get("severity")
+    detected_severity = severity_evidence(
+        raw_severity,
+        source="github_payload",
+        raw_marker=str(raw_severity).strip() if raw_severity is not None else None,
+        observed_from=thread.get("url") or first_url,
+    )
+    if detected_severity is None and first_body is not None:
+        detected_severity = extract_severity_evidence(
+            first_body,
+            source="github_first_comment",
+            observed_from=first_url,
+        )
+    if detected_severity:
+        apply_severity_evidence(item, detected_severity)
+    elif first_scene_item_severity(item):
+        item["severity"] = first_scene_item_severity(item)
+    else:
+        apply_severity_evidence(item, None)
+    priority_evidence = review_priority_evidence(
+        thread.get("review_priority") or thread.get("priority"),
+        source="github_payload",
+        raw_marker=str(thread.get("review_priority") or thread.get("priority") or "").strip() or None,
+        observed_from=thread.get("url") or first_url,
+    )
+    if priority_evidence is None and first_body is not None:
+        priority_evidence = extract_review_priority_evidence(
+            first_body, source="github_first_comment", observed_from=first_url
+        )
+    if priority_evidence:
+        item["review_priority_evidence"] = priority_evidence
+    elif first_body is not None:
+        item.pop("review_priority_evidence", None)
+    is_resolved = thread_is_resolved(thread)
+    is_outdated = is_stale_or_outdated_github_thread(thread)
+    item["is_outdated"] = is_outdated
+    if is_resolved:
+        item["state"] = (
+            item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
+        )
+        item["status"] = "CLOSED"
+        item["blocking"] = False
+        item["handled"] = True
+    elif _has_publish_ready_evidence(item):
+        item["state"] = "publish_ready"
+        item["status"] = item.get("status") or "OPEN"
+        item["blocking"] = True
+    elif is_outdated:
+        item["state"] = "stale"
+        item["status"] = "STALE"
+        item["blocking"] = True
+    else:
+        item["state"] = "open"
+        item["status"] = "OPEN"
+        item["blocking"] = True
+    if thread.get("viewer_replied") and thread.get("viewer_reply_url"):
+        item["reply_evidence"] = {
+            "reply_url": thread["viewer_reply_url"],
+            "author_login": thread.get("viewer_login") or item.get("reply_author_login") or current_login,
+        }
+        item["reply_url"] = thread["viewer_reply_url"]
+        item["reply_posted"] = True
+    return item
+
+
 def _session_with_remote_threads(
     session: Mapping[str, Any],
     remote_threads: Iterable[Mapping[str, Any]],
@@ -241,86 +331,12 @@ def _session_with_remote_threads(
             continue
         item_id = f"github-thread:{thread_id}"
         existing = items.get(item_id)
-        item = dict(existing) if isinstance(existing, Mapping) else {}
-        item.setdefault("item_id", item_id)
-        item.setdefault("item_kind", "github_thread")
-        item.setdefault("source", "github")
-        item["thread_id"] = thread_id
-        item["origin_ref"] = thread_id
-        item["path"] = thread.get("path") or item.get("path")
-        item["line"] = thread.get("line") or item.get("line")
-        item["url"] = thread.get("url") or item.get("url")
-        item["body"] = thread.get("body") or item.get("body")
-        if thread.get("first_author_login"):
-            item["first_author_login"] = thread.get("first_author_login")
-        if thread.get("latest_author_login"):
-            item["latest_author_login"] = thread.get("latest_author_login")
-        first_body = thread.get("first_body")
-        if first_body is None and thread.get("comment_source") == "first":
-            first_body = thread.get("body")
-        first_url = thread.get("first_url") or thread.get("url")
-        raw_severity = thread.get("severity")
-        detected_severity = severity_evidence(
-            raw_severity,
-            source="github_payload",
-            raw_marker=str(raw_severity).strip() if raw_severity is not None else None,
-            observed_from=thread.get("url") or first_url,
+        item = _merge_single_remote_thread(
+            thread,
+            thread_id,
+            existing,
+            current_login=current_login,
         )
-        if detected_severity is None and first_body is not None:
-            detected_severity = extract_severity_evidence(
-                first_body,
-                source="github_first_comment",
-                observed_from=first_url,
-            )
-        if detected_severity:
-            apply_severity_evidence(item, detected_severity)
-        elif first_scene_item_severity(item):
-            item["severity"] = first_scene_item_severity(item)
-        else:
-            apply_severity_evidence(item, None)
-        priority_evidence = review_priority_evidence(
-            thread.get("review_priority") or thread.get("priority"),
-            source="github_payload",
-            raw_marker=str(thread.get("review_priority") or thread.get("priority") or "").strip() or None,
-            observed_from=thread.get("url") or first_url,
-        )
-        if priority_evidence is None and first_body is not None:
-            priority_evidence = extract_review_priority_evidence(
-                first_body, source="github_first_comment", observed_from=first_url
-            )
-        if priority_evidence:
-            item["review_priority_evidence"] = priority_evidence
-        elif first_body is not None:
-            item.pop("review_priority_evidence", None)
-        is_resolved = thread_is_resolved(thread)
-        is_outdated = is_stale_or_outdated_github_thread(thread)
-        item["is_outdated"] = is_outdated
-        if is_resolved:
-            item["state"] = (
-                item.get("state") if str(item.get("state") or "").lower() in GITHUB_TERMINAL_STATES else "closed"
-            )
-            item["status"] = "CLOSED"
-            item["blocking"] = False
-            item["handled"] = True
-        elif _has_publish_ready_evidence(item):
-            item["state"] = "publish_ready"
-            item["status"] = item.get("status") or "OPEN"
-            item["blocking"] = True
-        elif is_outdated:
-            item["state"] = "stale"
-            item["status"] = "STALE"
-            item["blocking"] = True
-        else:
-            item["state"] = "open"
-            item["status"] = "OPEN"
-            item["blocking"] = True
-        if thread.get("viewer_replied") and thread.get("viewer_reply_url"):
-            item["reply_evidence"] = {
-                "reply_url": thread["viewer_reply_url"],
-                "author_login": thread.get("viewer_login") or item.get("reply_author_login") or current_login,
-            }
-            item["reply_url"] = thread["viewer_reply_url"]
-            item["reply_posted"] = True
         items[item_id] = item
     merged["items"] = items
     return merged
@@ -349,27 +365,26 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
     }
 
 
-def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "", passed: bool = False) -> str:
-    if reason_code is None:
-        if passed:
-            return "Completion may be claimed."
-        return "Status unknown: pending check results."
-    if repo and pr_number:
-        final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
-        if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
-            return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
-            return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
-            return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_BLOCKING_GITHUB_ITEMS:
-            return f"Run `gh-address-cr agent publish {repo} {pr_number}` or `gh-address-cr address {repo} {pr_number} --lean`, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_BLOCKING_LOCAL_ITEMS:
-            return f"Run `gh-address-cr review {repo} {pr_number}` or close/defer local items, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:
-            return f"Run `gh-address-cr agent evidence add {repo} {pr_number} ...`, then rerun {final_gate}."
-        if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
-            return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
+def _next_action_with_pr(reason_code: str, repo: str, pr_number: str) -> str | None:
+    final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
+    if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
+        return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
+        return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
+        return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_BLOCKING_GITHUB_ITEMS:
+        return f"Run `gh-address-cr agent publish {repo} {pr_number}` or `gh-address-cr address {repo} {pr_number} --lean`, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_BLOCKING_LOCAL_ITEMS:
+        return f"Run `gh-address-cr review {repo} {pr_number}` or close/defer local items, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:
+        return f"Run `gh-address-cr agent evidence add {repo} {pr_number} ...`, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
+        return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
+    return None
+
+
+def _next_action_generic(reason_code: str) -> str:
     if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
         return "Resolve all remote GitHub review threads, then rerun final-gate."
     if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
@@ -387,3 +402,15 @@ def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = ""
     if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
         return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
     return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
+
+
+def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "", passed: bool = False) -> str:
+    if reason_code is None:
+        if passed:
+            return "Completion may be claimed."
+        return "Status unknown: pending check results."
+    if repo and pr_number:
+        result = _next_action_with_pr(reason_code, repo, pr_number)
+        if result is not None:
+            return result
+    return _next_action_generic(reason_code)

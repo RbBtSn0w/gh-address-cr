@@ -63,7 +63,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.mccabe]
 # Ratchet target: lower this over time as legacy hot-path functions are decomposed.
-max-complexity = 20
+max-complexity = 15
 
 [tool.coverage.run]
 branch = true

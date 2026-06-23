@@ -12,9 +12,11 @@ from gh_address_cr.core.telemetry import (
     SessionTelemetry,
     autodiscovery_miss_import_summary,
     build_efficiency_report,
-    command_label,
     efficiency_report_markdown,
     import_external_telemetry,
+)
+from gh_address_cr.core.telemetry_safety import (
+    command_label,
     is_inline_env_assignment,
 )
 

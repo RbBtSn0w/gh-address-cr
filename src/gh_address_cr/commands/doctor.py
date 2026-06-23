@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.command_runner import run_cmd
@@ -15,7 +16,7 @@ GH_DOCTOR_TIMEOUT_SECONDS = 30.0
 
 
 def _doctor_check(name: str, passed: bool, *, detail: str | None = None, diagnostics: dict | None = None) -> dict:
-    row = {
+    row: dict[str, Any] = {
         "name": name,
         "status": "passed" if passed else "failed",
     }

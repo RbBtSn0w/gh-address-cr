@@ -481,7 +481,7 @@ class ClaimLease:
             "lease_id": self.lease_id,
             "item_id": self.item_id,
             "agent_id": self.agent_id,
-            "role": self.role.value,
+            "role": self.role if isinstance(self.role, str) else self.role.value,
             "status": self.status,
             "conflict_keys": list(self.conflict_keys),
         }
