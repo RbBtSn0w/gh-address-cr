@@ -53,6 +53,16 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 
 def _json_ready(value: Any) -> Any:
+    # Fast path: check exact types to avoid expensive `is_dataclass` overhead and
+    # slower `isinstance` evaluations during heavy recursion.
+    _type = type(value)
+    if _type is str or _type is int or _type is float or _type is bool or value is None:
+        return value
+    if _type is dict:
+        return {str(key): _json_ready(inner) for key, inner in value.items()}
+    if _type is list:
+        return [_json_ready(inner) for inner in value]
+
     if is_dataclass(value) and not isinstance(value, type):
         return _json_ready(asdict(value))
     if isinstance(value, datetime):

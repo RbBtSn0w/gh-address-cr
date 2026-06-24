@@ -57,6 +57,16 @@ def format_timestamp(value: datetime) -> str:
 
 
 def json_ready(value: Any) -> Any:
+    # Fast path: check exact types to avoid slower `isinstance` evaluations and
+    # other introspection overhead during heavy recursion.
+    _type = type(value)
+    if _type is str or _type is int or _type is float or _type is bool or value is None:
+        return value
+    if _type is dict:
+        return {str(key): json_ready(inner) for key, inner in value.items()}
+    if _type is list:
+        return [json_ready(inner) for inner in value]
+
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):
