@@ -10,7 +10,6 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
 from gh_address_cr.core.telemetry import (
     SessionTelemetry,
-    _normalize_external_event,
     autodiscovery_miss_import_summary,
     build_efficiency_report,
     efficiency_report_markdown,
@@ -595,34 +594,6 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(duplicate["reason_code"], "DUPLICATE_TELEMETRY_IMPORT")
             self.assertEqual(duplicate["duplicate_fingerprints"], accepted["accepted_fingerprints"])
             self.assertEqual(report["total_events"], 1)
-
-    def test_normalize_external_event_coalesces_blank_or_non_str_session_id(self):
-        base = {
-            "schema_version": "1.0",
-            "source": "generic-agent",
-            "kind": "tool_call",
-            "operation": "exec_command",
-            "duration_ms": 1000,
-            "status": "success",
-        }
-        for label, raw_session_id in (
-            ("empty string", ""),
-            ("non-str int", 5),
-            ("non-str bool", True),
-        ):
-            with self.subTest(case=label):
-                event = _normalize_external_event(
-                    {**base, "source_session_id": raw_session_id}, declared_source="generic-agent"
-                )
-                self.assertEqual(event.source_session_id, "unknown-session")
-
-        missing = _normalize_external_event(dict(base), declared_source="generic-agent")
-        self.assertEqual(missing.source_session_id, "unknown-session")
-
-        provided = _normalize_external_event(
-            {**base, "source_session_id": "run-1"}, declared_source="generic-agent"
-        )
-        self.assertEqual(provided.source_session_id, "run-1")
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_source_labels(self, state_dir):

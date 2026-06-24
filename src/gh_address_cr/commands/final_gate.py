@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from gh_address_cr.core.telemetry import EfficiencyReportPayload
+    pass
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
@@ -88,8 +88,8 @@ def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
     result: core_gate.GateResult,
     summary_path: Path,
-    telemetry_report: EfficiencyReportPayload | None,
-) -> tuple[Path, EfficiencyReportPayload | None]:
+    telemetry_report: dict | None,
+) -> tuple[Path, dict | None]:
     if result.passed and parsed.auto_clean:
         workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
         archive_target = archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
@@ -99,10 +99,8 @@ def _archive_and_clean_workspace_if_passed(
                 paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
                 archived_report_path = archive_target / paths.efficiency_report_file.name
                 telemetry_report["report_artifact"] = str(archived_report_path)
-                # replace_path_occurrences rebuilds the mapping with identical
-                # keys, so the result still satisfies EfficiencyReportPayload.
                 telemetry_report = cast(
-                    "EfficiencyReportPayload",
+                    dict,
                     replace_path_occurrences(
                         telemetry_report,
                         str(workspace_path),
@@ -123,7 +121,7 @@ def _archive_and_clean_workspace_if_passed(
 def _emit_machine_summary(
     result: core_gate.GateResult,
     summary_path: Path,
-    telemetry_report: EfficiencyReportPayload | None,
+    telemetry_report: dict | None,
 ) -> None:
     machine_summary = result.to_machine_summary()
     if summary_path:
@@ -187,7 +185,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             print(message, file=sys.stderr)
         return 5
 
-    telemetry_report: EfficiencyReportPayload | None
+    telemetry_report: dict[str, Any] | None
     summary_path, telemetry_report = write_native_final_gate_artifacts(
         parsed.repo, parsed.pr_number, parsed.audit_id, result
     )
@@ -362,7 +360,7 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
         return
 
 
-def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: EfficiencyReportPayload) -> None:
+def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: Any) -> None:
     try:
         current = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -383,7 +381,7 @@ def rewrite_archived_audit_artifacts(
     *,
     original_workspace: Path,
     summary_path: Path,
-    telemetry_report: EfficiencyReportPayload,
+    telemetry_report: dict,
 ) -> None:
     summary_sha256 = read_file_sha256(summary_path)
     for path in (archive_target / "audit.jsonl", archive_target / "trace.jsonl"):
@@ -438,11 +436,11 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
-def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> str:
+def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: Any) -> str:
     return build_completion_summary_model(result, telemetry_report)["line"]
 
 
-def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> dict[str, str]:
+def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: Any) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
@@ -542,7 +540,7 @@ def _top_operation_summary(value: object) -> str:
     return f"slowest: {operation} {_format_duration(duration_ms)} {status}"
 
 
-def _issue_summary(telemetry_report: EfficiencyReportPayload, *, success_rate: float, total_events: int) -> str:
+def _issue_summary(telemetry_report: dict, *, success_rate: float, total_events: int) -> str:
     parts: list[str] = []
     if total_events > 0 and success_rate < 100.0:
         parts.append(f"success {success_rate:.1f}%")
@@ -692,7 +690,7 @@ def _gather_attention_items(
 
 def build_completion_summary_guidance(
     result: core_gate.GateResult,
-    telemetry_report: EfficiencyReportPayload,
+    telemetry_report: dict,
     summary_path: Path | None,
     *,
     include_sha256: bool = True,
@@ -790,7 +788,7 @@ def emit_final_gate_result(
     result: core_gate.GateResult,
     *,
     summary_path: Path | None = None,
-    telemetry_report: EfficiencyReportPayload | None = None,
+    telemetry_report: dict | None = None,
 ) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
@@ -822,7 +820,9 @@ def emit_final_gate_result(
     print(f"reason_code={result.reason_code or 'PASSED'}")
     print(f"exit_code={result.exit_code}")
     if telemetry_report is None:
-        telemetry_report = core_telemetry.build_efficiency_report(result.repo, result.pr_number)
+        from typing import cast
+
+        telemetry_report = cast(dict, core_telemetry.build_efficiency_report(result.repo, result.pr_number))
     print()
     print("== Agent Efficiency Summary ==")
     print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
@@ -849,7 +849,7 @@ def write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> tuple[Path, EfficiencyReportPayload]:
+) -> tuple[Path, Any]:
     paths = core_paths.SessionPaths(repo, pr_number)
     workspace = paths.workspace_dir
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -886,7 +886,7 @@ def write_native_final_gate_artifacts(
     if result.failure_codes:
         summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
     guidance_md = build_completion_summary_guidance(
-        result, telemetry_report, summary_path=summary_path, include_sha256=False
+        result, cast(dict, telemetry_report), summary_path=summary_path, include_sha256=False
     )
     summary_lines.extend(["", "## PR Completion Summary Guidance", guidance_md])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -932,7 +932,7 @@ def write_native_final_gate_artifacts(
     return summary_path, telemetry_report
 
 
-def telemetry_sources_summary(telemetry_report: EfficiencyReportPayload) -> str:
+def telemetry_sources_summary(telemetry_report: Any) -> str:
     sources = telemetry_report.get("sources")
     if not isinstance(sources, list) or not sources:
         return "none"
@@ -948,7 +948,7 @@ def telemetry_sources_summary(telemetry_report: EfficiencyReportPayload) -> str:
     return "; ".join(rows) if rows else "none"
 
 
-def telemetry_diagnostics_summary(telemetry_report: EfficiencyReportPayload) -> str:
+def telemetry_diagnostics_summary(telemetry_report: Any) -> str:
     diagnostics = telemetry_report.get("diagnostics")
     if not isinstance(diagnostics, list) or not diagnostics:
         return "none"
