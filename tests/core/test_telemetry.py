@@ -619,10 +619,17 @@ class TestTelemetry(unittest.TestCase):
         missing = _normalize_external_event(dict(base), declared_source="generic-agent")
         self.assertEqual(missing.source_session_id, "unknown-session")
 
-        provided = _normalize_external_event(
-            {**base, "source_session_id": "run-1"}, declared_source="generic-agent"
-        )
-        self.assertEqual(provided.source_session_id, "run-1")
+        # Boundary: a truthy non-empty string is preserved verbatim (including
+        # whitespace-only), so coalescing applies only to blank/non-str input.
+        for label, raw_session_id in (
+            ("valid id", "run-1"),
+            ("whitespace-only", "   "),
+        ):
+            with self.subTest(case=label):
+                event = _normalize_external_event(
+                    {**base, "source_session_id": raw_session_id}, declared_source="generic-agent"
+                )
+                self.assertEqual(event.source_session_id, raw_session_id)
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_source_labels(self, state_dir):
