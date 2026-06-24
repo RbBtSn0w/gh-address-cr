@@ -99,6 +99,8 @@ def _archive_and_clean_workspace_if_passed(
                 paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
                 archived_report_path = archive_target / paths.efficiency_report_file.name
                 telemetry_report["report_artifact"] = str(archived_report_path)
+                # replace_path_occurrences rebuilds the mapping with identical
+                # keys, so the result still satisfies EfficiencyReportPayload.
                 telemetry_report = cast(
                     "EfficiencyReportPayload",
                     replace_path_occurrences(

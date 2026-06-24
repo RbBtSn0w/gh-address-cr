@@ -16,7 +16,7 @@ def main() -> None:
     print(f"Running: {' '.join(MYPY_CMD)}")
     try:
         result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=300)
-    except Exception as exc:  # includes subprocess.TimeoutExpired
+    except (OSError, subprocess.SubprocessError) as exc:  # includes subprocess.TimeoutExpired
         print(f"FAILED: mypy execution failed or timed out: {exc}")
         sys.exit(1)
     output = result.stdout + result.stderr
@@ -27,8 +27,11 @@ def main() -> None:
         error_count = int(match.group(1))
     elif "Success: no issues found" in output:
         error_count = 0
-    elif "error:" in output:
-        error_count = output.count("error:")
+    elif ": error:" in output:
+        # Fallback when the summary line is absent: count actual diagnostic
+        # lines (`path:line: error: ...`) so quoted "error:" text in notes
+        # does not inflate the count.
+        error_count = sum(1 for line in output.splitlines() if ": error:" in line)
     elif result.returncode == 0:
         error_count = 0
     else:

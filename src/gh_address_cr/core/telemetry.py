@@ -1320,7 +1320,9 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     duration_ms = _event_duration_ms(payload_dict)
     metadata = _safe_metadata(payload_dict.get("metadata") or {})
     raw_session_id = payload_dict.get("source_session_id")
-    session_id = _safe_source_session_id(raw_session_id if isinstance(raw_session_id, str) else "unknown-session")
+    session_id = _safe_source_session_id(
+        raw_session_id if isinstance(raw_session_id, str) and raw_session_id else "unknown-session"
+    )
     operation_payload = payload_dict["operation"]
     if not isinstance(operation_payload, str):
         raise ValueError("operation must be a string")
