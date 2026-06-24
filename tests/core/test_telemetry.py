@@ -13,9 +13,9 @@ from gh_address_cr.core.telemetry import (
     _normalize_external_event,
     autodiscovery_miss_import_summary,
     build_efficiency_report,
-    efficiency_report_markdown,
     import_external_telemetry,
 )
+from gh_address_cr.core.telemetry_reporting import efficiency_report_markdown
 from gh_address_cr.core.telemetry_safety import (
     command_label,
     is_inline_env_assignment,
