@@ -14,7 +14,11 @@ BASELINE = 0
 
 def main() -> None:
     print(f"Running: {' '.join(MYPY_CMD)}")
-    result = subprocess.run(MYPY_CMD, capture_output=True, text=True)
+    try:
+        result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=300)
+    except Exception as exc:  # includes subprocess.TimeoutExpired
+        print(f"FAILED: mypy execution failed or timed out: {exc}")
+        sys.exit(1)
     output = result.stdout + result.stderr
     print(output)
 

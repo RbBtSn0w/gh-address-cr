@@ -1309,25 +1309,29 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
     if missing:
         raise ValueError(f"missing required field(s): {', '.join(missing)}")
     source = _safe_source_label(source_text)
-    schema_version = _safe_identity_label(str(payload.get("schema_version") or "1.0"), field="schema_version")
-    kind = _safe_identity_label(str(payload["kind"]), field="kind")
-    status = _safe_identity_label(str(payload["status"]), field="status")
+    payload_dict = cast(dict[str, Any], payload)
+    schema_version = _safe_identity_label(str(payload_dict.get("schema_version") or "1.0"), field="schema_version")
+    kind = _safe_identity_label(str(payload_dict["kind"]), field="kind")
+    status = _safe_identity_label(str(payload_dict["status"]), field="status")
     if kind not in SAFE_KINDS:
         raise ValueError(f"unsupported kind: {kind}")
     if status not in SAFE_STATUSES:
         raise ValueError(f"unsupported status: {status}")
-    duration_ms = _event_duration_ms(cast(dict[str, Any], payload))
-    metadata = _safe_metadata(payload.get("metadata") or {})
-    session_id = _safe_source_session_id(str(payload.get("source_session_id") or "unknown-session"))
-    operation_payload = payload["operation"]
+    duration_ms = _event_duration_ms(payload_dict)
+    metadata = _safe_metadata(payload_dict.get("metadata") or {})
+    raw_session_id = payload_dict.get("source_session_id")
+    session_id = _safe_source_session_id(raw_session_id if isinstance(raw_session_id, str) else "unknown-session")
+    operation_payload = payload_dict["operation"]
     if not isinstance(operation_payload, str):
         raise ValueError("operation must be a string")
     operation = _safe_operation(operation_payload)
-    started_at = _safe_optional_timestamp(payload.get("started_at"), field="started_at")
-    ended_at = _safe_optional_timestamp(payload.get("ended_at"), field="ended_at")
-    correlation_id = _safe_correlation_id(str(payload["correlation_id"])) if payload.get("correlation_id") else None
+    started_at = _safe_optional_timestamp(payload_dict.get("started_at"), field="started_at")
+    ended_at = _safe_optional_timestamp(payload_dict.get("ended_at"), field="ended_at")
+    correlation_id = (
+        _safe_correlation_id(str(payload_dict["correlation_id"])) if payload_dict.get("correlation_id") else None
+    )
     event_id = str(
-        (_safe_identity_label(str(payload["event_id"]), field="event_id") if payload.get("event_id") else None)
+        (_safe_identity_label(str(payload_dict["event_id"]), field="event_id") if payload_dict.get("event_id") else None)
         or _derive_event_id(
             source=source,
             source_session_id=session_id,
@@ -1507,30 +1511,31 @@ def _extract_stored_required_strings(payload: dict[str, Any], source: str) -> di
 def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
     if not isinstance(payload, dict):
         raise ValueError("record must be a JSON object")
-    source = payload.get("source")
+    payload_dict = cast(dict[str, Any], payload)
+    source = payload_dict.get("source")
     if not source:
         raise ValueError("missing required field(s): source")
     if not isinstance(source, str):
         raise ValueError("source must be a string")
-    values = _extract_stored_required_strings(cast(dict[str, Any], payload), source)
-    duration_ms = payload.get("duration_ms")
+    values = _extract_stored_required_strings(payload_dict, source)
+    duration_ms = payload_dict.get("duration_ms")
     if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
         raise ValueError("duration_ms must be an integer")
     if duration_ms < 0:
         raise ValueError("duration_ms must be non-negative")
-    metadata = payload.get("metadata")
+    metadata = payload_dict.get("metadata")
     if metadata is None:
         metadata = {}
     metadata = _safe_metadata(metadata)
-    started_at = _stored_optional_timestamp(payload.get("started_at"), field="started_at")
-    ended_at = _stored_optional_timestamp(payload.get("ended_at"), field="ended_at")
-    correlation_raw = payload.get("correlation_id")
+    started_at = _stored_optional_timestamp(payload_dict.get("started_at"), field="started_at")
+    ended_at = _stored_optional_timestamp(payload_dict.get("ended_at"), field="ended_at")
+    correlation_raw = payload_dict.get("correlation_id")
     correlation_id = None
     if correlation_raw is not None:
         if not isinstance(correlation_raw, str):
             raise ValueError("correlation_id must be a string")
         correlation_id = _safe_correlation_id(correlation_raw)
-    event_fingerprint = payload.get("event_fingerprint")
+    event_fingerprint = payload_dict.get("event_fingerprint")
     if event_fingerprint is not None and not isinstance(event_fingerprint, str):
         raise ValueError("event_fingerprint must be a string")
     event = ExternalTelemetryEvent(
