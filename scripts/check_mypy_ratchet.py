@@ -1,51 +1,51 @@
+"""Mypy ratchet gate: fail CI if the error count exceeds the baseline.
+
+The mypy invocation is intentionally flag-free so that pyproject.toml's
+[tool.mypy] section (files + strict flags) stays the single source of truth.
+"""
+import re
 import subprocess
 import sys
-import re
 
-MYPY_CMD = ["mypy", "src/gh_address_cr", "--check-untyped-defs", "--disallow-untyped-defs", "--show-error-codes"]
+# Config-driven: flags and target files come from [tool.mypy] in pyproject.toml.
+MYPY_CMD = ["mypy", "--show-error-codes"]
 BASELINE = 0
-TIMEOUT_SECONDS = 300
 
-def main():
+
+def main() -> None:
     print(f"Running: {' '.join(MYPY_CMD)}")
     try:
-        result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        print(f"FAILED: Mypy timed out after {TIMEOUT_SECONDS}s.")
+        result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:  # includes subprocess.TimeoutExpired
+        print(f"FAILED: mypy execution failed or timed out: {exc}")
         sys.exit(1)
-    except Exception as exc:
-        print(f"FAILED: Mypy execution failed: {type(exc).__name__}: {exc}")
-        sys.exit(1)
-
     output = result.stdout + result.stderr
     print(output)
 
     match = re.search(r"Found (\d+) error", output)
-    error_count = None
-
     if match:
         error_count = int(match.group(1))
     elif "Success: no issues found" in output:
         error_count = 0
-    elif "error:" in output:
-        error_count = output.count("error:")
+    elif ": error:" in output:
+        # Fallback when the summary line is absent: count actual diagnostic
+        # lines (`path:line: error: ...`) so quoted "error:" text in notes
+        # does not inflate the count.
+        error_count = sum(1 for line in output.splitlines() if ": error:" in line)
     elif result.returncode == 0:
         error_count = 0
-
-    if error_count is None:
-        if result.returncode != 0:
-            print(f"FAILED: Mypy exited with {result.returncode} but error count could not be parsed.")
-            sys.exit(1)
-        error_count = 0
+    else:
+        # mypy failed without a parseable count (e.g. crash/config error).
+        print(f"FAILED: mypy exited with code {result.returncode} and no parseable result.")
+        sys.exit(1)
 
     print(f"Current error count: {error_count}")
     print(f"Baseline: {BASELINE}")
-
     if error_count > BASELINE:
         print(f"FAILED: Mypy error count ({error_count}) exceeds baseline ({BASELINE}).")
         sys.exit(1)
-
     print("Mypy ratchet check passed.")
+
 
 if __name__ == "__main__":
     main()
