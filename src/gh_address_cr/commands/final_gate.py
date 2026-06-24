@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from gh_address_cr.core.telemetry import EfficiencyReportPayload
+    from gh_address_cr.core.telemetry_models import EfficiencyReportPayload
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,

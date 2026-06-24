@@ -13,7 +13,7 @@ from gh_address_cr.commands.common import (
 )
 from gh_address_cr.core import cr_metrics as core_cr_metrics
 from gh_address_cr.core import telemetry as core_telemetry
-from gh_address_cr.core import telemetry_health
+from gh_address_cr.core import telemetry_health, telemetry_reporting
 from gh_address_cr.core.io import write_json_atomic
 
 
@@ -74,7 +74,7 @@ def _handle_telemetry_summary(args: list[str]) -> int:
         print(json.dumps(payload, sort_keys=True))
         return 2
     if parsed.format == "markdown":
-        print(core_telemetry.efficiency_report_markdown(cast(dict[str, Any], report)), end="")
+        print(telemetry_reporting.efficiency_report_markdown(cast(dict[str, Any], report)), end="")
     else:
         print(json.dumps(report, sort_keys=True))
     return 0
