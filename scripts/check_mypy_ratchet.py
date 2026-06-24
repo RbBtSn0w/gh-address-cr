@@ -10,12 +10,13 @@ import sys
 # Config-driven: flags and target files come from [tool.mypy] in pyproject.toml.
 MYPY_CMD = ["mypy", "--show-error-codes"]
 BASELINE = 0
+TIMEOUT_SECONDS = 300
 
 
 def main() -> None:
     print(f"Running: {' '.join(MYPY_CMD)}")
     try:
-        result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(MYPY_CMD, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError) as exc:  # includes subprocess.TimeoutExpired
         print(f"FAILED: mypy execution failed or timed out: {exc}")
         sys.exit(1)
