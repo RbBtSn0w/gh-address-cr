@@ -89,6 +89,8 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS)
     + r")(?![A-Za-z0-9])"
 )
+
+
 def runtime_compatibility() -> dict[str, Any]:
     return {
         "status": "compatible",
@@ -100,7 +102,6 @@ def runtime_compatibility() -> dict[str, Any]:
         "entrypoints": ["gh-address-cr", "python3 -m gh_address_cr"],
         "remediation": None,
     }
-
 
 
 def fast_fix_from_batch_input(
@@ -183,11 +184,7 @@ def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict
     if not isinstance(items, list) or not items:
         return
 
-    requested_ids = {
-        str(item.get("item_id") or "").strip()
-        for item in items
-        if isinstance(item, dict)
-    }
+    requested_ids = {str(item.get("item_id") or "").strip() for item in items if isinstance(item, dict)}
     requested_ids.discard("")
     if not requested_ids:
         return
@@ -799,10 +796,7 @@ def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]
         return False, "Trivial fast path requires an existing review-thread item."
     if item.get("item_kind") != "github_thread":
         return False, "Trivial fast path only handles GitHub review threads."
-    text = " ".join(
-        str(item.get(key) or "")
-        for key in ("title", "body", "first_body", "path")
-    ).lower()
+    text = " ".join(str(item.get(key) or "") for key in ("title", "body", "first_body", "path")).lower()
     if TRIVIAL_SENSITIVE_MARKER_RE.search(text):
         return False, "Thread contains non-trivial or sensitive review markers."
     path = str(item.get("path") or "").lower()

@@ -125,8 +125,7 @@ def resolve_active_cached_scope() -> tuple[str, str] | dict:
             "waiting_on": "pr_scope",
             "next_action": "Multiple cached PR sessions exist. Pass <owner/repo> <pr_number> explicitly.",
             "candidates": [
-                {"repo": repo, "pr_number": pr_number, "session_file": str(path)}
-                for repo, pr_number, path in sessions
+                {"repo": repo, "pr_number": pr_number, "session_file": str(path)} for repo, pr_number, path in sessions
             ],
             "exit_code": 2,
         }

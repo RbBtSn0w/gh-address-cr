@@ -422,11 +422,15 @@ def calculate_lease_recovery_state(
     lease = _leases(session).get(lease_id)
     lease_item_id = _recovery_field(_get(lease, "item_id") if lease is not None else None, default=item_id)
     item = _items(session).get(lease_item_id) if lease is not None else _items(session).get(item_id)
-    lease_status = _recovery_field(_get(lease, "status") if lease is not None else None, default="missing", false_default="unknown")
+    lease_status = _recovery_field(
+        _get(lease, "status") if lease is not None else None, default="missing", false_default="unknown"
+    )
     lease_agent_id = _recovery_field(_get(lease, "agent_id") if lease is not None else None, default=agent_id)
     lease_role = _role_text(_get(lease, "role") if lease is not None else None, default=role)
     lease_request_id = _recovery_field(_get(lease, "request_id") if lease is not None else None, default="")
-    lease_request_hash = _recovery_field(_get(lease, "request_hash") if lease is not None else None, default=request_hash)
+    lease_request_hash = _recovery_field(
+        _get(lease, "request_hash") if lease is not None else None, default=request_hash
+    )
     item_state = _recovery_field(_get(item, "state") if item is not None else None, default="missing")
     item_claimed_by = _get(item, "claimed_by") if item is not None else None
     item_active_lease_id = _get(item, "active_lease_id") if item is not None else None
@@ -459,7 +463,9 @@ def calculate_lease_recovery_state(
         reason_code = "EXPIRED_LEASE_RECLAIMABLE"
     elif lease_status in {"rejected", "released"}:
         recovery_outcome = "reclaim" if item_state == "open" else "refresh_state"
-        reason_code = "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else protocol_codes.STALE_REQUEST_CONTEXT
+        reason_code = (
+            "EXPIRED_LEASE_RECLAIMABLE" if recovery_outcome == "reclaim" else protocol_codes.STALE_REQUEST_CONTEXT
+        )
     elif lease_status == "active":
         recovery_outcome = "stop"
         reason_code = "LEASE_ACTIVE"
@@ -520,16 +526,9 @@ def _hunk_conflict_key(item: Any) -> str | None:
     path = _get(item, "path")
     if not path:
         return None
-    start = _coerce_positive_int(
-        _get(item, "start_line")
-        or _get(item, "line")
-        or _get(item, "original_line")
-    )
+    start = _coerce_positive_int(_get(item, "start_line") or _get(item, "line") or _get(item, "original_line"))
     end = _coerce_positive_int(
-        _get(item, "end_line")
-        or _get(item, "original_end_line")
-        or _get(item, "line")
-        or _get(item, "original_line")
+        _get(item, "end_line") or _get(item, "original_end_line") or _get(item, "line") or _get(item, "original_line")
     )
     if start is None or end is None:
         return None
@@ -573,7 +572,9 @@ def _hunk_overlap(candidate_keys: tuple[str, ...], existing_keys: set[str]) -> s
             if candidate_path != existing_path:
                 continue
             if candidate_start <= existing_end and existing_start <= candidate_end:
-                overlaps.add(f"hunk:{candidate_path}:{max(candidate_start, existing_start)}-{min(candidate_end, existing_end)}")
+                overlaps.add(
+                    f"hunk:{candidate_path}:{max(candidate_start, existing_start)}-{min(candidate_end, existing_end)}"
+                )
     return overlaps
 
 

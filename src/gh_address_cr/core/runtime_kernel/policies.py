@@ -43,9 +43,7 @@ def evaluate_review_policy(projection: ReviewProjection) -> PolicyDecision:
             next_action="stop_and_inspect_kernel_facts",
         )
 
-    actionable_ids = tuple(
-        sorted(set(projection.active_item_ids).union(projection.evidence_pending_item_ids))
-    )
+    actionable_ids = tuple(sorted(set(projection.active_item_ids).union(projection.evidence_pending_item_ids)))
     if actionable_ids:
         return PolicyDecision(
             status="ready_for_action",

@@ -78,11 +78,14 @@ fail_under = 65
 skip_covered = false
 
 [tool.mypy]
-# Lenient introduction (~55 errors at adoption). CI runs this non-blocking; the
-# ratchet is to drive that count to zero, then flip on stricter flags and make it
-# blocking. Do not relax further — only tighten.
+# Ratchet complete: error count was driven to zero (#152), so the stricter flags
+# are now on and CI runs this as a blocking gate via scripts/check_mypy_ratchet.py
+# (baseline 0). This config is the single source of truth for the gate. Do not
+# relax further — only tighten.
 python_version = "3.10"
 files = ["src/gh_address_cr"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+check_untyped_defs = true
+disallow_untyped_defs = true

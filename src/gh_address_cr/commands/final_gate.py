@@ -9,7 +9,10 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from gh_address_cr.core.telemetry import EfficiencyReportPayload
 
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
@@ -85,8 +88,8 @@ def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
     result: core_gate.GateResult,
     summary_path: Path,
-    telemetry_report: dict | None,
-) -> tuple[Path, dict | None]:
+    telemetry_report: EfficiencyReportPayload | None,
+) -> tuple[Path, EfficiencyReportPayload | None]:
     if result.passed and parsed.auto_clean:
         workspace_path = session_store.workspace_dir(parsed.repo, parsed.pr_number)
         archive_target = archive_and_clean_workspace(parsed.repo, parsed.pr_number, parsed.audit_id)
@@ -96,11 +99,16 @@ def _archive_and_clean_workspace_if_passed(
                 paths = core_paths.SessionPaths(parsed.repo, parsed.pr_number)
                 archived_report_path = archive_target / paths.efficiency_report_file.name
                 telemetry_report["report_artifact"] = str(archived_report_path)
-                telemetry_report = cast(dict, replace_path_occurrences(
-                    telemetry_report,
-                    str(workspace_path),
-                    str(archive_target),
-                ))
+                # replace_path_occurrences rebuilds the mapping with identical
+                # keys, so the result still satisfies EfficiencyReportPayload.
+                telemetry_report = cast(
+                    "EfficiencyReportPayload",
+                    replace_path_occurrences(
+                        telemetry_report,
+                        str(workspace_path),
+                        str(archive_target),
+                    ),
+                )
                 rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
                 rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
                 rewrite_archived_audit_artifacts(
@@ -115,7 +123,7 @@ def _archive_and_clean_workspace_if_passed(
 def _emit_machine_summary(
     result: core_gate.GateResult,
     summary_path: Path,
-    telemetry_report: dict | None,
+    telemetry_report: EfficiencyReportPayload | None,
 ) -> None:
     machine_summary = result.to_machine_summary()
     if summary_path:
@@ -179,8 +187,10 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             print(message, file=sys.stderr)
         return 5
 
-    telemetry_report: dict[str, Any] | None
-    summary_path, telemetry_report = write_native_final_gate_artifacts(parsed.repo, parsed.pr_number, parsed.audit_id, result)
+    telemetry_report: EfficiencyReportPayload | None
+    summary_path, telemetry_report = write_native_final_gate_artifacts(
+        parsed.repo, parsed.pr_number, parsed.audit_id, result
+    )
     summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
         parsed, result, summary_path, telemetry_report
     )
@@ -339,10 +349,10 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
         if line.startswith("- efficiency_report_path:"):
             updated.append(f"- efficiency_report_path: {report_artifact}")
         elif line.strip().startswith("- Efficiency Report:"):
-            leading = line[:line.find("-")]
+            leading = line[: line.find("-")]
             updated.append(f"{leading}- Efficiency Report: {report_artifact}")
         elif line.strip().startswith("- Audit Summary:"):
-            leading = line[:line.find("-")]
+            leading = line[: line.find("-")]
             updated.append(f"{leading}- Audit Summary: {summary_path}")
         else:
             updated.append(line)
@@ -352,7 +362,7 @@ def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact:
         return
 
 
-def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: dict) -> None:
+def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_report: EfficiencyReportPayload) -> None:
     try:
         current = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -373,7 +383,7 @@ def rewrite_archived_audit_artifacts(
     *,
     original_workspace: Path,
     summary_path: Path,
-    telemetry_report: dict,
+    telemetry_report: EfficiencyReportPayload,
 ) -> None:
     summary_sha256 = read_file_sha256(summary_path)
     for path in (archive_target / "audit.jsonl", archive_target / "trace.jsonl"):
@@ -428,11 +438,11 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
-def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: dict) -> str:
+def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> str:
     return build_completion_summary_model(result, telemetry_report)["line"]
 
 
-def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: dict) -> dict[str, str]:
+def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
@@ -490,9 +500,7 @@ def _coverage_line_suffix(coverage: str) -> str:
 def _coverage_note(coverage: str, confidence: str, total_events: int, success_rate: float) -> str:
     base = f"{coverage} telemetry with {confidence} confidence, {total_events} events, and {success_rate:.1f}% success."
     if coverage == "runtime-only":
-        return (
-            f"{base} host telemetry was not imported; metrics cover runtime command events only."
-        )
+        return f"{base} host telemetry was not imported; metrics cover runtime command events only."
     if coverage == "complete":
         return f"{base} Runtime and imported host telemetry were both available."
     if coverage == "partial":
@@ -534,7 +542,7 @@ def _top_operation_summary(value: object) -> str:
     return f"slowest: {operation} {_format_duration(duration_ms)} {status}"
 
 
-def _issue_summary(telemetry_report: dict, *, success_rate: float, total_events: int) -> str:
+def _issue_summary(telemetry_report: EfficiencyReportPayload, *, success_rate: float, total_events: int) -> str:
     parts: list[str] = []
     if total_events > 0 and success_rate < 100.0:
         parts.append(f"success {success_rate:.1f}%")
@@ -662,7 +670,9 @@ def _gather_attention_items(
         if pending_reviews > 0:
             remain_details.append(f"{pending_reviews} pending reviews")
         if checks_not_green > 0:
-            remain_details.append(f"{checks_not_green} non-green checks ({checks_failed} failed, {checks_pending} pending)")
+            remain_details.append(
+                f"{checks_not_green} non-green checks ({checks_failed} failed, {checks_pending} pending)"
+            )
         if blocking_items > 0:
             remain_details.append(f"{blocking_items} blocking items")
         if missing_reply > 0:
@@ -682,7 +692,7 @@ def _gather_attention_items(
 
 def build_completion_summary_guidance(
     result: core_gate.GateResult,
-    telemetry_report: dict,
+    telemetry_report: EfficiencyReportPayload,
     summary_path: Path | None,
     *,
     include_sha256: bool = True,
@@ -705,9 +715,7 @@ def build_completion_summary_guidance(
     inefficiency_flags = _string_list(telemetry_report.get("inefficiency_flags"))
     flags_str = "; ".join(inefficiency_flags) if inefficiency_flags else "none"
     telemetry_diagnostics = [
-        diagnostic
-        for diagnostic in _string_list(telemetry_report.get("diagnostics"))
-        if diagnostic.strip()
+        diagnostic for diagnostic in _string_list(telemetry_report.get("diagnostics")) if diagnostic.strip()
     ]
     telemetry_diagnostics_str = "; ".join(telemetry_diagnostics)
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
@@ -721,16 +729,16 @@ def build_completion_summary_guidance(
         audit_summary_line += f" (sha256: {summary_sha256})"
 
     threads_checks_remain = (
-        unresolved_threads > 0 or
-        pending_reviews > 0 or
-        blocking_items > 0 or
-        blocking_local > 0 or
-        blocking_github > 0 or
-        missing_reply > 0 or
-        missing_validation > 0 or
-        logic_validation_blocking > 0 or
-        checks_not_green > 0 or
-        checks_failed > 0
+        unresolved_threads > 0
+        or pending_reviews > 0
+        or blocking_items > 0
+        or blocking_local > 0
+        or blocking_github > 0
+        or missing_reply > 0
+        or missing_validation > 0
+        or logic_validation_blocking > 0
+        or checks_not_green > 0
+        or checks_failed > 0
     )
 
     abnormal_implications, abnormal_names = _gather_attention_items(
@@ -761,17 +769,19 @@ def build_completion_summary_guidance(
     ]
 
     if abnormal_implications:
-        lines.extend([
-            "",
-            "### Attention Items & Implications",
-            *abnormal_implications,
-            "",
-            "> [!IMPORTANT]",
-            "> One or more metrics are abnormal. You MUST explain the implications of these metrics in your completion summary rather than just pasting raw fields.",
-            ">",
-            "> **IMPLICATION PROMPT**:",
-            f"> Please explain the impact of: {', '.join(abnormal_names)}."
-        ])
+        lines.extend(
+            [
+                "",
+                "### Attention Items & Implications",
+                *abnormal_implications,
+                "",
+                "> [!IMPORTANT]",
+                "> One or more metrics are abnormal. You MUST explain the implications of these metrics in your completion summary rather than just pasting raw fields.",
+                ">",
+                "> **IMPLICATION PROMPT**:",
+                f"> Please explain the impact of: {', '.join(abnormal_names)}.",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -780,7 +790,7 @@ def emit_final_gate_result(
     result: core_gate.GateResult,
     *,
     summary_path: Path | None = None,
-    telemetry_report: dict | None = None,
+    telemetry_report: EfficiencyReportPayload | None = None,
 ) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
@@ -839,7 +849,7 @@ def write_native_final_gate_artifacts(
     pr_number: str,
     audit_id: str,
     result: core_gate.GateResult,
-) -> tuple[Path, dict]:
+) -> tuple[Path, EfficiencyReportPayload]:
     paths = core_paths.SessionPaths(repo, pr_number)
     workspace = paths.workspace_dir
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -922,7 +932,7 @@ def write_native_final_gate_artifacts(
     return summary_path, telemetry_report
 
 
-def telemetry_sources_summary(telemetry_report: dict) -> str:
+def telemetry_sources_summary(telemetry_report: EfficiencyReportPayload) -> str:
     sources = telemetry_report.get("sources")
     if not isinstance(sources, list) or not sources:
         return "none"
@@ -938,7 +948,7 @@ def telemetry_sources_summary(telemetry_report: dict) -> str:
     return "; ".join(rows) if rows else "none"
 
 
-def telemetry_diagnostics_summary(telemetry_report: dict) -> str:
+def telemetry_diagnostics_summary(telemetry_report: EfficiencyReportPayload) -> str:
     diagnostics = telemetry_report.get("diagnostics")
     if not isinstance(diagnostics, list) or not diagnostics:
         return "none"

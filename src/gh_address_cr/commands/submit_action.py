@@ -269,10 +269,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Action '{args.resolution}' formulated for {item.get('item_id')}.")
     if runtime:
         print("To submit this response, run:")
-        print(f"  gh-address-cr agent submit {repo} {pr_number} --input \"{output_path}\"")
+        print(f'  gh-address-cr agent submit {repo} {pr_number} --input "{output_path}"')
     else:
         print("To resume the PR session, run your original loop command and append:")
-        print(f"  --fixer-cmd \"{script_path}\"")
+        print(f'  --fixer-cmd "{script_path}"')
     return 0
 
 

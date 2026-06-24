@@ -306,6 +306,7 @@ def _configure_publish_telemetry(repo: str, pr_number: str) -> None:
 
     configure_context_safely(repo, pr_number)
 
+
 def _publish_ready_items(session: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     ready: list[tuple[str, dict[str, Any]]] = []
     for item_id, item in _items(session).items():
@@ -459,8 +460,6 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
         ), None
     except SystemExit as exc:
         return None, str(exc) or protocol_codes.MISSING_PUBLISH_REPLY
-
-
 
 
 def _side_effect_key(session: dict[str, Any], item_id: str, side_effect_type: str) -> str:

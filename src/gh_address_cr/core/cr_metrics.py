@@ -47,7 +47,9 @@ def _percentile(values: list[int], q: float) -> int:
     return ordered[rank - 1]
 
 
-def _empty_report(repo: str, pr_number: str, artifact: Path, diagnostics: list[str], session_id: str = "") -> dict[str, Any]:
+def _empty_report(
+    repo: str, pr_number: str, artifact: Path, diagnostics: list[str], session_id: str = ""
+) -> dict[str, Any]:
     return {
         "status": "SUCCESS",
         "reason_code": "CR_LEDGER_EMPTY",

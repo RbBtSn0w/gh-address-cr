@@ -91,7 +91,9 @@ def handle_doctor_command(args: argparse.Namespace) -> int:
         "repo": repo,
         "pr_number": str(pr_number) if pr_number else None,
         "checks": checks,
-        "next_action": "Fix failed doctor checks, then rerun the original command." if failed else "Rerun the blocked gh-address-cr command.",
+        "next_action": "Fix failed doctor checks, then rerun the original command."
+        if failed
+        else "Rerun the blocked gh-address-cr command.",
         "exit_code": 5 if failed else 0,
     }
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")

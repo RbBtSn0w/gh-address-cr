@@ -24,6 +24,7 @@ SEVERITY_SIGNAL_LABELS = {
 
 DEFAULT_FILE_SUMMARY = "updated per CR scope"
 
+
 def _normalize_severity(severity: str | None) -> str | None:
     if severity in (None, ""):
         return None
@@ -68,7 +69,7 @@ def _format_rationale(text: str) -> list[str]:
     if not paragraphs:
         # Fallback to single newline if no double newlines found
         paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
-    
+
     lines = []
     for p in paragraphs:
         if p.startswith(("- ", "* ", "1. ")):
@@ -83,9 +84,9 @@ def _format_rationale(text: str) -> list[str]:
 
 
 def fix_reply(
-    severity: str | None, 
-    payload: list[str], 
-    *, 
+    severity: str | None,
+    payload: list[str],
+    *,
     summary: str | None = None,
     review_priority: str | None = None,
     review_priority_note: str | None = None,
@@ -101,14 +102,14 @@ def fix_reply(
 
     commit_hash, files_csv, test_command, test_result, *rest = payload
     why = rest[0] if rest else "Addressed the CR with minimal targeted changes and regression coverage."
-    
+
     # FR-005: For P0 and P1, rich technical rationale is encouraged.
-    # Note: Explicit enforcement via SystemExit is disabled to maintain test 
+    # Note: Explicit enforcement via SystemExit is disabled to maintain test
     # compatibility for existing suites using dummy payloads.
 
     files = [item.strip() for item in files_csv.split(",") if item.strip()]
     file_summary = str(summary or DEFAULT_FILE_SUMMARY).strip()
-    
+
     review_signal = _review_signal_label(normalized_severity, normalized_review_priority)
 
     display_commit = _display_commit_hash(commit_hash)
@@ -134,7 +135,7 @@ def fix_reply(
         lines.append(f"- Risk note: {REVIEW_PRIORITY_RISK_NOTES[normalized_review_priority]}")
 
     lines.append(f"- Validation: `{test_command}` {test_result}")
-    
+
     return "\n".join(lines) + "\n"
 
 
@@ -162,7 +163,7 @@ def clarify_reply(payload: list[str]) -> str:
             "If you feel this still needs an adjustment, let me know and I can follow up with a patch!",
         ]
     )
-    
+
     return "\n".join(lines) + "\n"
 
 
@@ -173,7 +174,9 @@ def defer_reply(payload: list[str]) -> str:
         "",
         "Decision:",
     ]
-    lines.extend(_format_rationale(f"Marking as deferred (non-blocking for this PR) because: {_sentence_with_period(reason)}"))
+    lines.extend(
+        _format_rationale(f"Marking as deferred (non-blocking for this PR) because: {_sentence_with_period(reason)}")
+    )
     lines.extend(
         [
             "",
@@ -185,5 +188,5 @@ def defer_reply(payload: list[str]) -> str:
             "If you prefer, I can bring this into the current PR instead.",
         ]
     )
-    
+
     return "\n".join(lines) + "\n"

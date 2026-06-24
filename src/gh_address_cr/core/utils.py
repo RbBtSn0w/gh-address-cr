@@ -118,9 +118,7 @@ def normalize_optional_fix_reply_severity(value: Any) -> str | None:
 def severity_override_note(fix_reply_or_note: dict[str, Any] | str | None) -> str:
     if isinstance(fix_reply_or_note, dict):
         return str(
-            fix_reply_or_note.get("severity_note")
-            or fix_reply_or_note.get("severity_override_note")
-            or ""
+            fix_reply_or_note.get("severity_note") or fix_reply_or_note.get("severity_override_note") or ""
         ).strip()
     return str(fix_reply_or_note or "").strip()
 
@@ -141,11 +139,7 @@ def fix_reply_severity_rejection_reason(fix_reply: dict[str, Any], item: dict[st
     if not explicit_severity:
         return None
     first_scene_severity = first_scene_item_severity(item)
-    if (
-        first_scene_severity
-        and first_scene_severity != explicit_severity
-        and not severity_override_note(fix_reply)
-    ):
+    if first_scene_severity and first_scene_severity != explicit_severity and not severity_override_note(fix_reply):
         return "SEVERITY_OVERRIDE_NOTE_REQUIRED"
     return None
 

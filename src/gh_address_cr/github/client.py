@@ -147,7 +147,9 @@ class GitHubClient:
         )
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url")
         if not isinstance(reply_url, str) or not reply_url.strip():
-            raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reply response did not include comment.url.")
+            raise GitHubError(
+                protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reply response did not include comment.url."
+            )
         return reply_url
 
     def resolve_thread(self, repo: str, pr_number: str, thread_id: str) -> bool:
@@ -167,7 +169,9 @@ class GitHubClient:
         )
         resolved = payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved")
         if resolved is not True:
-            raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub resolve response did not confirm isResolved=true.")
+            raise GitHubError(
+                protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub resolve response did not confirm isResolved=true."
+            )
         return True
 
     def list_pending_reviews(self, repo: str, pr_number: str, login: str | None = None) -> list[dict[str, Any]]:
@@ -176,7 +180,9 @@ class GitHubClient:
         while True:
             payload = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"])
             if not isinstance(payload, list):
-                raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reviews response must be a JSON array.")
+                raise GitHubError(
+                    protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reviews response must be a JSON array."
+                )
             if not payload:
                 return pending
             for review in payload:
@@ -326,7 +332,9 @@ def _review_threads(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         review_threads = payload["data"]["repository"]["pullRequest"]["reviewThreads"]
     except KeyError as exc:
-        raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub response did not include reviewThreads.") from exc
+        raise GitHubError(
+            protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub response did not include reviewThreads."
+        ) from exc
     if not isinstance(review_threads, dict):
         raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reviewThreads response must be an object.")
     return review_threads
