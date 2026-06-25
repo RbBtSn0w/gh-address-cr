@@ -176,7 +176,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
     def test_agent_next_response_skeleton_matches_non_fixer_role_shape(self):
         self.write_session(items=[open_item("github-thread:abc", item_kind="github_thread", source="github")])
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "triage", "--agent-id", "triage-1")
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "triage", "--agent-id", "triage-1"
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -202,7 +204,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -228,7 +232,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -252,7 +258,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        result = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -716,7 +724,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
         first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
-        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
@@ -814,7 +824,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         )
 
         first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
-        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
 
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -853,7 +865,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             "--test-result",
             "passed",
         )
-        issued = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        issued = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(added.returncode, 0, added.stderr)
         self.assertEqual(issued.returncode, 0, issued.stderr)
         request = json.loads(Path(json.loads(issued.stdout)["request_path"]).read_text(encoding="utf-8"))
@@ -1287,7 +1301,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
         first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
-        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
@@ -1348,7 +1364,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.write_session(items=[])
         missing_path = self.workspace_dir() / "missing-batch-action-response.json"
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(missing_path))
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(missing_path)
+        )
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -1480,7 +1498,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
 
         with (
             patch("gh_address_cr.core.telemetry.SessionTelemetry.get_instance", side_effect=AssertionError("blocked")),
-            patch("gh_address_cr.commands.agent.publisher.publish_github_thread_responses", return_value=expected) as publish,
+            patch(
+                "gh_address_cr.commands.agent.publisher.publish_github_thread_responses", return_value=expected
+            ) as publish,
             redirect_stdout(stdout),
         ):
             result = agent.handle_agent_publish(None, [self.repo, self.pr])

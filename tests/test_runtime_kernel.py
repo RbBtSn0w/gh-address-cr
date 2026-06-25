@@ -13,7 +13,9 @@ class RuntimeKernelTestIntent:
     why_existing_tests_insufficient = "Existing tests cover current workflow paths, but not a standalone facts-to-projection-to-policy-to-plan kernel boundary."
     chosen_layer = "Unit Test - pure runtime logic is the smallest effective layer."
     fragility_analysis = "Tests assert public kernel dictionaries and reason codes, not private helper call order."
-    if_omitted = "Final-gate or agent routing could regress into partial-evidence or self-referential artifact completion."
+    if_omitted = (
+        "Final-gate or agent routing could regress into partial-evidence or self-referential artifact completion."
+    )
 
 
 def review_fact(thread_id, *, fact_id=None, observed_at="2026-06-05T00:00:00Z", sequence=0, **payload):
@@ -361,9 +363,7 @@ class RuntimeKernelPolicyTests(unittest.TestCase):
             project_review_threads([review_fact("WAIT", is_resolved=False, external_wait=True)])
         ).to_dict()
         eligible = evaluate_review_policy(
-            project_review_threads(
-                [review_fact("DONE", is_resolved=True, state="closed", reply_evidence_present=True)]
-            )
+            project_review_threads([review_fact("DONE", is_resolved=True, state="closed", reply_evidence_present=True)])
         ).to_dict()
 
         self.assertEqual(blocked["status"], "blocked")
@@ -547,7 +547,9 @@ class RuntimeKernelCommandPlanTests(unittest.TestCase):
         )
         next_plan = [
             command.to_dict()
-            for command in plan_review_commands(failed_retry_projection, evaluate_review_policy(failed_retry_projection))
+            for command in plan_review_commands(
+                failed_retry_projection, evaluate_review_policy(failed_retry_projection)
+            )
         ]
         retry_commands = [command for command in next_plan if command["command_kind"] == "retry_command"]
 

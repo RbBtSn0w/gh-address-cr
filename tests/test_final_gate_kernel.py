@@ -10,7 +10,9 @@ if str(SRC_ROOT) not in sys.path:
 class FinalGateKernelTestIntent:
     risk = "Final-gate completion can drift when remote threads, local findings, reviews, checks, and validation evidence are counted in scattered branches."
     why_automation = "The gate decision is deterministic projection and policy logic that should replay without GitHub IO or artifact writes."
-    why_existing_tests_insufficient = "Existing gate tests assert the facade behavior, but not the pure runtime-kernel facts-to-policy boundary."
+    why_existing_tests_insufficient = (
+        "Existing gate tests assert the facade behavior, but not the pure runtime-kernel facts-to-policy boundary."
+    )
     chosen_layer = "Unit Test - pure runtime logic is the smallest effective layer."
     fragility_analysis = "Tests assert public counts and failure codes, not private helper call order."
     if_omitted = "A later CLI refactor could preserve visible summaries while reintroducing hidden state flags or branch-only completion logic."

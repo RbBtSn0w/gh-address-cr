@@ -53,6 +53,17 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 
 def _json_ready(value: Any) -> Any:
+    val_type = type(value)
+    # Fast path for primitive types
+    if val_type is str or val_type is int or val_type is bool or val_type is float or value is None:
+        return value
+    # Fast path for exact match collections
+    if val_type is dict:
+        return {str(key): _json_ready(inner) for key, inner in value.items()}
+    if val_type is list or val_type is tuple or val_type is set:
+        return [_json_ready(inner) for inner in value]
+
+    # Fallbacks for subclasses and other types
     if is_dataclass(value) and not isinstance(value, type):
         return _json_ready(asdict(value))
     if isinstance(value, datetime):

@@ -47,13 +47,21 @@ class ThreadAliasTest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "T2",
-            "--commit", "abc123",
-            "--files", "src/shared.py",
-            "--summary", "Addressed the second thread.",
-            "--why", "The shared guard now covers the reviewed case.",
-            "--validation", "python3 -m unittest tests.test_shared=passed",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--summary",
+            "Addressed the second thread.",
+            "--why",
+            "The shared guard now covers the reviewed case.",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -66,13 +74,21 @@ class ThreadAliasTest(PythonScriptTestCase):
         self.write_session(items=[github_thread("github-thread:abc")])
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "T9",
-            "--commit", "abc123",
-            "--files", "src/shared.py",
-            "--summary", "x",
-            "--why", "y",
-            "--validation", "cmd=passed",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/shared.py",
+            "--summary",
+            "x",
+            "--why",
+            "y",
+            "--validation",
+            "cmd=passed",
         )
 
         self.assertEqual(result.returncode, 2)

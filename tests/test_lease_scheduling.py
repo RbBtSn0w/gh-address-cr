@@ -116,8 +116,7 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         self.lease_token = orch.active_leases["finding-1"].lease_token
         self.response = Path(self.temp_dir.name) / "response.json"
         self.response.write_text(
-            json.dumps({"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}})
-            + "\n",
+            json.dumps({"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}}) + "\n",
             encoding="utf-8",
         )
 
@@ -199,7 +198,9 @@ class TestRuntimeLeaseRecoveryAudit(unittest.TestCase):
                 now=datetime(2026, 4, 24, 12, 0, 2, tzinfo=timezone.utc),
             )
 
-        recovery_events = [event for event in session["lease_events"] if event["event_type"] == "lease_recovery_calculated"]
+        recovery_events = [
+            event for event in session["lease_events"] if event["event_type"] == "lease_recovery_calculated"
+        ]
         self.assertEqual(len(recovery_events), 1)
         self.assertEqual(recovery_events[0]["recovery_outcome"], "renew")
         self.assertEqual(recovery_events[0]["reason_code"], "EXPIRED_LEASE_RENEWABLE")

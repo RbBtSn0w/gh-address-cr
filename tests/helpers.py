@@ -89,10 +89,14 @@ class PythonScriptTestCase(unittest.TestCase):
             old_argv = sys.argv
             sys.argv = ["gh-address-cr", *args]
             old_cwd = os.getcwd()
-            
+
             exit_code = 0
             try:
-                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf):
+                with (
+                    contextlib.redirect_stdout(stdout_buf),
+                    contextlib.redirect_stderr(stderr_buf),
+                    patch("sys.stdin", stdin_buf),
+                ):
                     exit_code = main(list(args))
             except SystemExit as exc:
                 if exc.code is None:
@@ -103,6 +107,7 @@ class PythonScriptTestCase(unittest.TestCase):
                     exit_code = 1
             except Exception as exc:
                 import traceback
+
                 stderr_buf.write(f"In-process execution failed: {exc}\n")
                 traceback.print_exc(file=stderr_buf)
                 exit_code = 2
@@ -120,7 +125,9 @@ class PythonScriptTestCase(unittest.TestCase):
 
             res = CompletedProcessEmulation(exit_code, stdout_buf.getvalue(), stderr_buf.getvalue())
             if check and exit_code != 0:
-                raise subprocess.CalledProcessError(exit_code, ["gh-address-cr", *args], output=res.stdout, stderr=res.stderr)
+                raise subprocess.CalledProcessError(
+                    exit_code, ["gh-address-cr", *args], output=res.stdout, stderr=res.stderr
+                )
             return res
         else:
             env = self.env.copy()

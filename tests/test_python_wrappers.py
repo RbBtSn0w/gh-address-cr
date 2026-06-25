@@ -190,7 +190,9 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE": "assistant-host",
                 },
             ),
-            patch.object(final_gate.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")),
+            patch.object(
+                final_gate.core_telemetry, "input_unavailable_import_summary", side_effect=OSError("disk full")
+            ),
         ):
             result = final_gate.ingest_host_telemetry_from_environment(self.repo, self.pr)
 
@@ -436,9 +438,7 @@ else:
         self.assertEqual(summary["telemetry"]["inefficiency_flags"], [])
 
     def test_cli_final_gate_rejects_conflicting_output_flags(self):
-        result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--machine", "--human", self.repo, self.pr]
-        )
+        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--machine", "--human", self.repo, self.pr])
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("not allowed with argument", result.stderr)
@@ -936,7 +936,10 @@ else:
         self.assertEqual(summary["reason_code"], "DOCTOR_PASSED")
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)
-        self.assertEqual({check["name"] for check in summary["checks"]}, {"gh_available", "gh_auth", "gh_viewer", "repo_access", "state_dir", "workspace_dir"})
+        self.assertEqual(
+            {check["name"] for check in summary["checks"]},
+            {"gh_available", "gh_auth", "gh_viewer", "repo_access", "state_dir", "workspace_dir"},
+        )
 
     def test_cli_doctor_help_prints_usage_without_running_checks(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "doctor", "--help"])
@@ -949,7 +952,9 @@ else:
     def test_cli_address_accepts_pr_url_target(self):
         self.install_fake_gh_for_threads([])
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "address", f"https://github.com/{self.repo}/pull/{self.pr}"])
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "address", f"https://github.com/{self.repo}/pull/{self.pr}"]
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
@@ -1231,9 +1236,7 @@ else:
     def test_cli_findings_missing_input_path_returns_structured_error_without_session_mutation(self):
         missing = Path(self.temp_dir.name) / "missing-findings.json"
 
-        result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(missing)]
-        )
+        result = self.run_cmd([sys.executable, str(CLI_PY), "findings", self.repo, self.pr, "--input", str(missing)])
 
         self.assertEqual(result.returncode, 2)
         summary = json.loads(result.stdout)
@@ -2223,7 +2226,6 @@ body: Missing title should fail.
         self.assertIn("must include a title", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-
     def test_cli_dispatches_review_to_findings(self):
         markdown = """```finding
 title: CLI finding
@@ -2468,7 +2470,17 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "gate-test",
+                self.repo,
+                self.pr,
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("== Current Run Snapshot ==", result.stdout)
@@ -2507,7 +2519,9 @@ else:
             "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
             summary_text,
         )
-        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report_path_line = next(
+            line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:")
+        )
         report_path = Path(report_path_line.partition(": ")[2])
         self.assertTrue(report_path.exists())
 
@@ -2848,7 +2862,9 @@ else:
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
-        self.assertTrue(any("external telemetry store is not a regular file" in item for item in payload["diagnostics"]))
+        self.assertTrue(
+            any("external telemetry store is not a regular file" in item for item in payload["diagnostics"])
+        )
 
     def test_cli_telemetry_summary_fails_loud_when_import_ledger_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
@@ -2872,7 +2888,9 @@ else:
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "TELEMETRY_REPORT_UNAVAILABLE")
-        self.assertTrue(any("telemetry import summary is not a regular file" in item for item in payload["diagnostics"]))
+        self.assertTrue(
+            any("telemetry import summary is not a regular file" in item for item in payload["diagnostics"])
+        )
 
     def test_cli_telemetry_summary_fails_loud_when_import_diagnostics_shape_is_corrupted(self):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
@@ -2965,7 +2983,17 @@ else:
         (self.workspace_dir() / "external-telemetry.jsonl").write_text("{not-json}\n", encoding="utf-8")
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "corrupted-telemetry", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "corrupted-telemetry",
+                self.repo,
+                self.pr,
+            ]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2977,7 +3005,9 @@ else:
         summary_text = summary_file.read_text(encoding="utf-8")
         self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
         self.assertIn("- telemetry_diagnostics: external telemetry line 1: invalid JSON", summary_text)
-        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report_path_line = next(
+            line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:")
+        )
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertTrue(any("external telemetry line 1" in diagnostic for diagnostic in report["diagnostics"]))
 
@@ -3006,7 +3036,9 @@ else:
         self.assertIn("TELEMETRY_TRANSCRIPT_NOT_FOUND", result.stdout)
         summary_text = self.audit_summary_file().read_text(encoding="utf-8")
         self.assertIn("- telemetry_diagnostics: telemetry import host-autodiscovery:", summary_text)
-        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report_path_line = next(
+            line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:")
+        )
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         reason_codes = {issue["reason_code"] for issue in report["cli_health_issues"]}
         self.assertIn("TELEMETRY_AUTODISCOVERY_MISS", reason_codes)
@@ -3035,7 +3067,17 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "host-telemetry", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "host-telemetry",
+                self.repo,
+                self.pr,
+            ]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -3045,7 +3087,9 @@ else:
         summary_text = self.audit_summary_file().read_text(encoding="utf-8")
         self.assertIn("- telemetry_coverage_label: partial", summary_text)
         self.assertIn("- telemetry_sources: assistant-host (host-adapter): 1 events, available", summary_text)
-        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        report_path_line = next(
+            line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:")
+        )
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertEqual(report["total_events"], 1)
         self.assertEqual(report["slowest_operations"][0]["operation"], "inspect issue")
@@ -3057,16 +3101,32 @@ else:
         self.env["GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"] = "assistant-host"
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "missing-host-telemetry", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "missing-host-telemetry",
+                self.repo,
+                self.pr,
+            ]
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
-        self.assertIn("telemetry_diagnostics=telemetry import assistant-host: telemetry input unavailable", result.stdout)
+        self.assertIn(
+            "telemetry_diagnostics=telemetry import assistant-host: telemetry input unavailable", result.stdout
+        )
         summary_text = self.audit_summary_file().read_text(encoding="utf-8")
         self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
-        self.assertIn("- telemetry_diagnostics: telemetry import assistant-host: telemetry input unavailable", summary_text)
-        report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
+        self.assertIn(
+            "- telemetry_diagnostics: telemetry import assistant-host: telemetry input unavailable", summary_text
+        )
+        report_path_line = next(
+            line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:")
+        )
         report = json.loads(Path(report_path_line.partition(": ")[2]).read_text(encoding="utf-8"))
         self.assertEqual(report["total_events"], 0)
         self.assertIn("telemetry import assistant-host: telemetry input unavailable", report["diagnostics"])
@@ -3115,7 +3175,9 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr]
+        )
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("github_threads_missing_reply_count=1", result.stdout)
         self.assertIn("missing reply evidence", result.stderr)
@@ -3154,7 +3216,17 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", "--audit-id", "native-run", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--no-auto-clean",
+                "--audit-id",
+                "native-run",
+                self.repo,
+                self.pr,
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Audit summary path:", result.stdout)
@@ -3210,11 +3282,12 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr]
+        )
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("Pending review count: 1", result.stdout)
         self.assertIn("pending review(s)", result.stderr)
-
 
     def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "review-to-findings", self.repo, self.pr])
@@ -3276,7 +3349,9 @@ else:
         )
         self.assertEqual(ingest.returncode, 5, ingest.stderr)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--no-auto-clean", self.repo, self.pr]
+        )
         self.assertNotEqual(result.returncode, 0)
         audit_lines = self.audit_log_file().read_text(encoding="utf-8").splitlines()
         last = json.loads(audit_lines[-1])
@@ -3314,7 +3389,9 @@ else:
         )
         gh.chmod(0o755)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", self.repo, self.pr])
+        result = self.run_cmd(
+            [sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", self.repo, self.pr]
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
@@ -3350,7 +3427,17 @@ else:
         gh.chmod(0o755)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--auto-clean",
+                "--audit-id",
+                "archive-run",
+                self.repo,
+                self.pr,
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
@@ -3390,7 +3477,9 @@ else:
         ]
         archived_summary_sha256 = hashlib.sha256(archived_summary.read_bytes()).hexdigest()
         self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(entry) for entry in audit_entries))
-        self.assertTrue(any(entry.get("details", {}).get("summary_file") == str(archived_summary) for entry in audit_entries))
+        self.assertTrue(
+            any(entry.get("details", {}).get("summary_file") == str(archived_summary) for entry in audit_entries)
+        )
         self.assertTrue(
             any(entry.get("details", {}).get("summary_sha256") == archived_summary_sha256 for entry in audit_entries)
         )
@@ -3436,7 +3525,17 @@ else:
         report_artifact.mkdir(parents=True)
 
         result = self.run_cmd(
-            [sys.executable, str(CLI_PY), "final-gate", "--human", "--auto-clean", "--audit-id", "artifact-fail", self.repo, self.pr]
+            [
+                sys.executable,
+                str(CLI_PY),
+                "final-gate",
+                "--human",
+                "--auto-clean",
+                "--audit-id",
+                "artifact-fail",
+                self.repo,
+                self.pr,
+            ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())

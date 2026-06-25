@@ -21,7 +21,9 @@ class NativeFoundationTests(unittest.TestCase):
                 self.assertEqual(paths.audit_summary_file("owner/repo", "123").name, "audit_summary.md")
                 self.assertEqual(paths.external_telemetry_file("owner/repo", "123").name, "external-telemetry.jsonl")
                 self.assertEqual(paths.telemetry_imports_file("owner/repo", "123").name, "telemetry-imports.jsonl")
-                self.assertEqual(paths.telemetry_fingerprints_file("owner/repo", "123").name, "telemetry-fingerprints.json")
+                self.assertEqual(
+                    paths.telemetry_fingerprints_file("owner/repo", "123").name, "telemetry-fingerprints.json"
+                )
                 self.assertEqual(paths.efficiency_report_file("owner/repo", "123").name, "efficiency-report.json")
 
     def test_session_paths_properties(self):

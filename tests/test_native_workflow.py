@@ -200,7 +200,7 @@ class NativeWorkflowTests(unittest.TestCase):
                     "- No code changes were made for this specific comment.\n"
                     "\n"
                     "If you feel this still needs an adjustment, let me know and I can follow up with a patch!\n"
-                    )
+                )
 
                 self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", expected_reply))
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
@@ -370,7 +370,9 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(client.replies[0][2], "THREAD_1")
                 self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
                 self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
-                self.assertEqual(session["items"]["github-thread:THREAD_1"]["reply_evidence"]["author_login"], "agent-login")
+                self.assertEqual(
+                    session["items"]["github-thread:THREAD_1"]["reply_evidence"]["author_login"], "agent-login"
+                )
 
     def test_publish_with_no_ready_items_does_not_require_viewer_login(self):
         from gh_address_cr.core import publisher
@@ -907,7 +909,9 @@ class NativeWorkflowTests(unittest.TestCase):
                         "resolution": "fix",
                         "note": "Fixed thread issue.",
                         "files": ["src/example.py"],
-                        "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                        "validation_commands": [
+                            {"command": "python3 -m unittest tests.test_example", "result": "passed"}
+                        ],
                         "fix_reply": {
                             "summary": "Added the missing input guard.",
                             "commit_hash": "abc123",

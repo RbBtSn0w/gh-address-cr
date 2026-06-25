@@ -6,9 +6,7 @@ from pathlib import Path
 
 from tests.helpers import SRC_ROOT, PythonScriptTestCase
 
-HELPER_SCRIPTS = (
-    SRC_ROOT / "gh_address_cr" / "commands" / "submit_action.py",
-)
+HELPER_SCRIPTS = (SRC_ROOT / "gh_address_cr" / "commands" / "submit_action.py",)
 
 
 def runtime_request(**overrides):

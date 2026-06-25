@@ -65,5 +65,6 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertIn("gh-address-cr agent submit", message)
         self.assertIn("gh-address-cr submit-action", message)
 
+
 if __name__ == "__main__":
     unittest.main()

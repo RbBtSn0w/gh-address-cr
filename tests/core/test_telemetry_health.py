@@ -40,4 +40,3 @@ class TelemetryHealthTests(unittest.TestCase):
 
         self.assertEqual(check["status"], "failed")
         self.assertEqual(check["reason_code"], "TELEMETRY_TRANSCRIPT_NOT_FOUND")
-

@@ -27,8 +27,12 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
     def _two_identical_threads(self):
         self.write_session(
             items=[
-                github_thread("github-thread:abc", body="Wrap `Xcode` in backticks.", first_body="Wrap `Xcode` in backticks."),
-                github_thread("github-thread:def", body="Wrap `Xcode` in backticks.", first_body="Wrap `Xcode` in backticks."),
+                github_thread(
+                    "github-thread:abc", body="Wrap `Xcode` in backticks.", first_body="Wrap `Xcode` in backticks."
+                ),
+                github_thread(
+                    "github-thread:def", body="Wrap `Xcode` in backticks.", first_body="Wrap `Xcode` in backticks."
+                ),
             ]
         )
 
@@ -36,12 +40,18 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "--agent-id", "codex-1",
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
+            "--agent-id",
+            "codex-1",
             "--reject",
             "--match-files",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -62,11 +72,16 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--clarify",
             "--match-files",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -86,11 +101,16 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--reject",
             "--match-files",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 4)
@@ -112,10 +132,15 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--reject",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 2)
@@ -127,10 +152,14 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--reject",
             "--match-files",
-            "--files", "src/shared.py",
+            "--files",
+            "src/shared.py",
         )
 
         self.assertEqual(result.returncode, 2)
@@ -144,12 +173,18 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--reject",
             "--match-files",
-            "--files", "src/shared.py",
-            "--commit", "abc123",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--commit",
+            "abc123",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 2)
@@ -160,12 +195,17 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "--reject",
             "--clarify",
             "--match-files",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--files",
+            "src/shared.py",
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 2)
@@ -176,10 +216,14 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self._two_identical_threads()
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
             "github-thread:abc",
             "--reject",
-            "--homogeneous-reason", self.REASON,
+            "--homogeneous-reason",
+            self.REASON,
         )
 
         self.assertEqual(result.returncode, 2)

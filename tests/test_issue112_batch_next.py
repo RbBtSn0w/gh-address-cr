@@ -226,7 +226,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
-        
+
         # 应当仅租赁了 "thread-fix"
         self.assertEqual(response["lease_count"], 1)
         self.assertEqual(response["leased_items"][0]["item_id"], "thread-fix")
@@ -267,10 +267,10 @@ class BatchNextTestCase(PythonScriptTestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
-        
+
         # 仅应有最多 2 个新租赁
         self.assertEqual(response["lease_count"], 2)
-        
+
         session = self.load_session()
         claimed_count = sum(1 for itm in session["items"].values() if itm["state"] == "claimed")
         self.assertEqual(claimed_count, 2)
@@ -306,7 +306,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
-        
+
         # 验证 lease-existing 已经在 session 中补充了 request_id/request_hash/request_path
         session = self.load_session()
         updated_lease = session["leases"]["lease-existing"]
@@ -375,7 +375,10 @@ class BatchNextTestCase(PythonScriptTestCase):
         # 验证 session 一致性：此前成功获取的 thread-1 应当被回滚释放，不留痕迹
         session = self.load_session()
         self.assertEqual(session["items"]["thread-1"]["state"], "open")
-        self.assertNotIn("thread-1", [lease.get("item_id") for lease in session["leases"].values() if lease.get("agent_id") == "test-agent"])
+        self.assertNotIn(
+            "thread-1",
+            [lease.get("item_id") for lease in session["leases"].values() if lease.get("agent_id") == "test-agent"],
+        )
 
     def test_batch_next_merges_existing_skeleton_replies(self):
         items = [
@@ -390,12 +393,10 @@ class BatchNextTestCase(PythonScriptTestCase):
         self.init_session(items)
 
         # 1. 运行第一次，写入 skeleton
-        result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
-        )
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent")
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
-        
+
         # 模拟用户手工编辑 skeleton 文件
         skeleton_path = Path(response["response_skeleton_path"])
         skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
@@ -405,9 +406,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         # 2. 运行第二次，应当做增量合并
-        result2 = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
-        )
+        result2 = self.run_runtime_module("agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent")
         self.assertEqual(result2.returncode, 0, result2.stderr)
 
         # 验证编辑好的字段在二次获取后没有丢失
@@ -450,9 +449,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path = self.workspace_dir() / "batch-response-skeleton.json"
         skeleton_path.write_text("invalid json content", encoding="utf-8")
 
-        result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
-        )
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent")
         self.assertEqual(result.returncode, 5, result.stderr)
         self.assertIn("Failed to parse existing batch skeleton JSON", result.stderr)
 
@@ -475,9 +472,7 @@ class BatchNextTestCase(PythonScriptTestCase):
         ]
         self.init_session(items)
 
-        result = self.run_runtime_module(
-            "agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent"
-        )
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--batch", "--agent-id", "test-agent")
         self.assertEqual(result.returncode, 0, result.stderr)
         session = self.load_session()
         self.assertEqual(session["items"]["thread-classified"]["state"], "claimed")

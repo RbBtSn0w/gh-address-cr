@@ -26,10 +26,29 @@ class ResolvePublishedFlagTest(unittest.TestCase):
 class TrivialResolveGuardTest(unittest.TestCase):
     def _ns(self, **kw):
         base = dict(
-            repo="o/r", pr_number="1", item_id=None, agent_id="a", commit=None, files=None, file=[],
-            summary=None, why=None, severity=None, severity_note=None, review_priority=None, validation=[],
-            input=None, batch=False, trivial=False, stale=False, homogeneous_reason=None, concern_label=None,
-            match_files=False, include_stale=False, publish=False, now=None,
+            repo="o/r",
+            pr_number="1",
+            item_id=None,
+            agent_id="a",
+            commit=None,
+            files=None,
+            file=[],
+            summary=None,
+            why=None,
+            severity=None,
+            severity_note=None,
+            review_priority=None,
+            validation=[],
+            input=None,
+            batch=False,
+            trivial=False,
+            stale=False,
+            homogeneous_reason=None,
+            concern_label=None,
+            match_files=False,
+            include_stale=False,
+            publish=False,
+            now=None,
         )
         base.update(kw)
         return argparse.Namespace(**base)
@@ -42,8 +61,11 @@ class TrivialResolveGuardTest(unittest.TestCase):
 
     def test_item_id_with_batch_or_stale_is_rejected(self):
         # CR: <item_id> with a match-all/batch mode must fail fast, not be ignored.
-        for kw in ({"batch": True, "input": "b.json"}, {"stale": True, "match_files": True, "commit": "abc"},
-                   {"homogeneous_reason": "x", "commit": "abc"}):
+        for kw in (
+            {"batch": True, "input": "b.json"},
+            {"stale": True, "match_files": True, "commit": "abc"},
+            {"homogeneous_reason": "x", "commit": "abc"},
+        ):
             with self.subTest(kw=kw):
                 with self.assertRaises(WorkflowError) as ctx:
                     _dispatch_agent_resolve(self._ns(item_id="github-thread:abc", **kw), now_dt=None)

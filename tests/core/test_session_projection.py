@@ -123,7 +123,9 @@ class SessionProjectionTest(unittest.TestCase):
 
     def test_reply_evidence_none_is_replaced(self):
         # #1: reply_evidence stored as None must not silently drop the reply_url.
-        base = {"github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread", "reply_evidence": None}}
+        base = {
+            "github-thread:abc": {"item_id": "github-thread:abc", "item_kind": "github_thread", "reply_evidence": None}
+        }
         events = [_event("reply_posted", "github-thread:abc", {"reply_url": "https://x/reply"})]
         item = apply_ledger_events(base, events)["github-thread:abc"]
         self.assertEqual(item["reply_evidence"], {"reply_url": "https://x/reply"})

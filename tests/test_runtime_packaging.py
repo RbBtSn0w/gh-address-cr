@@ -109,10 +109,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
             [
                 sys.executable,
                 "-c",
-                (
-                    "import importlib.util\n"
-                    "print(importlib.util.find_spec('gh_address_cr.core.cr_loop') is None)\n"
-                ),
+                ("import importlib.util\nprint(importlib.util.find_spec('gh_address_cr.core.cr_loop') is None)\n"),
             ],
             text=True,
             capture_output=True,
@@ -475,11 +472,16 @@ class RuntimePackagingTest(PythonScriptTestCase):
         formula = output.read_text(encoding="utf-8")
         self.assertIn("class GhAddressCr < Formula", formula)
         self.assertIn("include Language::Python::Virtualenv", formula)
-        self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
+        self.assertIn(
+            'url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula
+        )
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
         self.assertIn('resource "packaging" do', formula)
-        self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
+        self.assertIn(
+            'url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"',
+            formula,
+        )
         self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
         self.assertIn("virtualenv_install_with_resources", formula)
         self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)

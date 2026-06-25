@@ -40,7 +40,7 @@ class TestTelemetry(unittest.TestCase):
     def test_record_metric(self):
         tracker = SessionTelemetry.get_instance()
         tracker.record("ls -l", 100.0, 101.5, 0)
-        
+
         self.assertEqual(len(tracker.metrics), 1)
         metric = tracker.metrics[0]
         self.assertEqual(metric.command, "ls -l")
@@ -52,9 +52,9 @@ class TestTelemetry(unittest.TestCase):
 
     def test_retry_detection(self):
         tracker = SessionTelemetry.get_instance()
-        tracker.record("npm install", 100.0, 105.0, 1) # Failed
-        tracker.record("npm install", 106.0, 110.0, 0) # Retry succeeded
-        
+        tracker.record("npm install", 100.0, 105.0, 1)  # Failed
+        tracker.record("npm install", 106.0, 110.0, 0)  # Retry succeeded
+
         self.assertEqual(len(tracker.metrics), 2)
         self.assertFalse(tracker.metrics[0].is_retry)
         self.assertTrue(tracker.metrics[1].is_retry)
@@ -63,7 +63,7 @@ class TestTelemetry(unittest.TestCase):
         tracker = SessionTelemetry.get_instance()
         tracker.record("cmd1", 100.0, 101.0, 0)
         tracker.record("cmd2", 102.0, 104.0, 1)
-        
+
         report = tracker.get_report()
         self.assertEqual(report.total_invocations, 2)
         self.assertEqual(report.total_duration, 3.0)
@@ -77,15 +77,15 @@ class TestTelemetry(unittest.TestCase):
         tracker.record("fail cmd", 100, 101, 1)
         # Explicit Timeout (124)
         tracker.record("hang cmd", 200, 320, 124)
-        
+
         report = tracker.get_report()
-        # Flags: 
+        # Flags:
         # - long cmd > 60s
         # - hang cmd > 60s
         # - hang cmd Timeout
         # - Global error rate
         self.assertGreaterEqual(len(report.flagged_inefficiencies), 4)
-        
+
         flags_lower = [f.lower() for f in report.flagged_inefficiencies]
         self.assertTrue(any("exceeds 60s" in f for f in flags_lower))
         self.assertTrue(any("error rate" in f for f in flags_lower))
@@ -96,7 +96,7 @@ class TestTelemetry(unittest.TestCase):
         tracker.record("pytest", 0, 1, 1)
         tracker.record("pytest", 2, 3, 1)
         tracker.record("pytest", 4, 5, 0)
-        
+
         report = tracker.get_report()
         # Should flag "pytest" for high retry count
         self.assertTrue(any("retries" in f.lower() and "pytest" in f for f in report.flagged_inefficiencies))
@@ -177,7 +177,9 @@ class TestTelemetry(unittest.TestCase):
             )
 
             self.assertEqual(summary["reason_code"], "TELEMETRY_AUTODISCOVERY_MISS")
-            self.assertEqual(summary["diagnostics"][0], "host telemetry autodiscovery codex: TELEMETRY_TRANSCRIPT_NOT_FOUND")
+            self.assertEqual(
+                summary["diagnostics"][0], "host telemetry autodiscovery codex: TELEMETRY_TRANSCRIPT_NOT_FOUND"
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_invalid_utf8_last_machine_summary_becomes_health_issue(self, state_dir):
@@ -199,12 +201,14 @@ class TestTelemetry(unittest.TestCase):
         self.assertNotIn("value", label)
 
     def test_command_label_skips_flag_values_and_sensitive_tokens(self):
-        label = command_label([
-            "curl",
-            "-H",
-            "Authorization: Bearer ghp_secret",
-            "https://api.github.com/user",
-        ])
+        label = command_label(
+            [
+                "curl",
+                "-H",
+                "Authorization: Bearer ghp_secret",
+                "https://api.github.com/user",
+            ]
+        )
         self.assertEqual(label, "curl")
         self.assertNotIn("Bearer", label)
 
@@ -278,7 +282,10 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["reason_code"], "TELEMETRY_REPORT_READY")
             self.assertEqual(report["total_events"], 1)
             self.assertTrue(
-                any("efficiency report artifact unavailable: OSError: disk full" in item for item in report["diagnostics"])
+                any(
+                    "efficiency report artifact unavailable: OSError: disk full" in item
+                    for item in report["diagnostics"]
+                )
             )
 
     @patch("gh_address_cr.core.telemetry.write_json_atomic")
@@ -298,7 +305,9 @@ class TestTelemetry(unittest.TestCase):
             report = build_efficiency_report("octo/example", "77")
 
             diagnostic = "\n".join(report["diagnostics"])
-            self.assertIn("efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic)
+            self.assertIn(
+                "efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic
+            )
             self.assertNotIn("/private/tmp/secret", diagnostic)
 
     @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
@@ -504,7 +513,9 @@ class TestTelemetry(unittest.TestCase):
 
             stored_events = [
                 json.loads(line)
-                for line in core_paths.external_telemetry_file("octo/example", "77").read_text(encoding="utf-8").splitlines()
+                for line in core_paths.external_telemetry_file("octo/example", "77")
+                .read_text(encoding="utf-8")
+                .splitlines()
             ]
             self.assertEqual(stored_events[0]["event_fingerprint"], accepted["accepted_fingerprints"][0])
             self.assertTrue(core_paths.telemetry_fingerprints_file("octo/example", "77").exists())
@@ -793,7 +804,9 @@ class TestTelemetry(unittest.TestCase):
             }
             second = {**first, "source_session_id": "run-2", "event_id": "e2"}
 
-            import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first))
+            import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=json.dumps(first)
+            )
             result = import_external_telemetry(
                 "octo/example",
                 "77",
@@ -1078,7 +1091,9 @@ class TestTelemetry(unittest.TestCase):
                 }
             )
 
-            result = import_external_telemetry("octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload)
+            result = import_external_telemetry(
+                "octo/example", "77", source="generic-agent", fmt="agent-jsonl", raw=payload
+            )
 
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
@@ -1159,7 +1174,9 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["coverage_label"], "complete")
             self.assertEqual(report["total_events"], 1)
             self.assertEqual(report["total_observed_duration_ms"], 2000)
-            self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+            self.assertTrue(
+                any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"])
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_report_deduplicates_correlated_runtime_and_external_events_with_duration_skew(self, state_dir):
@@ -1187,7 +1204,9 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["total_events"], 1)
             self.assertEqual(report["total_observed_duration_ms"], 2000)
-            self.assertTrue(any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"]))
+            self.assertTrue(
+                any("correlated telemetry event ignored" in diagnostic for diagnostic in report["diagnostics"])
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_runtime_command_operations_are_sanitized_before_reporting(self, state_dir):
@@ -1220,9 +1239,7 @@ class TestTelemetry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir.return_value = Path(tmp)
 
-            result = import_external_telemetry(
-                "octo/example", "77", source="username-alice-laptop", fmt="xml", raw=""
-            )
+            result = import_external_telemetry("octo/example", "77", source="username-alice-laptop", fmt="xml", raw="")
 
             self.assertEqual(result["reason_code"], "UNSUPPORTED_TELEMETRY_FORMAT")
             self.assertEqual(result["source"], "[redacted]")
@@ -1338,7 +1355,9 @@ class TestTelemetry(unittest.TestCase):
                 "status": "success",
                 "correlation_id": "tool-call-1",
             }
-            imported = import_external_telemetry("octo/example", "77", source="codex", fmt="agent-jsonl", raw=json.dumps(event))
+            imported = import_external_telemetry(
+                "octo/example", "77", source="codex", fmt="agent-jsonl", raw=json.dumps(event)
+            )
             stored_path = core_paths.external_telemetry_file("octo/example", "77")
             stored_line = stored_path.read_text(encoding="utf-8")
             stored_path.write_text(stored_line + stored_line, encoding="utf-8")
@@ -1347,7 +1366,9 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["total_events"], 1)
             self.assertEqual(report["total_observed_duration_ms"], 1000)
-            self.assertIn(f"duplicate event fingerprint ignored: {imported['accepted_fingerprints'][0]}", report["diagnostics"])
+            self.assertIn(
+                f"duplicate event fingerprint ignored: {imported['accepted_fingerprints'][0]}", report["diagnostics"]
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_corrupted_external_telemetry_is_fail_open_with_diagnostics(self, state_dir):
@@ -1377,7 +1398,9 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(report["status"], "SUCCESS")
             self.assertEqual(report["coverage_label"], "unavailable")
             self.assertEqual(report["total_events"], 0)
-            self.assertTrue(any("external telemetry line 1: record must be a JSON object" in item for item in report["diagnostics"]))
+            self.assertTrue(
+                any("external telemetry line 1: record must be a JSON object" in item for item in report["diagnostics"])
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_stored_external_telemetry_without_source_is_corrupted(self, state_dir):
@@ -1741,7 +1764,9 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
             self.assertEqual(result["accepted_count"], 0)
-            self.assertTrue(any("external telemetry store is not a regular file" in item for item in result["diagnostics"]))
+            self.assertTrue(
+                any("external telemetry store is not a regular file" in item for item in result["diagnostics"])
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_fingerprint_ledger_directory_blocks_import_without_appending_events(self, state_dir):
@@ -1768,7 +1793,9 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(result["status"], "FAILED")
             self.assertEqual(result["reason_code"], "CORRUPTED_TELEMETRY_STORE")
             self.assertEqual(result["accepted_count"], 0)
-            self.assertTrue(any("telemetry fingerprint ledger is not a regular file" in item for item in result["diagnostics"]))
+            self.assertTrue(
+                any("telemetry fingerprint ledger is not a regular file" in item for item in result["diagnostics"])
+            )
             self.assertFalse(external_path.exists())
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
@@ -1811,7 +1838,9 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(report["status"], "SUCCESS")
             self.assertEqual(report["coverage_label"], "unavailable")
-            self.assertTrue(any("telemetry import summary is not a regular file" in item for item in report["diagnostics"]))
+            self.assertTrue(
+                any("telemetry import summary is not a regular file" in item for item in report["diagnostics"])
+            )
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_import_external_telemetry_rejects_unsafe_metadata(self, state_dir):
@@ -2321,13 +2350,14 @@ class TestTelemetry(unittest.TestCase):
         tracker = SessionTelemetry.get_instance()
         tracker.record("cmd", 0, 1, 0)
         report = tracker.get_report()
-        
+
         data = report.to_dict()
         self.assertEqual(data["total_invocations"], 1)
         self.assertEqual(len(data["metrics"]), 1)
         self.assertEqual(data["metrics"][0]["command"], "cmd")
-        
+
         import json
+
         json_str = json.dumps(data)
         self.assertIsInstance(json_str, str)
 
@@ -2471,7 +2501,7 @@ class TestTelemetry(unittest.TestCase):
         metric = tracker.metrics[0]
         self.assertEqual(metric.pid, 12345)
         self.assertEqual(metric.execution_id, "exec-id-abc")
-        
+
         # Test serialization
         data = metric.to_dict()
         self.assertEqual(data["pid"], 12345)
@@ -2479,16 +2509,19 @@ class TestTelemetry(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_run_cmd_timeout(self, mock_run):
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err")
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err"
+        )
 
         from gh_address_cr.core.command_runner import run_cmd
+
         res = run_cmd(["sleep", "10"], timeout=120.0)
 
         self.assertEqual(res.returncode, 124)
         self.assertEqual(res.stdout, "out")
         self.assertIn("err", res.stderr)
         self.assertIn("Command timed out after 120.0 seconds.", res.stderr)
-        
+
         tracker = SessionTelemetry.get_instance()
         self.assertEqual(len(tracker.metrics), 1)
         self.assertEqual(tracker.metrics[0].exit_code, 124)
@@ -2498,6 +2531,7 @@ class TestTelemetry(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
 
         from gh_address_cr.core.command_runner import run_cmd
+
         run_cmd(["ls"])
 
         self.assertIsNone(mock_run.call_args.kwargs["timeout"])
@@ -2506,11 +2540,14 @@ class TestTelemetry(unittest.TestCase):
     @patch("subprocess.run")
     def test_run_cmd_retries_transient_gh_failure(self, mock_run, mock_sleep):
         mock_run.side_effect = [
-            subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="graphql failed"),
+            subprocess.CompletedProcess(
+                args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="graphql failed"
+            ),
             subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=0, stdout="{}", stderr=""),
         ]
 
         from gh_address_cr.core.command_runner import run_cmd
+
         res = run_cmd(["gh", "api", "graphql"], retries=2)
 
         self.assertEqual(res.returncode, 0)
@@ -2525,6 +2562,7 @@ class TestTelemetry(unittest.TestCase):
         )
 
         from gh_address_cr.core.command_runner import run_cmd
+
         res = run_cmd(["gh", "api", "graphql"], retries=3)
 
         self.assertEqual(res.returncode, 1)
@@ -2537,8 +2575,9 @@ class TestTelemetry(unittest.TestCase):
     def test_run_cmd_fail_open(self, mock_run, mock_record, mock_stderr):
         mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
         mock_record.side_effect = Exception("Telemetry DB error")
-        
+
         from gh_address_cr.core.command_runner import run_cmd
+
         res = run_cmd(["ls"])
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout, "ok")
@@ -2555,13 +2594,7 @@ class TestTelemetry(unittest.TestCase):
 
         from gh_address_cr.core.agent_protocol import _accept_action_response_submission
 
-        session = {
-            "session_id": "owner/repo#123",
-            "repo": "owner/repo",
-            "pr_number": "123",
-            "items": {},
-            "leases": {}
-        }
+        session = {"session_id": "owner/repo#123", "repo": "owner/repo", "pr_number": "123", "items": {}, "leases": {}}
         ledger = MagicMock()
         response = {
             "agent_id": "test-agent",
@@ -2571,45 +2604,26 @@ class TestTelemetry(unittest.TestCase):
                 {
                     "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
                     "result": "Passed (528 tests)",
-                    "duration": 5.5
+                    "duration": 5.5,
                 },
                 {
                     "command": "GH_TOKEN=ghp_secret pytest tests/core --token ghp_secret",
                     "result": "Passed (528 tests)",
-                    "duration": 5.5
+                    "duration": 5.5,
                 },
-                {
-                    "command": "pytest 'unterminated --token ghp_secret",
-                    "result": "passed",
-                    "duration": 1.0
-                },
-                {
-                    "command": "ruff check src",
-                    "result": "failed",
-                    "start_time": 1000.0,
-                    "end_time": 1002.5
-                },
-                {
-                    "command": "ruff check src",
-                    "result": "failed",
-                    "duration": 0.0
-                },
-                {
-                    "command": "pytest tests/unit",
-                    "result": "passed"
-                },
-                {
-                    "command": "pytest tests/integration",
-                    "result": "passed"
-                }
-            ]
+                {"command": "pytest 'unterminated --token ghp_secret", "result": "passed", "duration": 1.0},
+                {"command": "ruff check src", "result": "failed", "start_time": 1000.0, "end_time": 1002.5},
+                {"command": "ruff check src", "result": "failed", "duration": 0.0},
+                {"command": "pytest tests/unit", "result": "passed"},
+                {"command": "pytest tests/integration", "result": "passed"},
+            ],
         }
         prepared = {
             "lease_id": "lease-123",
             "lease": {"role": "fixer"},
             "item_id": "finding-1",
             "item": {"item_kind": "local_finding"},
-            "expected_request_hash": "hash-123"
+            "expected_request_hash": "hash-123",
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2655,32 +2669,20 @@ class TestTelemetry(unittest.TestCase):
 
         from gh_address_cr.core.agent_protocol import _accept_action_response_submission
 
-        session = {
-            "session_id": "owner/repo#123",
-            "repo": "owner/repo",
-            "pr_number": "123",
-            "items": {},
-            "leases": {}
-        }
+        session = {"session_id": "owner/repo#123", "repo": "owner/repo", "pr_number": "123", "items": {}, "leases": {}}
         ledger = MagicMock()
         response = {
             "agent_id": "test-agent",
             "resolution": "fix",
             "note": "my fix note",
-            "validation_commands": [
-                {
-                    "command": "ruff check src",
-                    "result": "passed",
-                    "duration": 1.0
-                }
-            ]
+            "validation_commands": [{"command": "ruff check src", "result": "passed", "duration": 1.0}],
         }
         prepared = {
             "lease_id": "lease-123",
             "lease": {"role": "fixer"},
             "item_id": "github-thread:one",
             "item": {"item_kind": "github_thread"},
-            "expected_request_hash": "hash-123"
+            "expected_request_hash": "hash-123",
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2709,33 +2711,21 @@ class TestTelemetry(unittest.TestCase):
         from gh_address_cr.core.agent_protocol import _accept_action_response_submission
         from gh_address_cr.core.errors import WorkflowError
 
-        session = {
-            "session_id": "owner/repo#123",
-            "repo": "owner/repo",
-            "pr_number": "123",
-            "items": {},
-            "leases": {}
-        }
+        session = {"session_id": "owner/repo#123", "repo": "owner/repo", "pr_number": "123", "items": {}, "leases": {}}
         ledger = MagicMock()
         ledger.append_event.return_value.record_id = "ev-reject"
         response = {
             "agent_id": "test-verifier",
             "resolution": "reject",
             "note": "validation failed",
-            "validation_commands": [
-                {
-                    "command": "pytest tests/core",
-                    "result": "failed (1 failed)",
-                    "duration": 2.0
-                }
-            ]
+            "validation_commands": [{"command": "pytest tests/core", "result": "failed (1 failed)", "duration": 2.0}],
         }
         prepared = {
             "lease_id": "lease-123",
             "lease": {"role": "verifier"},
             "item_id": "finding-1",
             "item": {"item_kind": "local_finding"},
-            "expected_request_hash": "hash-123"
+            "expected_request_hash": "hash-123",
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2758,7 +2748,9 @@ class TestTelemetry(unittest.TestCase):
 
         from gh_address_cr.commands.high_level import _run_adapter_command
 
-        mock_run.return_value = subprocess.CompletedProcess(args=["my-adapter"], returncode=0, stdout="findings JSON", stderr="")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["my-adapter"], returncode=0, stdout="findings JSON", stderr=""
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             telemetry_file = Path(tmp) / "telemetry.jsonl"
@@ -2772,7 +2764,7 @@ class TestTelemetry(unittest.TestCase):
             mock_run.assert_called_once()
             self.assertEqual(mock_run.call_args.args[0], ["my-adapter", "--fast"])
             self.assertEqual(mock_run.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
-            
+
             self.assertEqual(len(tracker.metrics), 1)
             self.assertEqual(tracker.metrics[0].command, "my-adapter")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
@@ -2786,7 +2778,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockCustomAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 parts = raw.strip().split(":")
@@ -2819,7 +2811,7 @@ class TestTelemetry(unittest.TestCase):
 
         register_adapter("mock-custom", MockCustomAdapter())
         self.addCleanup(lambda: unregister_adapter("mock-custom"))
-        
+
         with tempfile.TemporaryDirectory() as tmp:
             with patch("gh_address_cr.core.telemetry.core_paths.state_dir", return_value=Path(tmp)):
                 raw_payload = "session-abc:event-123:custom_op:4500"
@@ -2832,7 +2824,7 @@ class TestTelemetry(unittest.TestCase):
                 )
                 self.assertEqual(result["status"], "SUCCESS")
                 self.assertEqual(result["accepted_count"], 1)
-                
+
                 report = build_efficiency_report("octo/example", "77")
                 self.assertEqual(report["total_events"], 1)
                 self.assertEqual(report["total_observed_duration_ms"], 4500)
@@ -2845,7 +2837,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockCustomAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 return TelemetryParseResult([], 0, False, False, [])
@@ -2946,7 +2938,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockUnsafeAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 # Return an event containing unsafe metadata keys (e.g. password)
@@ -2959,7 +2951,7 @@ class TestTelemetry(unittest.TestCase):
                     operation="op",
                     status="success",
                     duration_ms=100,
-                    metadata={"password": "should_be_rejected"}
+                    metadata={"password": "should_be_rejected"},
                 )
                 return TelemetryParseResult(
                     events=[event],
@@ -3034,7 +3026,9 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
                 self.assertEqual(result["accepted_count"], 0)
                 self.assertEqual(result["rejected_count"], 1)
-                self.assertTrue(any("unsafe private identifier in operation label" in diag for diag in result["diagnostics"]))
+                self.assertTrue(
+                    any("unsafe private identifier in operation label" in diag for diag in result["diagnostics"])
+                )
 
     def test_custom_telemetry_adapter_non_json_metadata_rejection(self):
         from gh_address_cr.core.telemetry import (
@@ -3044,7 +3038,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockNonJsonMetadataAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 # Return metadata with a non-serializable datetime object
@@ -3057,7 +3051,7 @@ class TestTelemetry(unittest.TestCase):
                     operation="op",
                     status="success",
                     duration_ms=100,
-                    metadata={"created_at": datetime.now()}
+                    metadata={"created_at": datetime.now()},
                 )
                 return TelemetryParseResult(
                     events=[event],
@@ -3092,7 +3086,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockCrashedAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 # Raise ValueError simulating a parsing crash
@@ -3150,7 +3144,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockNaNMetadataAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 # Return metadata with a NaN float constant
@@ -3163,7 +3157,7 @@ class TestTelemetry(unittest.TestCase):
                     operation="op",
                     status="success",
                     duration_ms=100,
-                    metadata={"ratio": float("nan")}
+                    metadata={"ratio": float("nan")},
                 )
                 return TelemetryParseResult(
                     events=[event],
@@ -3199,7 +3193,7 @@ class TestTelemetry(unittest.TestCase):
             register_adapter,
             unregister_adapter,
         )
-        
+
         class MockNonJsonDiagnosticsAdapter(TelemetryAdapter):
             def parse(self, raw: str, source: str) -> TelemetryParseResult:
                 event = ExternalTelemetryEvent(
@@ -3287,7 +3281,7 @@ class TestTelemetry(unittest.TestCase):
                         "Rejected secret token: github_token=123",
                         "Path failure: /Users/alice/private/key.pem",
                         "User info: username=bob",
-                    ]
+                    ],
                 )
 
         register_adapter("mock-sensitive-diag", MockSensitiveDiagnosticsAdapter())
@@ -3381,7 +3375,7 @@ class TestTelemetry(unittest.TestCase):
                     rejected_count=0,
                     unsafe_seen=False,
                     malformed_seen=False,
-                    diagnostics=[]
+                    diagnostics=[],
                 )
 
         register_adapter("mock-unsafe-event-id", MockUnsafeEventIdAdapter())
@@ -3399,7 +3393,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertEqual(result["status"], "FAILED")
                 self.assertEqual(result["reason_code"], "UNSAFE_TELEMETRY_CONTENT")
                 self.assertEqual(result["rejected_count"], 1)
-                
+
                 self.assertFalse(any("ghp_unsafe_event_id" in diag for diag in result["diagnostics"]))
                 self.assertTrue(any("event index 0" in diag for diag in result["diagnostics"]))
 
@@ -3418,7 +3412,7 @@ class TestTelemetry(unittest.TestCase):
                     rejected_count=0,
                     unsafe_seen=False,
                     malformed_seen=False,
-                    diagnostics=[]
+                    diagnostics=[],
                 )
 
         register_adapter("mock-invalid-event", MockInvalidEventAdapter())
@@ -3435,7 +3429,9 @@ class TestTelemetry(unittest.TestCase):
                 )
                 self.assertEqual(result["status"], "FAILED")
                 self.assertEqual(result["reason_code"], "MALFORMED_TELEMETRY")
-                self.assertTrue(any("Adapter event processing failed: TypeError" in diag for diag in result["diagnostics"]))
+                self.assertTrue(
+                    any("Adapter event processing failed: TypeError" in diag for diag in result["diagnostics"])
+                )
 
     def test_import_external_telemetry_rejects_unsafe_metadata_keys(self):
         from gh_address_cr.core.telemetry import (
@@ -3465,7 +3461,7 @@ class TestTelemetry(unittest.TestCase):
                     rejected_count=0,
                     unsafe_seen=False,
                     malformed_seen=False,
-                    diagnostics=[]
+                    diagnostics=[],
                 )
 
         register_adapter("mock-unsafe-meta-key", MockUnsafeMetadataKeyAdapter())
@@ -3552,6 +3548,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertLessEqual(report["total_observed_duration_ms"], 1600)
             self.assertEqual(len(report["slowest_operations"]), 1)
             self.assertNotIn("TELEMETRY_TIMING_UNAVAILABLE", report["diagnostics"])
+
 
 if __name__ == "__main__":
     unittest.main()

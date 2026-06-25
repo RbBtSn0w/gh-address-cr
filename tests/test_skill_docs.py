@@ -303,7 +303,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("PR Completion Summary Guidance", combined)
         self.assertIn("first bracketed line", combined)
         self.assertIn("[gh-address-cr: PASSED | threads:", completion_text)
-        self.assertIn("telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary", combined)
+        self.assertIn(
+            "telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary",
+            combined,
+        )
         self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
 
     def test_skill_identifies_as_thin_adapter(self):
@@ -428,7 +431,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         }
         for filename, (severity, payload, summary) in fix_cases.items():
             with self.subTest(filename=filename):
-                self.assertEqual((REPLY_TEMPLATES_DIR / filename).read_text(encoding="utf-8"), fix_reply(severity, payload, summary=summary))
+                self.assertEqual(
+                    (REPLY_TEMPLATES_DIR / filename).read_text(encoding="utf-8"),
+                    fix_reply(severity, payload, summary=summary),
+                )
 
         self.assertEqual(
             (REPLY_TEMPLATES_DIR / "clarify.md").read_text(encoding="utf-8"),
@@ -522,9 +528,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = read_repo_docs(README_MD, ARCHITECTURE_MD)
         self.assertIn("Published skill payload: the entire `skill/` directory", text)
         self.assertIn("Repo-level verification harness: `tests/`", text)
-        self.assertIn(
-            "If a rule or instruction must ship with the installed skill, it must live inside `skill/`", text
-        )
+        self.assertIn("If a rule or instruction must ship with the installed skill, it must live inside `skill/`", text)
 
     def test_agents_documents_skill_directory_without_renaming_product_identity(self):
         text = AGENTS_MD.read_text(encoding="utf-8")
@@ -606,7 +610,9 @@ class SkillDocumentationContractTest(unittest.TestCase):
         workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
         self.assertIn("docs/workflows.md", cli_text)
         self.assertNotIn("## Automatic Review Workflow", cli_text)
-        self.assertLess(workflow_text.index("## Automatic Review Workflow"), workflow_text.index("Advanced producer categories:"))
+        self.assertLess(
+            workflow_text.index("## Automatic Review Workflow"), workflow_text.index("Advanced producer categories:")
+        )
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
         text = WORKFLOWS_MD.read_text(encoding="utf-8")
@@ -618,9 +624,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         self.assertIn("$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>", text)
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
-        self.assertIn(
-            "gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py", text
-        )
+        self.assertIn("gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py", text)
         self.assertIn(
             "gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py --base main --human",
             text,
@@ -748,5 +752,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("correlation_id", protocol_text)
         self.assertIn("Do not include tokens", protocol_text)
         self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)
-        self.assertNotIn("Clarify, defer, and reject responses require `reply_markdown` and validation evidence.", protocol_text)
+        self.assertNotIn(
+            "Clarify, defer, and reject responses require `reply_markdown` and validation evidence.", protocol_text
+        )
         self.assertIn("gh-address-cr telemetry ingest", openai_text)

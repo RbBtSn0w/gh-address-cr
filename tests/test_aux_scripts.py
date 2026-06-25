@@ -40,10 +40,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         config_dir.mkdir(parents=True)
         specs_dir.mkdir(parents=True)
         (config_dir / "agent-context-config.yml").write_text(
-            "context_file: AGENTS.md\n"
-            "context_markers:\n"
-            "  start: <!-- SPECKIT START -->\n"
-            "  end: <!-- SPECKIT END -->\n",
+            "context_file: AGENTS.md\ncontext_markers:\n  start: <!-- SPECKIT START -->\n  end: <!-- SPECKIT END -->\n",
             encoding="utf-8",
         )
         (specs_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
@@ -54,8 +51,7 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         (no_yaml_dir / "yaml.py").write_text("raise ImportError('blocked by test')\n", encoding="utf-8")
         python3 = self.bin_dir / "python3"
         python3.write_text(
-            "#!/bin/sh\n"
-            f"PYTHONPATH={no_yaml_dir}:$PYTHONPATH exec {sys.executable} \"$@\"\n",
+            f'#!/bin/sh\nPYTHONPATH={no_yaml_dir}:$PYTHONPATH exec {sys.executable} "$@"\n',
             encoding="utf-8",
         )
         python3.chmod(0o755)

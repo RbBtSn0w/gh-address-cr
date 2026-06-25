@@ -116,7 +116,9 @@ class CrSummaryCliTests(unittest.TestCase):
         with patch("gh_address_cr.core.paths.state_dir", return_value=Path(state)):
             wd = core_paths.workspace_dir("o/r", "5")
             wd.mkdir(parents=True, exist_ok=True)
-            core_paths.evidence_ledger_file("o/r", "5").write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            core_paths.evidence_ledger_file("o/r", "5").write_text(
+                FIXTURE.read_text(encoding="utf-8"), encoding="utf-8"
+            )
 
     def test_cli_cr_summary_json(self):
         with tempfile.TemporaryDirectory() as state:

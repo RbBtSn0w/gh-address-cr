@@ -127,7 +127,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "publish_ready")
-        self.assertEqual(session["items"]["github-thread:abc"]["accepted_response"]["fix_reply"]["commit_hash"], "abc123")
+        self.assertEqual(
+            session["items"]["github-thread:abc"]["accepted_response"]["fix_reply"]["commit_hash"], "abc123"
+        )
         self.assertEqual(
             session["items"]["github-thread:def"]["accepted_response"]["fix_reply"]["why"],
             "Both comments ask for the same repeated typo correction.",
@@ -361,7 +363,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
         first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
-        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
@@ -427,7 +431,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        claimed = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        claimed = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(claimed.returncode, 0, claimed.stderr)
         request = json.loads(Path(json.loads(claimed.stdout)["request_path"]).read_text(encoding="utf-8"))
         batch_path = self.workspace_dir() / "stale-fix-all-input.json"
@@ -487,7 +493,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
         first = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
-        second = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        second = self.run_runtime_module(
+            "agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1"
+        )
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
@@ -525,7 +533,10 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
                             "item_id": "github-thread:def",
                             "summary": "Redacted private log data.",
                             "why": "The logging path now omits the sensitive token mentioned in this thread.",
-                            "fix_reply": {"severity": "P2", "severity_note": "Reviewer called out a data exposure risk."},
+                            "fix_reply": {
+                                "severity": "P2",
+                                "severity_note": "Reviewer called out a data exposure risk.",
+                            },
                         },
                     ],
                 }
@@ -533,9 +544,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path)
-        )
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -806,7 +815,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "NO_MATCHING_GITHUB_THREADS")
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "publish_ready")
-        self.assertEqual(session["items"]["github-thread:stale"]["accepted_response"]["fix_reply"]["commit_hash"], "old123")
+        self.assertEqual(
+            session["items"]["github-thread:stale"]["accepted_response"]["fix_reply"]["commit_hash"], "old123"
+        )
 
     def test_agent_resolve_stale_missing_validation_uses_stale_status(self):
         self.write_session(

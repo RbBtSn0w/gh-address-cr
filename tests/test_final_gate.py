@@ -330,6 +330,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_guidance_clean(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance, build_completion_summary_line
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -364,6 +365,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_line_reports_runtime_only_telemetry_for_issue_103(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line, build_completion_summary_model
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -394,6 +396,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_line_renders_inefficiency_flags(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -425,6 +428,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_line_tolerates_malformed_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -490,6 +494,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_line_reports_required_check_counts(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -517,6 +522,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_guidance_abnormal(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_OPEN", "isResolved": False}],
@@ -530,7 +536,10 @@ class FinalGateTestCase(unittest.TestCase):
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
 
-        self.assertIn("[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial/medium (5 events, 80.0%) | sources: none | duration: no observed duration | slowest: none | issues: success 80.0%; flags: excessive_loops]", guidance)
+        self.assertIn(
+            "[gh-address-cr: FAILED | threads: 1 | reviews: 0 | checks: N/A | telemetry: partial/medium (5 events, 80.0%) | sources: none | duration: no observed duration | slowest: none | issues: success 80.0%; flags: excessive_loops]",
+            guidance,
+        )
         self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
         self.assertIn("Attention Items & Implications", guidance)
         self.assertIn("IMPLICATION PROMPT", guidance)
@@ -541,6 +550,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_completion_summary_guidance_reports_logic_validation_blockers(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
         session = self.passing_session()
         session["items"]["github-thread:THREAD_DONE"]["classification_evidence"] = {"classification": "fix"}
         session["items"]["github-thread:THREAD_DONE"].pop("validation_evidence")
@@ -564,6 +574,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_guidance_edge_cases(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
         session = self.passing_session()
         # Make a thread missing reply evidence
         session["items"]["github-thread:THREAD_DONE"].pop("reply_evidence")
@@ -588,16 +599,26 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertNotIn("success rate below 100%", guidance)
         self.assertIn("1 threads missing reply", guidance)
         self.assertIn("1 local items missing validation", guidance)
-        self.assertIn("Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session.", guidance)
-        self.assertIn("PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed.", guidance)
+        self.assertIn(
+            "Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session.",
+            guidance,
+        )
+        self.assertIn(
+            "PR completion is blocked until all threads are resolved, reviews submitted, checks pass, reply/validation evidence is recorded, and all blocking items are addressed.",
+            guidance,
+        )
 
         # Test runtime-only coverage label
         telemetry_report["coverage_label"] = "runtime-only"
         guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
-        self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
+        self.assertIn(
+            "Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly",
+            guidance_runtime,
+        )
 
     def test_completion_summary_guidance_keeps_telemetry_degradation_fail_open(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -619,6 +640,7 @@ class FinalGateTestCase(unittest.TestCase):
 
     def test_build_completion_summary_guidance_none_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
         result = self.evaluate(
             self.passing_session(),
             remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
@@ -631,7 +653,10 @@ class FinalGateTestCase(unittest.TestCase):
             "report_artifact": None,
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
-        self.assertIn("[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]", guidance)
+        self.assertIn(
+            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: none | duration: no observed duration | slowest: none | issues: none]",
+            guidance,
+        )
 
     def test_build_completion_summary_guidance_tolerates_malformed_telemetry_fields(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance

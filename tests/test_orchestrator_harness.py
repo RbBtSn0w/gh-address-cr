@@ -193,7 +193,9 @@ class TestOrchestratorHarness(unittest.TestCase):
         session = load_orchestration_session(self.repo, self.pr)
         lease = session.active_leases["finding-1"]
         response_path = Path(self.temp_dir.name) / "response.json"
-        self._write_response(response_path, {"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}})
+        self._write_response(
+            response_path, {"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}}
+        )
 
         mock_parse.return_value = {}
         mock_submit.return_value = {"status": "ACTION_ACCEPTED"}
@@ -225,7 +227,9 @@ class TestOrchestratorHarness(unittest.TestCase):
         session = load_orchestration_session(self.repo, self.pr)
         lease = session.active_leases["finding-1"]
         response_path = Path(self.temp_dir.name) / "response-race.json"
-        self._write_response(response_path, {"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}})
+        self._write_response(
+            response_path, {"evidence": {"files": [], "validation_commands": [], "note": "n", "fix_reply": {}}}
+        )
 
         mock_parse.return_value = {}
         mock_submit.side_effect = WorkflowError(
@@ -352,21 +356,23 @@ class TestOrchestratorHarness(unittest.TestCase):
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_step_enforces_max_concurrency(self, mock_stdout):
-        self._write_core_session({
-            "finding-1": self._open_item("finding-1", classified=True, path="src/a.py"),
-            "finding-2": self._open_item("finding-2", classified=True, path="src/b.py"),
-            "finding-3": self._open_item("finding-3", classified=True, path="src/c.py")
-        })
+        self._write_core_session(
+            {
+                "finding-1": self._open_item("finding-1", classified=True, path="src/a.py"),
+                "finding-2": self._open_item("finding-2", classified=True, path="src/b.py"),
+                "finding-3": self._open_item("finding-3", classified=True, path="src/c.py"),
+            }
+        )
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr, "--max-concurrency", "2"]), 0)
         self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
         self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
-        
+
         mock_stdout.truncate(0)
         mock_stdout.seek(0)
-        
+
         self.assertEqual(handle_agent_orchestrate("step", [self.repo, self.pr, "--role", "fixer"]), 0)
         payload = json.loads(mock_stdout.getvalue().strip().split("\n")[-1])
-        
+
         self.assertEqual(payload["status"], "WAITING")
         self.assertEqual(payload["reason_code"], "MAX_CONCURRENCY_REACHED")
         self.assertEqual(payload["next_action"], "RETRY")
@@ -375,15 +381,16 @@ class TestOrchestratorHarness(unittest.TestCase):
     def test_start_and_step_respect_completion_lock(self, mock_stdout):
         self._write_core_session({"finding-1": self._open_item("finding-1", classified=True)})
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
-        
+
         session = load_orchestration_session(self.repo, self.pr)
         session.completed = True
         from gh_address_cr.orchestrator.session import save_orchestration_session
+
         save_orchestration_session(session)
 
         mock_stdout.truncate(0)
         mock_stdout.seek(0)
-        
+
         # If there are no eligible items, it's locked
         with patch("gh_address_cr.orchestrator.harness._eligible_runtime_items", return_value=[]):
             self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
@@ -391,7 +398,7 @@ class TestOrchestratorHarness(unittest.TestCase):
             self.assertEqual(payload["status"], "LOCKED")
             self.assertEqual(payload["reason_code"], "SESSION_LOCKED")
             self.assertEqual(payload["next_action"], "HALT")
-        
+
         mock_stdout.truncate(0)
         mock_stdout.seek(0)
         session.queued_items = []
@@ -404,7 +411,6 @@ class TestOrchestratorHarness(unittest.TestCase):
             self.assertEqual(payload["reason_code"], "SESSION_LOCKED")
             self.assertEqual(payload["next_action"], "HALT")
 
-
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_missing_arguments_emit_structured_failure_signal(self, mock_stdout):
         # Missing 'repo' and 'pr'
@@ -414,7 +420,6 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(payload["status"], "FAILED")
         self.assertEqual(payload["reason_code"], "INVALID_ARGUMENTS")
         self.assertEqual(payload["next_action"], "HALT")
-
 
     @patch("gh_address_cr.orchestrator.harness.sys.stdout", new_callable=io.StringIO)
     def test_status_and_resume_emit_structured_failure_signals(self, mock_stdout):
