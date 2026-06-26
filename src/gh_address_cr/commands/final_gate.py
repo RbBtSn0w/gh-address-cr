@@ -442,7 +442,9 @@ def build_completion_summary_line(result: core_gate.GateResult, telemetry_report
     return build_completion_summary_model(result, telemetry_report)["line"]
 
 
-def build_completion_summary_model(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> dict[str, str]:
+def build_completion_summary_model(
+    result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload
+) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)

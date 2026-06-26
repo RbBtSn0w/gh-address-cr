@@ -57,12 +57,23 @@ def format_timestamp(value: datetime) -> str:
 
 
 def json_ready(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
+    # Performance optimized: exact type checks are significantly faster than isinstance/hasattr
+    t = type(value)
+    if t is str or t is int or t is bool or t is float or value is None:
+        return value
+    if t is dict:
+        return {str(key): json_ready(inner) for key, inner in value.items()}
+    if t is list or t is tuple or t is set:
+        return [json_ready(inner) for inner in value]
+
+    # Fallback to isinstance for subclasses
     if isinstance(value, dict):
         return {str(key): json_ready(inner) for key, inner in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [json_ready(inner) for inner in value]
+
+    if isinstance(value, datetime):
+        return value.isoformat()
     if hasattr(value, "__dict__"):
         return json_ready(vars(value))
     return value

@@ -974,7 +974,11 @@ def _normalize_external_event(payload: object, *, declared_source: str) -> Exter
         _safe_correlation_id(str(payload_dict["correlation_id"])) if payload_dict.get("correlation_id") else None
     )
     event_id = str(
-        (_safe_identity_label(str(payload_dict["event_id"]), field="event_id") if payload_dict.get("event_id") else None)
+        (
+            _safe_identity_label(str(payload_dict["event_id"]), field="event_id")
+            if payload_dict.get("event_id")
+            else None
+        )
         or _derive_event_id(
             source=source,
             source_session_id=session_id,
