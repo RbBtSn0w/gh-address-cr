@@ -182,6 +182,9 @@ def _safe_runtime_operation(operation: str) -> str:
     return operation
 
 
+_DRIVE_RE = re.compile(r"(^|\s)[a-zA-Z]:\\[^\s]+")
+
+
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
     if (
@@ -199,7 +202,13 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
         or "c:\\users\\" in lowered
     ):
         return True
-    return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
+    if ":\\" in value:
+        return bool(_DRIVE_RE.search(value))
+    return False
+
+
+_KEY_MARKER_PATTERNS = [re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])") for marker in UNSAFE_METADATA_KEY_MARKERS]
+_KEY_RE = re.compile(r"(^|[_-])key($|[_-])")
 
 
 def _is_unsafe_metadata_key(key: str) -> bool:
@@ -208,40 +217,65 @@ def _is_unsafe_metadata_key(key: str) -> bool:
         return False
     if lowered in UNSAFE_METADATA_KEYS:
         return True
-    if any(re.search(rf"(^|[_-]){re.escape(marker)}($|[_-])", lowered) for marker in UNSAFE_METADATA_KEY_MARKERS):
-        return True
-    return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
+
+    # Fast path checking substring first before regex
+    has_marker = False
+    for marker in UNSAFE_METADATA_KEY_MARKERS:
+        if marker in lowered:
+            has_marker = True
+            break
+
+    if has_marker:
+        for pattern in _KEY_MARKER_PATTERNS:
+            if pattern.search(lowered):
+                return True
+
+    if "key" in lowered:
+        return bool(_KEY_RE.search(lowered))
+
+    return False
+
+
+_BEARER_RE = re.compile(r"(^|[^a-z0-9])bearer\s+")
+_SK_RE = re.compile(r"(^|[^a-z0-9])sk-[a-z0-9]")
 
 
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
     if any(marker in lowered for marker in TOKEN_MARKERS):
         return True
-    if re.search(r"(^|[^a-z0-9])bearer\s+", lowered):
+    if "bearer" in lowered and _BEARER_RE.search(lowered):
         return True
-    return bool(re.search(r"(^|[^a-z0-9])sk-[a-z0-9]", lowered))
+    if "sk-" in lowered and _SK_RE.search(lowered):
+        return True
+    return False
 
 
 def _contains_control_character(value: str) -> bool:
-    return any(character in value for character in ("\n", "\r", "\t"))
+    return "\n" in value or "\r" in value or "\t" in value
+
+
+_PRIVATE_IDENTIFIER_MARKERS = (
+    "username",
+    "user-id",
+    "user_id",
+    "machine-id",
+    "machine_id",
+    "machine-name",
+    "machine_name",
+    "host-id",
+    "host_id",
+    "host-name",
+    "host_name",
+)
 
 
 def _contains_private_identifier(value: str) -> bool:
     lowered = value.lower()
-    markers = (
-        "username",
-        "user-id",
-        "user_id",
-        "machine-id",
-        "machine_id",
-        "machine-name",
-        "machine_name",
-        "host-id",
-        "host_id",
-        "host-name",
-        "host_name",
-    )
-    return any(marker in lowered for marker in markers)
+    for marker in _PRIVATE_IDENTIFIER_MARKERS:
+        if marker in lowered:
+            return True
+    return False
 
 
 def _json_loads_strict(raw: str) -> Any:
