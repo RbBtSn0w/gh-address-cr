@@ -53,14 +53,27 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 
 def _json_ready(value: Any) -> Any:
+    # Performance optimized: exact type checks are significantly faster than isinstance/is_dataclass
+    if value is None:
+        return None
+    t = type(value)
+    if t is str or t is int or t is bool or t is float:
+        return value
+    if t is dict:
+        return {str(key): _json_ready(inner) for key, inner in value.items()}
+    if t is list or t is tuple or t is set:
+        return [_json_ready(inner) for inner in value]
+
+    # Fallback to isinstance for subclasses
+    if isinstance(value, dict):
+        return {str(key): _json_ready(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_ready(inner) for inner in value]
+
     if is_dataclass(value) and not isinstance(value, type):
         return _json_ready(asdict(value))
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, dict):
-        return {str(key): _json_ready(inner) for key, inner in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_json_ready(inner) for inner in value]
     return value
