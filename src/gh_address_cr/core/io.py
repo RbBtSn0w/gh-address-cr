@@ -54,8 +54,10 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 def _json_ready(value: Any) -> Any:
     # Performance optimized: exact type checks are significantly faster than isinstance/is_dataclass
+    if value is None:
+        return None
     t = type(value)
-    if t is str or t is int or t is bool or t is float or value is None:
+    if t is str or t is int or t is bool or t is float:
         return value
     if t is dict:
         return {str(key): _json_ready(inner) for key, inner in value.items()}

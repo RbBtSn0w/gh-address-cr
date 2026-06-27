@@ -58,8 +58,10 @@ def format_timestamp(value: datetime) -> str:
 
 def json_ready(value: Any) -> Any:
     # Performance optimized: exact type checks are significantly faster than isinstance/hasattr
+    if value is None:
+        return None
     t = type(value)
-    if t is str or t is int or t is bool or t is float or value is None:
+    if t is str or t is int or t is bool or t is float:
         return value
     if t is dict:
         return {str(key): json_ready(inner) for key, inner in value.items()}
