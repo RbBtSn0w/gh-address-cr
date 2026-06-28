@@ -37,6 +37,27 @@ UNSAFE_METADATA_KEY_MARKERS = (
     "prompt",
 )
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
+PRIVATE_IDENTIFIER_MARKERS = (
+    "username",
+    "user-id",
+    "user_id",
+    "machine-id",
+    "machine_id",
+    "machine-name",
+    "machine_name",
+    "host-id",
+    "host_id",
+    "host-name",
+    "host_name",
+)
+
+# Pre-compiled regex optimizations for performance-critical paths
+_UNSAFE_METADATA_KEY_MARKERS_RE = re.compile(
+    rf"(^|[_-])({'|'.join(map(re.escape, UNSAFE_METADATA_KEY_MARKERS))})($|[_-])"
+)
+_KEY_MARKER_RE = re.compile(r"(^|[_-])key($|[_-])")
+_BEARER_RE = re.compile(r"(^|[^a-z0-9])bearer\s+")
+_SK_RE = re.compile(r"(^|[^a-z0-9])sk-[a-z0-9]")
 
 
 def _safe_metadata(metadata: object) -> dict[str, Any]:
@@ -208,40 +229,38 @@ def _is_unsafe_metadata_key(key: str) -> bool:
         return False
     if lowered in UNSAFE_METADATA_KEYS:
         return True
-    if any(re.search(rf"(^|[_-]){re.escape(marker)}($|[_-])", lowered) for marker in UNSAFE_METADATA_KEY_MARKERS):
+    # Performance: Use single pre-compiled regex instead of multiple re.search calls
+    if _UNSAFE_METADATA_KEY_MARKERS_RE.search(lowered):
         return True
-    return bool(re.search(r"(^|[_-])key($|[_-])", lowered))
+    return bool(_KEY_MARKER_RE.search(lowered))
 
 
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
-    if any(marker in lowered for marker in TOKEN_MARKERS):
+    # Performance: Explicit loop avoids generator overhead in hot paths
+    for marker in TOKEN_MARKERS:
+        if marker in lowered:
+            return True
+    # Performance: Fast-fail substring checks before evaluating expensive regexes
+    if "bearer" in lowered and _BEARER_RE.search(lowered):
         return True
-    if re.search(r"(^|[^a-z0-9])bearer\s+", lowered):
+    if "sk-" in lowered and _SK_RE.search(lowered):
         return True
-    return bool(re.search(r"(^|[^a-z0-9])sk-[a-z0-9]", lowered))
+    return False
 
 
 def _contains_control_character(value: str) -> bool:
-    return any(character in value for character in ("\n", "\r", "\t"))
+    # Performance: Direct containment checks are faster than inline generators
+    return "\n" in value or "\r" in value or "\t" in value
 
 
 def _contains_private_identifier(value: str) -> bool:
     lowered = value.lower()
-    markers = (
-        "username",
-        "user-id",
-        "user_id",
-        "machine-id",
-        "machine_id",
-        "machine-name",
-        "machine_name",
-        "host-id",
-        "host_id",
-        "host-name",
-        "host_name",
-    )
-    return any(marker in lowered for marker in markers)
+    # Performance: Explicit loop avoids generator overhead in hot paths
+    for marker in PRIVATE_IDENTIFIER_MARKERS:
+        if marker in lowered:
+            return True
+    return False
 
 
 def _json_loads_strict(raw: str) -> Any:
