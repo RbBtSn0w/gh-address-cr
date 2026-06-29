@@ -237,8 +237,9 @@ _SK_RE = re.compile(r"(^|[^a-z0-9])sk-[a-z0-9]")
 
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
-    if any(marker in lowered for marker in TOKEN_MARKERS):
-        return True
+    for marker in TOKEN_MARKERS:
+        if marker in lowered:
+            return True
     if "bearer" in lowered and _BEARER_RE.search(lowered):
         return True
     if "sk-" in lowered and _SK_RE.search(lowered):
