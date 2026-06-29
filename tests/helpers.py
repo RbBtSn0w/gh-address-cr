@@ -44,7 +44,21 @@ class PythonScriptTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def run_cmd(self, cmd, check=False, stdin=None):
-        cmd = self._normalize_python_module_command(list(cmd))
+        cmd = list(cmd)
+        in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+        if in_process and len(cmd) >= 2 and cmd[0] == sys.executable:
+            try:
+                path = Path(cmd[1]).resolve()
+                if path == CLI_PY.resolve():
+                    return self.run_runtime_module(*cmd[2:], check=check, stdin=stdin)
+                elif path == SUBMIT_FEEDBACK_PY.resolve():
+                    return self.run_runtime_module("submit-feedback", *cmd[2:], check=check, stdin=stdin)
+                elif path == REVIEW_TO_FINDINGS_PY.resolve():
+                    return self.run_runtime_module("review-to-findings", *cmd[2:], check=check, stdin=stdin)
+            except (ValueError, OSError):
+                pass
+
+        cmd = self._normalize_python_module_command(cmd)
         return subprocess.run(
             cmd,
             input=stdin,
@@ -92,7 +106,54 @@ class PythonScriptTestCase(unittest.TestCase):
             
             exit_code = 0
             try:
-                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf):
+                import subprocess
+                original_run = subprocess.run
+
+                def patched_run(*run_args, **run_kwargs):
+                    capture_out = False
+                    capture_err = False
+                    if not run_kwargs.get("capture_output") and run_kwargs.get("stdout") is None:
+                        run_kwargs["stdout"] = subprocess.PIPE
+                        capture_out = True
+                    if not run_kwargs.get("capture_output") and run_kwargs.get("stderr") is None:
+                        run_kwargs["stderr"] = subprocess.PIPE
+                        capture_err = True
+                    
+                    try:
+                        res = original_run(*run_args, **run_kwargs)
+                    except subprocess.SubprocessError as exc:
+                        if capture_out and getattr(exc, "output", None) is not None:
+                            out = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else exc.output
+                            sys.stdout.write(out)
+                            try:
+                                object.__setattr__(exc, "output", None)
+                                if hasattr(exc, "stdout"):
+                                    object.__setattr__(exc, "stdout", None)
+                            except AttributeError:
+                                pass
+                        if capture_err and getattr(exc, "stderr", None) is not None:
+                            err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
+                            sys.stderr.write(err)
+                            try:
+                                object.__setattr__(exc, "stderr", None)
+                            except AttributeError:
+                                pass
+                        raise
+                    
+                    if capture_out and res.stdout is not None:
+                        out = res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else res.stdout
+                        sys.stdout.write(out)
+                    if capture_err and res.stderr is not None:
+                        err = res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else res.stderr
+                        sys.stderr.write(err)
+                    
+                    if capture_out:
+                        object.__setattr__(res, "stdout", None)
+                    if capture_err:
+                        object.__setattr__(res, "stderr", None)
+                    return res
+
+                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf), patch("subprocess.run", patched_run):
                     exit_code = main(list(args))
             except SystemExit as exc:
                 if exc.code is None:

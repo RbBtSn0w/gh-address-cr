@@ -143,6 +143,17 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("plugin payload can be generated", result.stdout)
 
+    def test_runtime_requirements_are_synchronized(self):
+        src_req = ROOT / "src" / "gh_address_cr" / "runtime-requirements.json"
+        skill_req = ROOT / "skill" / "runtime-requirements.json"
+        self.assertTrue(src_req.exists())
+        self.assertTrue(skill_req.exists())
+        self.assertEqual(
+            src_req.read_text(encoding="utf-8"),
+            skill_req.read_text(encoding="utf-8"),
+            "src/gh_address_cr/runtime-requirements.json and skill/runtime-requirements.json must be identical"
+        )
+
     def test_community_compliance_docs_exist(self):
         privacy = (ROOT / "PRIVACY.md").read_text(encoding="utf-8")
         terms = (ROOT / "TERMS.md").read_text(encoding="utf-8")

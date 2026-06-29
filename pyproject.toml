@@ -70,11 +70,9 @@ branch = true
 source = ["gh_address_cr"]
 
 [tool.coverage.report]
-# Ratchet target: raise as coverage improves. Measured baseline is ~69% (branch).
-# Floor set a few points below to absorb cross-environment variance; ratchet up over time.
-# NOTE: the CLI subprocess tests (test_python_wrappers) execute in child
-# processes and are NOT counted here, so true coverage is higher than reported.
-fail_under = 65
+# Ratchet target: raise as coverage improves. Measured baseline is ~84% (branch) after in-process CLI test routing.
+# Floor set a few points below to absorb cross-environment variance.
+fail_under = 80
 skip_covered = false
 
 [tool.mypy]
