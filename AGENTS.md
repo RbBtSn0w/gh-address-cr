@@ -40,13 +40,14 @@ Follow this order of precedence:
 
 ### Python Environment
 - **Version**: Python 3.10+ (enforced by `pyproject.toml`).
-- **Install for dev**: `pip install -e .`
+- **Install for dev**: `pip install -e .` (required; test discovery depends on the installed package).
 
 ### Testable Contracts And Fail-Fast Changes
 Public behavior changes MUST update code, docs, and executable tests together. The project MUST fail fast on missing tools, malformed producer output, invalid handoff formats, unsafe resolve-only handling, and unsupported public command usage. Silent fallbacks, hidden compatibility shims, alternate prompt contracts, and narrative-only findings ingestion are forbidden unless they are explicitly documented, tested, and versioned as public behavior.
 
 ### Verification Commands
 Before claiming work is complete, run these local checks:
+- **Install**: `pip install -e .` (required before running tests).
 - **Linting**: `ruff check src tests scripts/build_plugin_payload.py` (configured in `pyproject.toml`).
 - **Unit Tests**: `python3 -m unittest discover -s tests`.
 - **CLI Smoke Test**: `python3 -m gh_address_cr --help`.

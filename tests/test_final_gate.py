@@ -1,12 +1,6 @@
 import importlib
 import importlib.util
-import sys
 import unittest
-
-from tests.helpers import SRC_ROOT
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 
 def load_gate_module():

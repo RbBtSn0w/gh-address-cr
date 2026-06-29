@@ -1,31 +1,26 @@
 import json
-import sys
 import unittest
 
-from tests.helpers import ROOT, SRC_ROOT
-
-sys.path.insert(0, str(SRC_ROOT))
-
-from gh_address_cr.agent.manifests import (  # noqa: E402
+from gh_address_cr.agent.manifests import (
     ManifestValidationError,
     is_manifest_eligible,
     load_capability_manifest,
     validate_capability_manifest,
 )
-from gh_address_cr.agent.requests import (  # noqa: E402
+from gh_address_cr.agent.requests import (
     RequestValidationError,
     build_action_request,
     reject_request_without_classification,
     validate_action_request,
 )
-from gh_address_cr.agent.responses import (  # noqa: E402
+from gh_address_cr.agent.responses import (
     ResponseValidationError,
     validate_action_response,
     validate_response_for_request,
 )
-from gh_address_cr.agent.roles import AgentRole  # noqa: E402
-from gh_address_cr.commands.agent import _parse_agent_validation  # noqa: E402
-from gh_address_cr.core.models import (  # noqa: E402
+from gh_address_cr.agent.roles import AgentRole
+from gh_address_cr.commands.agent import _parse_agent_validation
+from gh_address_cr.core.models import (
     LEASE_RECOVERY_OUTCOMES,
     LOGIC_VALIDATION_GATE_EFFECTS,
     RUNTIME_COMPLEXITY_REASON_CODES,
@@ -37,6 +32,7 @@ from gh_address_cr.core.models import (  # noqa: E402
     ReviewSession,
     WorkItem,
 )
+from tests.helpers import ROOT
 
 FIXTURES_DIR = ROOT / "tests" / "fixtures" / "action_protocol"
 
