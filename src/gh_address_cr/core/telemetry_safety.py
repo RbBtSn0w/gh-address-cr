@@ -207,10 +207,7 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     return False
 
 
-_KEY_MARKER_PAIRS = [
-    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])"))
-    for marker in UNSAFE_METADATA_KEY_MARKERS
-]
+_KEY_MARKER_PATTERNS = [re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])") for marker in UNSAFE_METADATA_KEY_MARKERS]
 _KEY_RE = re.compile(r"(^|[_-])key($|[_-])")
 
 
@@ -221,9 +218,17 @@ def _is_unsafe_metadata_key(key: str) -> bool:
     if lowered in UNSAFE_METADATA_KEYS:
         return True
 
-    for marker, pattern in _KEY_MARKER_PAIRS:
-        if marker in lowered and pattern.search(lowered):
-            return True
+    # Fast path checking substring first before regex
+    has_marker = False
+    for marker in UNSAFE_METADATA_KEY_MARKERS:
+        if marker in lowered:
+            has_marker = True
+            break
+
+    if has_marker:
+        for pattern in _KEY_MARKER_PATTERNS:
+            if pattern.search(lowered):
+                return True
 
     if "key" in lowered:
         return bool(_KEY_RE.search(lowered))
