@@ -1,3 +1,9 @@
+## [3.1.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.8...v3.1.9) (2026-06-29)
+
+### Bug Fixes
+
+* Optimize telemetry safety validation performance ([#169](https://github.com/RbBtSn0w/gh-address-cr/issues/169)) ([86d6bb2](https://github.com/RbBtSn0w/gh-address-cr/commit/86d6bb2955cbf05303689beb1ee5e1441ee83b68))
+
 ## [3.1.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.7...v3.1.8) (2026-06-29)
 
 ### Performance Improvements
