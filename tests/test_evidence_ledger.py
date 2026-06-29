@@ -1,12 +1,7 @@
 import hashlib
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-from tests.helpers import SRC_ROOT
-
-sys.path.insert(0, str(SRC_ROOT))
 
 
 class EvidenceLedgerTests(unittest.TestCase):

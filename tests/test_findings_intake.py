@@ -1,10 +1,7 @@
 import json
-import sys
 import unittest
 
-from tests.helpers import ROOT, SRC_ROOT
-
-sys.path.insert(0, str(SRC_ROOT))
+from tests.helpers import ROOT
 
 
 def load_producer_intake_fixture(name):

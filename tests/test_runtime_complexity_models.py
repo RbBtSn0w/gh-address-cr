@@ -1,11 +1,6 @@
-import sys
 import unittest
 
-from tests.helpers import SRC_ROOT
-
-sys.path.insert(0, str(SRC_ROOT))
-
-from gh_address_cr.core.models import (  # noqa: E402
+from gh_address_cr.core.models import (
     DeliverySlice,
     LeaseRecoveryState,
     LogicValidationSignal,

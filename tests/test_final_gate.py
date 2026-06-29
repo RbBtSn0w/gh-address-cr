@@ -1,18 +1,6 @@
-import importlib
-import importlib.util
-import sys
 import unittest
 
-from tests.helpers import SRC_ROOT
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-
-def load_gate_module():
-    if importlib.util.find_spec("gh_address_cr.core.gate") is None:
-        raise AssertionError("gh_address_cr.core.gate module is required")
-    return importlib.import_module("gh_address_cr.core.gate")
+from gh_address_cr.core import gate
 
 
 class FinalGateTestCase(unittest.TestCase):
@@ -26,7 +14,6 @@ class FinalGateTestCase(unittest.TestCase):
         check_runs=None,
         check_requirement=None,
     ):
-        gate = load_gate_module()
         return gate.evaluate_final_gate(
             session,
             remote_threads=remote_threads or [],
@@ -121,8 +108,6 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(summary["commands"]["final_gate"], "gh-address-cr final-gate octo/example 77")
 
     def test_unknown_next_action_fails_closed(self):
-        gate = load_gate_module()
-
         self.assertEqual(gate._next_action(None), "Status unknown: pending check results.")
 
     def test_resolved_thread_without_reply_evidence_still_fails(self):
