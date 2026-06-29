@@ -37,27 +37,6 @@ UNSAFE_METADATA_KEY_MARKERS = (
     "prompt",
 )
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
-PRIVATE_IDENTIFIER_MARKERS = (
-    "username",
-    "user-id",
-    "user_id",
-    "machine-id",
-    "machine_id",
-    "machine-name",
-    "machine_name",
-    "host-id",
-    "host_id",
-    "host-name",
-    "host_name",
-)
-
-# Pre-compiled regex optimizations for performance-critical paths
-_UNSAFE_METADATA_KEY_MARKERS_RE = re.compile(
-    rf"(^|[_-])({'|'.join(map(re.escape, UNSAFE_METADATA_KEY_MARKERS))})($|[_-])"
-)
-_KEY_MARKER_RE = re.compile(r"(^|[_-])key($|[_-])")
-_BEARER_RE = re.compile(r"(^|[^a-z0-9])bearer\s+")
-_SK_RE = re.compile(r"(^|[^a-z0-9])sk-[a-z0-9]")
 
 
 def _safe_metadata(metadata: object) -> dict[str, Any]:
@@ -203,6 +182,9 @@ def _safe_runtime_operation(operation: str) -> str:
     return operation
 
 
+_DRIVE_RE = re.compile(r"(^|\s)[a-zA-Z]:\\[^\s]+")
+
+
 def _looks_like_unnecessary_absolute_path(value: str) -> bool:
     lowered = value.lower()
     if (
@@ -220,7 +202,16 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
         or "c:\\users\\" in lowered
     ):
         return True
-    return bool(re.search(r"(^|\s)[a-zA-Z]:\\[^\s]+", value))
+    if ":\\" in value:
+        return bool(_DRIVE_RE.search(value))
+    return False
+
+
+_KEY_MARKER_PAIRS = [
+    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])"))
+    for marker in UNSAFE_METADATA_KEY_MARKERS
+]
+_KEY_RE = re.compile(r"(^|[_-])key($|[_-])")
 
 
 def _is_unsafe_metadata_key(key: str) -> bool:
@@ -229,19 +220,26 @@ def _is_unsafe_metadata_key(key: str) -> bool:
         return False
     if lowered in UNSAFE_METADATA_KEYS:
         return True
-    # Performance: Use single pre-compiled regex instead of multiple re.search calls
-    if _UNSAFE_METADATA_KEY_MARKERS_RE.search(lowered):
-        return True
-    return bool(_KEY_MARKER_RE.search(lowered))
+
+    for marker, pattern in _KEY_MARKER_PAIRS:
+        if marker in lowered and pattern.search(lowered):
+            return True
+
+    if "key" in lowered:
+        return bool(_KEY_RE.search(lowered))
+
+    return False
+
+
+_BEARER_RE = re.compile(r"(^|[^a-z0-9])bearer\s+")
+_SK_RE = re.compile(r"(^|[^a-z0-9])sk-[a-z0-9]")
 
 
 def _contains_token_marker(value: str) -> bool:
     lowered = value.lower()
-    # Performance: Explicit loop avoids generator overhead in hot paths
     for marker in TOKEN_MARKERS:
         if marker in lowered:
             return True
-    # Performance: Fast-fail substring checks before evaluating expensive regexes
     if "bearer" in lowered and _BEARER_RE.search(lowered):
         return True
     if "sk-" in lowered and _SK_RE.search(lowered):
@@ -250,14 +248,27 @@ def _contains_token_marker(value: str) -> bool:
 
 
 def _contains_control_character(value: str) -> bool:
-    # Performance: Direct containment checks are faster than inline generators
     return "\n" in value or "\r" in value or "\t" in value
+
+
+_PRIVATE_IDENTIFIER_MARKERS = (
+    "username",
+    "user-id",
+    "user_id",
+    "machine-id",
+    "machine_id",
+    "machine-name",
+    "machine_name",
+    "host-id",
+    "host_id",
+    "host-name",
+    "host_name",
+)
 
 
 def _contains_private_identifier(value: str) -> bool:
     lowered = value.lower()
-    # Performance: Explicit loop avoids generator overhead in hot paths
-    for marker in PRIVATE_IDENTIFIER_MARKERS:
+    for marker in _PRIVATE_IDENTIFIER_MARKERS:
         if marker in lowered:
             return True
     return False

@@ -1,3 +1,9 @@
+## [3.1.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.7...v3.1.8) (2026-06-29)
+
+### Performance Improvements
+
+* Optimize string and regex validations in telemetry hotpaths ([#167](https://github.com/RbBtSn0w/gh-address-cr/issues/167)) ([35c0215](https://github.com/RbBtSn0w/gh-address-cr/commit/35c021540eba4f82b723ec8d932427e73deb746f))
+
 ## [3.1.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.6...v3.1.7) (2026-06-24)
 
 ## [3.1.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.5...v3.1.6) (2026-06-23)
