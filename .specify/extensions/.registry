@@ -26,27 +26,6 @@
       "registered_skills": [],
       "installed_at": "2026-04-24T07:38:16.100045+00:00"
     },
-    "memorylint": {
-      "version": "1.5.1",
-      "source": "local",
-      "manifest_hash": "sha256:07be585a54faa255917c5165add8805a323aadc0affb3e2ba37a7aa7ad8e17d2",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.memorylint.audit",
-          "speckit.memorylint.apply",
-          "speckit.memorylint.load-agents"
-        ],
-        "codex": [
-          "speckit.memorylint.audit",
-          "speckit.memorylint.apply",
-          "speckit.memorylint.load-agents"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-04-24T07:46:54.651320+00:00"
-    },
     "agent-context": {
       "version": "1.0.0",
       "source": "local",
@@ -64,25 +43,29 @@
       "registered_skills": [],
       "installed_at": "2026-06-04T13:41:43.526151+00:00"
     },
-    "superb": {
-      "version": "1.6.1",
+    "memorylint": {
+      "version": "1.5.1",
       "source": "local",
-      "manifest_hash": "sha256:a3459eab51f8b5419481c86cd079167f1b6de20e3d932682c553a4c24a775053",
+      "manifest_hash": "sha256:07be585a54faa255917c5165add8805a323aadc0affb3e2ba37a7aa7ad8e17d2",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
-        "agy": [
-          "speckit.superb.check",
-          "speckit.superb.brainstorm",
-          "speckit.superb.controller",
-          "speckit.superb.review",
-          "speckit.superb.verify",
-          "speckit.superb.critique",
-          "speckit.superb.debug",
-          "speckit.superb.finish",
-          "speckit.superb.respond",
-          "speckit.superb.plan-gate"
-        ],
+        "codex": [
+          "speckit.memorylint.audit",
+          "speckit.memorylint.apply",
+          "speckit.memorylint.load-agents"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-06-30T08:25:05.951223+00:00"
+    },
+    "superb": {
+      "version": "1.7.0",
+      "source": "local",
+      "manifest_hash": "sha256:db75130fb3c469f0e6b9a38e22832e5a5c967a3d313a9001360b516cf2f93f89",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
         "codex": [
           "speckit.superb.check",
           "speckit.superb.brainstorm",
@@ -97,7 +80,7 @@
         ]
       },
       "registered_skills": [],
-      "installed_at": "2026-04-24T07:46:36.805417+00:00"
+      "installed_at": "2026-06-30T08:15:56.997920+00:00"
     }
   }
 }
