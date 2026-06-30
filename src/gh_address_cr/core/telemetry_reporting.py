@@ -345,9 +345,7 @@ def _error_prone_operations(events: list[ExternalTelemetryEvent]) -> list[dict[s
         elif status == "timeout":
             row["timeouts"] += 1
 
-        if event.kind == "retry":
-            row["retries"] += 1
-        elif event.metadata and event.metadata.get("is_retry"):
+        if event.kind == "retry" or (event.metadata and event.metadata.get("is_retry")):
             row["retries"] += 1
     result: list[dict[str, Any]] = []
     for row in grouped.values():
