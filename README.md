@@ -88,6 +88,60 @@ Completion means the latest final gate reports:
 
 A zero unresolved-thread count alone is not sufficient.
 
+## OpenTelemetry traces
+
+The versioned public behavior and architecture boundary are defined by
+[`otel-tracing.v1`](docs/contracts/otel-tracing-v1.md).
+
+The installed CLI exports one process-level OTLP/HTTP trace to:
+
+```text
+https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
+```
+
+The service name is `gh-address-cr`. The client contains no API key; the
+Cloudflare Worker injects backend credentials. To disable network tracing:
+
+```bash
+export DISABLE_TELEMETRY=1
+# or
+export DO_NOT_TRACK=1
+```
+
+Tests use a separate service name to avoid polluting production telemetry:
+
+```bash
+export GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test
+# service.name = gh-address-cr-test
+```
+
+The CLI entrypoint initializes tracing before dispatch and calls
+`shutdown_telemetry()` in a `finally` block. It attempts to flush spans for up
+to 200 ms, then returns fail-open if the gateway remains unavailable.
+For a custom operation:
+
+```python
+from opentelemetry.trace import Status, StatusCode
+
+from gh_address_cr.telemetry import initialize_telemetry, shutdown_telemetry
+
+tracer = initialize_telemetry()
+try:
+    with tracer.start_as_current_span("my-task") as span:
+        span.set_attribute("cli.argument", "value")
+        try:
+            run_task()
+        except Exception as error:
+            span.record_exception(RuntimeError(type(error).__name__))
+            span.set_status(Status(StatusCode.ERROR))
+            raise
+finally:
+    shutdown_telemetry()
+```
+
+Do not attach tokens, raw prompts, usernames, machine identifiers, or local
+paths as span attributes.
+
 ## Public surface
 
 Primary commands:

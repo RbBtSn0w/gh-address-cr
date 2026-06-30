@@ -144,6 +144,12 @@ telemetry input. Core review-resolution flows remain fail-open for missing or
 damaged telemetry and report the reduced coverage instead of blocking review
 completion.
 
+Process-level OTLP tracing is separate from PR-scoped workflow telemetry and
+from the read-only evaluation plane. Its state owner, projection, export policy,
+side-effect boundary, privacy rules, and recovery model are versioned in
+`docs/contracts/otel-tracing-v1.md`. Remote spans never become runtime truth,
+evaluation input, audit evidence, or final-gate proof.
+
 
 ## Runtime Complexity Boundary Contracts
 

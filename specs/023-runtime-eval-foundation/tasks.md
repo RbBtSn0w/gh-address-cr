@@ -213,3 +213,7 @@
 3. Ship dimensional economics, catalog rebuild, comparison policy, and performance budgets.
 4. Ship the additive read-only CLI with privacy and zero-mutation contracts.
 5. Complete documentation and both verification gates.
+
+## Phase 7: Convergence
+
+- [X] T089 Review the unrequested default process-level OTLP exporter, added runtime dependencies, and console-entrypoint change; remove or split them into a separately specified feature unless a versioned public contract and architecture ownership justify retaining them per plan: Technical Context / Project Structure / unchanged public runtime contract (unrequested)

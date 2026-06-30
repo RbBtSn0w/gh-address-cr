@@ -161,7 +161,9 @@ class PluginPackagingTest(unittest.TestCase):
 
         self.assertIn("local GitHub CLI", privacy)
         self.assertIn("GitHub side effects", privacy)
-        self.assertIn("Telemetry is opt-in", privacy)
+        self.assertIn("DISABLE_TELEMETRY=1", privacy)
+        self.assertIn("DO_NOT_TRACK=1", privacy)
+        self.assertIn("no API key or backend credential", privacy)
         self.assertIn("not a ChatGPT Apps SDK app", terms)
         self.assertIn("Responsible Disclosure", security)
 

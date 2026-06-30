@@ -34,17 +34,27 @@ post replies or resolve threads directly.
 
 ## Telemetry
 
-Telemetry is opt-in. By default, the runtime writes only local audit and trace
-files and does not export telemetry over the network.
+The CLI exports process-level OpenTelemetry traces by default to the public
+Cloudflare Worker at
+`https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces`. The service name
+is `gh-address-cr`. The client contains no API key or backend credential.
+Ambient OTLP headers, credential providers, proxy credentials, and `.netrc`
+credentials are not inherited by the gateway exporter.
+When `GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test` is set, traces use the isolated
+service name `gh-address-cr-test` instead of the production dataset name.
 
-Network telemetry export is enabled only when the user sets
-`GH_ADDRESS_CR_TELEMETRY=1` for the hosted relay or configures an explicit
-OpenTelemetry endpoint such as `OTEL_EXPORTER_OTLP_ENDPOINT` or
-`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
+Set either `DISABLE_TELEMETRY=1` or `DO_NOT_TRACK=1` to disable initialization
+and network export. Exported CLI spans contain fixed service/version/entrypoint
+attributes plus the exception type when the CLI terminates with an exception.
+Exception messages and stack traces are not exported.
+Raw CLI arguments are not attached to the process span. Custom instrumentation
+must not attach tokens, raw prompts, usernames, machine identifiers, or local
+paths.
 
-Telemetry payloads are sanitized before export to reduce accidental exposure of
-tokens, email addresses, and absolute local paths. Local audit files remain the
-authoritative record even when telemetry export is enabled or fails.
+Local audit files remain the authoritative workflow record. Exported traces do
+not control review state, GitHub side effects, or final-gate truth.
+Exporter failures are suppressed from CLI stderr so telemetry cannot alter
+human or machine-readable output contracts.
 
 ## OpenAI/Codex Packaging
 
