@@ -44,9 +44,9 @@
       "installed_at": "2026-06-04T13:41:43.526151+00:00"
     },
     "memorylint": {
-      "version": "1.5.1",
+      "version": "1.8.0",
       "source": "local",
-      "manifest_hash": "sha256:07be585a54faa255917c5165add8805a323aadc0affb3e2ba37a7aa7ad8e17d2",
+      "manifest_hash": "sha256:de81cd98cd78b31e2738d79cec39f71f38fe8b4a5aed99a801c99e8a7c18837b",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
@@ -60,9 +60,9 @@
       "installed_at": "2026-06-30T08:25:05.951223+00:00"
     },
     "superb": {
-      "version": "1.7.0",
+      "version": "1.8.0",
       "source": "local",
-      "manifest_hash": "sha256:db75130fb3c469f0e6b9a38e22832e5a5c967a3d313a9001360b516cf2f93f89",
+      "manifest_hash": "sha256:0f604f88eb7bfd2b1b91c584339d466fe97e3229c852cf2ab3a493a5a3e8c6db",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
