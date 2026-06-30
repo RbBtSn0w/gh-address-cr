@@ -36,12 +36,15 @@ class EvaluationCatalog:
                     CREATE TABLE catalog_meta (schema_version TEXT NOT NULL, source_fingerprint TEXT NOT NULL);
                     CREATE TABLE runs (
                         run_id TEXT PRIMARY KEY,
+                        repo TEXT NOT NULL,
+                        pr_number TEXT NOT NULL,
                         runtime_version TEXT NOT NULL,
                         cohort_key TEXT NOT NULL,
                         projection_fingerprint TEXT NOT NULL UNIQUE,
                         payload_json TEXT NOT NULL
                     );
                     CREATE INDEX runs_version_cohort_idx ON runs(runtime_version, cohort_key);
+                    CREATE INDEX runs_repo_pr_idx ON runs(repo, pr_number);
                     CREATE TABLE concerns (evaluation_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, payload_json TEXT NOT NULL);
                     CREATE TABLE coverage (owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, dimension TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(owner_type, owner_id, dimension));
                     CREATE TABLE costs (owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, metric_name TEXT NOT NULL, metric_value REAL, PRIMARY KEY(owner_type, owner_id, metric_name));
@@ -51,8 +54,8 @@ class EvaluationCatalog:
                 )
                 connection.execute("INSERT INTO catalog_meta VALUES (?, ?)", ("evaluation-catalog.v1", source_fingerprint))
                 connection.executemany(
-                    "INSERT INTO runs VALUES (?, ?, ?, ?, ?)",
-                    [(row["run_id"], row["runtime_version"], row["cohort_key"], row["projection_fingerprint"], json.dumps(row, sort_keys=True)) for row in ordered],
+                    "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [(row["run_id"], row["repo"], str(row["pr_number"]), row["runtime_version"], row["cohort_key"], row["projection_fingerprint"], json.dumps(row, sort_keys=True)) for row in ordered],
                 )
                 for row in ordered:
                     run_id = str(row["run_id"])
@@ -110,31 +113,38 @@ class EvaluationCatalog:
             raise FileNotFoundError(self.path)
         connection = sqlite3.connect(self.path)
         try:
-            rows = connection.execute("SELECT payload_json FROM runs ORDER BY run_id").fetchall()
+            if run_id is None:
+                rows = connection.execute(
+                    "SELECT payload_json FROM runs WHERE repo = ? AND pr_number = ? ORDER BY run_id",
+                    (repo, str(pr_number))
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT payload_json FROM runs WHERE repo = ? AND pr_number = ? AND run_id = ? ORDER BY run_id",
+                    (repo, str(pr_number), run_id)
+                ).fetchall()
         finally:
             connection.close()
-        matches = [json.loads(row[0]) for row in rows]
-        matches = [row for row in matches if row.get("repo") == repo and str(row.get("pr_number")) == str(pr_number)]
-        if run_id is not None:
-            matches = [row for row in matches if row.get("run_id") == run_id]
-        return matches[-1] if matches else None
+        return json.loads(rows[-1][0]) if rows else None
 
     def summarize_pr(self, repo: str, pr_number: str) -> dict[str, Any]:
         if not self.path.exists():
             raise FileNotFoundError(self.path)
         connection = sqlite3.connect(self.path)
         try:
-            rows = [json.loads(row[0]) for row in connection.execute("SELECT payload_json FROM runs ORDER BY run_id")]
+            rows = connection.execute(
+                "SELECT run_id, runtime_version FROM runs WHERE repo = ? AND pr_number = ? ORDER BY run_id",
+                (repo, str(pr_number))
+            ).fetchall()
         finally:
             connection.close()
-        matched = [row for row in rows if row.get("repo") == repo and str(row.get("pr_number")) == str(pr_number)]
         return {
             "schema_version": "evaluation-pr.v1",
             "repo": repo,
             "pr_number": str(pr_number),
-            "run_count": len(matched),
-            "run_ids": [row["run_id"] for row in matched],
-            "runtime_versions": sorted({str(row["runtime_version"]) for row in matched}),
+            "run_count": len(rows),
+            "run_ids": [row[0] for row in rows],
+            "runtime_versions": sorted({str(row[1]) for row in rows}),
         }
 
     def summarize_runtime_version(self, runtime_version: str) -> dict[str, Any]:
