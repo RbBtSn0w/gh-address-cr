@@ -17,6 +17,8 @@ CORE_DIR = RUNTIME_PACKAGE_DIR / "core"
 CLI_PY = RUNTIME_PACKAGE_DIR / "cli.py"
 REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
 SUBMIT_FEEDBACK_PY = IMPLEMENTATIONS_DIR / "submit_feedback.py"
+SUBMIT_ACTION_PY = IMPLEMENTATIONS_DIR / "submit_action.py"
+
 
 
 class PythonScriptTestCase(unittest.TestCase):
@@ -44,7 +46,37 @@ class PythonScriptTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def run_cmd(self, cmd, check=False, stdin=None):
-        cmd = self._normalize_python_module_command(list(cmd))
+        cmd = list(cmd)
+        in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+        if in_process and len(cmd) >= 2 and cmd[0] == sys.executable:
+            is_m = cmd[1] == "-m" and len(cmd) >= 3
+            target = cmd[2] if is_m else cmd[1]
+            args_start = 3 if is_m else 2
+            try:
+                if is_m:
+                    if target in ("gh_address_cr", "gh_address_cr.cli"):
+                        return self.run_runtime_module(*cmd[args_start:], check=check, stdin=stdin)
+                    elif target == "gh_address_cr.commands.submit_feedback":
+                        return self.run_runtime_module("submit-feedback", *cmd[args_start:], check=check, stdin=stdin)
+                    elif target == "gh_address_cr.commands.review_to_findings":
+                        return self.run_runtime_module("review-to-findings", *cmd[args_start:], check=check, stdin=stdin)
+                    elif target == "gh_address_cr.commands.submit_action":
+                        return self.run_runtime_module("submit-action", *cmd[args_start:], check=check, stdin=stdin)
+                else:
+                    path = Path(target).resolve()
+                    if path == CLI_PY.resolve():
+                        return self.run_runtime_module(*cmd[args_start:], check=check, stdin=stdin)
+                    elif path == SUBMIT_FEEDBACK_PY.resolve():
+                        return self.run_runtime_module("submit-feedback", *cmd[args_start:], check=check, stdin=stdin)
+                    elif path == REVIEW_TO_FINDINGS_PY.resolve():
+                        return self.run_runtime_module("review-to-findings", *cmd[args_start:], check=check, stdin=stdin)
+                    elif path == SUBMIT_ACTION_PY.resolve():
+                        return self.run_runtime_module("submit-action", *cmd[args_start:], check=check, stdin=stdin)
+            except (ValueError, OSError):
+                pass
+
+
+        cmd = self._normalize_python_module_command(cmd)
         return subprocess.run(
             cmd,
             input=stdin,
@@ -92,7 +124,13 @@ class PythonScriptTestCase(unittest.TestCase):
             
             exit_code = 0
             try:
-                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf):
+                import subprocess
+                original_run = subprocess.run
+
+                def patched_run(*run_args, **run_kwargs):
+                    return _patched_subprocess_run(original_run, *run_args, **run_kwargs)
+
+                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf), patch("sys.stdin", stdin_buf), patch("subprocess.run", patched_run):
                     exit_code = main(list(args))
             except SystemExit as exc:
                 if exc.code is None:
@@ -136,6 +174,7 @@ class PythonScriptTestCase(unittest.TestCase):
                 check=check,
             )
 
+
     def workspace_dir(self):
         return self.state_dir / "octo__example" / f"pr-{self.pr}"
 
@@ -162,3 +201,53 @@ class PythonScriptTestCase(unittest.TestCase):
 
     def artifacts_dir(self):
         return self.workspace_dir()
+
+
+def _decode_stream(data):
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data or ""
+
+
+def _handle_subprocess_error(exc, capture_out, capture_err):
+    if capture_out and getattr(exc, "output", None) is not None:
+        sys.stdout.write(_decode_stream(exc.output))
+        try:
+            object.__setattr__(exc, "output", None)
+            if hasattr(exc, "stdout"):
+                object.__setattr__(exc, "stdout", None)
+        except AttributeError:
+            pass
+    if capture_err and getattr(exc, "stderr", None) is not None:
+        sys.stderr.write(_decode_stream(exc.stderr))
+        try:
+            object.__setattr__(exc, "stderr", None)
+        except AttributeError:
+            pass
+
+
+def _patched_subprocess_run(original_run, *run_args, **run_kwargs):
+    import subprocess
+    capture_out = False
+    capture_err = False
+    if not run_kwargs.get("capture_output") and run_kwargs.get("stdout") is None:
+        run_kwargs["stdout"] = subprocess.PIPE
+        capture_out = True
+    if not run_kwargs.get("capture_output") and run_kwargs.get("stderr") is None:
+        run_kwargs["stderr"] = subprocess.PIPE
+        capture_err = True
+
+    try:
+        res = original_run(*run_args, **run_kwargs)
+    except subprocess.SubprocessError as exc:
+        _handle_subprocess_error(exc, capture_out, capture_err)
+        raise
+
+    if capture_out and res.stdout is not None:
+        sys.stdout.write(_decode_stream(res.stdout))
+        object.__setattr__(res, "stdout", None)
+    if capture_err and res.stderr is not None:
+        sys.stderr.write(_decode_stream(res.stderr))
+        object.__setattr__(res, "stderr", None)
+    return res
+
