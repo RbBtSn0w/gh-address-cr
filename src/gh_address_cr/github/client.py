@@ -4,6 +4,7 @@ import json
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from gh_address_cr.core import protocol_codes
@@ -124,7 +125,52 @@ class GitHubClient:
                 threads.append(row)
             has_next_page, cursor = _comment_page_state(review_threads)
             if not has_next_page:
-                return threads
+                break
+        return threads
+
+    def evaluation_observations(self, repo: str, pr_number: str, run_id: str) -> list[dict[str, Any]]:
+        """Read public review facts and emit privacy-safe, concern-correlated observations."""
+        pr = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}"])
+        reviews = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}/reviews", "--paginate"])
+        threads = self.list_threads(repo, pr_number)
+        head_sha = str(((pr.get("head") or {}).get("sha")) or "unknown") if isinstance(pr, dict) else "unknown"
+        rows: list[dict[str, Any]] = []
+        if not isinstance(reviews, list):
+            return rows
+        for review in reviews:
+            if not isinstance(review, dict) or str(review.get("state") or "").upper() != "APPROVED":
+                continue
+            reviewer = _review_login(review)
+            review_id = str(review.get("id") or review.get("node_id") or "")
+            observed_at = str(
+                review.get("submitted_at")
+                or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            for thread in threads:
+                relation = "original_concern_author" if reviewer and reviewer == thread.get("first_author_login") else "other_reviewer"
+                if relation != "original_concern_author":
+                    continue
+                thread_id = str(thread.get("id") or "")
+                rows.append(
+                    {
+                        "schema_version": "evaluation-observation.v1",
+                        "repo": repo,
+                        "pr_number": str(pr_number),
+                        "run_id": run_id,
+                        "observed_at": observed_at,
+                        "observed_head_sha": head_sha,
+                        "review_round_id": review_id,
+                        "review_state": "APPROVED",
+                        "reviewer_relation": relation,
+                        "item_id": f"github-thread:{thread_id}",
+                        "observed_thread_id": thread_id,
+                        "outcome_kind": "no_reopen",
+                        "correlation_method": "thread_id",
+                        "source": "github",
+                        "source_url": review.get("html_url"),
+                    }
+                )
+        return rows
 
     def post_reply(self, repo: str, pr_number: str, thread_id: str, body: str) -> str:
         _ = (repo, pr_number)
@@ -316,7 +362,9 @@ class GitHubClient:
 
     @staticmethod
     def _default_runner(cmd: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run(cmd, text=True, capture_output=True, check=False)
+        from gh_address_cr.core.command_runner import run_cmd
+
+        return run_cmd(cmd, retries=1)
 
 
 def _split_repo(repo: str) -> tuple[str, str]:

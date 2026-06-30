@@ -8,6 +8,15 @@ from unittest.mock import patch
 
 
 class NativeFoundationTests(unittest.TestCase):
+    def test_evaluation_paths_are_scoped_under_runtime_state(self):
+        from gh_address_cr.core.paths import SessionPaths
+
+        paths = SessionPaths("octo/example", "77")
+
+        self.assertEqual(paths.run_manifest_file.name, "run-manifest.v1.json")
+        self.assertEqual(paths.evaluation_observations_file.name, "evaluation-observations.v1.jsonl")
+        self.assertEqual(paths.evaluation_catalog_file.name, "evaluation-catalog.v1.sqlite3")
+
     def test_paths_resolve_pr_workspace_without_legacy_imports(self):
         from gh_address_cr.core import paths
 

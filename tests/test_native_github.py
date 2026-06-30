@@ -22,6 +22,37 @@ class RecordingRunner:
 
 
 class NativeGitHubClientTests(unittest.TestCase):
+    def test_evaluation_observations_are_read_only_correlated_and_privacy_safe(self):
+        from gh_address_cr.github.client import GitHubClient
+
+        runner = RecordingRunner(
+            [
+                lambda cmd: completed(cmd, {"head": {"sha": "abc"}}),
+                lambda cmd: completed(cmd, [{"id": 7, "state": "APPROVED", "submitted_at": "2099-01-01T00:00:00Z", "user": {"login": "reviewer"}}]),
+                lambda cmd: completed(cmd, {"login": "agent"}),
+                lambda cmd: completed(cmd, {"data": {"repository": {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [{"id": "THREAD_1", "isResolved": True, "comments": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}, "firstComment": {"nodes": [{"author": {"login": "reviewer"}}]}, "latestComment": {"nodes": []}}]}}}}}),
+            ]
+        )
+
+        rows = GitHubClient(runner=runner).evaluation_observations("owner/repo", "12", "run-1")
+
+        self.assertEqual(rows[0]["item_id"], "github-thread:THREAD_1")
+        self.assertEqual(rows[0]["reviewer_relation"], "original_concern_author")
+        self.assertNotIn("username", rows[0])
+        self.assertTrue(all("mutation" not in " ".join(call).lower() for call in runner.calls))
+
+    def test_default_runner_uses_central_measured_command_boundary(self):
+        from unittest.mock import patch
+
+        from gh_address_cr.github.client import GitHubClient
+
+        expected = completed(["gh", "api", "user"], {"login": "octocat"})
+        with patch("gh_address_cr.core.command_runner.run_cmd", return_value=expected) as run_cmd:
+            result = GitHubClient._default_runner(["gh", "api", "user"])
+
+        self.assertIs(result, expected)
+        run_cmd.assert_called_once_with(["gh", "api", "user"], retries=1)
+
     def test_list_threads_formats_graphql_request_and_enriches_viewer_reply_evidence(self):
         from gh_address_cr.github.client import GitHubClient
 

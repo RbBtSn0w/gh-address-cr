@@ -2490,23 +2490,19 @@ else:
         summary_file = self.workspace_dir() / "audit_summary.md"
         self.assertTrue(summary_file.exists())
         self.assertIn("== Agent Efficiency Summary ==", result.stdout)
-        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("telemetry_coverage_label=runtime-only", result.stdout)
         self.assertIn("Efficiency report path:", result.stdout)
         self.assertIn("== PR Completion Summary Guidance ==", result.stdout)
-        self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
-            result.stdout,
-        )
+        self.assertIn("telemetry: runtime-only/medium", result.stdout)
+        self.assertIn("sources: runtime", result.stdout)
         summary_text = summary_file.read_text(encoding="utf-8")
-        self.assertIn("- telemetry_coverage_label: unavailable", summary_text)
+        self.assertIn("- telemetry_coverage_label: runtime-only", summary_text)
         self.assertIn("- efficiency_report_path:", summary_text)
-        self.assertIn("- telemetry_sources: telemetry (runtime): 0 events, unavailable", summary_text)
+        self.assertIn("- telemetry_sources: runtime (runtime):", summary_text)
         self.assertIn("- telemetry_diagnostics: none", summary_text)
         self.assertIn("## PR Completion Summary Guidance", summary_text)
-        self.assertIn(
-            "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: unavailable/low (0 events, 0.0%) | sources: telemetry 0 | duration: no observed duration | slowest: none | issues: none]",
-            summary_text,
-        )
+        self.assertIn("telemetry: runtime-only/medium", summary_text)
+        self.assertIn("sources: runtime", summary_text)
         report_path_line = next(line for line in summary_text.splitlines() if line.startswith("- efficiency_report_path:"))
         report_path = Path(report_path_line.partition(": ")[2])
         self.assertTrue(report_path.exists())
@@ -3002,7 +2998,7 @@ else:
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("telemetry_coverage_label=unavailable", result.stdout)
+        self.assertIn("telemetry_coverage_label=runtime-only", result.stdout)
         self.assertIn("TELEMETRY_TRANSCRIPT_NOT_FOUND", result.stdout)
         summary_text = self.audit_summary_file().read_text(encoding="utf-8")
         self.assertIn("- telemetry_diagnostics: telemetry import host-autodiscovery:", summary_text)
@@ -3366,6 +3362,12 @@ else:
         self.assertTrue(archived_summary.exists())
         self.assertTrue(archived_report.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
+        manifest_path = archived_workspace / "run-manifest.v1.json"
+        self.assertTrue(manifest_path.exists())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["run_id"], "archive-run")
+        self.assertNotIn("run-manifest.v1.json", {row["path"] for row in manifest["artifacts"]})
+        self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(row) for row in manifest["artifacts"]))
         self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")

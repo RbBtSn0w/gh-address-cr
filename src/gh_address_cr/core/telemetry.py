@@ -1467,6 +1467,8 @@ def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEve
             operation=_safe_runtime_operation(metric.command),
             status="success" if metric.is_success else ("timeout" if metric.exit_code == 124 else "failure"),
             duration_ms=max(0, int(metric.duration * 1000)),
+            started_at=datetime.fromtimestamp(metric.start_time, timezone.utc).isoformat().replace("+00:00", "Z"),
+            ended_at=datetime.fromtimestamp(metric.end_time, timezone.utc).isoformat().replace("+00:00", "Z"),
             metadata={"exit_code": metric.exit_code, "is_retry": metric.is_retry},
         )
         events.append(ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)}))

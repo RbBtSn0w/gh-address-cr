@@ -78,6 +78,27 @@ def last_machine_summary_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "last-machine-summary.json"
 
 
+def run_manifest_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "run-manifest.v1.json"
+
+
+def evaluation_root() -> Path:
+    return state_dir() / "evaluation"
+
+
+def evaluation_observations_file(repo: str, pr_number: str) -> Path:
+    return evaluation_root() / normalize_repo(repo) / f"pr-{pr_number}" / "evaluation-observations.v1.jsonl"
+
+
+def evaluation_catalog_file(repo: str, pr_number: str) -> Path:
+    _ = (repo, pr_number)
+    return evaluation_root() / "evaluation-catalog.v1.sqlite3"
+
+
+def global_evaluation_catalog_file() -> Path:
+    return evaluation_root() / "evaluation-catalog.v1.sqlite3"
+
+
 class SessionPaths:
     def __init__(self, repo: str, pr_number: str | int) -> None:
         self.repo = repo
@@ -118,3 +139,15 @@ class SessionPaths:
     @property
     def efficiency_report_file(self) -> Path:
         return efficiency_report_file(self.repo, self.pr_number)
+
+    @property
+    def run_manifest_file(self) -> Path:
+        return run_manifest_file(self.repo, self.pr_number)
+
+    @property
+    def evaluation_observations_file(self) -> Path:
+        return evaluation_observations_file(self.repo, self.pr_number)
+
+    @property
+    def evaluation_catalog_file(self) -> Path:
+        return evaluation_catalog_file(self.repo, self.pr_number)
