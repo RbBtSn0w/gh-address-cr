@@ -13,8 +13,8 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 |---|---|---|---|---|
 | `process.executable.name` | string | Required | `os.path.basename(sys.argv[0])` or `"gh-address-cr"` | Base name only. |
 | `process.pid` | int | Required | `os.getpid()` | |
-| `process.exit.code` | int | Required | return value of `cli_main` (0 on success); on propagated exception, synthetic `1` | Always present, incl. exception path (R-006, U1). |
-| `error.type` | string | Conditional (exit ≠ 0 only) | enumerated set: `"nonzero_exit"`, `"keyboard_interrupt"` (KeyboardInterrupt), `"timeout"` (TimeoutError), else `_OTHER` | Low-cardinality; **unset on success**; no raw class names (A2/U1). |
+| `process.exit.code` | int | Required | honest `cli_main` return (incl. non-zero **status** codes 2/5/6); synthetic `1` on propagated exception | Always present, incl. exception path (R-006, U1). |
+| `error.type` | string | Conditional (**exception only**) | enumerated literals: `"keyboard_interrupt"` (KeyboardInterrupt), `"timeout"` (TimeoutError), else `"_OTHER"` | Set **only on a propagated exception (crash)**, never on a non-zero status return (Principle VIII, F1); no raw class names (A2). |
 | `process.command_args` | string[] | Recommended | `safe_command_args([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | Sanitized (R-001). Never raw. Argv source pinned for test determinism (see Entity 2). |
 | `process.parent_pid` | int | Opt-In | `os.getppid()` | Fallback breadcrumb only (R-003); **replaces** spec's `system.process.parent_id` (G-5). |
 | `gen_ai.operation.name` | string | Added | constant `"execute_tool"` | |
@@ -31,7 +31,8 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `service.version`, `cli.entrypoint` | string | existing | already set | Unchanged. |
 
 ### Validation rules
-- `error.type` MUST NOT appear when `process.exit.code == 0`.
+- `error.type` appears **iff an exception propagated** (a crash); it MUST NOT
+  appear on any non-crash run, including a non-zero **status** exit (F1).
 - `process.command_args` and `gen_ai.tool.call.arguments` MUST derive from one
   sanitizer call — no second, differently-filtered copy.
 - No attribute may contain a raw token/credential/username/unnecessary abs path

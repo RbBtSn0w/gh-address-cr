@@ -185,27 +185,35 @@ genuinely needed in the AI dashboard.
 
 ## R-006 — Exit-code / error-type recording on the existing span (Dimension 1)
 
-**Decision**: Extend `run_traced` (or the `__main__` wrapper) to record
-`process.exit.code` from `cli_main`'s return value and set a low-cardinality
-`error.type` when the code is non-zero or an exception propagates. Keep the
-existing sanitized-error behavior.
+**Decision**: Extend `run_traced` (or the `__main__` wrapper) to record the
+honest `process.exit.code` from `cli_main`'s return value, and set a
+low-cardinality `error.type` **only when an exception propagates** (a crash).
 
-**Rationale**:
-- Today `run_traced` sets start-time attributes and records a sanitized exception
-  on failure, but does **not** capture the returned exit code as
-  `process.exit.code`. The return value of the operation is available at the
-  `with` block's exit, so recording it is a localized change.
-- `error.type` must be low-cardinality (CLI convention): map to a small closed set
-  (e.g. the sanitized exception class name, or `"nonzero_exit"` for a non-zero
-  return without an exception, or the well-known `_OTHER`). Must be **unset on
-  success** (exit 0).
-- Must not inflate observed failure counts: a `SystemExit(0)`/return 0 is success;
-  only genuine non-zero/exception paths set `error.type` (consistent with the
-  existing `SystemExit` handling in run_traced).
+**Rationale (updated for F1 — CRITICAL)**:
+- Today `run_traced` records a sanitized exception on failure but does **not**
+  capture the returned exit code. The return value is available at the `with`
+  block's exit, so recording it is localized.
+- **Critical constraint**: `gh-address-cr` overloads non-zero exit codes as a
+  *status channel* — verified in `cli.py`: `WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6`,
+  `WAITING_FOR_FIX`/needs-action `return 2`, `PR_IO_PREFLIGHT_EXIT = 5`, and
+  `agent_protocol` exits 4/5. A naive "error.type iff exit≠0" rule would brand
+  every normal waiting/needs-action outcome as a failure, **inflating error rates
+  — a direct Principle VIII violation**.
+- **Resolution**: an *error* is a **crash (propagated exception)**, not a domain
+  exit code. `error.type` is set only on a propagated exception, from the bounded
+  literals `"keyboard_interrupt"`/`"timeout"`/`"_OTHER"`; a non-zero *return*
+  records `process.exit.code` only. This is a documented deviation from the
+  generic OTel CLI "error iff exit≠0" rule, which the semconv permits
+  (instrumentations document their own error definition).
 
 **Alternatives considered**:
-- *High-cardinality error strings (message text)* → rejected: violates the
-  low-cardinality requirement and risks leaking sensitive text.
+- *Generic "error iff exit≠0"* → **rejected (F1)**: inflates failure counts for
+  status exits (waiting/needs-action).
+- *Per-exit-code allowlist of "non-error" codes* → rejected: couples telemetry to
+  the CLI's version-specific exit catalog and re-introduces scattered conditionals
+  (Principle X). Exception-only is lower-coupling and honest.
+- *High-cardinality error strings (message/class text)* → rejected: violates
+  low-cardinality and risks leaking sensitive text.
 
 **Landability verdict**: ✅ **LANDABLE**. Localized change to `run_traced`/`__main__`.
 

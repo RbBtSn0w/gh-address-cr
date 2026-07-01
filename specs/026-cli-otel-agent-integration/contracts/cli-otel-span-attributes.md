@@ -16,19 +16,26 @@ landable subset; "GATED" = requires human confirmation before build.
   `process.pid` (int).
 
 ## C-3 Exit outcome (MVP)
-- Every exported span carries `process.exit.code` (int). On a normal return it
-  equals the CLI's return code; when an exception propagates out of `cli_main`
-  it is a **synthetic non-zero code (`1`)** so exit.code is always present.
-- `error.type` (string, low-cardinality) is present **iff** `process.exit.code != 0`
-  or an exception propagated. It MUST be absent on exit code 0.
-- `error.type` values are drawn from an **explicitly enumerated bounded set**:
-  - `"nonzero_exit"` — non-zero return with no exception;
+- Every exported span carries the honest `process.exit.code` (int). On a normal
+  return it equals the CLI's return code (including non-zero **status** codes
+  like 6=`WAITING_FOR_EXTERNAL_REVIEW`, 2=needs-action, 5=preflight); when an
+  exception propagates out of `cli_main` it is a **synthetic `1`**.
+- `error.type` is present **iff an exception propagated** (a genuine crash). A
+  non-zero *return* by itself MUST NOT set `error.type` — those are Status-to-
+  Action outcome codes, and marking them errors would inflate failure counts
+  (Principle VIII). `error.type` MUST be absent on every non-crash run
+  (success **or** non-zero status). Span status is ERROR only on a propagated
+  exception. *(Documented deviation from the generic OTel "error iff exit≠0"
+  rule; here an error = a crash.)*
+- `error.type` values are drawn from an **explicitly enumerated bounded set**
+  (all literal strings):
   - `"keyboard_interrupt"` — `KeyboardInterrupt` propagated;
   - `"timeout"` — `TimeoutError` propagated;
-  - `_OTHER` — any other propagated exception.
-  The whitelist is intentionally minimal and extended only with evidence of a
-  new predictable, low-cardinality failure class. Arbitrary/raw exception class
-  names MUST NOT be passed through (cardinality guard, Principle VIII).
+  - `"_OTHER"` — any other propagated exception (the literal string `_OTHER`,
+    the OTel well-known fallback value).
+  Arbitrary/raw exception class names MUST NOT be passed through (cardinality
+  guard, Principle VIII). *(No `"nonzero_exit"` value: a non-zero return is not
+  an error.)*
 
 ## C-4 Sanitized arguments (MVP)
 - `process.command_args` (string[]) is present and is the output of
