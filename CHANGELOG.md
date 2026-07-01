@@ -1,3 +1,9 @@
+## [3.2.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.1...v3.2.2) (2026-07-01)
+
+### Bug Fixes
+
+* Harden dependency selection and improve Homebrew runtime rendering ([#178](https://github.com/RbBtSn0w/gh-address-cr/issues/178)) ([59e7749](https://github.com/RbBtSn0w/gh-address-cr/commit/59e7749adf98cd604e84377151389502a64f47df))
+
 ## [3.2.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.0...v3.2.1) (2026-07-01)
 
 ### Bug Fixes
