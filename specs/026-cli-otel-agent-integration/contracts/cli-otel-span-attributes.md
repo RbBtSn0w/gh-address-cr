@@ -65,6 +65,27 @@ landable subset; "GATED" = requires human confirmation before build.
   exit code equals what it would be with telemetry disabled
   (`DISABLE_TELEMETRY=1`). Telemetry-layer failures are fail-open.
 
+## C-11 Passive agent-session correlation (MVP — Tier 2)
+- Given a host env session id (`CLAUDE_CODE_SESSION_ID`, else
+  `GH_ADDRESS_CR_CONVERSATION_ID`), the span carries `gen_ai.conversation.id`
+  equal to that value plus `gen_ai.conversation.id.source` naming the env var,
+  and `gen_ai.agent.name` from `AI_AGENT` when present.
+- **Enforced**: two invocations under the same session env carry an **identical**
+  `gen_ai.conversation.id` (groupable). When no known env is present, all three
+  attributes are **absent** (fail-open); the CLI needs no flag and no skill change.
+- Recorded values pass the public-safe sanitation path.
+
+## C-12 VCS GitHub-PR mapping + privacy (MVP — Tier 1)
+- For a PR-scoped command (`owner/repo <pr>`), the span carries `vcs.change.id`
+  (the PR number) and `vcs.provider.name == "github"` in plain text, and
+  `vcs.repository.name` as a **stable one-way hash** of `owner/repo` (same repo →
+  same value across runs).
+- `vcs.change.state` is present **only** when already available in session data;
+  otherwise absent (no telemetry-driven GitHub lookup).
+- For non-PR commands (`version`, `doctor`), **all `vcs.*` are absent**.
+- **Enforced (privacy)**: no span attribute contains the plain `owner` string or
+  `vcs.repository.url.full`; a test asserts absence across a sampled PR run.
+
 ## GATED contracts (NOT built until confirmed)
 - **C-9 (G-2) `--traceparent`**: a global public flag accepting a full W3C
   traceparent string; when valid it is used for correlation with precedence over

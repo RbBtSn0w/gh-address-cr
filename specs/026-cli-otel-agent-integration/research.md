@@ -228,6 +228,68 @@ inside the protected baseline.
 
 ---
 
+## R-009 — Passive agent-session correlation rescues Dimension 2 (Tier 2, demo-verified 2026-07-01)
+
+**Decision**: Passively read a **registry** of host env vars and record
+`gen_ai.conversation.id` (+ `.source`) and `gen_ai.agent.name`. Promote to v1 MVP.
+
+**Rationale (live evidence)**: A demo inside a real Claude Code session found —
+with **zero agent cooperation** — `CLAUDE_CODE_SESSION_ID` (a stable per-session
+UUID, identical to the scratchpad path's session segment) and
+`AI_AGENT=claude-code_..._agent` already present in the environment, while
+`TRACEPARENT` was unset. Three simulated CLI invocations under an in-memory
+exporter all carried the **same** `gen_ai.conversation.id`, proving
+attribute-level session grouping works today. Both values passed the existing
+`telemetry_safety` filters (non-token, non-private-id, non-abspath →
+public-safe). Robustness: unlike `TRACEPARENT` (strict 55-char hex; a UUID is
+invalid), an opaque conversation id needs no format and no agent-side OTel
+tracer.
+
+**Why this changes the earlier conclusion**: R-002's pessimism conflated
+*correlation* with *span-tree nesting*. Nesting is still dormant (no
+`TRACEPARENT`), but the User-Story-2 goal — "which agent session drove these
+runs" — is achievable **today** via `gen_ai.conversation.id`. So Dimension 2 is
+no longer "≈0% usable"; it is usable now for Claude Code.
+
+**Alternatives considered**: generic `session.id` (rejected — GenAI
+`conversation.id` is the domain-correct key, maps cleanly from OpenInference
+`session.id`); only Claude Code (rejected — a small registry + generic override
+`GH_ADDRESS_CR_CONVERSATION_ID` future-proofs other hosts at no cost).
+
+**Landability verdict**: ✅ **LANDABLE & IN MVP.** No public flag, no skill
+change (passive env). Fail-open (omit when absent).
+
+---
+
+## R-010 — VCS GitHub-PR mapping with privacy-preserving repo hash (Tier 1)
+
+**Decision**: Map the CLI's own `owner/repo <pr>` arguments to `vcs.*`: plain
+`vcs.change.id` (PR#) + `vcs.provider.name=github`; **hashed**
+`vcs.repository.name` (one-way digest of `owner/repo`); conditional
+`vcs.change.state` only from existing session data; **never** plain owner or
+`vcs.repository.url.full`. Promote to v1 MVP.
+
+**Rationale**: `vcs.*` is a real (Development) semconv family and gh-address-cr
+is inherently PR-scoped, so the PR number = `vcs.change.id` maps perfectly and at
+zero input cost (already parsed). This elevates the span from "which tool ran" to
+"which PR was worked on", enabling per-PR / per-repo analytics. **Privacy is the
+governing constraint** (Principle VIII): this is a *published* skill whose
+telemetry flows to a shared gateway, so private-repo owner/repo names must not
+leak. A stable one-way hash of `owner/repo` preserves *grouping* (same repo →
+same hash) while removing the private identity — the confirmed Clarification.
+
+**Alternatives considered**: full plain `vcs.*` (rejected — leaks private repo
+identity for third-party installs); PR#+provider only (rejected — cannot
+distinguish repos, low grouping value); plain repo name without owner (rejected —
+repo name alone can still be private and loses org grouping).
+`vcs.change.state` always-on (rejected — would force telemetry-driven GitHub
+lookups; conditional-from-session keeps it fail-open and zero-latency).
+
+**Landability verdict**: ✅ **LANDABLE & IN MVP** with an explicit privacy gate
+(hash) and executable "no plain owner/URL" test.
+
+---
+
 ## Consolidated feasibility summary
 
 | Dimension | Piece | Verdict | Gate |
@@ -241,11 +303,15 @@ inside the protected baseline.
 | 3 | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name` | ✅ Landable (R-004) | G-4 |
 | 3 | `gen_ai.tool.call.arguments` (reuse sanitized argv) | ✅ Landable (R-001/R-004) | G-4 |
 | 3 | `gen_ai.tool.call.result` | ⚠️ Not landable as-spec — **omit v1** (R-005) | **G-3** |
+| 2 (Tier 2) | `gen_ai.conversation.id` + `gen_ai.agent.name` (passive env) | ✅ **Landable & IN MVP** — rescues Dim-2 today (R-009) | confirmed |
+| Tier 1 | `vcs.change.id` + `vcs.provider.name` (plain), hashed `vcs.repository.name` | ✅ **Landable & IN MVP** — privacy hash (R-010) | confirmed |
+| Tier 1 | `vcs.change.state` (conditional), plain owner/URL | ⚠️ state only-if-in-session; **owner/URL never plain** (R-010) | confirmed |
 
-**Bottom line for the user**: The forensic core (Dimension 1) and the AI-tool
-vocabulary (most of Dimension 3) land cleanly inside the protected baseline. The
-**AI-agent context-linking dimension is where "能否成功" is genuinely in doubt** —
-the standard `TRACEPARENT` path is correct but unused by today's agents (R-002),
-and the only paths that force exact correlation (`--traceparent` flag + skill
-instruction) exceed the baseline and need human confirmation (G-2). Recommended
-MVP is the ✅-Landable rows minus the deferred ⚠️ rows.
+**Bottom line (updated 2026-07-01)**: Dimension 1 (forensics) and Dimension 3
+(tool vocabulary) land cleanly. The Dimension-2 pessimism (R-002) is **partially
+overturned by R-009**: full `TRACEPARENT` span-nesting is still dormant, but
+passive `gen_ai.conversation.id` gives real session-level correlation **today**
+for Claude Code — so Tier 2 is promoted into the MVP. Tier 1 VCS mapping is also
+promoted with a privacy-preserving repo hash (R-010). The only paths still
+deferred are those that would grow public CLI/skill surface (`--traceparent` G-2)
+or need CLI-internal plumbing (`tool.call.result` G-3).

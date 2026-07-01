@@ -21,6 +21,13 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `gen_ai.tool.name` | string | Added | parsed top-level command (e.g. `review`), else `"gh-address-cr"` | Matches public command surface. |
 | `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the **same** `safe_command_args` value (no system-only flags exist in v1) | Reuses R-001 output (FR-007). |
 | `gen_ai.tool.call.result` | — | **OMITTED v1** | — | Not capturable at span boundary (R-005, G-3). |
+| `gen_ai.conversation.id` | string | Added (Tier 2) | host env registry: `CLAUDE_CODE_SESSION_ID` → else `GH_ADDRESS_CR_CONVERSATION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
+| `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
+| `gen_ai.agent.name` | string | Added (Tier 2) | `AI_AGENT` env | Omitted when absent. Public-safe product string. |
+| `vcs.change.id` | string | Added (Tier 1) | PR number from argv | Only for PR-scoped commands; omitted otherwise. FR-012. |
+| `vcs.provider.name` | string | Added (Tier 1) | constant `"github"` | Set with `vcs.change.id`. |
+| `vcs.repository.name` | string | Added (Tier 1) | **hash** of `owner/repo` (Entity 5) | Opaque, stable per repo. **No plain owner/URL ever** (R-010). |
+| `vcs.change.state` | string | Conditional (Tier 1) | session data only, if already present | Omit if not already available; no telemetry-driven GitHub lookup. |
 | `service.version`, `cli.entrypoint` | string | existing | already set | Unchanged. |
 
 ### Validation rules
@@ -29,6 +36,10 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
   sanitizer call — no second, differently-filtered copy.
 - No attribute may contain a raw token/credential/username/unnecessary abs path
   (enforced by the sanitizer + existing safety helpers).
+- **No attribute may contain the plain `owner` name or `vcs.repository.url.full`**
+  (Tier 1 privacy). `vcs.repository.name` MUST be the opaque hash only.
+- `gen_ai.conversation.id.source` MUST be present iff `gen_ai.conversation.id` is.
+- `vcs.*` attributes MUST be absent for non-PR commands (`version`, `doctor`).
 
 ## Entity 2 — Sanitized Argument Set (new, transient)
 
@@ -65,6 +76,32 @@ Priority order (FR-004) — v1 implements levels 2–4; level 1 is deferred:
    root span.
 
 Determinism: same `environ` → same returned context. Unit-testable in isolation.
+
+## Entity 4 — Agent Session Context (new, transient — Tier 2)
+
+Pure function `detect_agent_session(environ) -> dict[str, str]`:
+- **Conversation-id registry** (ordered, first match wins):
+  `CLAUDE_CODE_SESSION_ID` → `GH_ADDRESS_CR_CONVERSATION_ID`. On match, returns
+  `{gen_ai.conversation.id: <value>, gen_ai.conversation.id.source: <env name>}`.
+- **Agent name**: `AI_AGENT` → `gen_ai.agent.name` when present.
+- Empty dict when nothing matches (→ attributes omitted, fail-open).
+- All returned values pass the public-safe sanitation path before use.
+- Registry is a module-level table so new hosts can be added without logic change.
+
+## Entity 5 — VCS Change Context (new, transient — Tier 1)
+
+Pure function `map_vcs_attributes(command, repo, pr_number, session) -> dict[str, str]`:
+- Returns `{}` unless `repo` (`owner/repo`) and `pr_number` are both present
+  (i.e., a PR-scoped command).
+- On a PR command:
+  - `vcs.change.id` = `str(pr_number)`, `vcs.provider.name` = `"github"`.
+  - `vcs.repository.name` = `repo_hash(owner/repo)` — a deterministic, one-way,
+    non-reversible digest (stable across runs; algorithm fixed in impl, not a
+    public contract; need not be cryptographic — only stable + collision-resistant
+    enough to group per repo).
+  - `vcs.change.state` = session-provided state **only if already present**;
+    otherwise omitted.
+- MUST NOT emit plain `owner` or `vcs.repository.url.full`.
 
 ## State transitions
 None. One span per process; attributes are set at start (identity, args, parent

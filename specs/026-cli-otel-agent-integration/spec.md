@@ -36,10 +36,15 @@ observed outcome — with no reproduction step required.
 1. **Given** the CLI is invoked with a valid command, **When** it exits
    successfully, **Then** the process span records `process.executable.name`,
    `process.pid`, `process.exit.code = 0`, and no `error.type`.
-2. **Given** the CLI is invoked with arguments that cause it to fail,
-   **When** it exits with a non-zero code or raises an unhandled error,
-   **Then** the process span records that non-zero `process.exit.code` and a
-   low-cardinality `error.type` describing the failure class.
+2. **Given** an unhandled exception propagates out of the CLI (a genuine
+   crash), **When** the span is recorded, **Then** it carries a non-zero
+   `process.exit.code` and a low-cardinality `error.type` describing the
+   failure class.
+2b. **Given** the CLI returns a non-zero *status* exit code that is a normal
+   domain outcome (e.g. `WAITING_FOR_EXTERNAL_REVIEW` = exit 6, needs-action =
+   exit 2), **When** the span is recorded, **Then** it records that
+   `process.exit.code` honestly but sets **no** `error.type` (waiting/needs-action
+   is not a failure — Principle VIII, no inflated error counts).
 3. **Given** the received arguments contain a credential, token, username, or
    unnecessary absolute local path, **When** the span is recorded, **Then**
    the sanitized value attached to `process.command_args` has that sensitive
@@ -74,6 +79,11 @@ none of these present still completes normally as a root span.
 2. **Given** no `TRACEPARENT` is present but the OS parent process id is
    available, **When** the CLI starts, **Then** the span records the parent
    process id as an explicit attribute (not as trace-context linkage).
+2a. *(v1-landable — Tier 2)* **Given** the host exports a session identifier
+   (e.g. `CLAUDE_CODE_SESSION_ID`), **When** the CLI runs, **Then** the span
+   records `gen_ai.conversation.id` (and `gen_ai.agent.name` from `AI_AGENT`),
+   so multiple CLI invocations from the same agent session share one
+   `gen_ai.conversation.id` and are groupable **today, without `TRACEPARENT`**.
 3. *(DEFERRED — G-2, not in v1)* **Given** a caller needs an exact, pre-agreed
    trace identifier regardless of environment propagation, **When** it supplies
    the documented `--traceparent` override flag, **Then** the CLI parses it and
@@ -117,6 +127,39 @@ copy) and a bounded-length result value.
 
 ---
 
+### User Story 4 - Group CLI activity by the GitHub PR being worked on (Priority: P2)
+
+Someone analyzing agent activity wants each `gh-address-cr` invocation tagged
+with the GitHub PR it operated on, so they can retrieve "all CLI activity for
+PR #123" or compare review-resolution effort across repositories — without a
+CLI-specific query path and without the telemetry exposing private repository
+names.
+
+**Why this priority**: `gh-address-cr` is inherently PR-scoped, so the PR is the
+natural grouping key for every other signal; it is P2 (alongside US2) because it
+turns per-invocation spans into per-PR analytics. It is independent of US1/US2/US3.
+
+**Independent Test**: run a PR-scoped command (`review acme/widgets 123`) and a
+non-PR command (`version`); confirm the PR run carries the PR number, provider,
+and a hashed repository id with no plain owner/URL, and the non-PR run carries no
+`vcs.*` — and that the same repo hashes identically across runs.
+
+**Acceptance Scenarios**:
+
+1. **Given** a PR-scoped command `owner/repo <pr>`, **When** the span is
+   recorded, **Then** it carries `vcs.change.id` (the PR number) and
+   `vcs.provider.name = github` in plain text, and `vcs.repository.name` as a
+   stable one-way hash of `owner/repo`.
+2. **Given** any invocation, **When** the span is recorded, **Then** no attribute
+   contains the plain `owner` name or `vcs.repository.url.full` (privacy).
+3. **Given** a command that does not identify a PR (e.g. `version`, `doctor`),
+   **When** the span is recorded, **Then** no `vcs.*` attribute is present.
+4. **Given** the PR state is already available in session data, **When** the span
+   is recorded, **Then** `vcs.change.state` is included; otherwise it is omitted
+   (no telemetry-driven GitHub lookup).
+
+---
+
 ### Edge Cases
 
 - What happens when the CLI is invoked directly by a human at a terminal
@@ -144,6 +187,14 @@ copy) and a bounded-length result value.
   bounded-length string representation before truncation is applied. Not
   applicable in v1 (result attribute omitted).
 
+## Clarifications
+
+### Session 2026-07-01
+
+- Q: VCS attribute privacy scope for a *published* skill whose telemetry flows to a shared gateway (private-repo owner/repo names are sensitive under Principle VIII) → A: Emit `vcs.change.id` (PR#) and `vcs.provider.name=github` in plain text; hash owner/repo into a **stable opaque id** stored in `vcs.repository.name`; do NOT emit plain owner or `vcs.repository.url.full`.
+- Q: Emit `vcs.change.state` (open/merged/closed)? → A: Only when the PR state is **already present in session data** (zero extra cost, fail-open); omit otherwise — no telemetry-driven GitHub lookup.
+- Q: Source design for `gen_ai.conversation.id` (passive env read) → A: An **extensible registry** — `CLAUDE_CODE_SESSION_ID` now, plus a generic override env `GH_ADDRESS_CR_CONVERSATION_ID` for other hosts; omit the attribute entirely when none is present (fail-open).
+
 ## Requirements *(mandatory)*
 
 ### Scope Decisions (v1 MVP — confirmed 2026-07-01)
@@ -167,6 +218,18 @@ behavioral change.
   key's string value; document the pinned SDK version.
 - **G-5 — parent-pid attribute name**: **`process.parent_pid`** (standard,
   Opt-In int), not the non-standard `system.process.parent_id`.
+- **Tier 2 — passive agent-session correlation**: **PROMOTED INTO v1 MVP.**
+  Empirically validated (2026-07-01): Claude Code already exports
+  `CLAUDE_CODE_SESSION_ID` and `AI_AGENT` env vars with zero agent cooperation.
+  The CLI passively reads them → `gen_ai.conversation.id` + `gen_ai.agent.name`,
+  making all CLI invocations from one agent session **groupable today** without
+  `TRACEPARENT`/span nesting. This rescues the "correlate a run back to the agent
+  session" goal (US2) that the dormant G-1 path could not deliver on its own.
+- **Tier 1 — VCS GitHub-PR mapping**: **PROMOTED INTO v1 MVP.** The CLI's own
+  `owner/repo <pr>` arguments are mapped to `vcs.*` per the Clarifications above
+  (plain `vcs.change.id` + `vcs.provider.name`; hashed `vcs.repository.name`;
+  conditional `vcs.change.state`; no plain owner/URL). Elevates the span from
+  "which tool ran" to "which GitHub PR was being worked on".
 
 ### Functional Requirements
 
@@ -178,22 +241,30 @@ behavioral change.
   path (rejecting or redacting tokens, credentials, usernames, and
   unnecessary absolute local paths); the raw, unsanitized argument list MUST
   NOT be attached to any exported span attribute.
-- **FR-003**: The CLI's process-level span MUST record `process.exit.code`
-  on every invocation, and MUST record a low-cardinality, predictable
-  `error.type` value whenever the exit code is non-zero or an unhandled
-  exception propagates out of the CLI; `error.type` MUST NOT be set on a
-  successful (exit code 0) run.
-- **FR-004**: On startup, the CLI MUST attempt to establish caller trace
-  context in this priority order: (1) a well-formed W3C `traceparent` value
-  read from the `TRACEPARENT` environment variable, used as the span's
-  remote parent context (built in v1 but **dormant** — see G-1); (2) if absent
-  or malformed, the OS parent process id, recorded as the standard, descriptive
-  `process.parent_pid` attribute only (not used to alter trace/span
-  identifiers); (3) *[DEFERRED — G-2]* an explicit, documented `--traceparent`
-  CLI flag that a caller may supply to force exact correlation, taking
-  precedence over the above. Priority level (3) is **out of v1 scope** and
-  deferred to a follow-up architecture spec because it grows both the public
-  CLI contract and the packaged-skill behavioral layer.
+- **FR-003**: The CLI's process-level span MUST record the honest
+  `process.exit.code` on every invocation. `error.type` MUST be set **only when
+  an unhandled exception propagates out of the CLI** (a genuine process
+  failure/crash), using a low-cardinality bounded value. **A non-zero return
+  value by itself MUST NOT set `error.type`**, because `gh-address-cr`
+  deliberately overloads exit codes as a *status channel* (Status-to-Action Map,
+  Principle II) — e.g. `WAITING_FOR_EXTERNAL_REVIEW` returns exit 6,
+  `WAITING_FOR_FIX`/needs-action return exit 2, PR-IO preflight returns exit 5.
+  Branding those normal waiting/needs-action outcomes as errors would inflate
+  observed failure counts, violating Principle VIII. This is a documented
+  deviation from the generic OTel CLI "error iff exit≠0" rule: here an *error* is
+  a crash, and domain outcomes are carried by `process.exit.code` (and, when G-3
+  lands, `reason_code`). `error.type` MUST NOT be set on any non-crash run
+  (including a non-zero status exit). Span status is set ERROR only on a
+  propagated exception, not on a domain non-zero return.
+- **FR-004**: On startup, the CLI MUST establish caller trace context by this
+  precedence (highest first), consistent with data-model Entity 3:
+  **(1, highest) `--traceparent` flag** *[DEFERRED — G-2, NOT built in v1]* — an
+  explicit flag that forces exact correlation, overriding the env; out of v1
+  scope because it grows the public CLI contract and the packaged-skill layer.
+  **(2) `TRACEPARENT` env** — a well-formed W3C value used as the span's remote
+  parent context (built in v1 but **dormant**, G-1). **(3) `process.parent_pid`**
+  — the OS parent pid recorded as a descriptive attribute only (never alters
+  trace/span ids). In v1 only levels 2–3 exist; level 1 is deferred.
 - **FR-005**: A missing or malformed `TRACEPARENT` value, or an unset parent
   process id, MUST NOT cause the CLI to fail, hang, or change its exit
   behavior; the CLI MUST fall through to the next priority level and, at
@@ -219,10 +290,30 @@ behavioral change.
   parallel telemetry export pipeline.
 - **FR-010**: Sanitization and context-linking logic introduced by this
   feature MUST remain fail-open for missing, absent, or malformed
-  context-linking inputs, and MUST fail loudly only for genuinely malformed
-  telemetry-specific inputs (e.g., an explicit `--traceparent` flag value that is
-  not a valid traceparent format) — in no case may a telemetry-layer failure
-  change the CLI's own exit code or functional behavior.
+  context-linking inputs — in no case may a telemetry-layer failure change the
+  CLI's own exit code or functional behavior. The only fail-loud path (a
+  malformed explicit `--traceparent` flag value) belongs to the deferred G-2
+  scope; **in v1 only the fail-open behavior is active and tested**, so this
+  requirement is fully covered by the fail-open assertions (no v1 test gap).
+- **FR-011** (Tier 2 — passive agent-session correlation): The CLI MUST
+  passively read a known set of host environment variables and, when present,
+  record `gen_ai.conversation.id` (from `CLAUDE_CODE_SESSION_ID`, else the
+  generic override `GH_ADDRESS_CR_CONVERSATION_ID`) plus a `.source`
+  sub-attribute naming the env var used, and `gen_ai.agent.name` (from
+  `AI_AGENT`). The source set MUST be an extensible registry. When no known
+  variable is present, the CLI MUST omit these attributes (fail-open) and MUST
+  NOT require any agent cooperation, CLI flag, or skill change. The recorded
+  values MUST pass the existing public-safe sanitation path.
+- **FR-012** (Tier 1 — VCS GitHub-PR mapping): When the invoked command's
+  arguments identify a GitHub PR (`owner/repo <pr_number>`), the CLI MUST record
+  `vcs.change.id` (the PR number) and `vcs.provider.name = github` in plain
+  text, and `vcs.repository.name` as a **stable, deterministic opaque hash** of
+  `owner/repo` (same repo → same hash across runs). The CLI MUST NOT emit plain
+  `owner` or `vcs.repository.url.full`. It MUST record `vcs.change.state`
+  (open/closed/merged/wip) only when that state is already available in session
+  data at zero extra cost, and MUST omit it otherwise (no telemetry-driven
+  GitHub lookup). For commands that do not identify a PR (e.g. `version`,
+  `doctor`), all `vcs.*` attributes MUST be omitted (fail-open).
 
 ### Constitution Alignment *(mandatory)*
 
@@ -238,9 +329,10 @@ behavioral change.
   entrypoint.
 - **CLI / Agent Contract Impact**: No change to `review`, other high-level
   commands, machine summary fields, reason codes, wait states, or exit
-  codes. The only surface addition is one optional, telemetry-only flag
-  (FR-004, priority level 3) for forcing an exact trace id; it has no effect
-  on command semantics, output, or the Status-to-Action Map.
+  codes. The only potential surface addition is the deferred (G-2), optional,
+  telemetry-only `--traceparent` flag (FR-004, highest precedence); it is **not
+  built in v1** and would have no effect on command semantics, output, or the
+  Status-to-Action Map.
 - **Evidence Requirements**: Not applicable to review-item evidence — this
   feature produces observability evidence about CLI execution and agent tool
   calls, not review-resolution evidence, and MUST NOT be treated as a
@@ -264,11 +356,12 @@ behavioral change.
   investigative ambiguity (Story 1) without adding branches, flags, or
   fallbacks beyond the documented three-level context-linking priority
   order in FR-004, which is itself bounded and finite.
-- **Fail-Fast Behavior**: A malformed explicit `--traceparent` override flag value
-  (FR-004, priority level 3) MUST fail loudly, since the caller explicitly
-  requested exact correlation and a silently-ignored bad value would produce
-  misleading trace data. All other context-linking inputs (`TRACEPARENT`,
-  parent process id) MUST fail open per FR-005.
+- **Fail-Fast Behavior**: A malformed explicit `--traceparent` flag value
+  (FR-004, highest precedence — **deferred G-2**) would fail loudly when built,
+  since the caller explicitly requested exact correlation and a silently-ignored
+  bad value would produce misleading trace data. In v1, all context-linking
+  inputs (`TRACEPARENT` env, parent process id, session env, VCS args) fail open
+  per FR-005/FR-010; there is no v1 fail-loud path.
 
 ### Key Entities
 
@@ -282,6 +375,14 @@ behavioral change.
 - **Caller Trace Context**: The externally-supplied correlation identifier
   (from `TRACEPARENT`, OS parent process id, or the explicit override flag)
   used to link the CLI process span to the calling agent's own trace.
+- **Agent Session Context** (Tier 2): The passively-detected, public-safe
+  session/agent identity (`gen_ai.conversation.id` from a host env registry,
+  `gen_ai.agent.name` from `AI_AGENT`) that groups all CLI invocations of one
+  agent session by attribute — independent of trace-context propagation.
+- **VCS Change Context** (Tier 1): The GitHub-PR identity derived from the
+  command arguments — `vcs.change.id` (PR number), `vcs.provider.name`, and a
+  hashed `vcs.repository.name` — that ties the span to the PR being worked on
+  without leaking the private owner/repo name or URL.
 
 ## Success Criteria *(mandatory)*
 
@@ -313,15 +414,30 @@ behavioral change.
   (missing/garbled `TRACEPARENT`, unavailable parent process id) still
   completes with its original exit code in 100% of cases — telemetry never
   changes functional CLI behavior.
+- **SC-007** (Tier 2, v1-testable): When the host exports a session identifier,
+  multiple CLI invocations from the same agent session carry an identical
+  `gen_ai.conversation.id`, so an operator can retrieve the full set of that
+  session's CLI activity by a single attribute filter — no `TRACEPARENT` and no
+  secondary log cross-referencing required.
+- **SC-008** (Tier 1, v1-testable): CLI activity for a given GitHub PR is
+  retrievable by filtering on `vcs.change.id` + hashed `vcs.repository.name`,
+  and zero sampled spans expose the plain private owner name or repository URL.
 
 ## Assumptions
 
 - "AI agent" callers in scope include, but are not limited to, Claude Code,
   Codex, and other automation that invokes `gh-address-cr` as a subprocess or
   tool call; this spec does not assume a single specific agent vendor.
-- W3C Trace Context (the `traceparent` format) is adopted as the standard
-  propagation mechanism for Story 2; no other propagation format is in
-  scope.
+- W3C Trace Context (the `traceparent` format) is the standard mechanism for
+  *span-tree nesting* (Story 2), but it is dormant today (G-1). The **v1
+  correlation primitive** is Tier 2 passive session detection
+  (`gen_ai.conversation.id`), which groups a session's CLI invocations by
+  attribute without requiring the agent to run its own OTel tracer.
+- The stable hash used for `vcs.repository.name` (Tier 1) is a deterministic,
+  non-reversible digest of `owner/repo`; the specific algorithm is an
+  implementation detail fixed during planning, not a user-facing contract, and
+  need not be cryptographically strong — only stable and collision-resistant
+  enough to group per repository.
 - Because `gh-address-cr` is inherently an AI-agent-facing control plane
   (per existing project scope), GenAI tool-call attributes (Story 3) are
   populated on every invocation rather than conditionally gated on detecting

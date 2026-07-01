@@ -32,6 +32,12 @@ Expected assertions (map to contract IDs):
 - `process.parent_pid` present, span trace id unchanged by it (C-6).
 - Malformed `TRACEPARENT` env → root span, unchanged exit code (C-7/C-8).
 - Well-formed `TRACEPARENT` env → span parent == injected trace id (C-7 dormant).
+- Tier 2: with `CLAUDE_CODE_SESSION_ID` set, two invocations carry an identical
+  `gen_ai.conversation.id` (+ `.source`) and `gen_ai.agent.name`; with none set,
+  all three absent (C-11).
+- Tier 1: a PR-scoped run (`review acme/widgets 123`) has `vcs.change.id=="123"`,
+  `vcs.provider.name=="github"`, hashed `vcs.repository.name`, and **no** plain
+  `owner`/URL anywhere on the span; a non-PR run (`version`) has no `vcs.*` (C-12).
 
 ## 2. Smoke checks
 ```bash
