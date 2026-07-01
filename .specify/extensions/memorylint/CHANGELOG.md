@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apply` staleness-check failure message now explicitly directs the user to re-run
   `/speckit-memorylint-audit` (a common trigger is an `agent-context` block update between audit
   and apply).
-- Declared Spec Kit compatibility raised to `>=0.12.0`.
+- Declared Spec Kit compatibility remains `>=0.11.0`.
 
 ## [1.5.1] - 2026-05-29
 ### Added
