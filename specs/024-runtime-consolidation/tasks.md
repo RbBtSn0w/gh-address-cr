@@ -64,8 +64,8 @@ effects, deterministic across runs).
 
 ### Tests for User Story 1 (write first, must fail)
 
-- [ ] T007 [P] [US1] Contract test: `RuntimeAuthorityMap` accepts exactly one owner per axis and raises fail-loud `DUPLICATE_STATE_OWNER` on a duplicate-owner fixture, in `tests/consolidation/test_authority_map.py`; git commit -m "test: assert duplicate state owner fails loud"
-- [ ] T008 [P] [US1] Contract test: every axis is present during partial migration (FR-019) in `tests/consolidation/test_authority_map.py`; git commit -m "test: assert all axes present during partial migration"
+- [x] T007 [P] [US1] Contract test: `RuntimeAuthorityMap` accepts exactly one owner per axis and raises fail-loud `DUPLICATE_STATE_OWNER` on a duplicate-owner fixture, in `tests/consolidation/test_authority_map.py`; git commit -m "test: assert duplicate state owner fails loud"
+- [x] T008 [P] [US1] Contract test: every axis is present during partial migration (FR-019) in `tests/consolidation/test_authority_map.py`; git commit -m "test: assert all axes present during partial migration"
 - [ ] T009 [P] [US1] Replay test: `ParityObserver` produces a deterministic `parity-report.v1` for the same `fact_digest` with `side_effects_executed == 0`, in `tests/consolidation/test_parity_observation.py`; git commit -m "test: assert parity observer is deterministic and side-effect free"
 - [ ] T010 [P] [US1] Replay test: parity compares projection, policy decision, and planned-command digests; an injected candidate divergence populates `differences`, in `tests/consolidation/test_parity_observation.py`; git commit -m "test: assert candidate divergence is reported in parity differences"
 - [ ] T011 [P] [US1] Guard test: parity observation performs zero GitHub calls (inject a client that raises on any call) in `tests/consolidation/test_parity_observation.py`; git commit -m "test: assert parity observation performs zero GitHub calls"
