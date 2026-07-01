@@ -75,8 +75,8 @@ effects, deterministic across runs).
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Implement `RuntimeAuthorityMap` dataclass with per-axis validation and `to_dict()`/`authority-map.v1` serialization in `src/gh_address_cr/core/consolidation/authority_map.py`; git commit -m "feat: implement RuntimeAuthorityMap with axis validation"
-- [ ] T016 [US1] Implement the `AuthorityMap` projection (derive owners for the active runtime, fail loud on duplicate/ambiguous ownership) in `src/gh_address_cr/core/consolidation/authority_map.py`; git commit -m "feat: implement AuthorityMap projection with duplicate owner detection"
+- [x] T015 [US1] Implement `RuntimeAuthorityMap` dataclass with per-axis validation and `to_dict()`/`authority-map.v1` serialization in `src/gh_address_cr/core/consolidation/authority_map.py`; git commit -m "feat: implement RuntimeAuthorityMap with axis validation"
+- [x] T016 [US1] Implement the `AuthorityMap` projection (derive owners for the active runtime, fail loud on duplicate/ambiguous ownership) in `src/gh_address_cr/core/consolidation/authority_map.py`; git commit -m "feat: implement AuthorityMap projection with duplicate owner detection"
 - [ ] T017 [US1] Implement `ParityObservation` dataclass and `parity-report.v1` serialization in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: implement ParityObservation schema serialization"
 - [ ] T018 [US1] Implement `ParityObserver.observe(slice_id, facts)` replaying facts through the legacy projection and a registered pluggable candidate-projection hook (the pilot registers a synthetic candidate; the real check-axis kernel projection is deferred to the slice's own migration), comparing projection/decision using `runtime_kernel` projections+policies, in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: implement ParityObserver fact replay execution"
 - [ ] T019 [US1] Extend `ParityObserver` to compare planned commands by idempotency key + `planned_command_digest` without executing them in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: extend ParityObserver to compare planned command digests"

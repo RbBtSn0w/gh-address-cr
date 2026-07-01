@@ -10,6 +10,18 @@ from __future__ import annotations
 from enum import Enum
 
 
+class ConsolidationError(Exception):
+    """Fail-loud error for the consolidation framework.
+
+    Carries a machine-readable ``reason_code`` (see ``core.protocol_codes``) so
+    CLI surfaces and tests can assert the exact failure without string matching.
+    """
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(message)
+
+
 class StateAxis(str, Enum):
     """A runtime state axis that a migration slice can transfer ownership of.
 
