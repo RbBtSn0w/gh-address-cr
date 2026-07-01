@@ -125,13 +125,13 @@ the next (FR-009).
 
 **Independent Test**: OTel still traces the core CLI invocation (SC-005); core flows complete with internal telemetry absent (SC-006); single-agent path works without orchestrator.
 
-- [ ] T026 [US4] Shrink the internal telemetry cluster (`src/gh_address_cr/core/telemetry.py` + `telemetry_models/telemetry_reporting/telemetry_safety/telemetry_health.py`) to a minimal optional, off-by-default, fail-open hook; delete attribution/fingerprint/coverage machinery no longer required; remove its now-dead tests
-- [ ] T027 [US4] Remove/fold `src/gh_address_cr/core/host_telemetry/` and delete any OTel plumbing/instrumentation that only served a removed subsystem — **without touching** the OTLP root span in `src/gh_address_cr/telemetry.py` + `src/gh_address_cr/__main__.py` (FR-006: OTel of the surviving core journey stays)
-- [ ] T028 [US4] Decouple the `final-gate` efficiency-report from the shrunk telemetry so `commands/final_gate.py` degrades the audit-summary text gracefully (fail-open) and never the verdict
-- [ ] T029 [US4] Version bump + help/metavar for any removed public `telemetry` subcommand surface (G1, FR-008/SC-008): update `src/gh_address_cr/cli.py` help/metavar and confirm a removed `telemetry` subcommand exits non-zero as unknown while preserved telemetry behavior is unchanged
-- [ ] T030 [P] [US4] Demote `orchestrator/` to an optional extra: keep the default single-agent `agent` path working without it; confirm `commands/agent.py`'s lazy `agent orchestrate` import path is the only coupling
-- [ ] T031 [P] [US4] Update `skill/` **and repo-root docs that describe telemetry/orchestration behavior** to drop references to the removed telemetry subcommands / removed orchestration guidance in the same change (FR-011, FR-017)
-- [ ] T032 [US4] Verify US4: `grep -n "start_as_current_span\|run_traced" src/gh_address_cr/telemetry.py src/gh_address_cr/__main__.py` still present (OTel intact, SC-005); core `review`/`resolve`/`final-gate` complete with internal telemetry disabled/absent (SC-006); single-agent path works; run the verification harness (green)
+- [X] T026 [US4] Shrink the internal telemetry cluster (`src/gh_address_cr/core/telemetry.py` + `telemetry_models/telemetry_reporting/telemetry_safety/telemetry_health.py`) to a minimal optional, off-by-default, fail-open hook; delete attribution/fingerprint/coverage machinery no longer required; remove its now-dead tests
+- [X] T027 [US4] Remove/fold `src/gh_address_cr/core/host_telemetry/` and delete any OTel plumbing/instrumentation that only served a removed subsystem — **without touching** the OTLP root span in `src/gh_address_cr/telemetry.py` + `src/gh_address_cr/__main__.py` (FR-006: OTel of the surviving core journey stays)
+- [X] T028 [US4] Decouple the `final-gate` efficiency-report from the shrunk telemetry so `commands/final_gate.py` degrades the audit-summary text gracefully (fail-open) and never the verdict
+- [X] T029 [US4] Version bump + help/metavar for any removed public `telemetry` subcommand surface (G1, FR-008/SC-008): update `src/gh_address_cr/cli.py` help/metavar and confirm a removed `telemetry` subcommand exits non-zero as unknown while preserved telemetry behavior is unchanged
+- [X] T030 [P] [US4] Demote `orchestrator/` to an optional extra: keep the default single-agent `agent` path working without it; confirm `commands/agent.py`'s lazy `agent orchestrate` import path is the only coupling
+- [X] T031 [P] [US4] Update `skill/` **and repo-root docs that describe telemetry/orchestration behavior** to drop references to the removed telemetry subcommands / removed orchestration guidance in the same change (FR-011, FR-017)
+- [X] T032 [US4] Verify US4: `grep -n "start_as_current_span\|run_traced" src/gh_address_cr/telemetry.py src/gh_address_cr/__main__.py` still present (OTel intact, SC-005); core `review`/`resolve`/`final-gate` complete with internal telemetry disabled/absent (SC-006); single-agent path works; run the verification harness (green)
 
 **Checkpoint**: largest weight down; OpenTelemetry preserved as live observability, no shell.
 
@@ -139,10 +139,10 @@ the next (FR-009).
 
 ## Phase 8: Polish & Cross-Cutting Verification
 
-- [ ] T033 [P] Confirm SC-004: ≥4,500 LOC (src+test) removed across US1–US3 (`git diff --stat` against the pre-reduction base); core-command machine summaries unchanged vs `.core-contract-before.txt`
-- [ ] T034 [P] Confirm SC-012: `grep -rniE "consolidation|evaluation" skill/` returns zero references to removed commands, and `grep -rniE "dual-engine|runtime kernel|kernel review-state-machine|orchestrator" skill/` leaves only intentional surviving references; installed skill instructs only the reduced surface and surviving architecture
-- [ ] T035 [P] Final residual docs sweep: confirm repo-root docs (`README.md` and any developer docs) contain no stale references that escaped the story-local doc sync tasks, and reconcile any remaining reduced-surface / single-engine wording gaps
-- [ ] T036 Final full verification: `pip install -e .`, `ruff check src tests`, `python3 -m unittest discover -s tests` (green), `python3 -m gh_address_cr --help`, core `review`/`threads`/`final-gate` smoke, protected-layer survival assertion, and confirm the `mypy` strict ratchet does not regress; validate `quickstart.md` scenarios US5→US4 end-to-end
+- [X] T033 [P] Confirm SC-004: ≥4,500 LOC (src+test) removed across US1–US3 (measure branch-level diff from the pre-reduction base, e.g. `git diff --numstat $(git merge-base HEAD origin/main)..HEAD -- src tests`); core-command machine summaries unchanged vs `.core-contract-before.txt`
+- [X] T034 [P] Confirm SC-012: `grep -rniE "consolidation|evaluation" skill/` returns zero references to removed commands, and `grep -rniE "dual-engine|runtime kernel|kernel review-state-machine|orchestrator" skill/` leaves only intentional surviving references; installed skill instructs only the reduced surface and surviving architecture
+- [X] T035 [P] Final residual docs sweep: confirm repo-root docs (`README.md` and any developer docs) contain no stale references that escaped the story-local doc sync tasks, and reconcile any remaining reduced-surface / single-engine wording gaps
+- [X] T036 Final full verification: `pip install -e .`, `ruff check src tests`, `python3 -m unittest discover -s tests` (green), `python3 -m gh_address_cr --help`, core `review`/`threads`/`final-gate` smoke, protected-layer survival assertion, and confirm the `mypy` strict ratchet does not regress; validate `quickstart.md` scenarios US5→US4 end-to-end
 
 ---
 
@@ -181,3 +181,8 @@ Setup (T001-T002) → Foundational (T003) → US5 (P0, T004-T010) → US1 (T011-
 - **Protected baseline is inviolable:** the core journey + OpenTelemetry-of-that-journey
   survive every stage (survival asserted by the harness); business function first,
   OTel rides with it.
+
+## Phase 9: Convergence
+
+- [X] T037 Remove residual `__pycache__` package directories under `src/gh_address_cr/core/consolidation/` and `src/gh_address_cr/core/evaluation/`, and add a regression check proving those removed packages are fully absent per SC-001 (partial)
+- [X] T038 Prune or explicitly archive stale repo-root developer docs under `docs/superpowers/` that still describe removed telemetry subcommands / host-hook behavior as live usage per FR-011 (partial)

@@ -176,14 +176,13 @@ Pick one intake route by what you already have; all converge on the same PR sess
 | Fixed Markdown `finding` blocks only | `<producer> | gh-address-cr review-to-findings <r> <pr> --input - > findings.json`, then `findings`/`review --input` |
 | GitHub review threads only | `gh-address-cr review <r> <pr> --auto-simple` (alias: `address`) |
 
-## Telemetry Import Decision Table (#124)
+## Telemetry Coverage Decision Table (#124)
 
-Telemetry is optional, PR-scoped, and never mutates review state.
+Telemetry is optional, PR-scoped, runtime-owned observed evidence, and never
+mutates review state.
 
 | You have | Run |
 | --- | --- |
-| Generic agent JSONL | `gh-address-cr telemetry ingest <r> <pr> --source <source> --format agent-jsonl --input <path>|-` |
-| Codex native session log | Auto-discovered by `final-gate` from the packaged `codex` profile when `CODEX_THREAD_ID` is available |
-| Codex host aggregate JSON | `gh-address-cr telemetry ingest <r> <pr> --source codex --format codex-host-json --input <path>|-` |
-| A safe JSONL feed the host can hand the gate | `export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path>` before `final-gate` (auto-imported) |
-| Just want the report | `gh-address-cr telemetry summary <r> <pr> --format markdown` |
+| Measured validation timing | Record `--validation "<cmd>=passed@<n>ms"` (or `@<n>s`) before `final-gate` |
+| A normal single-agent PR flow | Run `review` / `address` / `agent resolve` / `agent publish` / `final-gate`; telemetry coverage is reported by `final-gate` |
+| Coverage is `runtime-only` or `unavailable` | Re-run the same PR flow and ensure real timing is recorded in `--validation` values |

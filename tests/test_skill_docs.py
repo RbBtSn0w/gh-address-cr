@@ -134,7 +134,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "/gh-address-cr agent publish <owner/repo> <pr_number>",
             "/gh-address-cr agent leases <owner/repo> <pr_number>",
             "/gh-address-cr agent reclaim <owner/repo> <pr_number>",
-            "/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit>",
+            "/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit|autopilot>",
         ):
             with self.subTest(command=command):
                 self.assertIn(command, text)
@@ -195,8 +195,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "findings --input <json|->",
             "adapter <adapter_cmd...>",
             "doctor",
-            "telemetry ingest",
-            "telemetry summary",
             "command-session --input <operations.json|->",
             "final-gate",
             "review-to-findings --input <finding-blocks.md|->",
@@ -227,13 +225,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "publish",
             "leases",
             "reclaim",
-            "orchestrate start",
-            "orchestrate step",
-            "orchestrate status",
-            "orchestrate resume",
-            "orchestrate stop",
-            "orchestrate submit",
-            "orchestrate autopilot",
+            "orchestrate start/status/step/resume/stop/submit/autopilot",
         ):
             with self.subTest(command=command):
                 self.assertIn(command, section)
@@ -749,26 +741,19 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("completion_summary", cli_text)
         self.assertIn("compact metrics line", readme_text)
 
-    def test_skill_documents_external_agent_telemetry_contract(self):
+    def test_skill_documents_runtime_telemetry_summary_contract(self):
         skill_text = SKILL_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         openai_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
 
-        self.assertIn("gh-address-cr telemetry ingest <owner/repo> <pr_number>", skill_text)
-        self.assertIn("gh-address-cr telemetry summary <owner/repo> <pr_number>", skill_text)
-        self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", skill_text)
-        self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", protocol_text)
-        self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", openai_text)
-        self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", readme_text)
         self.assertIn("complete", skill_text)
         self.assertIn("partial", skill_text)
         self.assertIn("runtime-only", skill_text)
         self.assertIn("unavailable", skill_text)
-        self.assertIn("Generic agent telemetry uses JSONL", protocol_text)
-        self.assertIn("source_session_id", protocol_text)
-        self.assertIn("correlation_id", protocol_text)
-        self.assertIn("Do not include tokens", protocol_text)
+        self.assertIn("runtime telemetry", skill_text)
+        self.assertIn("Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`", protocol_text)
+        self.assertNotIn("telemetry summary", readme_text)
         self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)
         self.assertNotIn("Clarify, defer, and reject responses require `reply_markdown` and validation evidence.", protocol_text)
-        self.assertIn("gh-address-cr telemetry ingest", openai_text)
+        self.assertNotIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", openai_text)

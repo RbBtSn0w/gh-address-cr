@@ -28,7 +28,6 @@ from gh_address_cr.commands.high_level import (
     HighLevelReviewRuntime,
     summary_commands,
 )
-from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
 from gh_address_cr.core.io import write_json_atomic
@@ -57,7 +56,6 @@ PUBLIC_COMMANDS = {
     "command-session",
     "doctor",
     "final-gate",
-    "telemetry",
 }
 PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
 OUTPUT_FLAGS = {"--machine", "--human"}
@@ -754,7 +752,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -781,9 +779,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>\n"
             "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files\n"
             "  gh-address-cr final-gate owner/repo 123\n"
-            "  gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl\n"
-            "  gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]\n"
-            "  gh-address-cr telemetry doctor owner/repo 123 [--format json|markdown]\n"
             "  gh-address-cr command-session --input commands.json\n"
         ),
     )
@@ -824,15 +819,6 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
         if args.machine and "--machine" not in passthrough:
             passthrough.append("--machine")
         return handle_final_gate(args.repo, args.pr_number, passthrough)
-
-    if args.command == "telemetry":
-        if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
-            print(
-                "--machine, --human, --lean, and --summary are not supported for telemetry commands.",
-                file=sys.stderr,
-            )
-            return 2
-        return handle_telemetry_command(args.repo, args.pr_number, args.args)
 
     if args.command == "command-session":
         if args.machine or args.human:

@@ -112,6 +112,13 @@ removed architecture is still described as live after its story lands.
 
 ## Final acceptance
 
-- ≥4,500 LOC (src+test) removed across US1–US3 (SC-004).
+- ≥4,500 LOC (src+test) removed across US1–US3 (SC-004), measured from the
+  pre-reduction base to the current feature branch rather than from the current
+  working tree. Recommended command:
+
+```bash
+git diff --numstat "$(git merge-base HEAD origin/main)..HEAD" -- src tests
+```
+
 - Full suite green; `ruff` clean; core smoke intact; OpenTelemetry intact.
 - Constitution amended (MAJOR + Sync Impact Report); AGENTS.md consistent; skill clean.

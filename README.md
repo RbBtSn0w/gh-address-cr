@@ -150,8 +150,6 @@ Primary commands:
 - `review`
 - `address`
 - `final-gate`
-- `telemetry ingest`
-- `telemetry summary`
 
 Advanced integration commands:
 
@@ -169,7 +167,6 @@ Advanced integration commands:
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
-- `agent orchestrate autopilot`
 - `command-session`
 - `doctor`
 
@@ -177,45 +174,11 @@ High-level commands emit machine-readable JSON summaries by default. Use
 `--human` when a person needs narrative output and `--lean` where supported for
 low-token agent context.
 
-Telemetry commands are PR-scoped and do not mutate review item state:
-
-```bash
-gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input agent-telemetry.jsonl
-gh-address-cr telemetry summary owner/repo 123 --format markdown
-gh-address-cr telemetry doctor owner/repo 123
-gh-address-cr telemetry ingest owner/repo 123 --source codex --format codex-host-json --input codex-host.json
-```
-
-Assistant hosts can also provide a final-gate ingestion hook by setting:
-
-```bash
-export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=agent-telemetry.jsonl
-export GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE=assistant-host
-gh-address-cr final-gate owner/repo 123
-```
-
-`GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`. The hook uses
-the same telemetry ingestion contract before final-gate artifacts are written.
-When `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` is not set, `final-gate` can
-auto-discover first-party Claude Code and Codex native session logs through
-packaged host profiles. Codex native capture emits the same `agent-jsonl`
-contract as other hosts; `codex-host-json` remains available for explicit
-aggregate Codex exports.
-
 Every final efficiency summary reports one coverage label: `complete`,
-`partial`, `runtime-only`, or `unavailable`. Imported events are normalized to
-runtime-owned `event_fingerprint` values; duplicate or overlapping imports are
-reported through `accepted_fingerprints` and `duplicate_fingerprints` without
-inflating counts, durations, or slowest-operation rankings. Corrupted external
-telemetry remains fail-open for review and final-gate flows, while telemetry
-commands fail loudly with reason codes and diagnostics.
-
-Use `telemetry doctor` when coverage is `runtime-only` or `unavailable`, or
-when the efficiency report contains `cli_health_issues`. The doctor report
-checks packaged Codex/Claude Code profiles, host session environment, transcript
-discovery, PR attribution window availability, telemetry storage, and the latest
-CLI machine `reason_code`/`next_action` so telemetry can point to concrete
-repair work instead of only reporting slow or missing events.
+`partial`, `runtime-only`, or `unavailable`. The runtime records process and
+workflow telemetry for the surviving core path and keeps telemetry fail-open:
+reduced coverage is reported in the summary, but it does not change the review
+verdict by itself.
 For GitHub review-thread replies, the single mutating entrypoint is
 `agent resolve`; it records classification internally, so no separate
 `agent classify` round-trip is needed. Shared files/validation evidence is not the
@@ -229,8 +192,8 @@ When `resolve` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
 write a fillable `batch-response-skeleton.json` before `agent resolve --batch`.
 
 When exactly one PR session is cached, PR-scoped commands such as `address`,
-`review`, `threads`, `final-gate`, and `telemetry summary` may omit
-`<owner/repo> <pr_number>`. No-session and multi-session cases fail loud with
+`review`, `threads`, and `final-gate` may omit `<owner/repo> <pr_number>`.
+No-session and multi-session cases fail loud with
 `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`.
 
 Use `agent resolve --trivial` only for documentation or typo-only GitHub review
@@ -248,9 +211,10 @@ compatibility path, but JSON avoids whitespace-sensitive parsing.
 inside one process and returns one result per operation. Failed operations do
 not suppress later operations.
 
-`agent orchestrate autopilot` is guarded dry-run planning by default. It emits a
-deterministic plan for classify, lease, submit, publish, and final-gate steps.
-Side-effecting autopilot execution is not enabled in this v1 contract.
+`agent orchestrate` remains an optional advanced surface. The default supported
+path is still single-agent `review` / `address` / `agent resolve` /
+`agent publish` / `final-gate`; no orchestration session is required for normal
+PR handling.
 
 ## Runtime and adapter boundary
 
