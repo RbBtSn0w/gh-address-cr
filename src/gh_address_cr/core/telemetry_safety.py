@@ -11,8 +11,14 @@ import json
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
+
+from gh_address_cr.core.otel_semconv import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_CONVERSATION_ID,
+)
 
 UNSAFE_METADATA_KEYS = {
     "token",
@@ -366,4 +372,42 @@ def safe_command_args(argv: list[str]) -> list[str]:
                 res.append("[redacted]")
             else:
                 res.append(arg)
+    return res
+
+
+def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
+    """Detect and return agent session correlation attributes from environ.
+
+    Precedence: GH_ADDRESS_CR_CONVERSATION_ID first, then CLAUDE_CODE_SESSION_ID.
+    """
+    res = {}
+
+    # 1. Conversation ID
+    conv_id = None
+    source = None
+    if "GH_ADDRESS_CR_CONVERSATION_ID" in environ:
+        conv_id = environ["GH_ADDRESS_CR_CONVERSATION_ID"]
+        source = "GH_ADDRESS_CR_CONVERSATION_ID"
+    elif "CLAUDE_CODE_SESSION_ID" in environ:
+        conv_id = environ["CLAUDE_CODE_SESSION_ID"]
+        source = "CLAUDE_CODE_SESSION_ID"
+
+    if conv_id is not None:
+        try:
+            # Route through the public-safe path
+            safe_conv_id = _safe_identity_label(conv_id, field=source)
+            res[GEN_AI_CONVERSATION_ID] = safe_conv_id
+            res["gen_ai.conversation.id.source"] = source
+        except ValueError:
+            pass
+
+    # 2. Agent Name
+    if "AI_AGENT" in environ:
+        agent_name = environ["AI_AGENT"]
+        try:
+            safe_agent_name = _safe_identity_label(agent_name, field="AI_AGENT")
+            res[GEN_AI_AGENT_NAME] = safe_agent_name
+        except ValueError:
+            pass
+
     return res

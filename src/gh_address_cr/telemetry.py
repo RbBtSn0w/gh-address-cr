@@ -10,16 +10,19 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
 
 import requests
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
+    PROCESS_PARENT_PID,
     PROCESS_PID,
 )
 
@@ -119,22 +122,54 @@ def _shutdown_provider(provider: TracerProvider) -> None:
         return
 
 
+def resolve_parent_context(environ: Mapping[str, str]) -> Context | None:
+    """Resolve the parent context from the environment.
+
+    Extracts traceparent using TraceContextTextMapPropagator, supporting
+    both TRACEPARENT and traceparent keys. Fail-open.
+    """
+    try:
+        val = environ.get("TRACEPARENT") or environ.get("traceparent")
+        if not val:
+            return None
+        return TraceContextTextMapPropagator().extract(carrier={"traceparent": val})
+    except Exception:
+        return None
+
+
 def run_traced(
     tracer: Tracer,
     span_name: str,
     operation: Callable[[], T],
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
+    context: Context | None = None,
 ) -> T:
     """Run an operation in a span and explicitly record failures."""
+    if context is None:
+        context = resolve_parent_context(os.environ)
+
     with tracer.start_as_current_span(
         span_name,
         record_exception=False,
         set_status_on_exception=False,
+        context=context,
     ) as span:
         # Record execution identity attributes
         span.set_attribute(PROCESS_EXECUTABLE_NAME, os.path.basename(sys.executable))
         span.set_attribute(PROCESS_PID, os.getpid())
+
+        # Record parent pid fail-open
+        try:
+            span.set_attribute(PROCESS_PARENT_PID, os.getppid())
+        except Exception:
+            pass
+
+        # Record agent session correlation
+        from gh_address_cr.core.telemetry_safety import detect_agent_session
+        agent_attrs = detect_agent_session(os.environ)
+        for key, val in agent_attrs.items():
+            span.set_attribute(key, val)
 
         if attributes:
             for key, value in attributes.items():
