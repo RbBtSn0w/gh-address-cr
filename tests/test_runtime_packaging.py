@@ -670,7 +670,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('resource "requests" do', output.read_text(encoding="utf-8"))
 
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
-        text = (ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("Install the released runtime CLI", text)
         self.assertIn("pipx install gh-address-cr", text)

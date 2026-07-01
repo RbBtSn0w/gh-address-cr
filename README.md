@@ -12,8 +12,7 @@ publishes GitHub replies/resolves.
 
 > **Upgrading from 2.x?** 3.0 is a breaking release: the `agent fix`,
 > `agent trivial-fix`, `agent fix-all`, `agent resolve-stale`, and
-> `agent submit-batch` commands are replaced by a single `agent resolve`. See the
-> [3.0 migration guide](docs/migration-3.0.md).
+> `agent submit-batch` commands are replaced by a single `agent resolve`.
 
 Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `skill/SKILL.md`.
@@ -90,8 +89,16 @@ A zero unresolved-thread count alone is not sufficient.
 
 ## OpenTelemetry traces
 
-The versioned public behavior and architecture boundary are defined by
-[`otel-tracing.v1`](docs/contracts/otel-tracing-v1.md).
+`otel-tracing.v1` is the versioned public behavior and architecture boundary
+for process tracing.
+
+- Process-level observability owner: the CLI process
+- External inputs: command invocation and environment-based telemetry opt-out
+- Span projection: one root span per CLI invocation
+- Export policy: OTLP/HTTP through the configured relay
+- Side-effect boundary: tracing observes runtime behavior and remains separate from PR-scoped workflow telemetry
+- Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
+- Recovery and replay: tracing is fail-open and must not block command completion
 
 The installed CLI exports one process-level OTLP/HTTP trace to:
 
@@ -100,7 +107,8 @@ https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
 
 The service name is `gh-address-cr`. The client contains no API key; the
-Cloudflare Worker injects backend credentials. To disable network tracing:
+Cloudflare Worker as the security relay injects backend credentials. To disable
+network tracing:
 
 ```bash
 export DISABLE_TELEMETRY=1
@@ -216,6 +224,21 @@ path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
 PR handling.
 
+## Architecture and Packaging
+
+`gh-address-cr` is the preferred and stable automation entrypoint.
+
+- Published skill payload: the entire `skill/` directory
+- Repo-level verification harness: `tests/`
+- If a rule or instruction must ship with the installed skill, it must live inside `skill/`
+
+When blast radius requires kernel-style modeling, the design follows
+`external facts -> events -> projections -> policy -> command plan/outbox`.
+Architecture Preflight must name the artifact truth boundary, any
+self-referential completion risk, and the recovery model. If review feedback
+keeps adding edge cases without reducing state space, stop expanding
+conditionals and update the architecture spec instead.
+
 ## Runtime and adapter boundary
 
 The deterministic implementation belongs to the Python runtime package:
@@ -242,16 +265,230 @@ The OpenAI curated Plugin Directory is not a self-service publish target in this
 repository. The committed `.agents/plugins/marketplace.json` points at the
 generated community distribution artifact.
 
-## Documentation
+## Command Topology (ASCII)
 
-- [3.0 migration guide](docs/migration-3.0.md)
-- [Installation and distribution](docs/installation.md)
-- [CLI reference](docs/cli-reference.md)
-- [Workflows](docs/workflows.md)
-- [Architecture](docs/architecture.md)
-- [Compatibility inventory](docs/compatibility-inventory.md)
-- [Development and release](docs/development.md)
-- [Troubleshooting](docs/troubleshooting.md)
+```text
+active-pr
+review
+review [--auto-simple]
+address [--lean|--summary]
+threads [--lean|--summary]
+findings --input <json|->
+adapter <adapter_cmd...>
+doctor
+command-session --input <operations.json|->
+final-gate
+review-to-findings --input <finding-blocks.md|->
+submit-feedback
+submit-action <action-request.json>
+version / --version
+--machine
+--human
+
+manifest
+classify
+next --role <role>
+next --batch
+submit
+resolve <item_id>
+resolve --trivial
+resolve --batch
+resolve --homogeneous-reason
+resolve --stale --match-files
+evidence add
+evidence list
+publish
+leases
+reclaim
+orchestrate start/status/step/resume/stop/submit/autopilot
+
+WAITING_FOR_EXTERNAL_REVIEW
+WAITING_FOR_SIMPLE_ADDRESS
+PER_THREAD_EVIDENCE_REQUIRED -> next --batch
+producer output
+session items
+agent classify
+ActionResponse or BatchActionResponse
+agent submit or agent resolve --batch
+accepted evidence
+agent publish (GitHub thread side effects only)
+final-gate
+completion_summary_line
+completion_summary
+runtime-owned leases + request_id values
+agent resolve --batch validates lease ownership and request context
+```
+
+Stable machine summary fields:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `commands`
+- `exit_code`
+
+Use `--lean` or `--summary` when reducing token load. Machine summaries also
+surface the current-login pending review count.
+
+## Advanced / Developer Integration
+
+The public user flow above does not require manual `--input`, producer
+selection, or mode routing.
+
+For explicit automation or repository-root invocation, the main command is:
+`gh-address-cr review <owner/repo> <pr_number>`.
+
+`adapter` is for adapter-produced findings plus PR orchestration.
+
+`review` handles both local findings and GitHub review threads in one run.
+`findings` handles local findings only; it does not process GitHub review
+threads.
+
+`findings --sync` requires an explicit `--source`.
+`review-to-findings` does not accept arbitrary Markdown. It only accepts the
+fixed `finding` block format.
+
+The wrapper `--human` and `--machine` belong before `adapter`; remaining flags
+are passed through to the adapter command unchanged.
+
+```text
+$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
+$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
+gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py
+gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
+```
+
+Any external review producer may satisfy the handoff.
+
+- `producer-request.md`
+- `incoming-findings.json`
+- `incoming-findings.md`
+- `WAITING_FOR_EXTERNAL_REVIEW`
+- source-scoped producer result
+- `[]` is a valid explicit producer result
+
+Published fix replies surface exactly one canonical `Review signal:` line when
+severity or reviewer priority evidence exists.
+
+## Workflow Patterns
+
+## Automatic Review Workflow
+
+1. Run `gh-address-cr review <owner/repo> <pr_number>`.
+2. Ingest existing findings or wait for external review handoff.
+3. Resolve items through `agent resolve` and publish through `agent publish`.
+4. Finish with `final-gate`.
+
+for GitHub thread `fix`: `fix_reply`
+- `summary`
+- `files`
+
+for GitHub thread `clarify` or `defer`: `reply_markdown`
+
+Minimal user prompt:
+
+`Run gh-address-cr review for this PR, follow the machine summary, and finish with final-gate.`
+
+Ready-to-use prompt variants:
+
+- Short generic:
+  `Review this PR through gh-address-cr and follow the runtime status map.`
+- Explicit `$code-review` producer:
+  `Run the external review producer, convert fixed finding blocks if needed, ingest them, then continue gh-address-cr review.`
+- Any external review producer:
+  `Any external review producer may satisfy the handoff if it emits findings JSON or fixed finding blocks.`
+
+如果你自己就是外部 review producer，请直接输出 findings JSON 或固定 `finding` blocks。
+
+不要只输出普通 Markdown 审查报告。
+
+Advanced producer categories:
+
+- adapter-produced findings
+- fixed `finding` block conversion
+- explicit `findings --sync --source <producer>` handoff
+
+## Runtime Distribution
+
+Install the released runtime CLI:
+
+- `pipx install gh-address-cr`
+- `uv tool install gh-address-cr`
+
+Install with Homebrew:
+
+- `brew tap RbBtSn0w/tap`
+- `brew install gh-address-cr`
+- `brew upgrade gh-address-cr`
+- `brew test gh-address-cr`
+
+GitHub-direct runtime validation install:
+
+- `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git`
+
+Local editable development install:
+
+- `python3 -m pip install -e .`
+
+Packaged skill install:
+
+- `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill`
+
+The packaged skill does not install the runtime CLI package.
+
+Upgrade from skill-shim usage:
+
+- Install the runtime CLI with `pipx` or `uv tool`
+- Keep `--skill skill` for the packaged adapter
+- Homebrew tap distribution remains available
+
+## Compatibility Inventory
+
+Preserved Public Contracts:
+
+- `review`
+- `address`
+- `threads`
+- `findings`
+- `submit-action`
+- `final-gate`
+
+Unsupported historical root commands:
+
+- `legacy_scripts`
+
+Removed Or Unsupported Surfaces:
+
+- removed migration/evaluation command surfaces
+- legacy script entrypoints
+
+Internal Naming Rule:
+
+- the shipped runtime and packaged skill remain `gh-address-cr`
+
+## Troubleshooting
+
+When machine output is ambiguous, inspect:
+
+- `status`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `commands`
+- `artifact_path`
+
+Outdated / `STALE` GitHub threads still count as unresolved until explicitly
+handled. Prefer `agent resolve --stale --match-files`.
+
+## Additional Repository Files
+
 - [Privacy](PRIVACY.md)
 - [Security](SECURITY.md)
 - [Terms](TERMS.md)

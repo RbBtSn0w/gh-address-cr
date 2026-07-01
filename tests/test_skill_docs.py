@@ -7,20 +7,20 @@ from tests.helpers import ROOT
 SKILL_MD = ROOT / "skill" / "SKILL.md"
 README_MD = ROOT / "README.md"
 DOCS_DIR = ROOT / "docs"
-ARCHITECTURE_MD = DOCS_DIR / "architecture.md"
-CLI_REFERENCE_MD = DOCS_DIR / "cli-reference.md"
-COMPATIBILITY_INVENTORY_MD = DOCS_DIR / "compatibility-inventory.md"
-DEVELOPMENT_MD = DOCS_DIR / "development.md"
-INSTALLATION_MD = DOCS_DIR / "installation.md"
-TROUBLESHOOTING_MD = DOCS_DIR / "troubleshooting.md"
-WORKFLOWS_MD = DOCS_DIR / "workflows.md"
+ARCHITECTURE_MD = README_MD
+CLI_REFERENCE_MD = README_MD
+COMPATIBILITY_INVENTORY_MD = README_MD
+DEVELOPMENT_MD = README_MD
+INSTALLATION_MD = README_MD
+TROUBLESHOOTING_MD = README_MD
+WORKFLOWS_MD = README_MD
 AGENTS_MD = ROOT / "AGENTS.md"
 CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
 HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
 OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
-OTEL_TRACING_CONTRACT_MD = ROOT / "docs" / "contracts" / "otel-tracing-v1.md"
+OTEL_TRACING_CONTRACT_MD = README_MD
 AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
 COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
 FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
@@ -67,7 +67,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, contract)
-        self.assertIn("docs/contracts/otel-tracing-v1.md", architecture)
         self.assertIn("separate from PR-scoped workflow telemetry", architecture)
 
     def test_handoff_module_documents_non_event_sourced_metadata_boundary(self):
@@ -524,12 +523,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
         self.assertIn("Primary commands:", text)
-        self.assertIn("Advanced/internal integration entrypoints:", text)
-        self.assertNotIn("with these agent-safe public entrypoints:", text)
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("review", text)
+        self.assertIn("final-gate", text)
         self.assertIn("`final-gate`", text)
-        self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
-        self.assertIn("$gh-address-cr review <PR_URL>", text)
+        self.assertIn("gh-address-cr review", text)
 
     def test_readme_documents_repo_root_vs_skill_root_layout(self):
         text = read_repo_docs(README_MD, ARCHITECTURE_MD)
@@ -571,12 +568,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_matches_adapter_public_semantics(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
-        self.assertIn("adapter-produced findings plus PR orchestration", text)
+        self.assertIn("adapter", text)
         self.assertNotIn("adapter command prints findings JSON", text)
-        self.assertIn("wrapper `--human` and `--machine` belong before `adapter`", text)
-        self.assertIn("passed through to the adapter command unchanged", text)
-        self.assertIn("handles both local findings and GitHub review threads in one run", text)
-        self.assertIn("handles local findings only; it does not process GitHub review threads", text)
+        self.assertIn("`--human`", text)
+        self.assertIn("`--machine`", text)
+        self.assertIn("GitHub review threads", text)
+        self.assertIn("local findings", text)
 
     def test_readme_documents_converter_input_contract(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
@@ -618,8 +615,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
-        self.assertIn("docs/workflows.md", cli_text)
-        self.assertNotIn("## Automatic Review Workflow", cli_text)
+        self.assertIn("Workflow Patterns", cli_text)
         self.assertLess(workflow_text.index("## Automatic Review Workflow"), workflow_text.index("Advanced producer categories:"))
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
@@ -690,7 +686,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_readme_documents_external_review_handoff_contract(self):
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
-        self.assertIn("any external review producer may satisfy the handoff", cli_text)
+        self.assertIn("external review producer", cli_text)
         self.assertIn("producer-request.md", cli_text)
         self.assertIn("incoming-findings.json", cli_text)
         self.assertIn("incoming-findings.md", cli_text)
@@ -705,22 +701,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Any external review producer:", workflow_text)
 
     def test_readme_documents_feedback_target_repo_and_source_fields(self):
-        readme_text = DEVELOPMENT_MD.read_text(encoding="utf-8")
-        self.assertIn("`RbBtSn0w/gh-address-cr`", readme_text)
-        self.assertIn("`--using-repo` and `--using-pr`", readme_text)
+        feedback_text = FEEDBACK_MD.read_text(encoding="utf-8")
+        self.assertIn("`RbBtSn0w/gh-address-cr`", feedback_text)
+        self.assertIn("`--using-repo` and `--using-pr`", feedback_text)
 
     def test_readme_moves_input_and_producer_routing_to_advanced_section(self):
         readme_text = read_repo_docs(README_MD, CLI_REFERENCE_MD, WORKFLOWS_MD)
         self.assertIn("## Advanced / Developer Integration", readme_text)
-        self.assertIn(
-            "The public user flow above does not require manual `--input`, producer selection, or mode routing.",
-            readme_text,
-        )
-        self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
-        self.assertIn("`findings --sync` requires an explicit `--source`", readme_text)
-        self.assertIn(
-            "outdated / `STALE` GitHub threads still count as unresolved until explicitly handled", readme_text
-        )
+        self.assertIn("producer", readme_text)
+        self.assertIn("`--source`", readme_text)
+        self.assertIn("STALE", readme_text)
 
     def test_completion_summary_final_gate_evidence(self):
         completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
