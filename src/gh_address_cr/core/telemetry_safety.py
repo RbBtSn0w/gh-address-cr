@@ -339,3 +339,31 @@ def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, 
         inline_env[key] = value
         index += 1
     return argv[index:], inline_env
+
+
+def safe_command_args(argv: list[str]) -> list[str]:
+    """Sanitize command line arguments to redact sensitive inputs for telemetry."""
+    res = []
+    for arg in argv:
+        if "=" in arg:
+            lhs, eq, rhs = arg.partition("=")
+            key = lhs.lstrip("-")
+            if (
+                _is_unsafe_metadata_key(key)
+                or _contains_token_marker(rhs)
+                or _contains_private_identifier(rhs)
+                or _looks_like_unnecessary_absolute_path(rhs)
+            ):
+                res.append(f"{lhs}=[redacted]")
+            else:
+                res.append(arg)
+        else:
+            if (
+                _contains_token_marker(arg)
+                or _contains_private_identifier(arg)
+                or _looks_like_unnecessary_absolute_path(arg)
+            ):
+                res.append("[redacted]")
+            else:
+                res.append(arg)
+    return res
