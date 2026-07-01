@@ -411,3 +411,13 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
             pass
 
     return res
+
+
+def derive_tool_name(argv: list[str] | None) -> str:
+    """Derive the GenAI tool name from the command line arguments."""
+    if not argv:
+        return "gh-address-cr"
+    first = argv[0]
+    if first.startswith("-") or first in ("help", "version"):
+        return "gh-address-cr"
+    return first
