@@ -1,7 +1,15 @@
 {
   "info": {
     "name": "gh-address-cr",
-    "version": "1.2.3"
+    "version": "1.2.3",
+    "requires_dist": [
+      "opentelemetry-api>=1.30",
+      "opentelemetry-exporter-otlp-proto-http>=1.30",
+      "opentelemetry-sdk>=1.30",
+      "packaging>=24",
+      "requests>=2.7",
+      "coverage>=7; extra == \"dev\""
+    ]
   },
   "urls": [
     {
@@ -20,5 +28,283 @@
         "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       }
     }
-  ]
+  ],
+  "dependency_metadata": {
+    "packaging": {
+      "info": {
+        "name": "packaging",
+        "version": "26.2"
+      },
+      "urls": [
+        {
+          "filename": "packaging-26.2.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz",
+          "digests": {
+            "sha256": "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"
+          }
+        }
+      ]
+    },
+    "requests": {
+      "info": {
+        "name": "requests",
+        "version": "2.34.2",
+        "requires_dist": [
+          "charset_normalizer<4,>=2",
+          "idna<4,>=2.5",
+          "urllib3<3,>=1.26",
+          "certifi>=2023.5.7"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "requests-2.34.2.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/requests-2.34.2.tar.gz",
+          "digests": {
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        }
+      ]
+    },
+    "charset-normalizer": {
+      "info": {
+        "name": "charset-normalizer",
+        "version": "3.4.0"
+      },
+      "urls": [
+        {
+          "filename": "charset-normalizer-3.4.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/charset-normalizer-3.4.0.tar.gz",
+          "digests": {
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        }
+      ]
+    },
+    "idna": {
+      "info": {
+        "name": "idna",
+        "version": "3.10"
+      },
+      "urls": [
+        {
+          "filename": "idna-3.10.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/idna-3.10.tar.gz",
+          "digests": {
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        }
+      ]
+    },
+    "urllib3": {
+      "info": {
+        "name": "urllib3",
+        "version": "2.2.3"
+      },
+      "urls": [
+        {
+          "filename": "urllib3-2.2.3.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/urllib3-2.2.3.tar.gz",
+          "digests": {
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          }
+        }
+      ]
+    },
+    "certifi": {
+      "info": {
+        "name": "certifi",
+        "version": "2024.12.14"
+      },
+      "urls": [
+        {
+          "filename": "certifi-2024.12.14.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/certifi-2024.12.14.tar.gz",
+          "digests": {
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+          }
+        }
+      ]
+    },
+    "opentelemetry-api": {
+      "info": {
+        "name": "opentelemetry-api",
+        "version": "1.43.0",
+        "requires_dist": [
+          "typing-extensions>=4.5.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_api-1.43.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-api-1.43.0.tar.gz",
+          "digests": {
+            "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        }
+      ]
+    },
+    "opentelemetry-sdk": {
+      "info": {
+        "name": "opentelemetry-sdk",
+        "version": "1.43.0",
+        "requires_dist": [
+          "opentelemetry-api==1.43.0",
+          "opentelemetry-semantic-conventions==0.64b0",
+          "typing-extensions>=4.5.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_sdk-1.43.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-sdk-1.43.0.tar.gz",
+          "digests": {
+            "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+          }
+        }
+      ]
+    },
+    "opentelemetry-exporter-otlp-proto-http": {
+      "info": {
+        "name": "opentelemetry-exporter-otlp-proto-http",
+        "version": "1.43.0",
+        "requires_dist": [
+          "googleapis-common-protos~=1.52",
+          "opentelemetry-api~=1.15",
+          "opentelemetry-exporter-otlp-proto-common==1.43.0",
+          "opentelemetry-proto==1.43.0",
+          "opentelemetry-sdk~=1.43.0",
+          "requests~=2.7",
+          "typing-extensions>=4.5.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_exporter_otlp_proto_http-1.43.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-exporter-otlp-proto-http-1.43.0.tar.gz",
+          "digests": {
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+          }
+        }
+      ]
+    },
+    "opentelemetry-exporter-otlp-proto-common": {
+      "info": {
+        "name": "opentelemetry-exporter-otlp-proto-common",
+        "version": "1.43.0",
+        "requires_dist": [
+          "opentelemetry-proto==1.43.0",
+          "typing-extensions>=4.5.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_exporter_otlp_proto_common-1.43.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-exporter-otlp-proto-common-1.43.0.tar.gz",
+          "digests": {
+            "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+          }
+        }
+      ]
+    },
+    "opentelemetry-proto": {
+      "info": {
+        "name": "opentelemetry-proto",
+        "version": "1.43.0",
+        "requires_dist": [
+          "googleapis-common-protos~=1.52"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_proto-1.43.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-proto-1.43.0.tar.gz",
+          "digests": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    "opentelemetry-semantic-conventions": {
+      "info": {
+        "name": "opentelemetry-semantic-conventions",
+        "version": "0.64b0",
+        "requires_dist": [
+          "opentelemetry-api==1.43.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "opentelemetry_semantic_conventions-0.64b0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/opentelemetry-semantic-conventions-0.64b0.tar.gz",
+          "digests": {
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ]
+    },
+    "googleapis-common-protos": {
+      "info": {
+        "name": "googleapis-common-protos",
+        "version": "1.69.2",
+        "requires_dist": [
+          "protobuf>=5.0"
+        ]
+      },
+      "urls": [
+        {
+          "filename": "googleapis_common_protos-1.69.2.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/googleapis-common-protos-1.69.2.tar.gz",
+          "digests": {
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        }
+      ]
+    },
+    "protobuf": {
+      "info": {
+        "name": "protobuf",
+        "version": "7.35.1"
+      },
+      "urls": [
+        {
+          "filename": "protobuf-7.35.1.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/protobuf-7.35.1.tar.gz",
+          "digests": {
+            "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        }
+      ]
+    },
+    "typing-extensions": {
+      "info": {
+        "name": "typing-extensions",
+        "version": "4.15.0"
+      },
+      "urls": [
+        {
+          "filename": "typing_extensions-4.15.0.tar.gz",
+          "packagetype": "sdist",
+          "url": "https://example.test/typing-extensions-4.15.0.tar.gz",
+          "digests": {
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        }
+      ]
+    }
+  }
 }

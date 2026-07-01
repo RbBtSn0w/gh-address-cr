@@ -1,3 +1,5 @@
+import importlib.util
+import io
 import json
 import os
 import re
@@ -6,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
@@ -20,6 +23,14 @@ CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 VERSION_SYNC_SCRIPT = ROOT / "scripts" / "set_package_version.py"
 HOMEBREW_FORMULA_RENDERER = ROOT / "scripts" / "release" / "render_homebrew_formula.py"
 PYPI_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "release" / "pypi_gh_address_cr_1_2_3.json"
+
+
+def load_homebrew_formula_renderer():
+    spec = importlib.util.spec_from_file_location("render_homebrew_formula", HOMEBREW_FORMULA_RENDERER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 class RuntimePackagingTest(PythonScriptTestCase):
@@ -447,11 +458,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("Formula/gh-address-cr.rb", text)
         self.assertIn('HOMEBREW_NO_INSTALL_FROM_API: "1"', text)
         self.assertIn("Sync rendered Homebrew formula into tapped clone", text)
-        self.assertIn("continue-on-error: true", text)
-        self.assertIn(
-            'brew update-python-resources --package-name gh-address-cr --version "$PACKAGE_VERSION" RbBtSn0w/tap/gh-address-cr',
-            text,
-        )
+        self.assertNotIn("brew update-python-resources", text)
         self.assertIn("brew audit --formula --strict RbBtSn0w/tap/gh-address-cr", text)
         self.assertIn("brew install --build-from-source RbBtSn0w/tap/gh-address-cr", text)
         self.assertIn("brew test RbBtSn0w/tap/gh-address-cr", text)
@@ -482,7 +489,26 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "RENDERED")
         self.assertEqual(payload["version"], "1.2.3")
         self.assertEqual(payload["sha256"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        self.assertEqual(payload["resources"], ["packaging"])
+        self.assertEqual(
+            payload["resources"],
+            [
+                "certifi",
+                "charset-normalizer",
+                "googleapis-common-protos",
+                "idna",
+                "opentelemetry-api",
+                "opentelemetry-exporter-otlp-proto-common",
+                "opentelemetry-exporter-otlp-proto-http",
+                "opentelemetry-proto",
+                "opentelemetry-sdk",
+                "opentelemetry-semantic-conventions",
+                "packaging",
+                "protobuf",
+                "requests",
+                "typing-extensions",
+                "urllib3",
+            ],
+        )
 
         formula = output.read_text(encoding="utf-8")
         self.assertIn("class GhAddressCr < Formula", formula)
@@ -490,6 +516,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
+        self.assertIn('resource "requests" do', formula)
+        self.assertIn('resource "certifi" do', formula)
+        self.assertIn('resource "opentelemetry-exporter-otlp-proto-http" do', formula)
         self.assertIn('resource "packaging" do', formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
         self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
@@ -497,6 +526,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
+        self.assertNotIn('resource "coverage" do', formula)
         self.assertNotIn("whl", formula)
 
     def test_homebrew_formula_renderer_prefers_tar_gz_when_pypi_lists_multiple_sdists(self):
@@ -550,6 +580,94 @@ class RuntimePackagingTest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["url"].endswith(".tar.gz"))
         self.assertEqual(payload["sha256"], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+    def test_homebrew_formula_renderer_prefers_versions_with_sdists(self):
+        renderer = load_homebrew_formula_renderer()
+
+        selected = renderer.select_dependency_version(
+            "example-package",
+            ">=1.0",
+            {
+                "info": {"version": "2.0"},
+                "releases": {
+                    "1.0": [
+                        {"packagetype": "sdist", "url": "https://example.test/example-package-1.0.tar.gz"},
+                    ],
+                    "2.0": [
+                        {"packagetype": "bdist_wheel", "url": "https://example.test/example-package-2.0.whl"},
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(selected, "1.0")
+
+    def test_homebrew_formula_renderer_fetches_root_metadata_for_network_mode(self):
+        renderer = load_homebrew_formula_renderer()
+        output = Path(self.temp_dir.name) / "gh-address-cr.rb"
+        root_payload = {
+            "info": {
+                "name": "gh-address-cr",
+                "version": "1.2.3",
+                "requires_dist": ["requests>=2.7"],
+            },
+            "urls": [
+                {
+                    "filename": "gh_address_cr-1.2.3.tar.gz",
+                    "packagetype": "sdist",
+                    "url": "https://example.test/gh_address_cr-1.2.3.tar.gz",
+                    "digests": {
+                        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    },
+                }
+            ],
+        }
+        requests_index = {
+            "info": {"name": "requests", "version": "2.34.2"},
+            "releases": {
+                "2.34.2": [
+                    {
+                        "packagetype": "sdist",
+                        "url": "https://example.test/requests-2.34.2.tar.gz",
+                    }
+                ]
+            },
+        }
+        requests_payload = {
+            "info": {"name": "requests", "version": "2.34.2"},
+            "urls": [
+                {
+                    "filename": "requests-2.34.2.tar.gz",
+                    "packagetype": "sdist",
+                    "url": "https://example.test/requests-2.34.2.tar.gz",
+                    "digests": {
+                        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+                    },
+                }
+            ],
+        }
+
+        stdout = io.StringIO()
+        with mock.patch.object(renderer, "fetch_pypi_json", side_effect=[root_payload, root_payload, requests_payload]):
+            with mock.patch.object(renderer, "fetch_package_index", return_value=requests_index):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        str(HOMEBREW_FORMULA_RENDERER),
+                        "--version",
+                        "1.2.3",
+                        "--output",
+                        str(output),
+                    ],
+                ):
+                    with mock.patch("sys.stdout", stdout):
+                        result = renderer.main()
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "RENDERED")
+        self.assertIn('resource "requests" do', output.read_text(encoding="utf-8"))
 
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = (ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
