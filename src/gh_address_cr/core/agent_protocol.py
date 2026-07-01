@@ -602,6 +602,46 @@ def _prepare_action_response_submission(
     lease_id = _required_response_field(response, "lease_id", status=rejected_status)
     lease = session.get("leases", {}).get(lease_id)
     if not isinstance(lease, dict):
+        rebound = _recover_rebound_github_thread_lease(
+            session,
+            response,
+            item_id=str(response.get("item_id") or ""),
+            current_lease_id=lease_id,
+        )
+        if rebound is not None:
+            lease_id = str(rebound["lease_id"])
+            lease = rebound["lease"]
+            item_id = str(rebound["item_id"])
+            item = rebound["item"]
+            evidence_ref_reason = _expand_evidence_ref(session, response)
+            if evidence_ref_reason:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    evidence_ref_reason,
+                    status=rejected_status,
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            reason_code = _validate_response(response, item)
+            if reason_code:
+                _raise_response_rejected(
+                    session,
+                    ledger,
+                    response,
+                    reason_code,
+                    status=rejected_status,
+                    item_id=item_id,
+                    lease_id=lease_id,
+                )
+            return {
+                "lease_id": lease_id,
+                "lease": lease,
+                "item_id": item_id,
+                "item": item,
+                "expected_request_hash": str(_get(lease, "request_hash") or ""),
+            }
         _record_response_rejected(session, ledger, response, "LEASE_NOT_FOUND")
         raise WorkflowError(
             status=rejected_status,
@@ -689,6 +729,42 @@ def _prepare_action_response_submission(
     }
 
 
+def _recover_rebound_github_thread_lease(
+    session: dict[str, Any],
+    response: dict[str, Any],
+    *,
+    item_id: str,
+    current_lease_id: str | None = None,
+) -> dict[str, Any] | None:
+    normalized_item_id = item_id.strip()
+    if not normalized_item_id:
+        return None
+    item = _items(session).get(normalized_item_id)
+    if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
+        return None
+    if str(response.get("resolution") or "") != "fix":
+        return None
+    state = str(item.get("state") or "").lower()
+    if state not in {"stale", "claimed"} and not bool(item.get("is_outdated")):
+        return None
+    rebound_lease = _active_fixer_lease_for_item(
+        session,
+        normalized_item_id,
+        agent_id=str(response.get("agent_id") or ""),
+    )
+    if not isinstance(rebound_lease, dict):
+        return None
+    rebound_lease_id = str(_get(rebound_lease, "lease_id") or "")
+    if not rebound_lease_id or rebound_lease_id == str(current_lease_id or ""):
+        return None
+    return {
+        "lease_id": rebound_lease_id,
+        "lease": rebound_lease,
+        "item_id": normalized_item_id,
+        "item": item,
+    }
+
+
 def _accept_action_response_submission(
     session: dict[str, Any],
     ledger: EvidenceLedger,
@@ -715,18 +791,42 @@ def _accept_action_response_submission(
         )
         accept_lease(session, lease_id, now=now)
     except LeaseSubmissionError as exc:
-        _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
-        payload: dict[str, Any] = {"item_id": item_id, "lease_id": lease_id}
-        if exc.recovery_state:
-            payload["lease_recovery"] = exc.recovery_state
-        raise WorkflowError(
-            status=rejected_status,
-            reason_code=exc.reason_code,
-            waiting_on="lease",
-            exit_code=5,
-            message=str(exc),
-            payload=payload,
-        ) from exc
+        rebound = None
+        if exc.reason_code in {"STALE_LEASE", "LEASE_NOT_FOUND"}:
+            rebound = _recover_rebound_github_thread_lease(
+                session,
+                response,
+                item_id=item_id,
+                current_lease_id=lease_id,
+            )
+        if rebound is None:
+            _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
+            payload: dict[str, Any] = {"item_id": item_id, "lease_id": lease_id}
+            if exc.recovery_state:
+                payload["lease_recovery"] = exc.recovery_state
+            raise WorkflowError(
+                status=rejected_status,
+                reason_code=exc.reason_code,
+                waiting_on="lease",
+                exit_code=5,
+                message=str(exc),
+                payload=payload,
+            ) from exc
+        lease_id = str(rebound["lease_id"])
+        lease = rebound["lease"]
+        prepared["lease_id"] = lease_id
+        prepared["lease"] = lease
+        prepared["expected_request_hash"] = str(_get(lease, "request_hash") or "")
+        submit_lease(
+            session,
+            lease_id,
+            agent_id=str(response["agent_id"]),
+            role=str(lease["role"]),
+            item_id=item_id,
+            request_hash=str(prepared["expected_request_hash"]),
+            now=now,
+        )
+        accept_lease(session, lease_id, now=now)
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
         _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)

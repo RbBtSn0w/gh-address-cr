@@ -2,7 +2,7 @@
 
 **Feature Branch**: `025-complexity-reduction`  
 **Created**: 2026-07-01  
-**Status**: Draft  
+**Status**: Verified
 **Input**: User description: "反向 analyze:从 core 用户旅程倒推,找出不在主路径上的每一层,逐个评估删除影响,输出可删除层清单与分阶段收敛路线图。保留 OpenTelemetry。"
 
 ## Clarifications

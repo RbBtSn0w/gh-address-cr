@@ -1281,6 +1281,157 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 self.assertEqual(result.counts["blocking_items_count"], 0)
                 self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
 
+    def test_stale_thread_submit_recovers_when_original_lease_was_released(self):
+        repo = "owner/repo"
+        pr_number = "507"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, stale_github_thread_item())
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_STALE",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect, needs null guard.",
+                )
+                original = agent_protocol.issue_action_request(repo, pr_number, role="fixer", agent_id="fixer-1")
+                original_request = json.loads(Path(original["request_path"]).read_text(encoding="utf-8"))
+                original_response_path = Path(tmp) / "stale-released-lease-response.json"
+                original_response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": original_request["request_id"],
+                            "lease_id": original_request["lease_id"],
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "note": "Fixed stale thread issue after lease turnover.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [
+                                {
+                                    "command": "python3 -m unittest tests.test_native_workflow.StaleThreadClaimabilityTests",
+                                    "result": "passed",
+                                }
+                            ],
+                            "fix_reply": {
+                                "summary": "Fixed stale thread issue.",
+                                "commit_hash": "abc123",
+                                "files": ["src/example.py"],
+                                "why": "The null guard now handles the stale review case.",
+                            },
+                            "item_id": "github-thread:THREAD_STALE",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                session = manager.load()
+                from gh_address_cr.core import leases as lease_module
+
+                released = lease_module.release_self_stale_lease(
+                    session,
+                    "github-thread:THREAD_STALE",
+                    agent_id="fixer-1",
+                )
+                self.assertTrue(released)
+                manager.save(session)
+
+                refreshed = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                )
+
+                accepted = agent_protocol.submit_action_response(
+                    repo,
+                    pr_number,
+                    response_path=original_response_path,
+                )
+
+                session = manager.load()
+                self.assertEqual(refreshed["status"], "ACTION_REQUESTED")
+                self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
+                self.assertEqual(accepted["item_id"], "github-thread:THREAD_STALE")
+                self.assertEqual(session["items"]["github-thread:THREAD_STALE"]["state"], "publish_ready")
+
+    def test_stale_thread_submit_recovers_when_original_lease_is_missing(self):
+        repo = "owner/repo"
+        pr_number = "508"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, stale_github_thread_item())
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_STALE",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect, needs null guard.",
+                )
+                original = agent_protocol.issue_action_request(repo, pr_number, role="fixer", agent_id="fixer-1")
+                original_request = json.loads(Path(original["request_path"]).read_text(encoding="utf-8"))
+                original_response_path = Path(tmp) / "stale-missing-lease-response.json"
+                original_response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": original_request["request_id"],
+                            "lease_id": original_request["lease_id"],
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "note": "Fixed stale thread issue after lease turnover.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [
+                                {
+                                    "command": "python3 -m unittest tests.test_native_workflow.StaleThreadClaimabilityTests",
+                                    "result": "passed",
+                                }
+                            ],
+                            "fix_reply": {
+                                "summary": "Fixed stale thread issue.",
+                                "commit_hash": "abc123",
+                                "files": ["src/example.py"],
+                                "why": "The null guard now handles the stale review case.",
+                            },
+                            "item_id": "github-thread:THREAD_STALE",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                session = manager.load()
+                from gh_address_cr.core import leases as lease_module
+
+                released = lease_module.release_self_stale_lease(
+                    session,
+                    "github-thread:THREAD_STALE",
+                    agent_id="fixer-1",
+                )
+                self.assertTrue(released)
+                session["leases"].pop(original["lease_id"], None)
+                manager.save(session)
+
+                refreshed = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                )
+
+                accepted = agent_protocol.submit_action_response(
+                    repo,
+                    pr_number,
+                    response_path=original_response_path,
+                )
+
+                session = manager.load()
+                self.assertEqual(refreshed["status"], "ACTION_REQUESTED")
+                self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
+                self.assertEqual(accepted["item_id"], "github-thread:THREAD_STALE")
+                self.assertEqual(session["items"]["github-thread:THREAD_STALE"]["state"], "publish_ready")
+
     def test_stale_thread_classify_then_fixer_claim(self):
         from gh_address_cr.core import agent_protocol
 
@@ -1359,6 +1510,66 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 self.assertEqual(len(client.replies), 1)
                 self.assertNotIn("Agent Efficiency Summary", client.replies[0])
                 self.assertNotIn("1 tools invoked", client.replies[0])
+
+    def test_publish_waits_briefly_for_remote_thread_resolution_to_settle(self):
+        from gh_address_cr.core import publisher
+
+        class FakeGitHubClient:
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+                self.list_threads_calls = 0
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+            def list_threads(self, repo, pr_number):
+                self.list_threads_calls += 1
+                if self.list_threads_calls == 1:
+                    return [{"id": "THREAD_1", "isResolved": False, "isOutdated": False}]
+                return [{"id": "THREAD_1", "isResolved": True, "isOutdated": False}]
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "fix",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+                "fix_reply": {
+                    "commit_hash": "abc123",
+                    "files": ["src/example.py"],
+                    "summary": "Fixed thread issue.",
+                    "why": "The guarded path now covers the review case.",
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+                with patch("gh_address_cr.core.publisher.time.sleep") as sleep:
+                    result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                session = manager.load()
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(session["items"]["github-thread:THREAD_1"]["state"], "closed")
+                self.assertEqual(client.list_threads_calls, 2)
+                sleep.assert_called_once()
 
 
 if __name__ == "__main__":

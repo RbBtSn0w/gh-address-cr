@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from datetime import datetime
 from typing import Any
 
@@ -226,6 +227,7 @@ def _execute_single_publish_plan(
             payload={"thread_id": thread_id, "idempotency_key": resolve_key},
             timestamp=timestamp,
         )
+        _wait_for_remote_thread_resolution(client, repo, str(pr_number), thread_id)
 
     item["state"] = "closed"
     item["status"] = "CLOSED"
@@ -248,6 +250,35 @@ def _execute_single_publish_plan(
         timestamp=timestamp,
     )
     return item_id
+
+
+def _wait_for_remote_thread_resolution(
+    client: Any,
+    repo: str,
+    pr_number: str,
+    thread_id: str,
+    *,
+    max_attempts: int = 2,
+    sleep_seconds: float = 1.0,
+) -> None:
+    list_threads = getattr(client, "list_threads", None)
+    if not callable(list_threads):
+        return
+    for attempt in range(max_attempts):
+        try:
+            threads = list_threads(repo, pr_number)
+        except Exception:
+            return
+        for thread in threads or []:
+            if not isinstance(thread, dict):
+                continue
+            if str(thread.get("id") or "") != thread_id:
+                continue
+            if bool(thread.get("isResolved")):
+                return
+            break
+        if attempt < max_attempts - 1:
+            time.sleep(sleep_seconds)
 
 
 def publish_github_thread_responses(
