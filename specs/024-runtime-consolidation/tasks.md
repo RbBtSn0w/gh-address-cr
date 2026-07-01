@@ -45,7 +45,7 @@ story depends on. No user story work may begin until this phase is complete.
 
 - [x] T004 Define shared enums (`StateAxis` incl. `local_finding`, `Owner`, `CompatibilityDirection`, `RolloutStage`) and schema-version constants (`authority-map.v1`, `parity-report.v1`, `rollout-state.v1`, `deprecation-inventory.v1`) in `src/gh_address_cr/core/consolidation/types.py`; git commit -m "chore: define shared consolidation types and constants"
 - [x] T005 [P] Add consolidation reason codes (`DUPLICATE_STATE_OWNER`, `UNKNOWN_SLICE`, `INSUFFICIENT_EVIDENCE`, `PARITY_DIFF`, `QUALITY_REGRESSION`, `DEPRECATION_WINDOW_OPEN`) to `src/gh_address_cr/core/protocol_codes.py`; git commit -m "chore: add consolidation protocol reason codes"
-- [ ] T006 Document the Architecture Preflight owners for the pilot `slice-check-state` (facts, projection, policy, side-effect boundary, recovery) as a docstring/module header in `src/gh_address_cr/core/consolidation/__init__.py`; git commit -m "docs: document pilot slice preflight owners in module docstring"
+- [x] T006 Document the Architecture Preflight owners for the pilot `slice-check-state` (facts, projection, policy, side-effect boundary, recovery) as a docstring/module header in `src/gh_address_cr/core/consolidation/__init__.py`; git commit -m "docs: document pilot slice preflight owners in module docstring"
 
 **Checkpoint**: Shared vocabulary ready — stories can proceed.
 
