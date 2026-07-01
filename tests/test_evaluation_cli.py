@@ -72,6 +72,10 @@ class EvaluationCliTests(unittest.TestCase):
         show_code, shown = self._run(["evaluation", "show", "owner/repo", "12", "--run-id", "run-1"])
 
         self.assertEqual((rebuild_code, second_code, show_code), (0, 0, 0))
+        self.assertEqual(first["catalog_schema_version"], "evaluation-catalog.v1")
+        self.assertIn("concern_count", first)
+        self.assertIn("observation_count", first)
+        self.assertEqual(first["diagnostics"], [])
         self.assertEqual(first["source_fingerprint"], second["source_fingerprint"])
         self.assertEqual(shown["run_id"], "run-1")
         self.assertEqual((target / "session.json").read_bytes(), session_before)

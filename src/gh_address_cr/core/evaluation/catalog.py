@@ -35,13 +35,14 @@ class EvaluationCatalog:
                     """
                     CREATE TABLE catalog_meta (schema_version TEXT NOT NULL, source_fingerprint TEXT NOT NULL);
                     CREATE TABLE runs (
-                        run_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL,
                         repo TEXT NOT NULL,
                         pr_number TEXT NOT NULL,
                         runtime_version TEXT NOT NULL,
                         cohort_key TEXT NOT NULL,
                         projection_fingerprint TEXT NOT NULL UNIQUE,
-                        payload_json TEXT NOT NULL
+                        payload_json TEXT NOT NULL,
+                        PRIMARY KEY(repo, pr_number, run_id)
                     );
                     CREATE INDEX runs_version_cohort_idx ON runs(runtime_version, cohort_key);
                     CREATE INDEX runs_repo_pr_idx ON runs(repo, pr_number);
@@ -93,7 +94,16 @@ class EvaluationCatalog:
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
-        return {"status": "SUCCESS", "run_count": len(ordered), "source_fingerprint": source_fingerprint, "catalog_artifact": str(self.path)}
+        return {
+            "status": "SUCCESS",
+            "catalog_schema_version": "evaluation-catalog.v1",
+            "run_count": len(ordered),
+            "concern_count": sum(len(row.get("concerns") or []) for row in ordered),
+            "observation_count": sum(len(row.get("observations") or []) for row in ordered),
+            "diagnostics": [],
+            "source_fingerprint": source_fingerprint,
+            "catalog_artifact": str(self.path),
+        }
 
     def query_runs(self, runtime_version: str, *, cohort_key: str | None = None) -> list[dict[str, Any]]:
         if not self.path.exists():

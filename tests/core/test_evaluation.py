@@ -224,6 +224,20 @@ class EvaluationCatalogAndComparisonTests(unittest.TestCase):
 
         self.assertTrue({"runs", "concerns", "coverage", "costs", "observations", "evidence_pointers"} <= names)
 
+    def test_catalog_scopes_run_identity_by_repository_and_pr(self):
+        from gh_address_cr.core.evaluation.catalog import EvaluationCatalog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = EvaluationCatalog(Path(tmp) / "evaluation.sqlite3")
+            first = self._run("1.0", 1)
+            second = {**first, "repo": "other/repo", "projection_fingerprint": "projection-other"}
+
+            result = catalog.rebuild([first, second])
+
+            self.assertEqual(result["run_count"], 2)
+            self.assertEqual(catalog.find_run("owner/repo", "1", first["run_id"]), first)
+            self.assertEqual(catalog.find_run("other/repo", "1", first["run_id"]), second)
+
     def test_comparison_requires_samples_and_reports_distributions(self):
         from gh_address_cr.core.evaluation.comparison import compare_runs
 
