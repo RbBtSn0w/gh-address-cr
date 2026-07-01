@@ -1,3 +1,9 @@
+## [3.3.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.2...v3.3.0) (2026-07-01)
+
+### Features
+
+* Implement deterministic rollout policy and state management ([#179](https://github.com/RbBtSn0w/gh-address-cr/issues/179)) ([f3b200d](https://github.com/RbBtSn0w/gh-address-cr/commit/f3b200d3b57309219160732bdd2eb4ca3b0546ff))
+
 ## [3.2.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.1...v3.2.2) (2026-07-01)
 
 ### Bug Fixes
