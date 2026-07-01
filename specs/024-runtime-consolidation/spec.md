@@ -2,7 +2,7 @@
 
 **Feature Branch**: `024-runtime-consolidation`  
 **Created**: 2026-06-30  
-**Status**: Draft  
+**Status**: Tasked
 **Input**: User description: "Define a safe, reversible implementation contract for issue #173 runtime consolidation, using the evaluation evidence from feature 023 before removing compatibility paths or changing public defaults."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -74,7 +74,7 @@ As an engineer, I want truncation, command-session, and workflow-surface optimiz
 
 ### Functional Requirements
 
-- **FR-001**: System MUST define one authoritative owner for every migrated state axis, including review-item state, lease state, check state, side-effect execution evidence, telemetry evidence state, and final-gate eligibility.
+- **FR-001**: System MUST define one authoritative owner for every migrated state axis, including review-item state, lease state, check state, local-finding triage state, side-effect execution evidence, telemetry evidence state, and final-gate eligibility.
 - **FR-002**: System MUST model consolidation as bounded migration slices rather than one unbounded rewrite.
 - **FR-003**: Every migration slice MUST identify external facts, authoritative projection, deterministic policy, side-effect command boundary, compatibility projection, replay coverage, supported cohort, and rollback trigger.
 - **FR-004**: System MUST NOT remove a legacy path until its replacement projection, policy, side-effect boundary, recovery behavior, and executable contract tests exist.
@@ -91,7 +91,7 @@ As an engineer, I want truncation, command-session, and workflow-surface optimiz
 - **FR-015**: Every risky optimization MUST declare its expected benefit, protected outcome guardrails, cohort rules, staged enablement, stop condition, and rollback action.
 - **FR-016**: System MUST make rollback possible without rewriting authoritative facts, losing execution evidence, or relying on reporting artifacts for recovery.
 - **FR-017**: System MUST deprecate duplicate models, compatibility shims, and telemetry fields only through an explicit inventory and documented contract boundary.
-- **FR-018**: System MUST remove obsolete code, tests, docs, and skill guidance together when a deprecation gate is satisfied.
+- **FR-018**: System MUST remove obsolete code, tests, docs, and skill guidance together when a deprecation gate is satisfied. *(Deferred: this feature builds and proves the reversible framework and inventory only. No legacy path is deleted within `024`; the coordinated removal defined here executes in a follow-up slice once all prior slices reach `default` and complete their deprecation windows.)*
 - **FR-019**: System MUST expose which state axes and workflow surfaces are migrated for every partially consolidated runtime version.
 - **FR-020**: System MUST stop architecture work and revise the spec when a slice adds hidden fallbacks, artifact-backed truth, duplicate decision surfaces, or new state flags that do not reduce ambiguity.
 

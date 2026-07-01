@@ -1,0 +1,38 @@
+{
+  "description": "Supported-cohort replay facts for the slice-check-state pilot. The framework proves the reversible parity machinery over the review-thread projection; the real check-axis kernel projection (which would additionally consume check_run_observed facts) is deferred to the slice's own migration. Contains no credentials or host identifiers.",
+  "cohort": "github-review-thread",
+  "facts": [
+    {
+      "schema_version": "1.0",
+      "fact_kind": "review_thread_observed",
+      "fact_id": "fact-thread-1",
+      "observed_at": "2026-06-30T12:00:00Z",
+      "sequence": 1,
+      "payload": {
+        "thread_id": "THREAD_1",
+        "state": "open",
+        "status": "OPEN",
+        "is_resolved": false,
+        "is_outdated": false,
+        "reply_evidence_present": false,
+        "path": "src/example.py",
+        "line": 10
+      }
+    },
+    {
+      "schema_version": "1.0",
+      "fact_kind": "review_thread_observed",
+      "fact_id": "fact-thread-2",
+      "observed_at": "2026-06-30T12:00:01Z",
+      "sequence": 2,
+      "payload": {
+        "thread_id": "THREAD_2",
+        "state": "resolved",
+        "status": "RESOLVED",
+        "is_resolved": true,
+        "is_outdated": false,
+        "reply_evidence_present": true
+      }
+    }
+  ]
+}
