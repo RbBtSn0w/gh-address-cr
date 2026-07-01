@@ -59,7 +59,7 @@ class OptimizationHypothesis:
     ) -> HypothesisTransitionDecision:
         if quality_regression:
             return HypothesisTransitionDecision(False, QUALITY_REGRESSION, self.staged_enablement)
-        if target_stage == RolloutStage.DEFAULT and not durable_evidence:
+        if target_stage in {RolloutStage.DEFAULT, RolloutStage.DEPRECATING, RolloutStage.DELETED} and not durable_evidence:
             return HypothesisTransitionDecision(False, INSUFFICIENT_EVIDENCE, self.staged_enablement)
         return HypothesisTransitionDecision(True, "ROLLOUT_STAGE_CHANGED", target_stage)
 

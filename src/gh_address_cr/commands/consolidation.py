@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_address_cr import __version__
-from gh_address_cr.core.consolidation.authority_map import derive_authority_map
+from gh_address_cr.core.consolidation.authority_map import AuthorityEntry, derive_authority_map
 from gh_address_cr.core.consolidation.deprecations import default_deprecation_inventory
 from gh_address_cr.core.consolidation.evidence import (
     RolloutEvidence,
@@ -41,8 +41,8 @@ _KNOWN_SLICES = {"slice-check-state": project_review_threads}
 def _emit(payload: JsonDict, as_json: bool) -> None:
     if as_json:
         sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    else:
-        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        return
+    sys.stdout.write(_render_human(payload) + "\n")
 
 
 def _error(reason_code: str, message: str, exit_code: int = 2) -> int:
@@ -61,8 +61,8 @@ def _load_facts(path: str) -> list[JsonDict]:
 
 def _slice_owners_for_status(
     *, cohort: str, rollout_state: Any
-) -> dict[Any, tuple[Owner, CompatibilityDirection, str | None]]:
-    owners: dict[Any, tuple[Owner, CompatibilityDirection, str | None]] = {}
+) -> list[AuthorityEntry]:
+    owners: list[AuthorityEntry] = []
     for slice_state in rollout_state.slices:
         if slice_state.stage not in {RolloutStage.DEFAULT, RolloutStage.DEPRECATING, RolloutStage.DELETED}:
             continue
@@ -71,7 +71,14 @@ def _slice_owners_for_status(
             continue
         direction = CompatibilityDirection.NONE if slice_state.stage == RolloutStage.DELETED else CompatibilityDirection.LEGACY_FROM_KERNEL
         for axis in slice_def.axes:
-            owners[axis] = (Owner.KERNEL, direction, slice_state.slice_id)
+            owners.append(
+                AuthorityEntry(
+                    axis=axis,
+                    authoritative_owner=Owner.KERNEL,
+                    compatibility_direction=direction,
+                    slice_id=slice_state.slice_id,
+                )
+            )
     return owners
 
 
@@ -86,6 +93,20 @@ def _load_rollout_evidence(path: str | None, fallback_reference: str | None) -> 
     if not isinstance(payload, dict):
         raise ValueError("evidence file must contain a JSON object")
     return evaluation_to_rollout_evidence(payload)
+
+
+def _load_parity_differences(path: str | None) -> tuple[str, ...]:
+    if not path:
+        return ()
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("parity file must contain a JSON object")
+    differences = payload.get("differences")
+    if differences is None:
+        return ()
+    if not isinstance(differences, list):
+        raise ValueError("parity file differences must be a JSON array")
+    return tuple(str(item) for item in differences)
 
 
 def _handle_status(argv: list[str]) -> int:
@@ -151,6 +172,10 @@ def _handle_rollout(argv: list[str]) -> int:
         "--evidence-file",
         help="Path to an evaluation.v1 JSON object used to derive rollout evidence for default/deleted gates.",
     )
+    parser.add_argument(
+        "--parity-file",
+        help="Path to a parity-report.v1 JSON object whose differences gate rollout transitions.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit the rollout transition JSON document.")
     try:
         args = parser.parse_args(argv)
@@ -172,11 +197,15 @@ def _handle_rollout(argv: list[str]) -> int:
         evidence = _load_rollout_evidence(args.evidence_file, current_slice_state.evidence_ref)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return _error(INVALID_ARGUMENTS, f"could not load rollout evidence: {exc}")
+    try:
+        parity_differences = _load_parity_differences(args.parity_file)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return _error(INVALID_ARGUMENTS, f"could not load parity report: {exc}")
     decision = RolloutPolicy().evaluate(
         current_stage=current_slice_state.stage,
         target_stage=RolloutStage(args.target_stage),
         evidence=evidence,
-        parity_differences=(),
+        parity_differences=parity_differences,
         deprecation_window_complete=current_slice_state.deprecation_window_complete,
     )
     if not decision.allowed:
@@ -197,6 +226,7 @@ def _handle_rollout(argv: list[str]) -> int:
         "resulting_stage": decision.next_stage.value,
         "reason_code": decision.reason_code,
         "evidence": evidence.to_dict(),
+        "parity_differences": list(parity_differences),
         "state": updated.to_dict(),
         "slice": slice_def.to_dict(),
     }
@@ -216,21 +246,27 @@ def _handle_deprecations(argv: list[str]) -> int:
 
 
 def handle_consolidation_command(repo: str | None, pr_number: str | None, args: list[str]) -> int:
-    """Dispatch a ``consolidation`` subcommand. ``repo``/``pr_number`` are folded
-    back into ``args`` by the CLI, so the subcommand name leads ``args``."""
+    """Dispatch a ``consolidation`` subcommand.
 
+    The root CLI still parses the first two trailing positionals as ``repo`` and
+    ``pr_number`` placeholders before command-specific dispatch. Consolidation is
+    not PR-scoped, so we treat a recognized subcommand in ``repo`` as the real
+    subcommand and ignore accidental explicit scope values.
+    """
+
+    known_subcommands = {"status", "parity", "rollout", "deprecations", "-h", "--help"}
     argv = list(args)
-    if repo is not None:
+    if repo in known_subcommands:
         argv = [repo, *argv]
-    if pr_number is not None:
-        argv = [pr_number, *argv]
+    elif repo is not None and "/" not in repo and pr_number is None:
+        argv = [repo, *argv]
 
     if not argv or argv[0] in {"-h", "--help"}:
         sys.stdout.write(
             "Consolidation commands:\n"
             "  gh-address-cr consolidation status [--cohort <id>] [--json]\n"
             "  gh-address-cr consolidation parity --slice <id> --facts <path> [--json]\n"
-            "  gh-address-cr consolidation rollout --slice <id> --to <stage> [--evidence-file <path>] [--json]\n"
+            "  gh-address-cr consolidation rollout --slice <id> --to <stage> [--evidence-file <path>] [--parity-file <path>] [--json]\n"
             "  gh-address-cr consolidation deprecations [--json]\n"
         )
         return 0
@@ -245,3 +281,38 @@ def handle_consolidation_command(repo: str | None, pr_number: str | None, args: 
     if subcommand == "deprecations":
         return _handle_deprecations(rest)
     return _error(INVALID_ARGUMENTS, f"unknown consolidation subcommand: {subcommand}")
+
+
+def _render_human(payload: JsonDict) -> str:
+    schema = str(payload.get("schema") or "")
+    if schema == "authority-map.v1":
+        lines = [f"authority-map {payload.get('runtime_version', 'unknown')}"]
+        lines.extend(
+            f"- {row['axis']}: {row['authoritative_owner']} ({row['compatibility_direction']})"
+            for row in payload.get("axes", [])
+        )
+        return "\n".join(lines)
+    if schema == "parity-report.v1":
+        differences = payload.get("differences", [])
+        return "\n".join(
+            [
+                f"parity {payload.get('slice_id', 'unknown')}",
+                f"- side_effects_executed: {payload.get('side_effects_executed', 0)}",
+                f"- differences: {len(differences)}",
+            ]
+        )
+    if schema == "rollout-transition.v1":
+        return (
+            f"rollout {payload.get('slice_id', 'unknown')}: "
+            f"{payload.get('current_stage', 'unknown')} -> {payload.get('resulting_stage', 'unknown')} "
+            f"({payload.get('reason_code', 'UNKNOWN')})"
+        )
+    if schema == "deprecation-inventory.v1":
+        entries = payload.get("entries", [])
+        return "\n".join(
+            [
+                "deprecation-inventory",
+                f"- entries: {len(entries)}",
+            ]
+        )
+    return json.dumps(payload, indent=2, sort_keys=True)

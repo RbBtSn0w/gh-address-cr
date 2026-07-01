@@ -10,6 +10,7 @@ from gh_address_cr.core.consolidation.types import ROLLOUT_STAGE_ORDER, RolloutS
 from gh_address_cr.core.protocol_codes import (
     DEPRECATION_WINDOW_OPEN,
     INSUFFICIENT_EVIDENCE,
+    INVALID_ARGUMENTS,
     PARITY_DIFF,
     QUALITY_REGRESSION,
 )
@@ -74,22 +75,18 @@ class RolloutPolicy:
         if _stage_index(target_stage) < _stage_index(current_stage):
             return RolloutDecision(True, "ROLLBACK_REQUESTED", target_stage)
 
+        if _stage_index(target_stage) != _stage_index(current_stage) + 1:
+            return RolloutDecision(False, INVALID_ARGUMENTS, current_stage)
+
         if parity_differences and target_stage in {RolloutStage.DEFAULT, RolloutStage.DEPRECATING, RolloutStage.DELETED}:
             return RolloutDecision(False, PARITY_DIFF, current_stage)
 
-        if target_stage == RolloutStage.DEFAULT:
+        if target_stage in {RolloutStage.DEFAULT, RolloutStage.DEPRECATING, RolloutStage.DELETED}:
             if evidence is None or evidence.status != RolloutEvidenceStatus.DURABLE:
                 return RolloutDecision(False, INSUFFICIENT_EVIDENCE, current_stage)
-            return RolloutDecision(True, "ROLLOUT_STAGE_CHANGED", target_stage)
 
         if target_stage == RolloutStage.DELETED:
             if not deprecation_window_complete:
                 return RolloutDecision(False, DEPRECATION_WINDOW_OPEN, current_stage)
-            if evidence is None or evidence.status != RolloutEvidenceStatus.DURABLE:
-                return RolloutDecision(False, INSUFFICIENT_EVIDENCE, current_stage)
-            return RolloutDecision(True, "ROLLOUT_STAGE_CHANGED", target_stage)
-
-        if target_stage == RolloutStage.OPT_IN and current_stage == RolloutStage.SHADOW:
-            return RolloutDecision(True, "ROLLOUT_STAGE_CHANGED", target_stage)
 
         return RolloutDecision(True, "ROLLOUT_STAGE_CHANGED", target_stage)

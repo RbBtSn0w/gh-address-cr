@@ -9,7 +9,7 @@ it never mutates runtime state.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from gh_address_cr.core.consolidation.types import (
     AUTHORITY_MAP_SCHEMA,
@@ -83,29 +83,22 @@ class RuntimeAuthorityMap:
 
 def derive_authority_map(
     runtime_version: str,
-    slice_owners: dict[StateAxis, tuple[Owner, CompatibilityDirection, str | None]],
+    slice_owners: Mapping[StateAxis, tuple[Owner, CompatibilityDirection, str | None]] | Iterable[AuthorityEntry],
 ) -> RuntimeAuthorityMap:
     """Project a *complete* authority map for the active runtime (FR-019).
 
     Axes claimed by a migration slice adopt the declared owner and compatibility
     direction; every unlisted axis defaults to the legacy owner so a partially
-    consolidated runtime still exposes exactly one owner per axis. Fails loud if
-    a caller declares the same axis twice with conflicting owners.
+    consolidated runtime still exposes exactly one owner per axis. Callers may
+    pass an iterable of ``AuthorityEntry`` declarations so duplicate axis claims
+    remain detectable at this interface boundary.
     """
 
-    entries: list[AuthorityEntry] = []
+    declared_entries = _declared_entries(slice_owners)
+    declared_axes = {entry.axis for entry in declared_entries}
+    entries: list[AuthorityEntry] = list(declared_entries)
     for axis in StateAxis:
-        if axis in slice_owners:
-            owner, direction, slice_id = slice_owners[axis]
-            entries.append(
-                AuthorityEntry(
-                    axis=axis,
-                    authoritative_owner=owner,
-                    compatibility_direction=direction,
-                    slice_id=slice_id,
-                )
-            )
-        else:
+        if axis not in declared_axes:
             entries.append(
                 AuthorityEntry(
                     axis=axis,
@@ -114,3 +107,19 @@ def derive_authority_map(
                 )
             )
     return RuntimeAuthorityMap.from_entries(runtime_version, entries)
+
+
+def _declared_entries(
+    slice_owners: Mapping[StateAxis, tuple[Owner, CompatibilityDirection, str | None]] | Iterable[AuthorityEntry],
+) -> list[AuthorityEntry]:
+    if isinstance(slice_owners, Mapping):
+        return [
+            AuthorityEntry(
+                axis=axis,
+                authoritative_owner=owner,
+                compatibility_direction=direction,
+                slice_id=slice_id,
+            )
+            for axis, (owner, direction, slice_id) in slice_owners.items()
+        ]
+    return list(slice_owners)

@@ -56,9 +56,16 @@ class RolloutState:
         slices_payload = payload.get("slices")
         if slices_payload is None:
             slices_payload = default_rollout_slice_states()
+        else:
+            slices_payload = _merge_slice_payloads(slices_payload, default_rollout_slice_states())
         hypotheses_payload = payload.get("hypotheses")
         if hypotheses_payload is None:
             hypotheses_payload = [state.to_dict() for state in default_hypothesis_states()]
+        else:
+            hypotheses_payload = _merge_hypothesis_payloads(
+                hypotheses_payload,
+                [state.to_dict() for state in default_hypothesis_states()],
+            )
         slices = tuple(RolloutSliceState.from_dict(row) for row in slices_payload)
         hypotheses = tuple(
             HypothesisState(
@@ -197,3 +204,25 @@ def load_or_default(path: str | Path | None = None) -> RolloutState:
 
 def default_rollout_state() -> RolloutState:
     return RolloutState.default()
+
+
+def _merge_slice_payloads(
+    existing_payloads: Any,
+    default_payloads: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    existing_rows = [dict(row) for row in existing_payloads]
+    existing_ids = {str(row.get("slice_id") or "") for row in existing_rows if row.get("slice_id")}
+    merged = list(existing_rows)
+    merged.extend(default_row for default_row in default_payloads if default_row["slice_id"] not in existing_ids)
+    return merged
+
+
+def _merge_hypothesis_payloads(
+    existing_payloads: Any,
+    default_payloads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing_rows = [dict(row) for row in existing_payloads]
+    existing_ids = {str(row.get("hypothesis_id") or "") for row in existing_rows if row.get("hypothesis_id")}
+    merged = list(existing_rows)
+    merged.extend(default_row for default_row in default_payloads if default_row["hypothesis_id"] not in existing_ids)
+    return merged

@@ -14,12 +14,13 @@ All commands are read-only or control-only; none execute review side effects.
 |---------|---------|--------|--------------|
 | `consolidation status [--cohort <id>]` | Show the Runtime Authority Map + each slice's rollout stage for a projected cohort | `authority-map.v1` + slice stages (JSON with `--json`) | none |
 | `consolidation parity --slice <id>` | Replay recorded facts through legacy vs candidate paths | `parity-report.v1` | none (0 GitHub calls) |
-| `consolidation rollout --slice <id> --to <stage> [--evidence-file <path>]` | Request a stage transition; deterministically allowed or blocked | transition result + reason code | atomic `rollout-state.v1` write only |
+| `consolidation rollout --slice <id> --to <stage> [--evidence-file <path>] [--parity-file <path>]` | Request a stage transition; deterministically allowed or blocked | transition result + reason code | atomic `rollout-state.v1` write only |
 | `consolidation deprecations` | List the duplicate models/shims/telemetry fields queued for removal and their contract boundary | `deprecation-inventory.v1` (JSON with `--json`) | none |
 
 **Guarantees**: unknown slice → fail loud (non-zero, `UNKNOWN_SLICE`); a blocked
 transition returns a reason code (`INSUFFICIENT_EVIDENCE`, `PARITY_DIFF`,
-`QUALITY_REGRESSION`, `DEPRECATION_WINDOW_OPEN`) and non-zero exit; `status`
+`QUALITY_REGRESSION`, `DEPRECATION_WINDOW_OPEN`, `INVALID_ARGUMENTS`) and
+non-zero exit; `status`
 keeps legacy authority during `shadow`/`opt_in` and switches an axis to kernel
 authority only once the slice reaches `default` or later for the projected
 supported cohort; exit codes, reason codes, and JSON field names are
@@ -91,12 +92,14 @@ rollout unless explained/versioned (FR-008, SC-004).
 ```
 
 Invariants: `stage` advances only when the Migration Slice Acceptance Gate holds;
-`default`/`deleted` reject provisional-only evidence (SC-008); `deleted` requires
-`deprecation_window_complete == true`; `consolidation rollout` accepts durable
+`default`/`deprecating`/`deleted` reject provisional-only evidence (SC-008);
+`deleted` requires `deprecation_window_complete == true`; `consolidation rollout`
+rejects forward stage skipping with `INVALID_ARGUMENTS`, accepts durable
 feature-023 proof from an explicit `--evidence-file` `evaluation.v1` document
-rather than inferring truth from session state or reports; rollback is a stage
-transition that never rewrites runtime facts (FR-016, SC-005). The three
-`hypotheses` accept/reject/roll back independently (SC-007).
+rather than inferring truth from session state or reports, and accepts
+`parity-report.v1` differences from an explicit `--parity-file` gate input;
+rollback is a stage transition that never rewrites runtime facts (FR-016,
+SC-005). The three `hypotheses` accept/reject/roll back independently (SC-007).
 
 ## `deprecation-inventory.v1` (FR-017)
 

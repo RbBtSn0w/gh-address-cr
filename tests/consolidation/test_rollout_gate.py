@@ -7,7 +7,12 @@ import unittest
 from gh_address_cr.core.consolidation.evidence import RolloutEvidence, RolloutEvidenceStatus
 from gh_address_cr.core.consolidation.rollout import RollbackTrigger, RolloutPolicy
 from gh_address_cr.core.consolidation.types import RolloutStage
-from gh_address_cr.core.protocol_codes import DEPRECATION_WINDOW_OPEN, INSUFFICIENT_EVIDENCE, PARITY_DIFF
+from gh_address_cr.core.protocol_codes import (
+    DEPRECATION_WINDOW_OPEN,
+    INSUFFICIENT_EVIDENCE,
+    INVALID_ARGUMENTS,
+    PARITY_DIFF,
+)
 
 
 class RolloutGateTests(unittest.TestCase):
@@ -68,6 +73,34 @@ class RolloutGateTests(unittest.TestCase):
         )
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason_code, DEPRECATION_WINDOW_OPEN)
+
+    def test_default_to_deprecating_requires_durable_evidence(self) -> None:
+        policy = RolloutPolicy()
+        decision = policy.evaluate(
+            current_stage=RolloutStage.DEFAULT,
+            target_stage=RolloutStage.DEPRECATING,
+            evidence=RolloutEvidence(
+                status=RolloutEvidenceStatus.PROVISIONAL,
+                reason_code="PROVISIONAL_EVIDENCE",
+                reference="evaluation.v1:run-cohort-abc",
+            ),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason_code, INSUFFICIENT_EVIDENCE)
+
+    def test_forward_transition_cannot_skip_stages(self) -> None:
+        policy = RolloutPolicy()
+        decision = policy.evaluate(
+            current_stage=RolloutStage.SHADOW,
+            target_stage=RolloutStage.DEPRECATING,
+            evidence=RolloutEvidence(
+                status=RolloutEvidenceStatus.DURABLE,
+                reason_code="DURABLE_VERIFIED",
+                reference="evaluation.v1:run-cohort-abc",
+            ),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason_code, INVALID_ARGUMENTS)
 
     def test_rollback_trigger_breach_uses_reversal_stage(self) -> None:
         policy = RolloutPolicy()

@@ -117,6 +117,12 @@ class ConsolidationStatusCliTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("not supported", err)
 
+    def test_status_without_json_uses_human_rendering(self) -> None:
+        rc, out, _ = _run(["consolidation", "status"])
+        self.assertEqual(rc, 0)
+        self.assertIn("authority-map", out)
+        self.assertNotIn('"schema"', out)
+
 
 class ConsolidationParityCliTests(unittest.TestCase):
     def test_parity_emits_parity_report_v1(self) -> None:
@@ -139,7 +145,9 @@ class ConsolidationParityCliTests(unittest.TestCase):
 class ConsolidationRolloutCliTests(unittest.TestCase):
     def test_rollout_blocks_default_without_durable_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+            rc1, _, _ = _run(["consolidation", "rollout", "--slice", "slice-check-state", "--to", "opt_in"])
             rc, _, err = _run(["consolidation", "rollout", "--slice", "slice-check-state", "--to", "default"])
+        self.assertEqual(rc1, 0)
         self.assertEqual(rc, 2)
         self.assertIn("INSUFFICIENT_EVIDENCE", err)
 
@@ -172,6 +180,66 @@ class ConsolidationRolloutCliTests(unittest.TestCase):
         body = json.loads(out)
         self.assertEqual(body["resulting_stage"], "default")
         self.assertEqual(body["evidence"]["status"], "durable")
+
+    def test_rollout_blocks_default_when_parity_report_has_differences(self) -> None:
+        evaluation = {
+            "schema_version": "evaluation.v1",
+            "evaluation_id": "evaluation_default",
+            "durable_state": "verified",
+            "durable_reason": "DURABLE_VERIFIED",
+        }
+        parity = {
+            "schema": "parity-report.v1",
+            "differences": ["projection"],
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+            evidence_path = Path(tmp) / "evaluation.json"
+            parity_path = Path(tmp) / "parity.json"
+            evidence_path.write_text(json.dumps(evaluation), encoding="utf-8")
+            parity_path.write_text(json.dumps(parity), encoding="utf-8")
+            rc1, _, _ = _run(["consolidation", "rollout", "--slice", "slice-check-state", "--to", "opt_in"])
+            rc2, _, err = _run(
+                [
+                    "consolidation",
+                    "rollout",
+                    "--slice",
+                    "slice-check-state",
+                    "--to",
+                    "default",
+                    "--evidence-file",
+                    str(evidence_path),
+                    "--parity-file",
+                    str(parity_path),
+                ]
+            )
+        self.assertEqual(rc1, 0)
+        self.assertEqual(rc2, 2)
+        self.assertIn("PARITY_DIFF", err)
+
+    def test_rollout_rejects_skipping_forward_stages(self) -> None:
+        evaluation = {
+            "schema_version": "evaluation.v1",
+            "evaluation_id": "evaluation_default",
+            "durable_state": "verified",
+            "durable_reason": "DURABLE_VERIFIED",
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+            evidence_path = Path(tmp) / "evaluation.json"
+            evidence_path.write_text(json.dumps(evaluation), encoding="utf-8")
+            rc, _, err = _run(
+                [
+                    "consolidation",
+                    "rollout",
+                    "--slice",
+                    "slice-check-state",
+                    "--to",
+                    "deprecating",
+                    "--evidence-file",
+                    str(evidence_path),
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("INVALID_ARGUMENTS", err)
 
     def test_deprecations_emits_deprecation_inventory_v1(self) -> None:
         rc, out, _ = _run(["consolidation", "deprecations", "--json"])

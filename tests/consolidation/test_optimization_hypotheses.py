@@ -27,6 +27,12 @@ class OptimizationHypothesisTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason_code, INSUFFICIENT_EVIDENCE)
 
+    def test_deprecating_transition_requires_durable_evidence(self) -> None:
+        hypothesis = next(item for item in default_optimization_hypotheses() if item.hypothesis_id == "workflow_surface_removal")
+        decision = hypothesis.evaluate_transition(RolloutStage.DEPRECATING, durable_evidence=False, quality_regression=False)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason_code, INSUFFICIENT_EVIDENCE)
+
     def test_non_session_path_remains_available_while_command_session_is_below_default(self) -> None:
         hypothesis = next(item for item in default_optimization_hypotheses() if item.hypothesis_id == "command_session")
         self.assertEqual(hypothesis.safe_fallback, "non-session path")

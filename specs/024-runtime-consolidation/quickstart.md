@@ -37,14 +37,17 @@ call).
 ## Scenario 3 — Rollout gate blocks on insufficient evidence (SC-004, SC-008)
 
 ```bash
-# Attempt to promote to default with only provisional feature-023 evidence
+# Promote to opt-in first, then attempt to promote to default with only
+# provisional feature-023 evidence
+python3 -m gh_address_cr consolidation rollout --slice slice-check-state --to opt_in
 python3 -m gh_address_cr consolidation rollout --slice slice-check-state --to default
 ```
 
 Expected: blocked, non-zero exit, reason code `INSUFFICIENT_EVIDENCE`. With an
 unexplained parity difference present, expect `PARITY_DIFF`. `shadow`/`opt_in`
 transitions succeed on provisional evidence; `default` requires durable
-feature-023 evidence supplied explicitly via an `evaluation.v1` file.
+feature-023 evidence supplied explicitly via an `evaluation.v1` file, and later
+promotion gates may also consume an explicit `parity-report.v1` file.
 
 ## Scenario 4 — Reversible rollback (SC-005, FR-016)
 

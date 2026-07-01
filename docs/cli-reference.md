@@ -99,12 +99,14 @@ ordinary PR-resolution workflow.
 - `consolidation parity --slice <id> --facts <path> --json` replays recorded
   facts through legacy and candidate paths and emits `parity-report.v1` with
   zero side effects.
-- `consolidation rollout --slice <id> --to <stage> --evidence-file <path> --json`
+- `consolidation rollout --slice <id> --to <stage> --evidence-file <path> --parity-file <path> --json`
   requests a deterministic transition in `rollout-state.v1`; blocked
   transitions fail loudly with reason codes such as `INSUFFICIENT_EVIDENCE` or
   `PARITY_DIFF`. `--evidence-file` accepts an `evaluation.v1` JSON object when a
-  default/deleted gate needs durable evidence. The command intentionally does
-  not infer durable rollout truth from session files or reports.
+  default/deleted gate needs durable evidence, and `--parity-file` accepts a
+  `parity-report.v1` JSON object when a promotion should be blocked by known
+  differences. The command intentionally does not infer durable rollout truth
+  from session files or reports.
 - `consolidation deprecations --json` emits `deprecation-inventory.v1`, the
   explicit list of duplicate models, compatibility shims, and telemetry fields
   queued for later removal.

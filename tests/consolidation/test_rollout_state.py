@@ -41,6 +41,28 @@ class RolloutStateTests(unittest.TestCase):
                 }
             )
 
+    def test_missing_registered_slice_is_merged_from_defaults(self) -> None:
+        state = RolloutState.from_dict(
+            {
+                "schema": ROLLOUT_STATE_SCHEMA,
+                "slices": [],
+                "hypotheses": [state.to_dict() for state in default_hypothesis_states()],
+            }
+        )
+        self.assertEqual(state.slice_for("slice-check-state").stage, RolloutStage.SHADOW)
+
+    def test_missing_registered_hypothesis_is_merged_from_defaults(self) -> None:
+        state = RolloutState.from_dict(
+            {
+                "schema": ROLLOUT_STATE_SCHEMA,
+                "slices": [
+                    {"slice_id": "slice-check-state", "stage": "shadow", "enabled": True},
+                ],
+                "hypotheses": [],
+            }
+        )
+        self.assertEqual(state.hypothesis_for("output_truncation").stage, RolloutStage.SHADOW)
+
 
 if __name__ == "__main__":
     unittest.main()

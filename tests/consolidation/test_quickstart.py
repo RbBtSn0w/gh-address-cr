@@ -47,7 +47,9 @@ class QuickstartScenarioTests(unittest.TestCase):
 
     def test_scenario_3_default_rollout_blocks_without_durable_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+            rc1, _, _ = _run(["consolidation", "rollout", "--slice", "slice-check-state", "--to", "opt_in"])
             rc, _, err = _run(["consolidation", "rollout", "--slice", "slice-check-state", "--to", "default"])
+        self.assertEqual(rc1, 0)
         self.assertEqual(rc, 2)
         self.assertIn("INSUFFICIENT_EVIDENCE", err)
 

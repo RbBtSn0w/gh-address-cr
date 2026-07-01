@@ -61,6 +61,22 @@ class TestRuntimeAuthorityMap(unittest.TestCase):
         self.assertEqual(body["runtime_version"], "3.2.2")
         self.assertTrue(all("axis" in row and "authoritative_owner" in row for row in body["axes"]))
 
+    def test_duplicate_axis_declarations_fail_loud_through_derive(self) -> None:
+        with self.assertRaises(ConsolidationError) as ctx:
+            derive_authority_map(
+                "3.2.2",
+                [
+                    self._entry(StateAxis.CHECK, Owner.LEGACY),
+                    AuthorityEntry(
+                        axis=StateAxis.CHECK,
+                        authoritative_owner=Owner.KERNEL,
+                        compatibility_direction=CompatibilityDirection.LEGACY_FROM_KERNEL,
+                        slice_id="slice-check-state",
+                    ),
+                ],
+            )
+        self.assertEqual(ctx.exception.reason_code, DUPLICATE_STATE_OWNER)
+
 
 class TestPartialMigrationCompleteness(unittest.TestCase):
     def test_derive_covers_every_axis(self) -> None:
