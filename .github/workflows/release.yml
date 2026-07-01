@@ -98,6 +98,10 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Install release helper dependencies
+        if: steps.package-version.outputs.released == 'true'
+        run: python -m pip install --upgrade packaging
+
       - name: Install package build dependencies
         if: steps.package-version.outputs.released == 'true'
         run: python -m pip install --upgrade pip build twine
@@ -231,6 +235,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Install release helper dependencies
+        run: python -m pip install --upgrade packaging
 
       - name: Generate Homebrew tap token
         id: homebrew-tap-token
