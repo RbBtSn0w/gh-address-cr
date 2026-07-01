@@ -1,7 +1,4 @@
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 
 class FinalGateKernelTestIntent:
@@ -41,40 +38,6 @@ def passing_session():
 
 
 class FinalGateKernelTests(unittest.TestCase):
-    def test_manifest_failure_is_a_visible_fail_open_diagnostic(self):
-        from gh_address_cr.commands.final_gate import finalize_manifest_fail_open
-
-        report = {"diagnostics": []}
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch(
-                "gh_address_cr.commands.final_gate.finalize_run_manifest",
-                side_effect=OSError("disk full"),
-            ):
-                result = finalize_manifest_fail_open(
-                    Path(tmp), repo="owner/repo", pr_number="12", run_id="run-1",
-                    passed=True, counts={}, telemetry_report=report,
-                )
-
-        self.assertIsNone(result)
-        self.assertIn("EVALUATION_MANIFEST_UNAVAILABLE", report["diagnostics"])
-
-    def test_manifest_overhead_budget_breach_degrades_telemetry_without_failing_gate(self):
-        from gh_address_cr.commands.final_gate import finalize_manifest_fail_open
-
-        report = {"diagnostics": []}
-        with patch(
-            "gh_address_cr.commands.final_gate.finalize_run_manifest",
-            return_value={"evaluation_capture_overhead_ms": 300.0},
-        ):
-            result = finalize_manifest_fail_open(
-                Path("/unused"), repo="owner/repo", pr_number="12", run_id="run-1",
-                passed=True, counts={}, telemetry_report=report,
-            )
-
-        self.assertIsNotNone(result)
-        self.assertEqual(report["evaluation_capture_status"], "degraded")
-        self.assertIn("EVALUATION_CAPTURE_OVERHEAD_EXCEEDED", report["diagnostics"])
-
     def test_projection_and_policy_pass_for_clean_facts(self):
         from gh_address_cr.core.runtime_kernel.final_gate import (
             COUNT_KEYS,

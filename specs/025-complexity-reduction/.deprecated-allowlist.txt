@@ -1,0 +1,35 @@
+src/gh_address_cr/cli.py:188
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:198
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:207
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:217
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:228
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:245
+Keep the documented `--machine` compatibility alias for the public CLI summary contract.
+
+src/gh_address_cr/cli.py:844
+Keep `adapter check-runtime` as the public runtime compatibility preflight contract.
+
+src/gh_address_cr/core/workflow.py:94
+Keep `runtime_compatibility()` as the canonical machine-readable compatibility payload.
+
+src/gh_address_cr/core/workflow.py:96
+Keep the public `compatible` status field in the runtime compatibility payload.
+
+src/gh_address_cr/agent/requests.py:113
+Keep `skill_shim_resume_command` as the explicit fail-loud reason code for malformed resume targets.
+
+src/gh_address_cr/agent/requests.py:114
+Keep the fail-loud validation message that forbids skill-local shim resume commands.
+
+src/gh_address_cr/orchestrator/harness.py:91
+Keep `INCOMPATIBLE_RUNTIME` as the orchestrator/runtime version mismatch reason code.

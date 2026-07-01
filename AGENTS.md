@@ -77,10 +77,14 @@ Before claiming work is complete, run these local checks:
 ### Architecture Preflight Gate
 
 Before editing implementation code, complete an Architecture Preflight when a
-change touches runtime state, telemetry, final-gate behavior, leases, artifacts,
-GitHub reply/resolve/publish side effects, session persistence,
-Status-to-Action Map behavior, or structured agent protocol files. The
-preflight must identify:
+change crosses a **blast-radius trigger**: it expands runtime state space,
+introduces or reshapes telemetry ingestion/reporting contracts, changes
+`final-gate` truth semantics, alters lease/orchestration ownership, adds new
+artifact-backed decision surfaces, widens GitHub side effects, changes session
+persistence semantics, changes Status-to-Action Map behavior, or introduces a
+new structured agent protocol surface. Small local fixes that stay within the
+existing protected baseline do not require the full preflight. When the trigger
+fires, the preflight must identify:
 
 - authoritative state owner
 - external facts or event inputs
@@ -94,7 +98,9 @@ If review or implementation feedback repeatedly adds edge branches in the same
 design axis without reducing the state space, stop expanding conditionals and
 create or update an architecture spec instead. Local bug fixes are acceptable
 only when they reduce ambiguity or remove a branch; they must not introduce
-unmodeled state flags, hidden fallback paths, or artifact-backed truth.
+unmodeled state flags, hidden fallback paths, artifact-backed truth, or new
+layers that exceed the protected baseline without a recorded blast-radius
+justification.
 
 ## Completion Standard
 

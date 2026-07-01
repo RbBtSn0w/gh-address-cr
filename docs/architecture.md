@@ -17,30 +17,29 @@ The packaged skill remains under `skill/` and acts as a thin adapter:
 The runtime must be available or execution must fail loudly before mutating session state. Runtime state machines, leases, GitHub side effects, evidence ledgers, and final-gate behavior must not be reimplemented as skill-owned workflow code.
 
 
-## First-Principles Runtime Kernel
+## Final-Gate Kernel
 
-The project treats PR review resolution as a runtime kernel, not as a sequence
-of agent-authored patches. External facts enter the runtime first; current state
-and safe actions are derived from those facts.
+The surviving kernel boundary is the `final-gate` decision path, not a separate
+review-state-machine for the whole PR workflow. External facts enter the
+runtime first; current state and safe actions are still derived from those
+facts, but only `final-gate` keeps an explicit fact -> projection -> policy
+kernel contract.
 
 The intended flow is:
 
 ```text
-external facts -> events -> projections -> policy -> command plan/outbox
--> execution evidence -> events -> final-gate proof
+external facts -> session/workflow state -> final-gate facts -> projection
+-> policy -> completion proof
 ```
 
 - **External facts**: GitHub review threads, pending reviews, check state,
   normalized findings, agent submissions, lease changes, telemetry observations,
   and artifact writes.
-- **Events / documented inputs**: append-only facts or explicitly documented
-  inputs that can be replayed or reloaded without agent memory.
-- **Projections**: derived current views such as actionable work items,
-  lease-recovery state, telemetry coverage, and final-gate readiness.
-- **Policy**: explicit status-to-action maps, decision tables, or deterministic
-  functions over projections.
-- **Command plan / outbox**: GitHub reply, resolve, publish, archive, and
-  artifact writes are planned side effects, not hidden state transitions.
+- **Workflow state**: the runtime session and evidence ledger remain the
+  authoritative mutable workflow surface for review handling.
+- **Final-gate facts / projection / policy**: `final-gate` adapts the current
+  session plus remote inputs into deterministic counts, failure codes, and next
+  actions.
 - **Execution evidence**: a side effect affects completion only after the
   runtime records durable evidence such as reply URLs, resolve confirmation,
   audit events, or final-gate proof.
@@ -145,10 +144,10 @@ damaged telemetry and report the reduced coverage instead of blocking review
 completion.
 
 Process-level OTLP tracing is separate from PR-scoped workflow telemetry and
-from the read-only evaluation plane. Its state owner, projection, export policy,
-side-effect boundary, privacy rules, and recovery model are versioned in
-`docs/contracts/otel-tracing-v1.md`. Remote spans never become runtime truth,
-evaluation input, audit evidence, or final-gate proof.
+from review-resolution runtime truth. Its state owner, projection, export
+policy, side-effect boundary, privacy rules, and recovery model are versioned
+in `docs/contracts/otel-tracing-v1.md`. Remote spans never become runtime
+truth, audit evidence, or final-gate proof.
 
 
 ## Runtime Complexity Boundary Contracts

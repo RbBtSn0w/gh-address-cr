@@ -24,7 +24,6 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core import telemetry_health
-from gh_address_cr.core.evaluation.archive import finalize_run_manifest
 from gh_address_cr.core.host_telemetry import attribution as host_attribution
 from gh_address_cr.core.host_telemetry import capture as host_capture
 from gh_address_cr.core.host_telemetry import discovery as host_discovery
@@ -34,43 +33,6 @@ from gh_address_cr.core.io import write_json_atomic
 HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
 HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
 HOST_TELEMETRY_FORMAT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT"
-
-
-def finalize_manifest_fail_open(
-    target: Path,
-    *,
-    repo: str,
-    pr_number: str,
-    run_id: str,
-    passed: bool,
-    counts: dict[str, int],
-    telemetry_report: Any | None,
-) -> dict[str, Any] | None:
-    try:
-        sources = []
-        if telemetry_report:
-            sources = [str(row.get("source")) for row in telemetry_report.get("sources", []) if isinstance(row, dict)]
-        manifest = finalize_run_manifest(
-            target,
-            repo=repo,
-            pr_number=pr_number,
-            run_id=run_id,
-            final_gate_passed=passed,
-            final_gate_counts=counts,
-            telemetry_sources=sources,
-        )
-        if telemetry_report is not None:
-            overhead = float(manifest.get("evaluation_capture_overhead_ms") or 0.0)
-            telemetry_report["evaluation_capture_overhead_ms"] = overhead
-            telemetry_report["evaluation_capture_budget_ms"] = 250.0
-            telemetry_report["evaluation_capture_status"] = "degraded" if overhead > 250.0 else "healthy"
-            if overhead > 250.0:
-                telemetry_report.setdefault("diagnostics", []).append("EVALUATION_CAPTURE_OVERHEAD_EXCEEDED")
-        return manifest
-    except Exception:
-        if telemetry_report is not None:
-            telemetry_report.setdefault("diagnostics", []).append("EVALUATION_MANIFEST_UNAVAILABLE")
-        return None
 
 
 def _parse_final_gate_args(
@@ -232,16 +194,6 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
         parsed, result, summary_path, telemetry_report
     )
-    finalize_manifest_fail_open(
-        summary_path.parent,
-        repo=parsed.repo,
-        pr_number=parsed.pr_number,
-        run_id=parsed.audit_id or "final-gate",
-        passed=result.passed,
-        counts=dict(result.counts),
-        telemetry_report=telemetry_report,
-    )
-
     if parsed.machine:
         _emit_machine_summary(result, summary_path, telemetry_report)
     else:

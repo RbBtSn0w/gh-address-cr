@@ -7,10 +7,9 @@ contract. The **Process-level observability owner** is
 `src/gh_address_cr/telemetry.py`; `src/gh_address_cr/__main__.py` owns its CLI
 lifecycle integration.
 
-This contract does not belong to the read-only evaluation plane in
-`specs/023-runtime-eval-foundation/`. It is also separate from PR-scoped
-workflow telemetry in `src/gh_address_cr/core/telemetry.py`. Exported spans are
-never runtime events, evaluation inputs, final-gate evidence, or local audit
+This contract is separate from PR-scoped workflow telemetry in
+`src/gh_address_cr/core/telemetry.py` and from review-resolution runtime truth.
+Exported spans are never runtime events, final-gate evidence, or local audit
 artifacts.
 
 ## Architecture Preflight
@@ -57,15 +56,15 @@ GitHub state, or final-gate results.
 
 No exported span or remote telemetry dataset is authoritative repository truth.
 The exporter does not write local runtime artifacts. PR-scoped audit,
-efficiency, evaluation, and final-gate artifacts retain their existing owners
-and contracts.
+efficiency, and final-gate artifacts retain their existing owners and
+contracts.
 
 ### Recovery and replay
 
 Shutdown attempts one bounded flush. A blocked or failed exporter may drop the
 span after the budget expires; it must never delay or fail the CLI. There is no
-retry ledger or replay into runtime/evaluation state. Re-running a command
-creates a new observation and cannot satisfy previous workflow evidence.
+retry ledger or replay into runtime state. Re-running a command creates a new
+observation and cannot satisfy previous workflow evidence.
 
 ## Compatibility And Versioning
 
@@ -74,4 +73,3 @@ opt-out variables, service names, endpoint, privacy exclusions, fail-open
 output behavior, and bounded shutdown. A breaking change to these fields or
 semantics requires a new contract version plus synchronized implementation,
 documentation, and executable tests.
-

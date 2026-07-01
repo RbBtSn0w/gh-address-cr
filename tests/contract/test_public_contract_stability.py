@@ -1,9 +1,4 @@
-"""Public-contract non-regression for the `consolidation` group (FR-009 / SC-009).
-
-Registering the advanced `consolidation` family must be strictly additive: it
-must not drift the parsing, routing, exit codes, or output-flag semantics of the
-existing public commands (`review`, `threads`, `agent`, `evaluation`, ...).
-"""
+"""Public-contract non-regression for the reduced core CLI surface."""
 
 from __future__ import annotations
 
@@ -22,28 +17,17 @@ def _run(argv: list[str]) -> tuple[int, str, str]:
 
 
 class PublicContractStabilityTests(unittest.TestCase):
-    def test_consolidation_is_additive_public_command(self) -> None:
-        self.assertIn("consolidation", cli.PUBLIC_COMMANDS)
-        # Advanced command: it must NOT join the agent-facing high-level surface.
-        self.assertNotIn("consolidation", cli.NATIVE_HIGH_LEVEL_COMMANDS)
-        self.assertNotIn("consolidation", cli.HIGH_LEVEL_COMMANDS)
-
     def test_existing_commands_still_parse(self) -> None:
-        for command in ("review", "threads", "address", "agent", "evaluation"):
+        for command in ("review", "threads", "address", "agent", "final-gate"):
             args = cli.parse_args([command, "owner/repo", "123"])
             self.assertEqual(args.command, command)
 
     def test_unknown_command_still_lists_supported_commands(self) -> None:
         rc, _, err = _run(["definitely-not-a-command"])
         self.assertEqual(rc, 2)
-        self.assertIn("consolidation", err)  # additive: surfaced in the supported set
         self.assertIn("review", err)  # existing commands still listed
-
-    def test_evaluation_root_flag_rejection_unchanged(self) -> None:
-        # Existing advanced-command output-flag contract is untouched.
-        rc, _, err = _run(["--machine", "evaluation", "rebuild"])
-        self.assertEqual(rc, 2)
-        self.assertIn("not supported", err)
+        self.assertNotIn("consolidation", err)
+        self.assertNotIn("evaluation", err)
 
 
 if __name__ == "__main__":

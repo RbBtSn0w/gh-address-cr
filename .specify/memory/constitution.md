@@ -1,22 +1,27 @@
 <!--
 Sync Impact Report
-Version change: 1.5.0 -> 1.5.1
+Version change: 1.5.1 -> 2.0.0
 Amendment reason:
-- Correct stale path reference to cli.py in Principle IV.
+- Reclassify universal multi-agent, telemetry, and runtime-kernel MUSTs as blast-radius-triggered governance.
+- Add a minimal-viable / complexity-budget principle that defines the protected baseline.
+- Align AGENTS.md preflight guidance with the reduced architecture contract.
 Version bump rationale:
-- PATCH: Corrected stale path reference in Principle IV.
+- MAJOR: Redefined public architecture boundaries and governance gates for reduction work.
 Modified principles:
-- IV. Packaged Skill Boundary Is Explicit (corrected path reference)
+- VI. Multi-Agent Coordination and Claim Leases
+- VIII. Telemetry Is Attributed Observed Evidence
+- IX. First-Principles Runtime Kernel
 Added sections:
-- None
+- X. Minimal Viable Baseline and Complexity Budget
 Removed sections:
 - None
 Templates requiring updates:
-- None: ✅ updated
+- AGENTS.md: ✅ updated
+- specs/025-complexity-reduction/*: ✅ updated
 Runtime guidance requiring updates:
-- None: ✅ updated
-Follow-up items:
 - None
+Follow-up items:
+- Keep repo-root docs and packaged-skill guidance aligned whenever a reduced surface removes a documented command or architecture.
 -->
 # GH Address CR Constitution
 
@@ -109,11 +114,15 @@ completion claims, duplicate side effects, or unrecoverable session drift.
 
 ### VI. Multi-Agent Coordination and Claim Leases
 
-The control plane MUST coordinate multi-agent work through explicit, item-scoped
-claim leases. No agent or process MAY mutate a work item without an active lease.
-The system MUST define specialized roles (coordinator, producer, triage, fixer,
-verifier, publisher, gatekeeper) and enforce lease policies (expiry, reclaiming,
-conflict detection) to ensure parallel execution is safe and auditable.
+When a feature or workflow introduces genuine **multi-agent blast radius**, the
+control plane MUST coordinate that work through explicit, item-scoped claim
+leases. No agent or process MAY mutate a work item without an active lease. For
+that blast-radius class, the system MUST define specialized roles
+(coordinator, producer, triage, fixer, verifier, publisher, gatekeeper) and
+enforce lease policies (expiry, reclaiming, conflict detection) to ensure
+parallel execution is safe and auditable. Single-agent workflows are the
+default supported path and MUST NOT be forced to carry orchestration weight
+that they do not need.
 **The coordination layer (Orchestrator) MUST follow a strict Delegation Pattern:
 it manages the fleet and lease lifecycle, but MUST delegate all state transitions
 and finding-specific logic to the authoritative Runtime Workflow.**
@@ -144,12 +153,18 @@ and imported external agent telemetry MUST preserve source attribution and MUST
 produce an explicit coverage label: `complete`, `partial`, `runtime-only`, or
 `unavailable`.
 
-External telemetry ingestion MUST use a documented, vendor-neutral event
-contract. The runtime MUST normalize accepted events, compute deterministic
-`event_fingerprint` values after canonicalization, deduplicate duplicate or
-overlapping imports by fingerprint or documented correlation rules, and report
-accepted, duplicate, rejected, and diagnostic outcomes without inflating
-durations, counts, retries, slowest-operation rankings, or error rates.
+OpenTelemetry tracing of the surviving live workflow is part of the protected
+baseline. It MUST remain attached to real business functionality and MUST NOT
+survive only as an empty-shell wrapper around removed subsystems.
+
+When a feature or command handles external telemetry ingestion or other
+telemetry-specific blast radius, it MUST use a documented, vendor-neutral event
+contract. For that blast-radius class, the runtime MUST normalize accepted
+events, compute deterministic `event_fingerprint` values after canonicalization,
+deduplicate duplicate or overlapping imports by fingerprint or documented
+correlation rules, and report accepted, duplicate, rejected, and diagnostic
+outcomes without inflating durations, counts, retries, slowest-operation
+rankings, or error rates.
 
 Telemetry artifacts MUST be public-safe. Imports MUST reject or sanitize tokens,
 credentials, raw prompts, usernames, private machine identifiers, and unnecessary
@@ -166,15 +181,16 @@ reports guide optimization without overstating evidence or leaking host data.
 
 ### IX. First-Principles Runtime Kernel
 
-Review resolution MUST be modeled as a first-principles runtime kernel. External
-facts such as GitHub review threads, pending reviews, check state, normalized
-findings, agent submissions, lease changes, telemetry observations, and artifact
-writes MUST enter the system as typed events or documented inputs. Current state
-MUST be derived by projections. Policy decisions MUST be expressed as explicit
-policy tables, status-to-action maps, or deterministic functions over
-projections, not scattered status conditionals. Side effects MUST be planned as
-command or outbox entries and MUST become completion evidence only after
-execution results are recorded.
+Review resolution surfaces that introduce new runtime-state blast radius MUST be
+modeled as a first-principles runtime kernel. For that blast-radius class,
+external facts such as GitHub review threads, pending reviews, check state,
+normalized findings, agent submissions, lease changes, telemetry observations,
+and artifact writes MUST enter the system as typed events or documented inputs.
+Current state MUST be derived by projections. Policy decisions MUST be
+expressed as explicit policy tables, status-to-action maps, or deterministic
+functions over projections, not scattered status conditionals. Side effects
+MUST be planned as command or outbox entries and MUST become completion
+evidence only after execution results are recorded.
 
 Artifacts are evidence and reporting outputs. They MUST NOT become authoritative
 truth unless the feature explicitly models them as a versioned event source with
@@ -183,32 +199,57 @@ semantics; when exact measurement would require observing the reporting write
 itself, the contract MUST define the excluded reporting boundary or use a
 non-self-referential artifact.
 
-Any feature that touches runtime state, telemetry, final-gate behavior, leases,
-artifacts, GitHub IO, session persistence, or the structured agent protocol MUST
+`final-gate` remains a protected kernel surface and MUST continue to follow
+fact -> projection -> policy reasoning even when the broader review-state
+machine is simplified.
+
+Any feature whose blast radius touches runtime state, telemetry, final-gate
+behavior, leases, artifacts, GitHub IO, session persistence, or the structured
+agent protocol in a way that expands state space or public architecture MUST
 complete Architecture Preflight before implementation. The preflight MUST name
 the state owner, event inputs, projection shape, policy/action map,
-side-effect/outbox boundary, recovery and replay model, artifact truth boundary,
-and executable contract tests. If repeated review or implementation feedback in
-the same design axis requires adding edge branches without reducing the state
-space, implementation MUST stop and create or update an architecture spec
-instead of continuing to patch conditionals.
+side-effect/outbox boundary, recovery and replay model, artifact truth
+boundary, and executable contract tests. If repeated review or implementation
+feedback in the same design axis requires adding edge branches without reducing
+the state space, implementation MUST stop and create or update an architecture
+spec instead of continuing to patch conditionals.
 
 Rationale: Agent workflows fail when external facts, derived state, decisions,
 side effects, and evidence are blended in one imperative path. Modeling facts
 first and deriving actions from projections prevents unbounded boundary growth
 and makes the system replayable, testable, and maintainable.
 
+### X. Minimal Viable Baseline and Complexity Budget
+
+The protected baseline for this product is the irreducible review-resolution
+journey plus OpenTelemetry of that live journey: findings -> classify -> reply + resolve
+-> `final-gate`, with deterministic runtime ownership and preserved CLI contracts.
+That baseline is the architectural floor.
+
+Any new subsystem, framework, orchestration layer, telemetry plane, migration
+meta-layer, or parallel state engine beyond that baseline MUST carry an
+explicitly recorded blast-radius justification and explain why the simpler
+baseline-preserving alternative was rejected. Complexity added only to manage
+another non-retired layer is presumed invalid unless the justification proves
+that it reduces long-term state space.
+
+Rationale: The repository should optimize for the simplest architecture that
+preserves the protected baseline. Complexity is allowed only when its blast
+radius and long-term payoff are made explicit and reviewable.
+
 ## Runtime Architecture
 
 The intended architecture is:
 
-- Runtime kernel: typed external facts, event log or documented event inputs,
-  projections, policy engine, Status-to-Action Map, command planner, outbox
-  executor, execution evidence, and replay/contract tests.
+- Runtime kernel when blast radius requires it: typed external facts, event log
+  or documented event inputs, projections, policy engine, Status-to-Action Map,
+  command planner, outbox executor, execution evidence, and replay/contract
+  tests.
 - Core engine: deterministic state machine, GitHub IO, findings normalization,
-  multi-agent lease management, session persistence, loop safety, final gate,
-  audit artifacts, telemetry import ledgers, fingerprint ledgers, coverage
-  calculation, and public-safe efficiency reports.
+  session persistence, loop safety, final gate, audit artifacts, and the
+  minimum telemetry/reporting required by the protected baseline. Multi-agent
+  lease management and advanced telemetry import ledgers remain optional layers
+  unless blast radius requires them.
 - CLI: stable public interface for agents, humans, CI, and future automation.
 - Agent protocol: structured `ActionRequest` and `ActionResponse` schemas
   for `fix`, `clarify`, `defer`, and `reject` workflows.
@@ -245,28 +286,34 @@ Implementation plans MUST include a Constitution Check covering:
 - control-plane ownership of state and side effects
 - first-principles runtime-kernel modeling, including event inputs, projections,
   policy/action maps, command planning, outbox execution, and replay evidence
+  when the feature crosses the kernel blast-radius threshold
 - public CLI and machine summary compatibility (including Status-to-Action Map)
 - evidence requirements for reply, resolve, and final-gate behavior
 - packaged skill boundary and path discipline (Policy Layer vs implementation)
 - external intake replaceability and findings normalization
 - telemetry attribution, coverage labels, privacy filtering, and fail-open scope
+  when the feature crosses the telemetry blast-radius threshold
 - artifact truth boundaries and non-self-referential telemetry/reporting design
 - architecture plateau discipline when feedback would add more edge branches
 - test coverage for changed contracts
 - agent protocol and lease compatibility (if multi-agent or action-oriented)
+- protected-baseline preservation and complexity-budget justification for any
+  new layer beyond the baseline
 
 Code changes MUST run the smallest verification that matches the scope. Public
 CLI or packaging changes MUST include CLI smoke tests. Session, loop, reply,
 resolve, or final-gate changes MUST include behavior tests. Documentation-only
 changes MUST still be checked for repo-root versus skill-root path correctness
 and public contract consistency.
-Telemetry changes MUST include tests for safety filtering, deterministic
-fingerprints, duplicate or overlapping import behavior, coverage labels, report
-artifacts, final-gate/audit integration, and the fail-loud telemetry-command
-versus fail-open core-workflow boundary.
-Runtime-kernel changes MUST include replay or contract tests that prove the
-event inputs, projections, policy decisions, side-effect plans, artifact
-boundaries, and final-gate outcomes agree.
+Telemetry changes that cross the telemetry blast-radius threshold MUST include
+tests for safety filtering, deterministic fingerprints, duplicate or
+overlapping import behavior, coverage labels, report artifacts,
+final-gate/audit integration, and the fail-loud telemetry-command versus
+fail-open core-workflow boundary.
+Runtime-kernel changes that cross the kernel blast-radius threshold MUST
+include replay or contract tests that prove the event inputs, projections,
+policy decisions, side-effect plans, artifact boundaries, and final-gate
+outcomes agree.
 
 ## Governance
 
@@ -297,4 +344,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.5.1 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-06-21
+**Version**: 2.0.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-07-01

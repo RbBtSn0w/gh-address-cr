@@ -193,16 +193,15 @@ class RuntimePackagingTest(PythonScriptTestCase):
                     self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", result.stdout)
                     self.assertIn("GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE", result.stdout)
 
-    def test_legacy_root_commands_fail_without_session_mutation(self):
-        legacy_commands = ["cr-loop", "session-engine", "clean-state"]
+    def test_removed_root_commands_fail_without_session_mutation(self):
+        removed_commands = ["cr-loop", "session-engine", "clean-state"]
 
-        for command in legacy_commands:
+        for command in removed_commands:
             with self.subTest(command=command):
                 result = self.run_runtime_module(command, "--help")
 
                 self.assertEqual(result.returncode, 2)
-                self.assertIn("unsupported legacy command", result.stderr.lower())
-                self.assertIn("gh-address-cr review", result.stderr)
+                self.assertIn("Unknown command. Supported commands:", result.stderr)
                 self.assertFalse(self.session_file().exists())
 
     def test_agent_manifest_outputs_runtime_capabilities(self):

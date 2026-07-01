@@ -104,8 +104,8 @@ def fix_reply(
     why = rest[0] if rest else "Addressed the CR with minimal targeted changes and regression coverage."
 
     # FR-005: For P0 and P1, rich technical rationale is encouraged.
-    # Note: Explicit enforcement via SystemExit is disabled to maintain test
-    # compatibility for existing suites using dummy payloads.
+    # Explicit enforcement via SystemExit stays disabled so dummy test payloads
+    # can still exercise formatting paths.
 
     files = [item.strip() for item in files_csv.split(",") if item.strip()]
     file_summary = str(summary or DEFAULT_FILE_SUMMARY).strip()

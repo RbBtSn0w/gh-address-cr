@@ -31,11 +31,6 @@ def read_lines(path: Path) -> list[dict]:
         return []
     return out
 
-
-# Backwards-compatible alias (kept so existing callers do not break).
-_read_lines = read_lines
-
-
 def capture_agent_jsonl(
     profile: HostProfile,
     *,

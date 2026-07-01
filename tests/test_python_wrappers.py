@@ -2040,11 +2040,11 @@ else:
         self.assertEqual(result.returncode, 5, result.stderr)
         self.assertEqual(self.local_items()[0]["path"], "src/cli_ingest.py")
 
-    def test_legacy_control_plane_root_command_is_unsupported(self):
+    def test_removed_control_plane_root_command_is_unknown(self):
         result = self.run_runtime_module("control-plane", "remote", self.repo, self.pr)
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Unsupported legacy command: control-plane", result.stderr)
+        self.assertIn("Unknown command. Supported commands:", result.stderr)
         self.assertFalse(self.session_file().exists())
 
     def test_native_address_replaces_control_plane_remote_bootstrap(self):
@@ -3362,12 +3362,6 @@ else:
         self.assertTrue(archived_summary.exists())
         self.assertTrue(archived_report.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
-        manifest_path = archived_workspace / "run-manifest.v1.json"
-        self.assertTrue(manifest_path.exists())
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        self.assertEqual(manifest["run_id"], "archive-run")
-        self.assertNotIn("run-manifest.v1.json", {row["path"] for row in manifest["artifacts"]})
-        self.assertTrue(all(str(self.workspace_dir()) not in json.dumps(row) for row in manifest["artifacts"]))
         self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")
@@ -3492,4 +3486,4 @@ else:
 
         result = self.run_cmd([sys.executable, str(CLI_PY), "mark-handled", "THREAD_NEEDS_CONTEXT"])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Unsupported legacy command: mark-handled", result.stderr)
+        self.assertIn("Unknown command. Supported commands:", result.stderr)

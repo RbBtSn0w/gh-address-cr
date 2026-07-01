@@ -63,7 +63,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "Side-effect boundary",
             "Artifact truth boundary",
             "Recovery and replay",
-            "does not belong to the read-only evaluation plane",
+            "separate from PR-scoped workflow telemetry",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, contract)

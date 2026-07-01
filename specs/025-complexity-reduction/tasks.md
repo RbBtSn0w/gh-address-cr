@@ -36,8 +36,8 @@ the next (FR-009).
 
 ## Phase 1: Setup (Baseline & Invariants)
 
-- [ ] T001 Confirm dev env and capture the baseline: `pip install -e .` into `.venv`, run the verification harness, and save the results (record the actual green test count, `ruff` clean, `gh-address-cr --help` output, protected-layer survival OK) to `specs/025-complexity-reduction/.baseline.txt`
-- [ ] T002 [P] Snapshot the core-command machine-summary contract (SC-004 "before"): capture `gh-address-cr review/threads/final-gate` help + a representative `final-gate --machine`/summary output to `specs/025-complexity-reduction/.core-contract-before.txt` for byte-for-byte comparison after each stage
+- [X] T001 Confirm dev env and capture the baseline: `pip install -e .` into `.venv`, run the verification harness, and save the results (record the actual green test count, `ruff` clean, `gh-address-cr --help` output, protected-layer survival OK) to `specs/025-complexity-reduction/.baseline.txt`
+- [X] T002 [P] Snapshot the core-command machine-summary contract (SC-004 "before"): capture `gh-address-cr review/threads/final-gate` help + a representative `final-gate --machine`/summary output to `specs/025-complexity-reduction/.core-contract-before.txt` for byte-for-byte comparison after each stage
 
 **Checkpoint**: baseline recorded; the invariant to protect is captured.
 
@@ -47,7 +47,7 @@ the next (FR-009).
 
 **Purpose**: Prove both the removal targets' isolation AND the protected layers' survival before deleting.
 
-- [ ] T003 Produce the dependency proof in `specs/025-complexity-reduction/.isolation-proof.txt`: (a) NEGATIVE — grep confirms `core/consolidation/`, `core/evaluation/` (beyond the `final_gate.py` manifest call), and the `runtime_kernel` review-state-machine modules have **zero importers on the core path** (`cli.py`, `commands/high_level.py`, `core/workflow.py`, `core/gate.py`); (b) POSITIVE (FR-010) — the harness protected-layer import assertion succeeds, proving `agent_protocol`, `leases`, `agent_batch`, `github/client.py`, `publisher.py`, `session`, `gate`, `runtime_kernel/final_gate` import cleanly
+- [X] T003 Produce the dependency proof in `specs/025-complexity-reduction/.isolation-proof.txt`: (a) NEGATIVE — grep confirms `core/consolidation/`, `core/evaluation/` (beyond the `final_gate.py` manifest call), and the `runtime_kernel` review-state-machine modules have **zero importers on the core path** (`cli.py`, `commands/high_level.py`, `core/workflow.py`, `core/gate.py`); (b) POSITIVE (FR-010) — the harness protected-layer import assertion succeeds, proving `agent_protocol`, `leases`, `agent_batch`, `github/client.py`, `publisher.py`, `session`, `gate`, `runtime_kernel/final_gate` import cleanly
 
 **Checkpoint**: removal safety + protected-layer survival confirmed — user story stages may begin.
 
@@ -59,13 +59,13 @@ the next (FR-009).
 
 **Independent Test**: The amended constitution has VI/VIII/IX as blast-radius-triggered, a new complexity-budget Principle X, a MAJOR version bump + Sync Impact Report, and AGENTS.md's Preflight Gate is trigger-scoped.
 
-- [ ] T004 [US5] Relax Principle VI (Multi-Agent Coordination) in `.specify/memory/constitution.md` to **blast-radius-triggered** (mandatory only for genuine multi-agent work; single-agent is the default supported path)
-- [ ] T005 [US5] Relax Principle VIII (Telemetry) in `.specify/memory/constitution.md`: require OpenTelemetry tracing of live functionality; make attribution/fingerprint/coverage mandatory only for external telemetry ingestion
-- [ ] T006 [US5] Relax Principle IX (Runtime Kernel) in `.specify/memory/constitution.md`: `final-gate` keeps fact→projection→policy; broader kernel modeling becomes blast-radius-triggered, not universal
-- [ ] T007 [US5] Add Principle X — Minimal Viable / Complexity Budget to `.specify/memory/constitution.md`: define the protected baseline (core journey + OpenTelemetry-of-that-journey) as the floor; any new subsystem beyond it requires a recorded blast-radius justification
-- [ ] T008 [US5] Bump the constitution version (MAJOR) and write the Sync Impact Report header in `.specify/memory/constitution.md` (reason, affected principles VI/VIII/IX/+X, dependent templates reviewed)
-- [ ] T009 [US5] Update `AGENTS.md`: rewrite the Architecture Preflight Gate to fire only on a blast-radius trigger, and prune AGENTS.md references to the layers being removed (consolidation/evaluation/kernel-review-engine)
-- [ ] T010 [US5] Verify US5: `grep -nE "blast.?radius|Complexity Budget|Minimal Viable" .specify/memory/constitution.md` shows the deltas; version bump present; AGENTS.md Preflight Gate is trigger-scoped; run the verification harness (no code changed → still green)
+- [X] T004 [US5] Relax Principle VI (Multi-Agent Coordination) in `.specify/memory/constitution.md` to **blast-radius-triggered** (mandatory only for genuine multi-agent work; single-agent is the default supported path)
+- [X] T005 [US5] Relax Principle VIII (Telemetry) in `.specify/memory/constitution.md`: require OpenTelemetry tracing of live functionality; make attribution/fingerprint/coverage mandatory only for external telemetry ingestion
+- [X] T006 [US5] Relax Principle IX (Runtime Kernel) in `.specify/memory/constitution.md`: `final-gate` keeps fact→projection→policy; broader kernel modeling becomes blast-radius-triggered, not universal
+- [X] T007 [US5] Add Principle X — Minimal Viable / Complexity Budget to `.specify/memory/constitution.md`: define the protected baseline (core journey + OpenTelemetry-of-that-journey) as the floor; any new subsystem beyond it requires a recorded blast-radius justification
+- [X] T008 [US5] Bump the constitution version (MAJOR) and write the Sync Impact Report header in `.specify/memory/constitution.md` (reason, affected principles VI/VIII/IX/+X, dependent templates reviewed)
+- [X] T009 [US5] Update `AGENTS.md`: rewrite the Architecture Preflight Gate to fire only on a blast-radius trigger, and prune AGENTS.md references to the layers being removed (consolidation/evaluation/kernel-review-engine)
+- [X] T010 [US5] Verify US5: `grep -nE "blast.?radius|Complexity Budget|Minimal Viable" .specify/memory/constitution.md` shows the deltas; version bump present; AGENTS.md Preflight Gate is trigger-scoped; run the verification harness (no code changed → still green)
 
 **Checkpoint**: governance is legal for the reductions below. No code removed yet.
 
@@ -77,14 +77,14 @@ the next (FR-009).
 
 **Independent Test**: Both packages + commands gone; removed commands fail as unknown; suite green; `final-gate` verdict unchanged (SC-002).
 
-- [ ] T011 [US1] Delete `src/gh_address_cr/core/consolidation/` (whole package) and `src/gh_address_cr/commands/consolidation.py`, and remove consolidation-only tests under `tests/consolidation/` and `tests/contract/test_consolidation_cli.py`. **Do NOT delete `tests/contract/test_public_contract_stability.py` wholesale** (it guards the core CLI contract — see T014)
-- [ ] T012 [US1] Remove the `consolidation` wiring from `src/gh_address_cr/cli.py` (import, `PUBLIC_COMMANDS` entry, metavar, `_dispatch_consolidation_command`, usage lines) and drop the 6 consolidation reason codes from `src/gh_address_cr/core/protocol_codes.py`
-- [ ] T013 [US1] Delete `src/gh_address_cr/core/evaluation/` (whole package) and `src/gh_address_cr/commands/evaluation.py`, and remove its tests (`tests/test_evaluation_cli.py`, `tests/core/evaluation/*`)
-- [ ] T014 [US1] Prune + repurpose `tests/contract/test_public_contract_stability.py` (G2): delete the consolidation-additive and evaluation-flag cases; KEEP and update `test_existing_commands_still_parse` (drop `evaluation`) and `test_unknown_command_still_lists_supported_commands` (reduced supported set) as the ongoing **core CLI contract guard** backing SC-002/SC-004
-- [ ] T015 [US1] Remove the evaluation import + fail-open `finalize_run_manifest` call from `src/gh_address_cr/commands/final_gate.py` and remove the `evaluation` wiring from `src/gh_address_cr/cli.py` (import, `PUBLIC_COMMANDS`, metavar, `_dispatch_evaluation_command`, usage)
-- [ ] T016 [P] [US1] Update `skill/` (`SKILL.md`, `references/*`, `agents/openai.yaml`, status-to-action guidance) **and repo-root docs that describe the public command surface** to remove every reference to `consolidation` and `evaluation` commands in the same change (FR-011, FR-017)
-- [ ] T017 [US1] Version bump for the removed `consolidation`/`evaluation` commands (Compatibility Policy) and confirm help/metavar no longer list them
-- [ ] T018 [US1] Verify US1: removed commands (`gh-address-cr consolidation status`, `gh-address-cr evaluation rebuild`) exit non-zero as unknown; `final-gate` machine summary is byte-for-byte identical to `.core-contract-before.txt` (SC-002); run the verification harness (green)
+- [X] T011 [US1] Delete `src/gh_address_cr/core/consolidation/` (whole package) and `src/gh_address_cr/commands/consolidation.py`, and remove consolidation-only tests under `tests/consolidation/` and `tests/contract/test_consolidation_cli.py`. **Do NOT delete `tests/contract/test_public_contract_stability.py` wholesale** (it guards the core CLI contract — see T014)
+- [X] T012 [US1] Remove the `consolidation` wiring from `src/gh_address_cr/cli.py` (import, `PUBLIC_COMMANDS` entry, metavar, `_dispatch_consolidation_command`, usage lines) and drop the 6 consolidation reason codes from `src/gh_address_cr/core/protocol_codes.py`
+- [X] T013 [US1] Delete `src/gh_address_cr/core/evaluation/` (whole package) and `src/gh_address_cr/commands/evaluation.py`, and remove its tests (`tests/test_evaluation_cli.py`, `tests/core/evaluation/*`)
+- [X] T014 [US1] Prune + repurpose `tests/contract/test_public_contract_stability.py` (G2): delete the consolidation-additive and evaluation-flag cases; KEEP and update `test_existing_commands_still_parse` (drop `evaluation`) and `test_unknown_command_still_lists_supported_commands` (reduced supported set) as the ongoing **core CLI contract guard** backing SC-002/SC-004
+- [X] T015 [US1] Remove the evaluation import + fail-open `finalize_run_manifest` call from `src/gh_address_cr/commands/final_gate.py` and remove the `evaluation` wiring from `src/gh_address_cr/cli.py` (import, `PUBLIC_COMMANDS`, metavar, `_dispatch_evaluation_command`, usage)
+- [X] T016 [P] [US1] Update `skill/` (`SKILL.md`, `references/*`, `agents/openai.yaml`, status-to-action guidance) **and repo-root docs that describe the public command surface** to remove every reference to `consolidation` and `evaluation` commands in the same change (FR-011, FR-017)
+- [X] T017 [US1] Version bump for the removed `consolidation`/`evaluation` commands (Compatibility Policy) and confirm help/metavar no longer list them
+- [X] T018 [US1] Verify US1: removed commands (`gh-address-cr consolidation status`, `gh-address-cr evaluation rebuild`) exit non-zero as unknown; `final-gate` machine summary is byte-for-byte identical to `.core-contract-before.txt` (SC-002); run the verification harness (green)
 
 **Checkpoint**: MVP — largest low-risk weight removed; core journey intact.
 
@@ -96,9 +96,9 @@ the next (FR-009).
 
 **Independent Test**: Kernel review modules gone with no live importer; `final_gate.py` present; reply/resolve/gate outputs unchanged.
 
-- [ ] T019 [US2] Delete the kernel review-state-machine modules: `src/gh_address_cr/core/runtime_kernel/{projections,policies,commands,events,identity,session_projection}.py` and their dedicated tests under `tests/` (keep `runtime_kernel/final_gate.py` and any module it imports)
-- [ ] T020 [US2] Resolve fallout: fix `runtime_kernel/__init__.py` exports and any `final_gate.py` import so the gate still builds without the deleted modules (extract the minimal shared helpers `final_gate.py` needs, if any, rather than resurrecting the engine), and prune any `skill/` **and repo-root architecture** guidance that still describes the deleted kernel review-state-machine / dual-engine model as live (FR-011, FR-017)
-- [ ] T021 [US2] Verify US2: `grep -rn "runtime_kernel.projections\|runtime_kernel.policies\|runtime_kernel.commands" src/` returns nothing; `runtime_kernel/final_gate.py` present; run the verification harness (green); `final-gate` verdict unchanged on fixtures
+- [X] T019 [US2] Delete the kernel review-state-machine modules: `src/gh_address_cr/core/runtime_kernel/{projections,policies,commands,events,identity,session_projection}.py` and their dedicated tests under `tests/` (keep `runtime_kernel/final_gate.py` and any module it imports)
+- [X] T020 [US2] Resolve fallout: fix `runtime_kernel/__init__.py` exports and any `final_gate.py` import so the gate still builds without the deleted modules (extract the minimal shared helpers `final_gate.py` needs, if any, rather than resurrecting the engine), and prune any `skill/` **and repo-root architecture** guidance that still describes the deleted kernel review-state-machine / dual-engine model as live (FR-011, FR-017)
+- [X] T021 [US2] Verify US2: `grep -rn "runtime_kernel.projections\|runtime_kernel.policies\|runtime_kernel.commands" src/` returns nothing; `runtime_kernel/final_gate.py` present; run the verification harness (green); `final-gate` verdict unchanged on fixtures
 
 **Checkpoint**: single review engine; the 016-era duplication is gone.
 
@@ -110,10 +110,10 @@ the next (FR-009).
 
 **Independent Test**: `(src/ deprecated-marker hits) − allowlist == 0`; unknown-command handling still works.
 
-- [ ] T022 [US3] Remove dead scraps in `src/gh_address_cr/cli.py`: the `_legacy_module()` stub, the `UNSUPPORTED_LEGACY_COMMANDS` reject table (unknown command already errors), and collapse the 4 overlapping command-set constants (`HIGH_LEVEL_COMMANDS`/`NATIVE_HIGH_LEVEL_COMMANDS`/`PR_SCOPED_IMPLICIT_COMMANDS`/`HIGH_LEVEL_GH_COMMANDS`) into the minimal set actually used
-- [ ] T023 [P] [US3] Remove the unused `ReplyPoster` (`src/gh_address_cr/github/replies.py`) and `ThreadResolver` (`src/gh_address_cr/github/threads.py`) after confirming no live or test reference (the live publish path uses `GitHubClient.post_reply`/`resolve_thread`); keep `normalize_threads`
-- [ ] T024 [US3] Sweep remaining `deprecated`/`legacy`/`compat`/`shim` code (e.g. `workflow.py` legacy branches, any telemetry re-export shim) — each removed only after grep-confirming no live consumer; any public-contract shim removed via the versioned change. Produce `specs/025-complexity-reduction/.deprecated-allowlist.txt` enumerating every intentionally-retained match with a one-line justification (A1)
-- [ ] T025 [US3] Verify US3: `(grep -rniE "deprecated|legacy|compat|shim" src/gh_address_cr --include="*.py") minus the allowlist == 0` (SC-011); unknown-command handling intact; run the verification harness (green)
+- [X] T022 [US3] Remove dead scraps in `src/gh_address_cr/cli.py`: the `_legacy_module()` stub, the `UNSUPPORTED_LEGACY_COMMANDS` reject table (unknown command already errors), and collapse the 4 overlapping command-set constants (`HIGH_LEVEL_COMMANDS`/`NATIVE_HIGH_LEVEL_COMMANDS`/`PR_SCOPED_IMPLICIT_COMMANDS`/`HIGH_LEVEL_GH_COMMANDS`) into the minimal set actually used
+- [X] T023 [P] [US3] Remove the unused `ReplyPoster` (`src/gh_address_cr/github/replies.py`) and `ThreadResolver` (`src/gh_address_cr/github/threads.py`) after confirming no live or test reference (the live publish path uses `GitHubClient.post_reply`/`resolve_thread`); keep `normalize_threads`
+- [X] T024 [US3] Sweep remaining `deprecated`/`legacy`/`compat`/`shim` code (e.g. `workflow.py` legacy branches, any telemetry re-export shim) — each removed only after grep-confirming no live consumer; any public-contract shim removed via the versioned change. Produce `specs/025-complexity-reduction/.deprecated-allowlist.txt` enumerating every intentionally-retained match with a one-line justification (A1)
+- [X] T025 [US3] Verify US3: `(grep -rniE "deprecated|legacy|compat|shim" src/gh_address_cr --include="*.py") minus the allowlist == 0` (SC-011); unknown-command handling intact; run the verification harness (green)
 
 **Checkpoint**: one clear path, no deprecated residue.
 

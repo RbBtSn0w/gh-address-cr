@@ -1,0 +1,60 @@
+## cli
+command=['rg', '-n', 'consolidation|evaluation', 'src/gh_address_cr/cli.py']
+exit=0
+stdout:
+26:from gh_address_cr.commands.consolidation import handle_consolidation_command
+28:from gh_address_cr.commands.evaluation import handle_evaluation_command
+61:    "consolidation",
+63:    "evaluation",
+784:        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,consolidation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+814:            "  gh-address-cr evaluation rebuild [--repo owner/repo] [--pr-number 123]\n"
+815:            "  gh-address-cr evaluation show owner/repo 123 [--run-id run-id]\n"
+816:            "  gh-address-cr evaluation compare --baseline-version 3.1.10 --candidate-version 3.2.0\n"
+817:            "  gh-address-cr consolidation status [--json]\n"
+818:            "  gh-address-cr consolidation parity --slice <id> --facts <path> [--json]\n"
+882:def _dispatch_evaluation_command(args: argparse.Namespace) -> int:
+884:        print("Root output flags are not supported for evaluation commands.", file=sys.stderr)
+886:    return handle_evaluation_command(args.repo, args.pr_number, args.args)
+889:def _dispatch_consolidation_command(args: argparse.Namespace) -> int:
+891:        print("Root output flags are not supported for consolidation commands.", file=sys.stderr)
+893:    return handle_consolidation_command(args.repo, args.pr_number, args.args)
+985:    if args.command == "evaluation":
+986:        return _dispatch_evaluation_command(args)
+988:    if args.command == "consolidation":
+989:        return _dispatch_consolidation_command(args)
+
+stderr:
+
+
+## high_level
+command=['rg', '-n', 'consolidation|evaluation|runtime_kernel\\.(projections|policies|commands|events|identity|session_projection)', 'src/gh_address_cr/commands/high_level.py']
+exit=1
+stdout:
+
+stderr:
+
+
+## workflow
+command=['rg', '-n', 'consolidation|evaluation|runtime_kernel\\.(projections|policies|commands|events|identity|session_projection)', 'src/gh_address_cr/core/workflow.py']
+exit=1
+stdout:
+
+stderr:
+
+
+## gate
+command=['rg', '-n', 'consolidation|evaluation|runtime_kernel\\.(projections|policies|commands|events|identity|session_projection)', 'src/gh_address_cr/core/gate.py']
+exit=1
+stdout:
+
+stderr:
+
+
+## protected
+command=['./.venv/bin/python', '-c', "import gh_address_cr.core.agent_protocol, gh_address_cr.core.leases, gh_address_cr.core.agent_batch, gh_address_cr.github.client, gh_address_cr.core.publisher, gh_address_cr.core.session, gh_address_cr.core.gate, gh_address_cr.core.runtime_kernel.final_gate; print('protected layers OK')"]
+exit=0
+stdout:
+protected layers OK
+
+stderr:
+

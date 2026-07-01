@@ -1218,9 +1218,7 @@ def _expected_request_hash_for_response(
 def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
     """Fold an accepted ActionResponse onto a session item in place.
 
-    Public projection helper: the event-sourcing fold in
-    `runtime_kernel.session_projection` replays this to rebuild agent deltas, so it
-    must stay a public symbol rather than a private cross-module import (#137).
+    Public item-state helper retained for deterministic session/item updates.
     """
     resolution = str(response["resolution"])
     if item.get("item_kind") == "github_thread":
@@ -1240,7 +1238,7 @@ def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> No
             item["accepted_response"]["evidence_ref"] = response["evidence_ref"]
         return
     item["state"] = "fixed" if resolution == "fix" else resolution
-    item["status"] = _legacy_local_status_for_resolution(resolution)
+    item["status"] = _local_status_for_resolution(resolution)
     item["blocking"] = False
     item["handled"] = True
     item["handled_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -1259,7 +1257,7 @@ def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> No
         item["evidence_ref"] = response["evidence_ref"]
 
 
-def _legacy_local_status_for_resolution(resolution: str) -> str:
+def _local_status_for_resolution(resolution: str) -> str:
     if resolution == "fix":
         return "CLOSED"
     if resolution == "clarify":

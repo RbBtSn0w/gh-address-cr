@@ -2,7 +2,6 @@ import hashlib
 import json
 import re
 import unittest
-from unittest.mock import patch
 
 
 def expected_local_item_id(source: str, finding: dict) -> str:
@@ -82,7 +81,7 @@ body: Add regression coverage.
         with self.assertRaises(FindingsFormatError):
             normalize_findings_payload("unknown", "[]")
 
-    def test_cli_review_handoff_parsers_do_not_import_legacy_modules(self):
+    def test_cli_review_handoff_parsers_use_native_helpers(self):
         from gh_address_cr import cli
 
         raw_json = json.dumps([{"title": "Finding", "body": "Body", "path": "src/a.py", "line": 3}])
@@ -93,11 +92,9 @@ line: 3
 body: Body
 ```"""
 
-        with patch.object(cli, "_legacy_module", side_effect=AssertionError("legacy import")):
-            [record] = cli._parse_records(raw_json)
-            [finding] = cli._parse_findings(raw_blocks)
-            normalized = cli._normalize_finding(record)
-
+        [record] = cli._parse_records(raw_json)
+        [finding] = cli._parse_findings(raw_blocks)
+        normalized = cli._normalize_finding(record)
         self.assertEqual(finding["title"], "Finding")
         self.assertEqual(normalized["path"], "src/a.py")
 

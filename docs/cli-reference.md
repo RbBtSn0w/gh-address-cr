@@ -25,13 +25,6 @@ Other public top-level commands:
 - `doctor`
 - `version`
 
-Advanced consolidation diagnostics:
-
-- `consolidation status`
-- `consolidation parity`
-- `consolidation rollout`
-- `consolidation deprecations`
-
 Advanced/internal integration entrypoints:
 
 The advanced surface is split between top-level integration commands above and
@@ -83,46 +76,6 @@ Minimal invocation model:
 ```
 
 Advanced/internal integrations are documented later in this reference.
-
-## Reversible Consolidation
-
-The `consolidation` command family is an additive advanced surface for feature
-024. It exists to expose reversible migration state without changing the
-ordinary PR-resolution workflow.
-
-- `consolidation status --cohort <id> --json` emits `authority-map.v1` plus the
-  active rollout slices and optimization hypotheses. The optional cohort input
-  lets migration validation prove that unsupported traffic remains on the legacy
-  authoritative path. `shadow` and `opt_in` do not change authoritative truth;
-  ownership only flips once a slice reaches `default` or later for the selected
-  supported cohort.
-- `consolidation parity --slice <id> --facts <path> --json` replays recorded
-  facts through legacy and candidate paths and emits `parity-report.v1` with
-  zero side effects.
-- `consolidation rollout --slice <id> --to <stage> --evidence-file <path> --parity-file <path> --json`
-  requests a deterministic transition in `rollout-state.v1`; blocked
-  transitions fail loudly with reason codes such as `INSUFFICIENT_EVIDENCE` or
-  `PARITY_DIFF`. `--evidence-file` accepts an `evaluation.v1` JSON object when a
-  default/deleted gate needs durable evidence, and `--parity-file` accepts a
-  `parity-report.v1` JSON object when a promotion should be blocked by known
-  differences. The command intentionally does not infer durable rollout truth
-  from session files or reports.
-- `consolidation deprecations --json` emits `deprecation-inventory.v1`, the
-  explicit list of duplicate models, compatibility shims, and telemetry fields
-  queued for later removal.
-
-Optimization hypotheses remain independent:
-
-- `output_truncation`: keeps `--full` as the safe fallback until durable
-  evidence proves the default is safe.
-- `command_session`: keeps the non-session review path available until session
-  mode clears its own rollout gate.
-- `workflow_surface_removal`: keeps legacy workflow surfaces documented until
-  deprecation gates are satisfied.
-
-These commands are not a replacement for `review`, `address`, `threads`,
-`agent`, or `final-gate`. They operate on rollout control artifacts and parity
-diagnostics only.
 
 ## Command Topology (ASCII)
 
