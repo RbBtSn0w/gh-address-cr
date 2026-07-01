@@ -29,8 +29,8 @@ on top of it.
 **Purpose**: Create the consolidation package and test scaffolding.
 
 - [x] T001 Create `src/gh_address_cr/core/consolidation/__init__.py` exporting the public entities (empty re-export stub) per plan structure; git commit -m "chore: init consolidation package"
-- [ ] T002 [P] Create `tests/consolidation/__init__.py` and an empty `tests/consolidation/fixtures/` directory for replay fact sets; git commit -m "chore: setup test directory structures"
-- [ ] T003 [P] Add a supported-cohort replay fixture for the `check` axis — review-thread + check-state facts from which `slice-check-state` derives PR check state — in `tests/consolidation/fixtures/check_state_facts.json`; git commit -m "test: add check state fact replay fixture"
+- [x] T002 [P] Create `tests/consolidation/__init__.py` and an empty `tests/consolidation/fixtures/` directory for replay fact sets; git commit -m "chore: setup test directory structures"
+- [x] T003 [P] Add a supported-cohort replay fixture for the `check` axis — review-thread + check-state facts from which `slice-check-state` derives PR check state — in `tests/consolidation/fixtures/check_state_facts.json`; git commit -m "test: add check state fact replay fixture"
 
 **Checkpoint**: Package and test locations exist; `ruff`/`mypy` already configured at repo root.
 
