@@ -139,6 +139,7 @@ def run_traced(
         if attributes:
             for key, value in attributes.items():
                 span.set_attribute(key, value)
+
         try:
             result = operation()
             # Normal Return
