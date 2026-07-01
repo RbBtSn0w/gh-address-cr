@@ -190,6 +190,6 @@ The reference surface is intentionally split so this file stays a first-read ent
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
 - Evidence ledger expectations: `references/evidence-ledger.md`
-- Optional OTel -> Worker -> Better Stack logging: `references/otel-worker-better-stack.md`
+- OTel trace export and opt-out controls: `references/otel-worker-better-stack.md`
 
 Low-level implementation details are inside the `gh-address-cr` runtime package, not the public agent surface.

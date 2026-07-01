@@ -22,7 +22,7 @@ Current test layout:
   - shared test harness
 
 
-## Optional Telemetry Export
+## OpenTelemetry Trace Export
 
 Local audit files remain the canonical repository contract:
 
@@ -30,52 +30,50 @@ Local audit files remain the canonical repository contract:
 - `trace.jsonl`
 - `audit_summary.md`
 
-Telemetry network export is opt-in. By default, the CLI writes only local audit
-and trace files. To use the hosted relay, set:
+The CLI exports a process-level OTLP/HTTP trace by default. To opt out, set:
 
 ```bash
-export GH_ADDRESS_CR_TELEMETRY=1
+export DISABLE_TELEMETRY=1
+# or
+export DO_NOT_TRACK=1
 ```
 
 The hosted relay endpoint is:
 
-- `https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs`
+- `https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces`
 
-When enabled, each audit/trace event is emitted as an OTLP/HTTP JSON `logs`
-record to that Cloudflare Worker.
+The service name is `gh-address-cr`. The client sends no credentials; the
+Cloudflare Worker injects backend credentials.
+The exporter uses an isolated Requests session with controlled headers and does
+not inherit ambient OTLP credentials, proxy authentication, or `.netrc`.
+
+The unit-test environment sets:
+
+```bash
+export GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test
+```
+
+This changes the OpenTelemetry service name to `gh-address-cr-test`; production
+remains `gh-address-cr`.
 
 Recommended deployment shape:
 
 - CLI client
 - Cloudflare Worker as the security relay
-- Better Stack as the backend
+- an OpenTelemetry-compatible backend
 
-This keeps the Better Stack source token out of the CLI runtime while preserving
-local audit artifacts for final-gate archives and tests.
-
-Repository-root reference docs:
-
-- setup guide: `skill/references/otel-worker-better-stack.md`
-- Worker example: `skill/references/otel-worker-better-stack/worker.mjs`
-- Wrangler example: `skill/references/otel-worker-better-stack/wrangler.example.jsonc`
-
-For self-hosting or explicit override, CLI-side OpenTelemetry configuration still
-supports standard env vars. Setting an explicit OTLP endpoint also enables
-network export:
-
-```bash
-export OTEL_SERVICE_NAME="gh-address-cr-cli"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=personal,service.namespace=skills"
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://gh-address-cr-telemetry.example.workers.dev"
-export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"
-```
+This keeps backend credentials out of the CLI runtime while preserving local
+audit artifacts for final-gate archives and tests.
 
 Notes:
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT` is treated as a base URL, so `/v1/logs` is appended automatically
-- `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` may be used instead when you want an exact logs endpoint
-- local audit files are still written even if telemetry export is disabled or fails
-- export failures are recorded locally as `telemetry_export` diagnostics in `trace.jsonl`
+- `src/gh_address_cr/telemetry.py` owns process-level tracing
+- `src/gh_address_cr/__main__.py` guarantees shutdown in a `finally` block
+- shutdown waits at most 200 ms; exporter failure remains fail-open
+- exporter diagnostics do not write to CLI stderr
+- exception spans export the exception type, not messages or stack traces
+- successful `SystemExit(0)` paths such as `--help` are not marked as errors
+- local audit files remain independent from OTLP trace export
 
 
 ## AI Agent Feedback

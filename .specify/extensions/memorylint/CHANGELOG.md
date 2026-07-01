@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-30
+### Added
+
+- Agent-context managed-block awareness: rule extraction now skips the
+  `<!-- SPECKIT START/END -->` block maintained by the opt-in `agent-context` extension across
+  all configured `context_files` (plural, with singular `context_file` fallback; defaults applied
+  when config is absent). Files containing the start marker are filtered defensively. Unterminated
+  blocks fail safe (skipped to EOF) with a warning. Prevents false findings and edit/churn loops
+  on machine-generated content.
+
+### Changed
+
+- `apply` staleness-check failure message now explicitly directs the user to re-run
+  `/speckit-memorylint-audit` (a common trigger is an `agent-context` block update between audit
+  and apply).
+- Declared Spec Kit compatibility remains `>=0.11.0`.
+
 ## [1.5.1] - 2026-05-29
 ### Added
 
@@ -117,10 +134,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/memorylint-v1.5.1...HEAD
+[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/memorylint-v1.8.0...HEAD
 [1.0.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.0.0
 [1.1.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.1.0
 [1.3.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.3.0
 [1.4.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.4.0
 [1.5.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.5.0
 [1.5.1]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.5.1
+[1.8.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/memorylint-v1.8.0

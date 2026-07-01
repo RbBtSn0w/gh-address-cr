@@ -1,122 +1,66 @@
-# Optional Telemetry Export: CLI -> Cloudflare Worker -> Better Stack
+# OpenTelemetry Traces: CLI -> Cloudflare Worker
 
-This skill keeps the local PR-scoped audit contract intact:
+The CLI exports process-level traces using OTLP/HTTP while keeping the local
+PR-scoped audit contract authoritative:
 
-- `audit.jsonl`
-- `trace.jsonl`
-- `audit_summary.md`
+- service name: `gh-address-cr`
+- endpoint: `https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces`
+- credentials: none in the CLI; the Worker injects backend credentials
 
-The distributed CLI ships with an optional public relay endpoint:
+The exporter uses an isolated Requests session and fixed non-secret headers.
+It does not inherit ambient OTLP headers, credential providers, proxy
+authentication, or `.netrc` credentials from the host environment.
 
-- `https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs`
+Set `GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test` in test runners to publish under
+the isolated `gh-address-cr-test` service name. Unset it in production.
 
-By default, the CLI writes only local audit and trace files. To export each
-audit/trace event as an OTLP/HTTP JSON log record to that Cloudflare Worker, set
-`GH_ADDRESS_CR_TELEMETRY=1`. The Worker injects the Better Stack source token and
-forwards the payload to Better Stack `/v1/logs`.
-
-This keeps the Better Stack token out of the CLI runtime.
-
-## Why this shape
-
-- local audit files remain the canonical repo contract
-- Better Stack credentials stay in Worker secrets
-- end users do not send telemetry unless they opt in
-- the implementation stays dependency-light and works with the existing Python-first packaging model
-
-## Signal boundary
-
-Current implementation exports the OpenTelemetry `logs` signal only.
-
-- CLI export target: `POST <worker>/v1/logs`
-- transport: `OTLP/HTTP JSON`
-- compression: `gzip`
-
-The Worker example in `references/otel-worker-better-stack/worker.mjs` forwards only `/v1/logs`.
-
-## Default CLI behavior
-
-No telemetry environment variables are required for local audit files.
-
-The CLI will not export logs over the network unless either
-`GH_ADDRESS_CR_TELEMETRY=1` is set or an explicit OTLP endpoint is configured.
-
-To use the hosted relay, set:
+Trace export is enabled by default. Disable it before invoking the CLI with
+either standard privacy control:
 
 ```bash
-export GH_ADDRESS_CR_TELEMETRY=1
+export DISABLE_TELEMETRY=1
+# or
+export DO_NOT_TRACK=1
 ```
 
-The CLI will then export logs to:
+The process span includes fixed service version and entrypoint attributes. Raw
+CLI arguments are not attached. Custom spans must not include tokens, raw
+prompts, usernames, private machine identifiers, or absolute local paths.
 
-```text
-https://gh-address-cr.hamiltonsnow.workers.dev/v1/logs
+`src/gh_address_cr/__main__.py` initializes tracing and calls
+`shutdown_telemetry()` in a `finally` block. This asks the batch processor to
+flush before a short-lived CLI process exits, including Python exception and
+interrupt paths. The wait is capped at 200 ms; an unavailable gateway cannot
+block CLI completion. Exception events include only a sanitized exception type,
+not the original message or traceback. Export failures are kept off CLI stderr,
+and successful `SystemExit(0)` paths such as `--help` remain successful spans.
+
+The exported trace is observed performance evidence only. It never owns review
+state, GitHub mutations, local audit artifacts, or final-gate truth.
+
+## Operation span example
+
+```python
+from opentelemetry.trace import Status, StatusCode
+
+from gh_address_cr.telemetry import initialize_telemetry, shutdown_telemetry
+
+tracer = initialize_telemetry()
+try:
+    with tracer.start_as_current_span("my-task") as span:
+        span.set_attribute("cli.argument", "value")
+        try:
+            run_task()
+        except Exception as error:
+            span.record_exception(RuntimeError(type(error).__name__))
+            span.set_status(Status(StatusCode.ERROR))
+            raise
+finally:
+    shutdown_telemetry()
 ```
-
-## Optional self-host override
-
-If you want to run your own Worker instead of the hosted relay, use standard
-OpenTelemetry environment variables. Setting an explicit endpoint enables export:
-
-```bash
-export OTEL_SERVICE_NAME="gh-address-cr-cli"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=personal,service.namespace=skills"
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://gh-address-cr-telemetry.example.workers.dev"
-export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"
-```
-
-Notes:
-
-- `OTEL_EXPORTER_OTLP_ENDPOINT` is treated as a base URL and the CLI appends `/v1/logs`
-- alternatively, set `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` to use an exact logs endpoint as-is
-- if export fails, the CLI keeps local audit files and appends a local `telemetry_export` diagnostic entry to `trace.jsonl`
-
-## Worker setup
-
-Use the example files:
-
-- Worker code: `references/otel-worker-better-stack/worker.mjs`
-- Wrangler example: `references/otel-worker-better-stack/wrangler.example.jsonc`
-
-Recommended bindings:
-
-- secret: `SOURCE_TOKEN`
-- var or secret: `INGESTING_HOST`
-
-Example commands:
-
-```bash
-wrangler secret put SOURCE_TOKEN
-wrangler deploy
-```
-
-## Better Stack setup
-
-1. Create a Telemetry source for logs.
-2. Copy the source token and ingesting host.
-3. Store the source token only in the Worker secret `SOURCE_TOKEN`.
-4. Put the ingesting host in `INGESTING_HOST`.
-
-The CLI should never receive the Better Stack source token in this deployment model.
-
-## Quick verification
-
-1. Deploy the Worker.
-2. Enable the hosted relay with `GH_ADDRESS_CR_TELEMETRY=1`, or export the override env vars above for your own Worker.
-3. Run any command that writes audit/trace events, for example:
-
-```bash
-gh-address-cr final-gate owner/repo 123
-```
-
-4. Confirm:
-   - local `audit.jsonl` and `trace.jsonl` still exist
-   - Better Stack receives logs from service `gh-address-cr-cli`
-   - no Better Stack token exists in the CLI shell environment
 
 ## Official references
 
 - OpenTelemetry OTLP exporter spec: [opentelemetry.io/docs/specs/otel/protocol/exporter/](https://opentelemetry.io/docs/specs/otel/protocol/exporter/)
 - OTLP transport spec: [opentelemetry.io/docs/specs/otlp/](https://opentelemetry.io/docs/specs/otlp/)
 - Cloudflare Workers secrets: [developers.cloudflare.com/workers/configuration/secrets/](https://developers.cloudflare.com/workers/configuration/secrets/)
-- Better Stack OpenTelemetry logging: [betterstack.com/docs/logs/open-telemetry/](https://betterstack.com/docs/logs/open-telemetry/)

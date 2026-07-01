@@ -26,7 +26,11 @@ classifiers = [
   "Topic :: Software Development :: Version Control :: Git",
 ]
 dependencies = [
+  "opentelemetry-api>=1.30",
+  "opentelemetry-exporter-otlp-proto-http>=1.30",
+  "opentelemetry-sdk>=1.30",
   "packaging>=24",
+  "requests>=2.7",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +46,7 @@ Source = "https://github.com/RbBtSn0w/gh-address-cr"
 Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"
 
 [project.scripts]
-gh-address-cr = "gh_address_cr.cli:main"
+gh-address-cr = "gh_address_cr.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

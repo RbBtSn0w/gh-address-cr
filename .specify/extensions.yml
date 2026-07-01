@@ -17,6 +17,7 @@ hooks:
     command: speckit.memorylint.audit
     enabled: true
     optional: true
+    priority: 10
     prompt: Run MemoryLint audit to generate a boundary report before constitution
       generation?
     description: ''
@@ -49,6 +50,7 @@ hooks:
     command: speckit.memorylint.load-agents
     enabled: true
     optional: false
+    priority: 10
     prompt: Execute speckit.memorylint.load-agents?
     description: 'Mandatory gate: Load AGENTS.md to enforce core rules and prevent
       rule drift during the planning (plan.md generation) phase.'
@@ -116,6 +118,7 @@ hooks:
     command: speckit.memorylint.audit
     enabled: true
     optional: true
+    priority: 10
     prompt: Run MemoryLint audit to check for conflicts between constitution and AGENTS.md?
     description: ''
     condition: null
@@ -242,4 +245,19 @@ hooks:
     optional: true
     prompt: Commit after syncing issues?
     description: Auto-commit after tasks-to-issues conversion
+    condition: null
+  after_converge:
+  - extension: superb
+    command: speckit.superb.verify
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.superb.verify?
+    description: 'Mandatory evidence-first gate after convergence. speckit-converge
+      only assesses and appends remaining tasks to tasks.md; the hook runs verification
+      at convergence completion to ensure convergence-driven work still proves completion
+      with fresh evidence. Blocking-on-missing-evidence is inherited from the same
+      verify command used by after_implement.
+
+      '
     condition: null

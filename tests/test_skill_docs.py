@@ -20,6 +20,7 @@ HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
 OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
+OTEL_TRACING_CONTRACT_MD = ROOT / "docs" / "contracts" / "otel-tracing-v1.md"
 AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
 COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
 FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
@@ -49,6 +50,26 @@ def cli_topology_section():
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
+    def test_process_otel_has_versioned_contract_and_architecture_ownership(self):
+        contract = OTEL_TRACING_CONTRACT_MD.read_text(encoding="utf-8")
+        architecture = ARCHITECTURE_MD.read_text(encoding="utf-8")
+
+        for phrase in (
+            "otel-tracing.v1",
+            "Process-level observability owner",
+            "External inputs",
+            "Span projection",
+            "Export policy",
+            "Side-effect boundary",
+            "Artifact truth boundary",
+            "Recovery and replay",
+            "does not belong to the read-only evaluation plane",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, contract)
+        self.assertIn("docs/contracts/otel-tracing-v1.md", architecture)
+        self.assertIn("separate from PR-scoped workflow telemetry", architecture)
+
     def test_handoff_module_documents_non_event_sourced_metadata_boundary(self):
         text = HANDOFF_PY.read_text(encoding="utf-8")
 
@@ -546,12 +567,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 
-    def test_readme_and_skill_document_optional_otlp_worker_logging(self):
+    def test_readme_and_skill_document_otlp_worker_tracing(self):
         readme_text = read_repo_docs(README_MD, DEVELOPMENT_MD)
         skill_text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("Cloudflare Worker as the security relay", readme_text)
-        self.assertIn("gh-address-cr.hamiltonsnow.workers.dev", readme_text)
-        self.assertIn("telemetry_export", readme_text)
+        self.assertIn("telemetry-gateway.hamiltonsnow.workers.dev/v1/traces", readme_text)
+        self.assertIn("DISABLE_TELEMETRY=1", readme_text)
+        self.assertIn("DO_NOT_TRACK=1", readme_text)
         self.assertNotIn("replace-with-worker-shared-secret", readme_text)
         self.assertIn("references/otel-worker-better-stack.md", skill_text)
 

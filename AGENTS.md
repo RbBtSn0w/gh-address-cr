@@ -130,6 +130,6 @@ A task is complete only when:
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-  [specs/018-runtime-kernel/plan.md](specs/018-runtime-kernel/plan.md)
+shell commands, and other important information, read the current plan
+at specs/023-runtime-eval-foundation/plan.md
 <!-- SPECKIT END -->

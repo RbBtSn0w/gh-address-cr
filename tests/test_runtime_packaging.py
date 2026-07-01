@@ -309,6 +309,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('license = "MIT"', text)
         self.assertIn('license-files = ["LICENSE"]', text)
         self.assertIn('"packaging>=24"', text)
+        self.assertIn('"opentelemetry-api>=1.30"', text)
+        self.assertIn('"opentelemetry-sdk>=1.30"', text)
+        self.assertIn('"opentelemetry-exporter-otlp-proto-http>=1.30"', text)
+        self.assertIn('"requests>=2.7"', text)
         self.assertIn("Programming Language :: Python :: 3.10", text)
         self.assertIn("Operating System :: OS Independent", text)
         self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
@@ -393,6 +397,14 @@ class RuntimePackagingTest(PythonScriptTestCase):
             "gh-address-cr final-gate owner/repo 123",
         ):
             self.assertIn(command, text)
+
+    def test_ci_installs_project_dependencies_before_source_tests(self):
+        text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+        install_index = text.index("python -m pip install -e .")
+        self.assertLess(install_index, text.index("- name: Ruff"))
+        self.assertLess(install_index, text.index("- name: Mypy (blocking)"))
+        self.assertLess(install_index, text.index("- name: Unit tests (with coverage)"))
 
     def test_release_workflow_has_trusted_publishing_version_and_staging_gates(self):
         text = RELEASE_WORKFLOW.read_text(encoding="utf-8")

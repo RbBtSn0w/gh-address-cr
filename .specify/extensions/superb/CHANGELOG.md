@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-30
+### Added
+
+- Mandatory `after_converge` hook running `speckit.superb.verify`, so work produced by upstream
+  `/speckit-converge` passes the evidence-first gate before it can be declared complete
+  (`implement → converge → implement → verify`).
+
+### Changed
+
+- `review` now delegates requirement-coverage-gap remediation to `/speckit-converge` instead of
+  recommending manual task additions, and focuses its own verdict on task quality, TDD-readiness,
+  and plan↔task consistency. README documents the `review` (plan-stage) vs `converge`
+  (delivery-stage) boundary.
+- Declared Spec Kit compatibility remains `>=0.11.0`.
+
+## [1.7.0] - 2026-06-30
+<!-- planned-bump: minor -->
+<!-- next-release-version: 1.7.0 -->
+
+### Added
+
+- Added centralized missing skill guidance and installation orchestration in `ensure-skills.sh`, plus installation-agnostic skill discovery in `resolve-skill.sh`.
+- Added interactive `npx` checking, Quick Setup impact groupings (Hard Requirements vs Optional Skills), and prompt selection execution in `/speckit.superb.check`.
+- Added sandboxed HOME E2E installation test.
+
 ## [1.6.1] - 2026-06-16
 ### Removed
 
@@ -132,7 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.6.1...HEAD
+[Unreleased]: https://github.com/RbBtSn0w/spec-kit-extensions/compare/superpowers-bridge-v1.8.0...HEAD
 [1.0.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.0.0
 [1.1.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.1.0
 [1.3.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.3.0
@@ -142,3 +167,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [1.5.2]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.5.2
 [1.6.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.6.0
 [1.6.1]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.6.1
+[1.7.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.7.0
+[1.8.0]: https://github.com/RbBtSn0w/spec-kit-extensions/releases/tag/superpowers-bridge-v1.8.0

@@ -23,6 +23,24 @@ from gh_address_cr.core.telemetry_safety import (
 
 
 class TestTelemetry(unittest.TestCase):
+    @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
+    def test_runtime_events_preserve_measured_interval_timestamps(self, state_dir):
+        from gh_address_cr.core.telemetry import _runtime_events
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir.return_value = Path(tmp)
+            paths = core_paths.SessionPaths("octo/example", "77")
+            paths.workspace_dir.mkdir(parents=True)
+            (paths.workspace_dir / "telemetry.jsonl").write_text(
+                '{"command":"gh api","start_time":1.0,"end_time":2.5,"exit_code":0}\n',
+                encoding="utf-8",
+            )
+
+            event = _runtime_events(paths)[0]
+
+            self.assertEqual(event.started_at, "1970-01-01T00:00:01Z")
+            self.assertEqual(event.ended_at, "1970-01-01T00:00:02.500000Z")
+
     def setUp(self):
         SessionTelemetry.reset()
 
