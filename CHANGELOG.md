@@ -1,3 +1,9 @@
+## [3.2.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.0...v3.2.1) (2026-07-01)
+
+### Bug Fixes
+
+* **release:** render complete homebrew runtime resources ([#177](https://github.com/RbBtSn0w/gh-address-cr/issues/177)) ([d9fe461](https://github.com/RbBtSn0w/gh-address-cr/commit/d9fe461289347b02e9f1e809b9504dda97864725))
+
 ## [3.2.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.11...v3.2.0) (2026-07-01)
 
 ### Features
