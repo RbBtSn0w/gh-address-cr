@@ -23,6 +23,7 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
+from gh_address_cr.commands.consolidation import handle_consolidation_command
 from gh_address_cr.commands.doctor import handle_doctor_command
 from gh_address_cr.commands.evaluation import handle_evaluation_command
 from gh_address_cr.commands.final_gate import handle_final_gate
@@ -57,6 +58,7 @@ PUBLIC_COMMANDS = {
     "active-pr",
     "agent",
     "command-session",
+    "consolidation",
     "doctor",
     "evaluation",
     "final-gate",
@@ -779,7 +781,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,consolidation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -812,6 +814,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr evaluation rebuild [--repo owner/repo] [--pr-number 123]\n"
             "  gh-address-cr evaluation show owner/repo 123 [--run-id run-id]\n"
             "  gh-address-cr evaluation compare --baseline-version 3.1.10 --candidate-version 3.2.0\n"
+            "  gh-address-cr consolidation status [--json]\n"
+            "  gh-address-cr consolidation parity --slice <id> --facts <path> [--json]\n"
             "  gh-address-cr command-session --input commands.json\n"
         ),
     )
@@ -880,6 +884,13 @@ def _dispatch_evaluation_command(args: argparse.Namespace) -> int:
         print("Root output flags are not supported for evaluation commands.", file=sys.stderr)
         return 2
     return handle_evaluation_command(args.repo, args.pr_number, args.args)
+
+
+def _dispatch_consolidation_command(args: argparse.Namespace) -> int:
+    if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
+        print("Root output flags are not supported for consolidation commands.", file=sys.stderr)
+        return 2
+    return handle_consolidation_command(args.repo, args.pr_number, args.args)
 
 
 def _expand_target_args(args: argparse.Namespace) -> None:
@@ -973,6 +984,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "evaluation":
         return _dispatch_evaluation_command(args)
+
+    if args.command == "consolidation":
+        return _dispatch_consolidation_command(args)
 
     rc = _dispatch_management_commands(args)
     if rc is not None:

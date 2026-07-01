@@ -80,9 +80,9 @@ effects, deterministic across runs).
 - [x] T017 [US1] Implement `ParityObservation` dataclass and `parity-report.v1` serialization in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: implement ParityObservation schema serialization"
 - [x] T018 [US1] Implement `ParityObserver.observe(slice_id, facts)` replaying facts through the legacy projection and a registered pluggable candidate-projection hook (the pilot registers a synthetic candidate; the real check-axis kernel projection is deferred to the slice's own migration), comparing projection/decision using `runtime_kernel` projections+policies, in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: implement ParityObserver fact replay execution"
 - [x] T019 [US1] Extend `ParityObserver` to compare planned commands by idempotency key + `planned_command_digest` without executing them in `src/gh_address_cr/core/consolidation/parity.py`; git commit -m "feat: extend ParityObserver to compare planned command digests"
-- [ ] T020 [US1] Create `src/gh_address_cr/commands/consolidation.py` with a `status` subcommand rendering the authority map (text + `--json`); git commit -m "feat: implement status command in consolidation CLI"
-- [ ] T021 [US1] Add a `parity` subcommand (`--slice`, `--json`) to `src/gh_address_cr/commands/consolidation.py`; git commit -m "feat: implement parity command in consolidation CLI"
-- [ ] T022 [US1] Register the advanced `consolidation` command group in `src/gh_address_cr/cli.py` (additive; does not alter `review` default path); git commit -m "feat: register consolidation command group in main CLI"
+- [x] T020 [US1] Create `src/gh_address_cr/commands/consolidation.py` with a `status` subcommand rendering the authority map (text + `--json`); git commit -m "feat: implement status command in consolidation CLI"
+- [x] T021 [US1] Add a `parity` subcommand (`--slice`, `--json`) to `src/gh_address_cr/commands/consolidation.py`; git commit -m "feat: implement parity command in consolidation CLI"
+- [x] T022 [US1] Register the advanced `consolidation` command group in `src/gh_address_cr/cli.py` (additive; does not alter `review` default path); git commit -m "feat: register consolidation command group in main CLI"
 
 **Checkpoint**: US1 fully functional and independently testable — authority is single-owned and parity is provable offline.
 
