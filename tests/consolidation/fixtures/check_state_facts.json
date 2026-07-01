@@ -1,0 +1,50 @@
+{
+  "description": "Supported-cohort replay facts for the `check` axis pilot (slice-check-state). Review-thread + check-run facts from which PR check state is derived. Used by side-effect-free parity replay; contains no credentials or host identifiers.",
+  "cohort": "github-review-thread",
+  "facts": [
+    {
+      "schema_version": "1.0",
+      "fact_kind": "review_thread_observed",
+      "fact_id": "fact-thread-1",
+      "observed_at": "2026-06-30T12:00:00Z",
+      "sequence": 1,
+      "payload": {
+        "thread_id": "THREAD_1",
+        "state": "open",
+        "status": "OPEN",
+        "is_resolved": false,
+        "is_outdated": false,
+        "reply_evidence_present": false,
+        "path": "src/example.py",
+        "line": 10
+      }
+    },
+    {
+      "schema_version": "1.0",
+      "fact_kind": "review_thread_observed",
+      "fact_id": "fact-thread-2",
+      "observed_at": "2026-06-30T12:00:01Z",
+      "sequence": 2,
+      "payload": {
+        "thread_id": "THREAD_2",
+        "state": "resolved",
+        "status": "RESOLVED",
+        "is_resolved": true,
+        "is_outdated": false,
+        "reply_evidence_present": true
+      }
+    },
+    {
+      "schema_version": "1.0",
+      "fact_kind": "check_run_observed",
+      "fact_id": "fact-check-1",
+      "observed_at": "2026-06-30T12:00:02Z",
+      "sequence": 3,
+      "payload": {
+        "check_name": "ci/build",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    }
+  ]
+}
