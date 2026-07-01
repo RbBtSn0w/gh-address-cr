@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
 
 import requests
@@ -14,6 +15,13 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer
+
+from gh_address_cr.core.otel_semconv import (
+    ERROR_TYPE,
+    PROCESS_EXECUTABLE_NAME,
+    PROCESS_EXIT_CODE,
+    PROCESS_PID,
+)
 
 SERVICE_NAME_VALUE = "gh-address-cr"
 TELEMETRY_ENVIRONMENT_VARIABLE = "GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT"
@@ -116,7 +124,7 @@ def run_traced(
     span_name: str,
     operation: Callable[[], T],
     *,
-    attributes: Mapping[str, str | bool | int | float] | None = None,
+    attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
 ) -> T:
     """Run an operation in a span and explicitly record failures."""
     with tracer.start_as_current_span(
@@ -124,16 +132,32 @@ def run_traced(
         record_exception=False,
         set_status_on_exception=False,
     ) as span:
+        # Record execution identity attributes
+        span.set_attribute(PROCESS_EXECUTABLE_NAME, os.path.basename(sys.executable))
+        span.set_attribute(PROCESS_PID, os.getpid())
+
         if attributes:
             for key, value in attributes.items():
                 span.set_attribute(key, value)
         try:
-            return operation()
+            result = operation()
+            # Normal Return
+            exit_code = result if isinstance(result, int) and not isinstance(result, bool) else 0
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+            return result
         except SystemExit as error:
-            if error.code not in (None, 0):
-                _record_sanitized_error(span, error)
+            exit_code = error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
             raise
         except BaseException as error:
+            span.set_attribute(PROCESS_EXIT_CODE, 1)
+            if isinstance(error, KeyboardInterrupt):
+                err_type = "keyboard_interrupt"
+            elif isinstance(error, TimeoutError):
+                err_type = "timeout"
+            else:
+                err_type = "_OTHER"
+            span.set_attribute(ERROR_TYPE, err_type)
             _record_sanitized_error(span, error)
             raise
 
