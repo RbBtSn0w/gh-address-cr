@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 from gh_address_cr import __version__
 from gh_address_cr.core.evaluation.models import EvaluationObservationV1, EvidencePointer, RunManifestV1
 from gh_address_cr.core.evaluation.projector import project_concern
+from gh_address_cr.core.evaluation.timing import compute_workflow_cost
 from gh_address_cr.core.io import write_json_atomic
 
 MANIFEST_NAME = "run-manifest.v1.json"
@@ -57,10 +58,10 @@ def _sha256(path: Path) -> str:
 def _complexity(run_dir: Path) -> dict[str, Any]:
     try:
         session = json.loads((run_dir / "session.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, ValueError):
         session = {}
-    items = session.get("items") if isinstance(session, dict) else {}
-    rows = list(items.values()) if isinstance(items, dict) else []
+    items = session.get("items") if isinstance(session, Mapping) else {}
+    rows = list(items.values()) if isinstance(items, Mapping) else list(items) if isinstance(items, Sequence) and not isinstance(items, (str, bytes)) else []
     mix = {key: 0 for key in ("fix", "clarify", "defer", "reject")}
     for row in rows:
         if isinstance(row, Mapping) and row.get("classification") in mix:
@@ -127,6 +128,39 @@ def load_archive(run_dir: Path) -> dict[str, Any]:
     return {"manifest": manifest, "run_dir": str(run_dir)}
 
 
+def _trace_fallback(run_dir: Path) -> tuple[dict[str, Any], int | None, int]:
+    try:
+        records = [
+            json.loads(line)
+            for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        rows = [row for row in records if isinstance(row, Mapping)]
+    except (OSError, UnicodeError, ValueError):
+        return {}, None, 0
+    cost = compute_workflow_cost(rows)
+    token_total = sum(
+        int((row.get("metadata") or {}).get("token_total_count") or row.get("token_total_count") or 0)
+        for row in rows
+        if isinstance(row.get("metadata") or {}, Mapping)
+    )
+    return cost, token_total or None, len(rows)
+
+
+def _resolve_cost_metrics(
+    run_dir: Path, efficiency: Mapping[str, Any], host_metrics: Mapping[str, Any]
+) -> tuple[int | None, int | None, dict[str, Any], int]:
+    token_total = host_metrics.get("token_total_count")
+    active_time = efficiency.get("total_observed_duration_ms")
+    fallback_cost: dict[str, Any] = {}
+    fallback_invocations = 0
+    if active_time is None or token_total is None:
+        fallback_cost, fallback_tokens, fallback_invocations = _trace_fallback(run_dir)
+        token_total = fallback_tokens if token_total is None else token_total
+        active_time = fallback_cost.get("active_wall_time_ms") if active_time is None else active_time
+    return token_total, active_time, fallback_cost, fallback_invocations
+
+
 def project_archive(run_dir: Path, observations: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     loaded = load_archive(run_dir)
     manifest = loaded["manifest"]
@@ -185,8 +219,9 @@ def project_archive(run_dir: Path, observations: Sequence[Mapping[str, Any]] | N
     except (OSError, json.JSONDecodeError):
         efficiency = {}
     host_metrics = efficiency.get("host_metrics") or {}
-    token_total = host_metrics.get("token_total_count")
-    active_time = efficiency.get("total_observed_duration_ms")
+    token_total, active_time, fallback_cost, fallback_invocations = _resolve_cost_metrics(
+        Path(run_dir), efficiency, host_metrics
+    )
     coverage = {
         "workflow": {"status": "complete" if count else "unavailable", "deficits": [] if count else ["WORKFLOW_EVIDENCE_MISSING"]},
         "timing": {"status": "complete" if active_time is not None else "unavailable", "deficits": [] if active_time is not None else ["TIMING_INTERVALS_MISSING"]},
@@ -213,8 +248,8 @@ def project_archive(run_dir: Path, observations: Sequence[Mapping[str, Any]] | N
         "cost": {
             "total_tokens": token_total,
             "active_wall_time_ms": active_time,
-            "summed_resource_time_ms": efficiency.get("total_observed_duration_ms"),
-            "invocation_count": efficiency.get("total_invocations", efficiency.get("total_events")),
+            "summed_resource_time_ms": efficiency.get("total_observed_duration_ms", fallback_cost.get("summed_resource_time_ms")),
+            "invocation_count": efficiency.get("total_invocations", efficiency.get("total_events", fallback_invocations or None)),
             "github_api_round_trip_count": host_metrics.get("github_api_round_trip_count"),
             "tool_call_count": host_metrics.get("tool_call_count"),
             "retry_count": host_metrics.get("retry_count"),

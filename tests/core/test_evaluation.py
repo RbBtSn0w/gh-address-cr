@@ -450,6 +450,24 @@ class EvaluationArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "integrity"):
                 load_archive(run_dir)
 
+    def test_manifest_complexity_accepts_list_items(self):
+        from gh_address_cr.core.evaluation.archive import finalize_run_manifest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "session.json").write_text(
+                json.dumps({"items": [{"classification": "fix"}, {"classification": "defer"}]}),
+                encoding="utf-8",
+            )
+
+            manifest = finalize_run_manifest(
+                run_dir, repo="owner/repo", pr_number="12", run_id="run-1",
+                final_gate_passed=True, final_gate_counts={},
+            )
+
+            self.assertEqual(manifest["complexity"]["review_item_count"], 2)
+            self.assertEqual(manifest["complexity"]["classification_mix"]["fix"], 1)
+
     def test_observation_rejects_prompt_and_private_path_fields(self):
         from gh_address_cr.core.evaluation.models import EvaluationObservationV1
 
