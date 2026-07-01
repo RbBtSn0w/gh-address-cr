@@ -1,3 +1,5 @@
+import importlib.util
+import io
 import json
 import os
 import re
@@ -6,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
@@ -20,6 +23,14 @@ CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 VERSION_SYNC_SCRIPT = ROOT / "scripts" / "set_package_version.py"
 HOMEBREW_FORMULA_RENDERER = ROOT / "scripts" / "release" / "render_homebrew_formula.py"
 PYPI_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "release" / "pypi_gh_address_cr_1_2_3.json"
+
+
+def load_homebrew_formula_renderer():
+    spec = importlib.util.spec_from_file_location("render_homebrew_formula", HOMEBREW_FORMULA_RENDERER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 class RuntimePackagingTest(PythonScriptTestCase):
@@ -569,6 +580,94 @@ class RuntimePackagingTest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["url"].endswith(".tar.gz"))
         self.assertEqual(payload["sha256"], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+    def test_homebrew_formula_renderer_prefers_versions_with_sdists(self):
+        renderer = load_homebrew_formula_renderer()
+
+        selected = renderer.select_dependency_version(
+            "example-package",
+            ">=1.0",
+            {
+                "info": {"version": "2.0"},
+                "releases": {
+                    "1.0": [
+                        {"packagetype": "sdist", "url": "https://example.test/example-package-1.0.tar.gz"},
+                    ],
+                    "2.0": [
+                        {"packagetype": "bdist_wheel", "url": "https://example.test/example-package-2.0.whl"},
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(selected, "1.0")
+
+    def test_homebrew_formula_renderer_fetches_root_metadata_for_network_mode(self):
+        renderer = load_homebrew_formula_renderer()
+        output = Path(self.temp_dir.name) / "gh-address-cr.rb"
+        root_payload = {
+            "info": {
+                "name": "gh-address-cr",
+                "version": "1.2.3",
+                "requires_dist": ["requests>=2.7"],
+            },
+            "urls": [
+                {
+                    "filename": "gh_address_cr-1.2.3.tar.gz",
+                    "packagetype": "sdist",
+                    "url": "https://example.test/gh_address_cr-1.2.3.tar.gz",
+                    "digests": {
+                        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    },
+                }
+            ],
+        }
+        requests_index = {
+            "info": {"name": "requests", "version": "2.34.2"},
+            "releases": {
+                "2.34.2": [
+                    {
+                        "packagetype": "sdist",
+                        "url": "https://example.test/requests-2.34.2.tar.gz",
+                    }
+                ]
+            },
+        }
+        requests_payload = {
+            "info": {"name": "requests", "version": "2.34.2"},
+            "urls": [
+                {
+                    "filename": "requests-2.34.2.tar.gz",
+                    "packagetype": "sdist",
+                    "url": "https://example.test/requests-2.34.2.tar.gz",
+                    "digests": {
+                        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+                    },
+                }
+            ],
+        }
+
+        stdout = io.StringIO()
+        with mock.patch.object(renderer, "fetch_pypi_json", side_effect=[root_payload, root_payload, requests_payload]):
+            with mock.patch.object(renderer, "fetch_package_index", return_value=requests_index):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        str(HOMEBREW_FORMULA_RENDERER),
+                        "--version",
+                        "1.2.3",
+                        "--output",
+                        str(output),
+                    ],
+                ):
+                    with mock.patch("sys.stdout", stdout):
+                        result = renderer.main()
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "RENDERED")
+        self.assertIn('resource "requests" do', output.read_text(encoding="utf-8"))
 
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = (ROOT / "docs" / "installation.md").read_text(encoding="utf-8")

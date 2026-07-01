@@ -94,7 +94,7 @@ def fetch_pypi_json(package_name: str, version: str, base_url: str, retries: int
             if not isinstance(payload, dict):
                 raise SystemExit("PyPI JSON must be an object")
             return payload
-        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, OSError, ValueError) as exc:
             last_error = exc
             if attempt < retries:
                 time.sleep(retry_delay)
@@ -115,7 +115,7 @@ def fetch_package_index(package_name: str, base_url: str, retries: int, retry_de
             if not isinstance(payload, dict):
                 raise SystemExit("PyPI JSON must be an object")
             return payload
-        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, OSError, ValueError) as exc:
             last_error = exc
             if attempt < retries:
                 time.sleep(retry_delay)
@@ -210,17 +210,25 @@ def dependency_payload_from_fixture(
     return payload
 
 
+def has_sdist_files(files: object) -> bool:
+    return isinstance(files, list) and any(
+        isinstance(item, dict) and item.get("packagetype") == "sdist"
+        for item in files
+    )
+
+
 def select_dependency_version(package_name: str, specifier: str, index_payload: dict) -> str:
     info_version = str((index_payload.get("info") or {}).get("version") or "")
     candidates: list[Version] = []
+    requirement = Requirement(f"{package_name}{specifier}") if specifier else None
     for release_version, files in (index_payload.get("releases") or {}).items():
-        if not files:
+        if not has_sdist_files(files):
             continue
         try:
             parsed = Version(release_version)
         except InvalidVersion:
             continue
-        if specifier and parsed not in Requirement(f"{package_name}{specifier}").specifier:
+        if requirement is not None and parsed not in requirement.specifier:
             continue
         candidates.append(parsed)
 
@@ -229,7 +237,12 @@ def select_dependency_version(package_name: str, specifier: str, index_payload: 
             parsed_info_version = Version(info_version)
         except InvalidVersion:
             parsed_info_version = None
-        if parsed_info_version is not None and (not specifier or parsed_info_version in Requirement(f"{package_name}{specifier}").specifier):
+        info_release_files = ((index_payload.get("releases") or {}).get(info_version))
+        if (
+            parsed_info_version is not None
+            and has_sdist_files(info_release_files)
+            and (requirement is None or parsed_info_version in requirement.specifier)
+        ):
             return info_version
 
     if not candidates:
@@ -372,7 +385,18 @@ def main() -> int:
     args = parse_args()
     args.version = validate_version(args.version)
 
-    root_payload = read_json(args.pypi_json) if args.pypi_json is not None else None
+    if args.pypi_json is not None:
+        root_payload = read_json(args.pypi_json)
+    elif args.sdist_path is None and args.sdist_url is None:
+        root_payload = fetch_pypi_json(
+            args.package_name,
+            args.version,
+            args.pypi_base_url,
+            args.retries,
+            args.retry_delay,
+        )
+    else:
+        root_payload = None
     url, sha256 = resolve_source(args)
     resources = resolve_dependency_resources(args, root_payload)
     formula = render_formula(
