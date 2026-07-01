@@ -126,34 +126,3 @@ class EvaluationCatalog:
         finally:
             connection.close()
         return json.loads(rows[-1][0]) if rows else None
-
-    def summarize_pr(self, repo: str, pr_number: str) -> dict[str, Any]:
-        if not self.path.exists():
-            raise FileNotFoundError(self.path)
-        connection = sqlite3.connect(self.path)
-        try:
-            rows = connection.execute(
-                "SELECT run_id, runtime_version FROM runs WHERE repo = ? AND pr_number = ? ORDER BY run_id",
-                (repo, str(pr_number))
-            ).fetchall()
-        finally:
-            connection.close()
-        return {
-            "schema_version": "evaluation-pr.v1",
-            "repo": repo,
-            "pr_number": str(pr_number),
-            "run_count": len(rows),
-            "run_ids": [row[0] for row in rows],
-            "runtime_versions": sorted({str(row[1]) for row in rows}),
-        }
-
-    def summarize_runtime_version(self, runtime_version: str) -> dict[str, Any]:
-        rows = self.query_runs(runtime_version)
-        return {
-            "schema_version": "evaluation-runtime.v1",
-            "runtime_version": runtime_version,
-            "run_count": len(rows),
-            "run_ids": [row["run_id"] for row in rows],
-            "repos": sorted({str(row["repo"]) for row in rows}),
-            "cohort_keys": sorted({str(row["cohort_key"]) for row in rows}),
-        }

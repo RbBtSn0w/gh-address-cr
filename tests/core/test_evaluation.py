@@ -224,19 +224,6 @@ class EvaluationCatalogAndComparisonTests(unittest.TestCase):
 
         self.assertTrue({"runs", "concerns", "coverage", "costs", "observations", "evidence_pointers"} <= names)
 
-    def test_catalog_derives_pr_and_runtime_version_records(self):
-        from gh_address_cr.core.evaluation.catalog import EvaluationCatalog
-
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = EvaluationCatalog(Path(tmp) / "evaluation.sqlite3")
-            catalog.rebuild([self._run("1.0", 1), self._run("1.0", 2)])
-
-            pr_record = catalog.summarize_pr("owner/repo", "1")
-            runtime_record = catalog.summarize_runtime_version("1.0")
-
-        self.assertEqual(pr_record["run_count"], 1)
-        self.assertEqual(runtime_record["run_count"], 2)
-
     def test_comparison_requires_samples_and_reports_distributions(self):
         from gh_address_cr.core.evaluation.comparison import compare_runs
 

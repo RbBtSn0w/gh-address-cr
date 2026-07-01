@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommending manual task additions, and focuses its own verdict on task quality, TDD-readiness,
   and plan↔task consistency. README documents the `review` (plan-stage) vs `converge`
   (delivery-stage) boundary.
-- Declared Spec Kit compatibility raised to `>=0.12.0`.
+- Declared Spec Kit compatibility remains `>=0.11.0`.
 
 ## [1.7.0] - 2026-06-30
 <!-- planned-bump: minor -->
