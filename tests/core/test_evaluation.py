@@ -279,6 +279,18 @@ class EvaluationCatalogAndComparisonTests(unittest.TestCase):
             compare_runs(baseline, candidate)["report_fingerprint"],
         )
 
+    def test_comparison_tolerates_missing_quality_and_cost_objects(self):
+        from gh_address_cr.core.evaluation.comparison import compare_runs
+
+        baseline = [{**self._run("1.0", index), "quality": None, "cost": None} for index in range(10)]
+        candidate = [{**self._run("2.0", index), "quality": None, "cost": None} for index in range(10)]
+
+        result = compare_runs(baseline, candidate)
+
+        self.assertEqual(result["quality"]["durable_rate"]["baseline"], 0.0)
+        self.assertEqual(result["operational_health"]["latency_ms"]["candidate"]["median"], 0.0)
+        self.assertEqual(result["operational_health"]["overhead_budget"]["status"], "healthy")
+
     def test_comparison_excludes_unmatched_cohorts_and_reports_quality_bounds(self):
         from gh_address_cr.core.evaluation.comparison import compare_runs
 

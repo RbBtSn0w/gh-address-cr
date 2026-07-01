@@ -88,7 +88,7 @@ def compare_runs(
             "retry_count",
             "actionable_rejection_count",
         ):
-            if not all(isinstance(run.get("cost", {}).get(metric), (int, float)) for run in [*baseline, *candidate]):
+            if not all(isinstance((run.get("cost") or {}).get(metric), (int, float)) for run in [*baseline, *candidate]):
                 continue
             semantic["economics"][metric] = {
                 "baseline": _distribution([float(run["cost"][metric]) for run in baseline]),
@@ -102,8 +102,8 @@ def compare_runs(
             "final_gate_regression_rate",
         )
         for metric in quality_metrics:
-            baseline_rate = statistics.mean(float(run["quality"].get(metric, 0.0)) for run in baseline)
-            candidate_rate = statistics.mean(float(run["quality"].get(metric, 0.0)) for run in candidate)
+            baseline_rate = statistics.mean(float((run.get("quality") or {}).get(metric, 0.0)) for run in baseline)
+            candidate_rate = statistics.mean(float((run.get("quality") or {}).get(metric, 0.0)) for run in candidate)
             semantic["quality"][metric] = {
                 "baseline": baseline_rate,
                 "candidate": candidate_rate,
@@ -124,10 +124,10 @@ def compare_runs(
             if semantic["quality"][metric]["candidate"] > semantic["quality"][metric]["baseline"]:
                 semantic["guardrail_failures"].append(code)
         semantic["operational_health"]["latency_ms"] = {
-            "baseline": _distribution([float(run["cost"]["active_wall_time_ms"]) for run in baseline]),
-            "candidate": _distribution([float(run["cost"]["active_wall_time_ms"]) for run in candidate]),
+            "baseline": _distribution([float((run.get("cost") or {}).get("active_wall_time_ms") or 0) for run in baseline]),
+            "candidate": _distribution([float((run.get("cost") or {}).get("active_wall_time_ms") or 0) for run in candidate]),
         }
-        overhead = [float(run["cost"].get("measurement_overhead_ms") or 0) for run in candidate]
+        overhead = [float((run.get("cost") or {}).get("measurement_overhead_ms") or 0) for run in candidate]
         overhead_distribution = _distribution(overhead)
         semantic["operational_health"]["overhead_budget"] = {
             "budget_ms": overhead_budget_ms,
