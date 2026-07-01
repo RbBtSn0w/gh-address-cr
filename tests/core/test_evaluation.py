@@ -383,6 +383,29 @@ class EvaluationArchiveTests(unittest.TestCase):
             self.assertEqual(result, {"accepted_count": 1, "duplicate_count": 1})
             self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1)
 
+    def test_observation_append_rejects_invalid_existing_ledger_without_writing(self):
+        from gh_address_cr.core.evaluation.models import EvaluationObservationV1
+        from gh_address_cr.core.evaluation.observations import append_observations
+
+        observation = EvaluationObservationV1.from_dict(
+            {
+                "repo": "owner/repo", "pr_number": "12", "run_id": "run-1",
+                "observed_at": "2026-06-30T02:00:00Z", "observed_head_sha": "abc",
+                "review_round_id": "review-2", "review_state": "APPROVED",
+                "reviewer_relation": "unknown", "item_id": "item-1",
+                "outcome_kind": "no_reopen", "correlation_method": "thread_id",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "observations.jsonl"
+            original = b'{"observation_id":"existing"}\n\xff'
+            path.write_bytes(original)
+
+            with self.assertRaisesRegex(ValueError, "observation ledger invalid"):
+                append_observations(path, [observation])
+
+            self.assertEqual(path.read_bytes(), original)
+
     def test_manifest_finalization_hashes_final_bytes_and_loader_checks_integrity(self):
         from gh_address_cr.core.evaluation.archive import finalize_run_manifest, load_archive
 

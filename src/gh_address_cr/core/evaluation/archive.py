@@ -161,7 +161,19 @@ def project_archive(run_dir: Path, observations: Sequence[Mapping[str, Any]] | N
         if by_type.get("response_published"):
             item["publish_evidence"] = by_type["response_published"]
         item["final_gate_passed"] = manifest["final_gate_status"] == "PASSED"
-    concerns = [project_concern(manifest["run_id"], item, observations or []) for item in items if isinstance(item, Mapping)]
+    observations_by_item: dict[str, list[Mapping[str, Any]]] = {}
+    for observation in observations or []:
+        for key in {str(observation.get("item_id") or ""), str(observation.get("related_item_id") or "")} - {""}:
+            observations_by_item.setdefault(key, []).append(observation)
+    concerns = [
+        project_concern(
+            manifest["run_id"],
+            item,
+            observations_by_item.get(str(item.get("item_id") or ""), []),
+        )
+        for item in items
+        if isinstance(item, Mapping)
+    ]
     verified = sum(row["provisional_state"] == "verified" for row in concerns)
     durable = sum(row["durable_state"] == "verified" for row in concerns)
     negative = sum(row["durable_state"] == "negative" for row in concerns)

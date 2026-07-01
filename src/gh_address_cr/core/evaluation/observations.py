@@ -12,9 +12,11 @@ def append_observations(path: Path, observations: Iterable[EvaluationObservation
     path.parent.mkdir(parents=True, exist_ok=True)
     existing: set[str] = set()
     if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                existing.add(str(json.loads(line)["observation_id"]))
+        try:
+            records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            existing = {str(record["observation_id"]) for record in records}
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"observation ledger invalid: {exc}") from exc
     accepted = duplicate = 0
     with path.open("a", encoding="utf-8") as handle:
         for observation in observations:
