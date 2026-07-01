@@ -14,7 +14,7 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `process.executable.name` | string | Required | `os.path.basename(sys.argv[0])` or `"gh-address-cr"` | Base name only. |
 | `process.pid` | int | Required | `os.getpid()` | |
 | `process.exit.code` | int | Required | return value of `cli_main` (0 on success); on propagated exception, synthetic `1` | Always present, incl. exception path (R-006, U1). |
-| `error.type` | string | Conditional (exit ≠ 0 only) | bounded set: `"nonzero_exit"`, whitelisted expected exception class name, else `_OTHER` | Low-cardinality; **unset on success**; no unbounded class names (A2). |
+| `error.type` | string | Conditional (exit ≠ 0 only) | enumerated set: `"nonzero_exit"`, `"keyboard_interrupt"` (KeyboardInterrupt), `"timeout"` (TimeoutError), else `_OTHER` | Low-cardinality; **unset on success**; no raw class names (A2/U1). |
 | `process.command_args` | string[] | Recommended | `safe_command_args([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | Sanitized (R-001). Never raw. Argv source pinned for test determinism (see Entity 2). |
 | `process.parent_pid` | int | Opt-In | `os.getppid()` | Fallback breadcrumb only (R-003); **replaces** spec's `system.process.parent_id` (G-5). |
 | `gen_ai.operation.name` | string | Added | constant `"execute_tool"` | |

@@ -21,10 +21,14 @@ landable subset; "GATED" = requires human confirmation before build.
   it is a **synthetic non-zero code (`1`)** so exit.code is always present.
 - `error.type` (string, low-cardinality) is present **iff** `process.exit.code != 0`
   or an exception propagated. It MUST be absent on exit code 0.
-- `error.type` values are drawn from a **bounded set**: `"nonzero_exit"` for a
-  non-zero return without exception, a small whitelist of expected exception
-  class names, else `_OTHER`. Arbitrary exception class names MUST NOT be passed
-  through unbounded (cardinality guard, Principle VIII).
+- `error.type` values are drawn from an **explicitly enumerated bounded set**:
+  - `"nonzero_exit"` — non-zero return with no exception;
+  - `"keyboard_interrupt"` — `KeyboardInterrupt` propagated;
+  - `"timeout"` — `TimeoutError` propagated;
+  - `_OTHER` — any other propagated exception.
+  The whitelist is intentionally minimal and extended only with evidence of a
+  new predictable, low-cardinality failure class. Arbitrary/raw exception class
+  names MUST NOT be passed through (cardinality guard, Principle VIII).
 
 ## C-4 Sanitized arguments (MVP)
 - `process.command_args` (string[]) is present and is the output of
@@ -40,9 +44,9 @@ landable subset; "GATED" = requires human confirmation before build.
 - `gen_ai.operation.name == "execute_tool"`.
 - `gen_ai.tool.name` is present (parsed command name, else `"gh-address-cr"`).
 - `gen_ai.tool.call.arguments` (JSON string) derives from the **same** sanitized
-  value as C-4. No independently-filtered copy. *(No system-only flags exist in
-  v1, so the "exclude system-only flags" clause of FR-007 is vacuous until G-2
-  lands; the test asserts equality with the C-4 value.)*
+  value as C-4: `json.loads(arguments)` MUST equal the `process.command_args`
+  list. No independently-filtered copy. *(No system-only flags exist in v1, so
+  the "exclude system-only flags" clause of FR-007 is vacuous until G-2 lands.)*
 - `gen_ai.tool.call.result` is **absent** in v1 (documented omission, G-3).
 
 ## C-6 Parent-pid breadcrumb (MVP)

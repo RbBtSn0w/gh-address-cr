@@ -5,6 +5,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Gate status**: All five gates (G-1…G-5) were **confirmed on 2026-07-01** and
+> are now fixed decisions in [spec.md](./spec.md) → *Scope Decisions (v1 MVP)*.
+> The "Human-Confirmation Gates" / "Recommendation" language below is retained as
+> the decision rationale record — it is no longer pending.
+
 > **Planning directive from the user**: This plan is primarily a **feasibility
 > investigation** ("上述细节主要调研是否可以落地"), with special scrutiny on the
 > **AI-agent invocation / context-linking** dimension. Anything that exceeds the
@@ -30,9 +35,10 @@ into a **landable MVP** and a **confirmation-gated remainder**:
   to a child process is **never automatic** — the calling agent must voluntarily
   inject it, and **no mainstream coding agent (Claude Code, Codex) is known to do
   so today**. So the "preferred" path is a *dormant, future-proofing* path, not
-  present-day linkage. The ppid fallback is landable but low-value and uses a
-  **non-standard attribute name** in the spec (`system.process.parent_id` →
-  should be the standard `process.parent_pid`). The `--traceparent` flag adds a
+  present-day linkage. The ppid fallback is landable but low-value; the original
+  spec draft used a **non-standard attribute name** (`system.process.parent_id`),
+  now **resolved in spec.md to the standard `process.parent_pid`** (G-5). The
+  `--traceparent` flag adds a
   **public CLI contract surface** and only works if the **skill payload instructs
   the agent to generate and pass it** — both exceed the baseline.
 - **Dimension 3 (GenAI Context) — SPLIT.** `gen_ai.operation.name=execute_tool`
@@ -191,6 +197,6 @@ The following exceed the landable baseline and MUST be confirmed before build:
    installed `opentelemetry.semconv._incubating` constants and document the
    version)? *Recommendation: accept, using `_incubating` constants + a pinned
    note.*
-5. **G-5 — `system.process.parent_id` vs `process.parent_pid`**: The spec's
-   proposed name is non-standard. *Recommendation: use the standard
-   `process.parent_pid` (Opt-In in the process semconv); update the spec.*
+5. **G-5 — `system.process.parent_id` vs `process.parent_pid`**: The original
+   draft name was non-standard. **CONFIRMED & applied**: spec.md now uses the
+   standard `process.parent_pid` (Opt-In in the process semconv).
