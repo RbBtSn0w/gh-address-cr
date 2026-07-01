@@ -13,6 +13,7 @@ from gh_address_cr.core.evaluation.archive import MANIFEST_NAME, capture_observa
 from gh_address_cr.core.evaluation.catalog import EvaluationCatalog
 from gh_address_cr.core.evaluation.comparison import compare_runs
 from gh_address_cr.core.evaluation.observations import append_observations, load_observations, validate_observation
+from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.github.client import GitHubClient
 
 
@@ -146,8 +147,8 @@ def _compare(args: list[str]) -> int:
     if parsed.output:
         output = Path(parsed.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         result["report_artifact"] = str(output)
+        write_json_atomic(output, result)
     _emit(result, parsed.format)
     return 0
 

@@ -284,6 +284,22 @@ class EvaluationCatalogAndComparisonTests(unittest.TestCase):
 
 
 class EvaluationArchiveTests(unittest.TestCase):
+    def test_archive_projection_rejects_invalid_utf8_evidence_without_partial_projection(self):
+        from gh_address_cr.core.evaluation.archive import finalize_run_manifest, project_archive
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            session = {"items": {"item-1": {"item_id": "item-1", "classification": "fix"}}}
+            (run_dir / "session.json").write_text(json.dumps(session), encoding="utf-8")
+            (run_dir / "evidence.jsonl").write_bytes(b'{"item_id":"item-1","event_type":"classification_recorded"}\n\xff')
+            finalize_run_manifest(
+                run_dir, repo="owner/repo", pr_number="12", run_id="run-1",
+                final_gate_passed=True, final_gate_counts={},
+            )
+
+            with self.assertRaisesRegex(ValueError, "archive evidence invalid"):
+                project_archive(run_dir)
+
     def test_archive_projection_uses_authoritative_runtime_evidence(self):
         from gh_address_cr.core.evaluation.archive import finalize_run_manifest, project_archive
 

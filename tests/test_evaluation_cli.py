@@ -112,6 +112,23 @@ class EvaluationCliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "INSUFFICIENT_EVIDENCE")
         self.assertGreaterEqual(payload["operational_health"]["report_generation_overhead_ms"], 0.0)
 
+    def test_compare_writes_report_atomically(self):
+        output = self.state_dir / "reports" / "comparison.json"
+        with (
+            patch("gh_address_cr.commands.evaluation.EvaluationCatalog.query_runs", return_value=[]),
+            patch("gh_address_cr.commands.evaluation.write_json_atomic") as write_atomic,
+        ):
+            code, payload = self._run([
+                "evaluation", "compare", "--baseline-version", "1.0", "--candidate-version", "2.0",
+                "--output", str(output),
+            ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["report_artifact"], str(output))
+        written_payload = write_atomic.call_args.args[1]
+        self.assertEqual(write_atomic.call_args.args[0], output)
+        self.assertEqual(written_payload["report_artifact"], str(output))
+
     def test_unsafe_observation_fails_with_stable_exit_code(self):
         self._archive("1.0", "run-1")
         unsafe = {

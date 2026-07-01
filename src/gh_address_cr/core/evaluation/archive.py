@@ -139,10 +139,11 @@ def project_archive(run_dir: Path, observations: Sequence[Mapping[str, Any]] | N
     evidence_by_item: dict[str, list[dict[str, Any]]] = {}
     evidence_path = Path(run_dir) / "evidence.jsonl"
     if evidence_path.exists():
-        for line in evidence_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            record = json.loads(line)
+        try:
+            records = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"archive evidence invalid: {exc}") from exc
+        for record in records:
             if isinstance(record, dict) and record.get("item_id"):
                 evidence_by_item.setdefault(str(record["item_id"]), []).append(record)
     for item in items:
