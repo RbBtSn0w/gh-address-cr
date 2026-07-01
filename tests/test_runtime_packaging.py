@@ -447,11 +447,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("Formula/gh-address-cr.rb", text)
         self.assertIn('HOMEBREW_NO_INSTALL_FROM_API: "1"', text)
         self.assertIn("Sync rendered Homebrew formula into tapped clone", text)
-        self.assertIn("continue-on-error: true", text)
-        self.assertIn(
-            'brew update-python-resources --package-name gh-address-cr --version "$PACKAGE_VERSION" RbBtSn0w/tap/gh-address-cr',
-            text,
-        )
+        self.assertNotIn("brew update-python-resources", text)
         self.assertIn("brew audit --formula --strict RbBtSn0w/tap/gh-address-cr", text)
         self.assertIn("brew install --build-from-source RbBtSn0w/tap/gh-address-cr", text)
         self.assertIn("brew test RbBtSn0w/tap/gh-address-cr", text)
@@ -482,7 +478,26 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "RENDERED")
         self.assertEqual(payload["version"], "1.2.3")
         self.assertEqual(payload["sha256"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        self.assertEqual(payload["resources"], ["packaging"])
+        self.assertEqual(
+            payload["resources"],
+            [
+                "certifi",
+                "charset-normalizer",
+                "googleapis-common-protos",
+                "idna",
+                "opentelemetry-api",
+                "opentelemetry-exporter-otlp-proto-common",
+                "opentelemetry-exporter-otlp-proto-http",
+                "opentelemetry-proto",
+                "opentelemetry-sdk",
+                "opentelemetry-semantic-conventions",
+                "packaging",
+                "protobuf",
+                "requests",
+                "typing-extensions",
+                "urllib3",
+            ],
+        )
 
         formula = output.read_text(encoding="utf-8")
         self.assertIn("class GhAddressCr < Formula", formula)
@@ -490,6 +505,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
+        self.assertIn('resource "requests" do', formula)
+        self.assertIn('resource "certifi" do', formula)
+        self.assertIn('resource "opentelemetry-exporter-otlp-proto-http" do', formula)
         self.assertIn('resource "packaging" do', formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
         self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
@@ -497,6 +515,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
+        self.assertNotIn('resource "coverage" do', formula)
         self.assertNotIn("whl", formula)
 
     def test_homebrew_formula_renderer_prefers_tar_gz_when_pypi_lists_multiple_sdists(self):

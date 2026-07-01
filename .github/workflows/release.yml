@@ -267,12 +267,6 @@ jobs:
           mkdir -p "$tap_path/Formula"
           cp homebrew-tap/Formula/gh-address-cr.rb "$tap_path/Formula/gh-address-cr.rb"
 
-      - name: Update Python resources
-        continue-on-error: true
-        env:
-          PACKAGE_VERSION: ${{ needs.build-release-package.outputs.package_version }}
-        run: brew update-python-resources --package-name gh-address-cr --version "$PACKAGE_VERSION" RbBtSn0w/tap/gh-address-cr
-
       - name: Audit Homebrew formula
         run: brew audit --formula --strict RbBtSn0w/tap/gh-address-cr
 
@@ -281,11 +275,6 @@ jobs:
 
       - name: Test Homebrew formula
         run: brew test RbBtSn0w/tap/gh-address-cr
-
-      - name: Sync audited Homebrew formula
-        run: |
-          tap_path="$(brew --repository RbBtSn0w/tap)"
-          cp "$tap_path/Formula/gh-address-cr.rb" homebrew-tap/Formula/gh-address-cr.rb
 
       - name: Commit Homebrew tap update
         working-directory: homebrew-tap
