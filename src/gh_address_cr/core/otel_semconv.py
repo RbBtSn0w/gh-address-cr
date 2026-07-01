@@ -16,6 +16,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_CONVERSATION_ID,
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
 )
 from opentelemetry.semconv._incubating.attributes.process_attributes import (
@@ -39,6 +40,7 @@ __all__ = [
     "GEN_AI_OPERATION_NAME",
     "GEN_AI_TOOL_NAME",
     "GEN_AI_TOOL_CALL_ARGUMENTS",
+    "GEN_AI_TOOL_CALL_RESULT",
     "GEN_AI_CONVERSATION_ID",
     "GEN_AI_AGENT_NAME",
     # Process attributes

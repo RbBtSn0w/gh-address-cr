@@ -6,6 +6,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_CONVERSATION_ID,
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
     PROCESS_COMMAND_ARGS,
     PROCESS_EXECUTABLE_NAME,
@@ -30,6 +31,7 @@ class OtelSemconvPinsTestCase(unittest.TestCase):
         self.assertEqual(GEN_AI_OPERATION_NAME, "gen_ai.operation.name")
         self.assertEqual(GEN_AI_TOOL_NAME, "gen_ai.tool.name")
         self.assertEqual(GEN_AI_TOOL_CALL_ARGUMENTS, "gen_ai.tool.call.arguments")
+        self.assertEqual(GEN_AI_TOOL_CALL_RESULT, "gen_ai.tool.call.result")
         self.assertEqual(GEN_AI_CONVERSATION_ID, "gen_ai.conversation.id")
         self.assertEqual(GEN_AI_AGENT_NAME, "gen_ai.agent.name")
         self.assertEqual(VCS_CHANGE_ID, "vcs.change.id")
