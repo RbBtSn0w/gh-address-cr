@@ -1,3 +1,0 @@
-## 2024-06-30 - Eager Allocation in setdefault()
-**Learning:** Using `dict.setdefault()` with a complex default object (like a dict or set) in a tight loop is a performance bottleneck. The default object is eagerly evaluated and allocated on EVERY iteration, even if the key already exists. In hot paths processing many events, this causes massive unnecessary memory allocation overhead and garbage collection pressure.
-**Action:** In tight loops, avoid `setdefault` with complex default objects. Instead, use an explicit `if key not in dict: dict[key] = ...` to ensure the complex object is only allocated when actually needed.
