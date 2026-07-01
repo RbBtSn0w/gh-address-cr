@@ -28,4 +28,67 @@ Architecture Preflight — pilot ``slice-check-state`` (Constitution Principle I
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from gh_address_cr.core.consolidation.authority_map import AuthorityEntry, RuntimeAuthorityMap, derive_authority_map
+from gh_address_cr.core.consolidation.deprecations import DeprecationEntry, DeprecationInventory
+from gh_address_cr.core.consolidation.evidence import (
+    RolloutEvidence,
+    RolloutEvidenceStatus,
+    evaluation_to_rollout_evidence,
+)
+from gh_address_cr.core.consolidation.migration_slice import (
+    MigrationSlice,
+    RollbackTrigger,
+    get_registered_slice,
+    registered_slices,
+)
+from gh_address_cr.core.consolidation.optimization import (
+    HypothesisState,
+    OptimizationHypothesis,
+    default_hypothesis_states,
+    default_optimization_hypotheses,
+)
+from gh_address_cr.core.consolidation.rollout import RolloutDecision, RolloutPolicy
+from gh_address_cr.core.consolidation.rollout_state import RolloutSliceState, RolloutState
+from gh_address_cr.core.consolidation.types import (
+    AUTHORITY_MAP_SCHEMA,
+    DEPRECATION_INVENTORY_SCHEMA,
+    PARITY_REPORT_SCHEMA,
+    ROLLOUT_STATE_SCHEMA,
+    CompatibilityDirection,
+    ConsolidationError,
+    Owner,
+    RolloutStage,
+    StateAxis,
+)
+
+__all__ = [
+    "AUTHORITY_MAP_SCHEMA",
+    "AuthorityEntry",
+    "CompatibilityDirection",
+    "ConsolidationError",
+    "DEPRECATION_INVENTORY_SCHEMA",
+    "DeprecationEntry",
+    "DeprecationInventory",
+    "HypothesisState",
+    "MigrationSlice",
+    "Owner",
+    "OptimizationHypothesis",
+    "PARITY_REPORT_SCHEMA",
+    "RolloutDecision",
+    "RolloutEvidence",
+    "RolloutEvidenceStatus",
+    "RolloutPolicy",
+    "RolloutSliceState",
+    "RolloutStage",
+    "RolloutState",
+    "ROLLOUT_STATE_SCHEMA",
+    "RollbackTrigger",
+    "RuntimeAuthorityMap",
+    "StateAxis",
+    "default_hypothesis_states",
+    "default_optimization_hypotheses",
+    "derive_authority_map",
+    "evaluation_to_rollout_evidence",
+    "get_registered_slice",
+    "registered_slices",
+]
