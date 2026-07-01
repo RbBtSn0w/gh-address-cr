@@ -1,3 +1,9 @@
+## [3.2.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.11...v3.2.0) (2026-07-01)
+
+### Features
+
+* read-only evaluation plane and process-level OTel tracing ([#175](https://github.com/RbBtSn0w/gh-address-cr/issues/175)) ([038a0e1](https://github.com/RbBtSn0w/gh-address-cr/commit/038a0e10422ccd36edded447cd96c7f48c3dad93))
+
 ## [3.1.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.10...v3.1.11) (2026-06-30)
 
 ## [3.1.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.1.9...v3.1.10) (2026-06-29)
