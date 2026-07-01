@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable, Mapping
 
 
+def _timestamp_ms(span: Mapping[str, Any], prefix: str) -> int | None:
+    numeric = span.get(f"{prefix}_at_ms")
+    if numeric is not None:
+        return int(numeric)
+    value = span.get(f"{prefix}_at")
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(f"{prefix}_at must include a timezone")
+    return round(parsed.timestamp() * 1000)
+
+
 def interval_union_ms(spans: Iterable[Mapping[str, Any]]) -> int:
-    intervals = sorted(
-        (int(span["started_at_ms"]), int(span["ended_at_ms"]))
-        for span in spans
-        if span.get("started_at_ms") is not None and span.get("ended_at_ms") is not None
-    )
+    intervals = []
+    for span in spans:
+        start, end = _timestamp_ms(span, "started"), _timestamp_ms(span, "ended")
+        if start is not None and end is not None:
+            intervals.append((start, end))
+    intervals.sort()
     total = 0
     current_start: int | None = None
     current_end: int | None = None
@@ -31,8 +46,9 @@ def compute_workflow_cost(spans: Iterable[Mapping[str, Any]], *, measurement_ove
     resource_time = 0
     for row in rows:
         measured = max(0, int(row.get("duration_ms") or 0))
-        if row.get("started_at_ms") is not None and row.get("ended_at_ms") is not None:
-            measured = max(measured, int(row["ended_at_ms"]) - int(row["started_at_ms"]))
+        start, end = _timestamp_ms(row, "started"), _timestamp_ms(row, "ended")
+        if start is not None and end is not None:
+            measured = max(measured, end - start)
         resource_time += measured
     return {
         "active_wall_time_ms": interval_union_ms(rows),

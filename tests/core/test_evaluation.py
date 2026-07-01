@@ -150,6 +150,19 @@ class EvaluationEconomicsTests(unittest.TestCase):
         self.assertEqual(cost["active_wall_time_ms"], 200)
         self.assertEqual(cost["summed_resource_time_ms"], 275)
 
+    def test_interval_union_accepts_runtime_iso_timestamps(self):
+        from gh_address_cr.core.evaluation.timing import compute_workflow_cost
+
+        cost = compute_workflow_cost(
+            [
+                {"started_at": "2026-06-30T01:00:00Z", "ended_at": "2026-06-30T01:00:00.100Z"},
+                {"started_at": "2026-06-30T01:00:00.050+00:00", "ended_at": "2026-06-30T01:00:00.150+00:00"},
+            ]
+        )
+
+        self.assertEqual(cost["active_wall_time_ms"], 150)
+        self.assertEqual(cost["summed_resource_time_ms"], 200)
+
     def test_rejection_taxonomy_defaults_unknown_to_actionable(self):
         from gh_address_cr.core.evaluation.coverage import classify_rejection
 
@@ -382,6 +395,16 @@ class EvaluationArchiveTests(unittest.TestCase):
 
             self.assertEqual(result, {"accepted_count": 1, "duplicate_count": 1})
             self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_observation_loader_rejects_invalid_utf8_without_partial_result(self):
+        from gh_address_cr.core.evaluation.observations import load_observations
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "observations.jsonl"
+            path.write_bytes(b'{"observation_id":"valid"}\n\xff')
+
+            with self.assertRaisesRegex(ValueError, "observation ledger invalid"):
+                load_observations(path)
 
     def test_observation_append_rejects_invalid_existing_ledger_without_writing(self):
         from gh_address_cr.core.evaluation.models import EvaluationObservationV1

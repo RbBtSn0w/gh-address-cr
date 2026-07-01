@@ -32,7 +32,13 @@ def append_observations(path: Path, observations: Iterable[EvaluationObservation
 def load_observations(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    try:
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if not all(isinstance(record, dict) for record in records):
+            raise ValueError("observation records must be objects")
+        return records
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError(f"observation ledger invalid: {exc}") from exc
 
 
 def normalize_observation(payload: Mapping[str, Any]) -> EvaluationObservationV1:
