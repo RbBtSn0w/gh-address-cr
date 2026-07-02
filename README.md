@@ -150,6 +150,38 @@ finally:
 Do not attach tokens, raw prompts, usernames, machine identifiers, or local
 paths as span attributes.
 
+### CLI span attributes for AI agent scenarios
+
+Every CLI invocation also emits exactly one `gh-address-cr.cli` span (kind
+`INTERNAL`) carrying a fixed set of attributes, so agent hosts can correlate
+tool calls without extra instrumentation:
+
+- `process.executable.name`, `process.pid`, `process.parent_pid`,
+  `process.exit.code` — execution identity and the honest exit code (including
+  non-zero Status-to-Action codes; these are not errors)
+- `error.type` — present only when an exception actually propagated (a crash),
+  drawn from a bounded set: `keyboard_interrupt`, `timeout`, `_OTHER`
+- `process.command_args`, `gen_ai.tool.call.arguments` — sanitized argv via
+  `safe_command_args(...)`; tokens, credentials, and PR `owner/repo` slots are
+  replaced with `"[redacted]"` in place (position-preserving), never dropped
+- `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` — GenAI tool
+  vocabulary for the invoked command
+- `gen_ai.conversation.id` (+ `.source`), `gen_ai.agent.name` — passive
+  session correlation. Set `GH_ADDRESS_CR_CONVERSATION_ID` (preferred,
+  vendor-neutral) or `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable
+  per-session value so repeated invocations group together; set `AI_AGENT` to
+  label the calling agent. All three are absent when no session env is set.
+- `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
+  PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is
+  a stable one-way hash, never the plain `owner/repo` string.
+  `vcs.change.state` appears only when already available from session data.
+  Non-PR commands (`version`, `doctor`) carry no `vcs.*` attributes.
+
+A malformed or missing `TRACEPARENT` never blocks or changes the CLI's exit
+code; a well-formed one makes the span a child of that remote context. See
+[`specs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md`](specs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md)
+for the full enforced contract.
+
 ## Public surface
 
 Primary commands:
