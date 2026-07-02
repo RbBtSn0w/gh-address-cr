@@ -62,7 +62,7 @@ jobs:
           set -e
           printf '%s\n' "$output"
           test "$status" -eq 2
-          printf '%s\n' "$output" | grep -qi "unsupported legacy command"
+          printf '%s\n' "$output" | grep -qi "Unknown command"
 
       - name: Package build
         run: |
