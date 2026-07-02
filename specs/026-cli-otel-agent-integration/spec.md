@@ -244,6 +244,17 @@ behavioral change.
   fallback; `skill/SKILL.md` now instructs the agent to export it before
   invoking `gh-address-cr`, so any agent vendor gets correlation with zero new
   code (only the free Claude Code fallback worked before this gate).
+- **G-7 — Mirror the guidance in `--help`**: **CONFIRMED & BUILT** 2026-07-03.
+  `skill/SKILL.md` (G-6) only reaches agents that go through the skill-trigger
+  path; an agent invoking the `gh-address-cr` binary directly never sees it.
+  `parse_args()` now carries a `Telemetry:` epilog documenting
+  `GH_ADDRESS_CR_CONVERSATION_ID`, explicitly labeled optional/fail-open, so
+  no agent misses the guidance regardless of which path it takes. Pure
+  additive text (`--help` is not machine-parsed anywhere); the underlying
+  fail-open detection logic is unchanged — if the value still cannot be
+  obtained, the CLI proceeds exactly as before (no attribute set, no effect
+  on command behavior, output, or exit codes), per the R-012 conclusion that
+  the CLI must never guess/auto-generate a substitute.
 
 ### Functional Requirements
 
@@ -326,9 +337,16 @@ behavioral change.
   `CLAUDE_CODE_SESSION_ID` is used. When neither is present, the CLI MUST omit
   these attributes (fail-open); no agent cooperation is strictly required (the
   Claude Code fallback is free), but the designed entry point becomes exact for
-  any agent once its skill guidance sets it — **G-6**, `skill/SKILL.md`
-  "Session Correlation" section, confirmed and built 2026-07-03. The recorded
-  values MUST pass the existing public-safe sanitation path.
+  any agent once it is told to set it — guidance for this is surfaced through
+  **two independent, redundant channels** so no agent misses it regardless of
+  invocation path: **G-6** (`skill/SKILL.md` "Session Correlation" section, for
+  agents that load the skill) and **G-7** (`--help` `Telemetry:` epilog, for
+  agents that invoke the CLI binary directly); both confirmed and built
+  2026-07-03. If the value still cannot be obtained through either channel,
+  the CLI MUST proceed exactly as if telemetry were absent — fail-open, no
+  auto-generated substitute (see R-012: all evaluated auto-generation
+  strategies were rejected on evidence). The recorded values MUST pass the
+  existing public-safe sanitation path.
 - **FR-012** (Tier 1 — VCS GitHub-PR mapping): When the invoked command's
   arguments identify a GitHub PR (`owner/repo <pr_number>`), the CLI MUST record
   `vcs.change.id` (the PR number) and `vcs.provider.name = github` in plain

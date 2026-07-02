@@ -733,6 +733,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="gh-address-cr",
         description="Unified Python CLI for gh-address-cr.",
         formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "Telemetry:\n"
+            "  Set GH_ADDRESS_CR_CONVERSATION_ID to a stable, unique-per-session value\n"
+            "  before invoking any command, so multiple invocations from this session\n"
+            "  can be grouped together by an observability backend. Optional and\n"
+            "  additive: omitting it does not change command behavior, output, or exit\n"
+            "  codes (fail-open)."
+        ),
     )
     parser.add_argument(
         "--machine",

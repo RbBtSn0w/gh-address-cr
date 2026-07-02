@@ -179,3 +179,22 @@ result (**defer**) · G-4 semconv pin (accept) · G-5 `process.parent_pid`
   doesn't follow the guidance still gets the Claude-only fallback or nothing,
   unchanged from before). Verified: plugin payload still builds
   (`scripts/build_plugin_payload.py --check`), full suite unaffected (812/812).
+
+- **G-7 — Mirror the session-correlation guidance in `--help` (CONFIRMED &
+  BUILT, 2026-07-03)**: `skill/SKILL.md` (G-6) only reaches agents that go
+  through the skill-trigger path; an agent that invokes the `gh-address-cr`
+  binary directly (bypassing the skill layer) never sees it. Per Principle II
+  the CLI itself — not the skill — is the stable, agent-safe public interface,
+  so `--help` is the more authoritative place for this guidance, not a
+  duplicate of G-6. Added a `Telemetry:` epilog to `parse_args()`'s
+  `argparse.ArgumentParser` (`src/gh_address_cr/cli.py`) documenting
+  `GH_ADDRESS_CR_CONVERSATION_ID`, explicitly labeled optional/fail-open.
+  Verified: `--help` output is not machine-parsed anywhere in the codebase
+  (checked before implementing), so this is a pure additive text change —
+  no public contract break (Principle II). New contract test
+  `tests/contract/test_public_contract_stability.py::test_help_mentions_conversation_id_session_correlation`
+  asserts the text is present and labeled "Optional". Full suite 813/813,
+  ruff clean, plugin payload builds. **No change to the underlying fail-open
+  detection logic** (`detect_agent_session`) — this gate only adds
+  discoverability, consistent with the R-012 conclusion that the CLI must
+  never guess/auto-generate a value when the guidance goes unheeded.

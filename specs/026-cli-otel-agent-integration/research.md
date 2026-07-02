@@ -327,9 +327,85 @@ vendor's skill/agent to set `GH_ADDRESS_CR_CONVERSATION_ID` — **zero new code*
   different purposes and coexist cleanly.
 
 **Landability verdict**: ✅ **No code change** (precedence was already correct).
-Docs/rationale corrected. **Follow-up (G-6, pending confirmation)**: add
-`skill/` guidance instructing agents to export `GH_ADDRESS_CR_CONVERSATION_ID`,
-which is what makes the designed entry point actually used beyond Claude Code.
+Docs/rationale corrected. **Follow-up**: G-6 — add `skill/` guidance
+instructing agents to export `GH_ADDRESS_CR_CONVERSATION_ID`, which is what
+makes the designed entry point actually used beyond Claude Code. **Confirmed &
+built 2026-07-03** (`skill/SKILL.md` "Session Correlation" section).
+
+---
+
+## R-012 — Auto-generating a fallback `gen_ai.conversation.id` when absent: rejected on evidence (2026-07-03)
+
+**Decision**: Do **not** auto-generate a `gen_ai.conversation.id` when neither
+`GH_ADDRESS_CR_CONVERSATION_ID` nor `CLAUDE_CODE_SESSION_ID` is present.
+Fail-open (attribute omitted) remains the only correct v1 behavior. Three
+candidate auto-generation strategies were evaluated and all three rejected —
+two by architectural analysis, one by direct cross-agent testing.
+
+**Candidates evaluated**:
+
+1. **Per-invocation random id** (`uuid4()` generated fresh on every CLI run
+   when no env var is set) → rejected by code demonstration: the CLI is a
+   short-lived, stateless process per the OTel CLI convention's own scope
+   ("short-lived programs"), so three simulated invocations of one agent
+   session each produced a *different* random id (`set(calls)` had 3 distinct
+   values) — zero grouping capability. Worse than omission: it produces
+   telemetry that *looks* like a designed correlation signal but is silently
+   meaningless (every "group" has size 1), which risks misleading a consumer
+   into believing correlation was attempted and failed to find matches, rather
+   than understanding no correlation signal existed at all.
+2. **Persisted local-state id** (generate once, write to a local file, read
+   back on subsequent invocations) → rejected by architectural analysis before
+   implementation: (a) the CLI's existing persisted state is scoped to
+   `owner/repo + PR` (`session.json` under `core_paths.workspace_dir`), which
+   does not match an "agent session" boundary — one agent session can span
+   multiple PRs, and one PR is touched by many unrelated agent sessions over
+   time, so a PR-scoped id would duplicate `vcs.change.id` rather than add
+   session-level information; (b) introducing a new telemetry-only persisted
+   artifact is exactly the blast-radius class Constitution Principle VIII
+   forbids ("telemetry MUST NOT... become a new state source") and Principle X
+   requires explicit justification for (new subsystem/artifact beyond the
+   protected baseline) — not undertaken without that justification.
+3. **Deterministic derivation from `(ppid, parent-process start time)`**
+   (hash the OS parent process identity, zero persisted state, zero new
+   dependency — verified feasible via `ps -o lstart=` on macOS) → build a
+   standalone experiment script
+   (`derive_session_id.py`, sha256 of `ppid|start_time`, no gh_address_cr
+   imports) and tested it across two real, independent agent hosts:
+   - **Claude Code**: two consecutive runs from the same parent shell produced
+     an identical derived id (`derived-58dac116ffdf751e`), as expected for a
+     single stable parent process.
+   - **Codex**: run once within a conversation, then again from a **new,
+     unrelated Codex conversation in the same terminal window** — both runs
+     produced the **identical** derived id (`ppid=70263`,
+     `start=2026-07-02T08:11:53`, `derived-3135b304420db2f0`). This is a
+     **false-positive over-grouping** failure, more dangerous than the random
+     id's false-negative: the derived id reflects "this terminal/shell
+     process", not "this agent conversation", so it silently merges telemetry
+     from two genuinely unrelated sessions under one `conversation.id` with no
+     signal that the merge is wrong. A consumer querying by that id would
+     receive a confidently-wrong answer.
+
+**Rationale for rejecting all three**: An agent's own OS process lifecycle
+(fresh process per call, or one long-lived parent shell reused across
+unrelated conversations) does not reliably correspond to "one agent
+conversation" in either direction — it can be finer-grained (defeats
+correlation) or coarser-grained (merges unrelated sessions) than the true
+boundary, and the CLI has no way to distinguish which case it is in for a
+given host. Only the agent itself (or its skill-level instructions) actually
+knows where one conversation ends and the next begins; fabricating a
+substitute signal from ambient process facts trades an honest "no data" for a
+dishonest "wrong data" in at least one of the two failure directions.
+
+**Alternatives considered**: (see the three candidates above — each *is* the
+alternative to fail-open, all three rejected).
+
+**Landability verdict**: ⚠️ **NOT LANDABLE, evidence-rejected.** Fail-open
+(current v1 behavior, R-009/R-011) is confirmed as the only correct design;
+G-6 (skill-level explicit export) remains the sole mechanism for a non-Claude
+agent to get accurate correlation. No further "smart default" auto-generation
+should be attempted without a fundamentally different signal source than OS
+process ambient facts.
 
 ---
 
@@ -349,12 +425,22 @@ which is what makes the designed entry point actually used beyond Claude Code.
 | 2 (Tier 2) | `gen_ai.conversation.id` + `gen_ai.agent.name` (passive env) | ✅ **Landable & IN MVP** — rescues Dim-2 today (R-009) | confirmed |
 | Tier 1 | `vcs.change.id` + `vcs.provider.name` (plain), hashed `vcs.repository.name` | ✅ **Landable & IN MVP** — privacy hash (R-010) | confirmed |
 | Tier 1 | `vcs.change.state` (conditional), plain owner/URL | ⚠️ state only-if-in-session; **owner/URL never plain** (R-010) | confirmed |
+| 2 (Tier 2) | `GH_ADDRESS_CR_CONVERSATION_ID` skill guidance for non-Claude agents | ✅ **Landable & IN MVP** — no new public CLI flag, `skill/` guidance only (R-011) | **G-6, built** |
+| 2 (Tier 2) | Auto-generated fallback `gen_ai.conversation.id` (random / persisted / ppid-derived) when no env var present | ⛔ **Rejected, evidence-based** — random defeats correlation (code demo); ppid-derived false-merges unrelated Codex sessions (live cross-agent test) (R-012) | rejected |
 
-**Bottom line (updated 2026-07-01)**: Dimension 1 (forensics) and Dimension 3
+**Bottom line (updated 2026-07-03)**: Dimension 1 (forensics) and Dimension 3
 (tool vocabulary) land cleanly. The Dimension-2 pessimism (R-002) is **partially
 overturned by R-009**: full `TRACEPARENT` span-nesting is still dormant, but
 passive `gen_ai.conversation.id` gives real session-level correlation **today**
-for Claude Code — so Tier 2 is promoted into the MVP. Tier 1 VCS mapping is also
-promoted with a privacy-preserving repo hash (R-010). The only paths still
-deferred are those that would grow public CLI/skill surface (`--traceparent` G-2)
-or need CLI-internal plumbing (`tool.call.result` G-3).
+for Claude Code — so Tier 2 is promoted into the MVP, with
+`GH_ADDRESS_CR_CONVERSATION_ID` corrected to its true role as the designed,
+vendor-neutral entry point (R-011) and G-6 skill guidance built so any agent
+vendor can use it with zero new code. Tier 1 VCS mapping is also promoted with
+a privacy-preserving repo hash (R-010). Three candidate strategies for
+auto-generating a fallback id when no env var is present were evaluated and
+**all rejected** — one by code demonstration, one by architectural analysis
+against Constitution Principles VIII/X, and one by live cross-agent testing
+that caught it silently merging two unrelated Codex conversations under one id
+(R-012). The only paths still deferred are those that would grow public
+CLI/skill surface (`--traceparent` G-2) or need CLI-internal plumbing
+(`tool.call.result` G-3).

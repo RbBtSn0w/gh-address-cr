@@ -29,6 +29,18 @@ class PublicContractStabilityTests(unittest.TestCase):
         self.assertNotIn("consolidation", err)
         self.assertNotIn("evaluation", err)
 
+    def test_help_mentions_conversation_id_session_correlation(self) -> None:
+        """G-7: --help must surface the GH_ADDRESS_CR_CONVERSATION_ID guidance
+        for agents that invoke the CLI directly and never load the skill."""
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit) as ctx:
+            cli.parse_args(["--help"])
+        self.assertEqual(ctx.exception.code, 0)
+        help_text = out.getvalue()
+        self.assertIn("GH_ADDRESS_CR_CONVERSATION_ID", help_text)
+        # Must document it as optional/fail-open — never implies it's required.
+        self.assertIn("Optional", help_text)
+
 
 if __name__ == "__main__":
     unittest.main()
