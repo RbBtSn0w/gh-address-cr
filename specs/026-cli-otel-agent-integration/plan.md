@@ -157,9 +157,25 @@ and `tests/`. **No `skill/` change** (Tier 2 is passive; no flag/instruction).
 | `gen_ai.tool.call.result` plumbing (G-3) | Full tool-result visibility | `exit.code` + `error.type` + `vcs.*` + session grouping cover forensics/analytics |
 | Plain `vcs.owner.name` / `vcs.repository.url.full` | Human-readable repo identity | Hashed `vcs.repository.name` groups per repo without leaking private names |
 
-## Human-Confirmation Gates (all resolved)
+## Human-Confirmation Gates
 
 G-1 dormant TRACEPARENT (build) · G-2 `--traceparent` flag (**defer**) · G-3
 result (**defer**) · G-4 semconv pin (accept) · G-5 `process.parent_pid`
 (applied). **Tier 2** (passive session) and **Tier 1** (VCS, hashed repo) —
 **confirmed via /speckit-clarify 2026-07-01, in MVP.**
+
+- **G-6 — Skill guidance to set `GH_ADDRESS_CR_CONVERSATION_ID` (CONFIRMED &
+  BUILT, 2026-07-03)**: `GH_ADDRESS_CR_CONVERSATION_ID` is the designed,
+  vendor-neutral entry point (FR-011); before this gate, nothing in `skill/`
+  told an agent to set it — only the free Claude Code fallback
+  (`CLAUDE_CODE_SESSION_ID`) was populated automatically. Added a "Session
+  Correlation" subsection to `skill/SKILL.md` (under Telemetry Coverage)
+  instructing the agent to `export GH_ADDRESS_CR_CONVERSATION_ID=<stable
+  per-session id>` before invoking `gh-address-cr`. This touches the
+  **packaged skill boundary** (Principle IV, Behavioral Policy Layer) — a
+  different governance surface than anything else in v1 — but adds **no new
+  public CLI flag/contract** (env-var guidance only, no runtime code change),
+  so its blast radius is small; it is additive/fail-open (an agent that
+  doesn't follow the guidance still gets the Claude-only fallback or nothing,
+  unchanged from before). Verified: plugin payload still builds
+  (`scripts/build_plugin_payload.py --check`), full suite unaffected (812/812).

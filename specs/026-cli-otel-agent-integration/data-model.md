@@ -21,7 +21,7 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `gen_ai.tool.name` | string | Added | parsed top-level command (e.g. `review`), else `"gh-address-cr"` | Matches public command surface. |
 | `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the **same** `safe_command_args` value (no system-only flags exist in v1) | Reuses R-001 output (FR-007). |
 | `gen_ai.tool.call.result` | — | **OMITTED v1** | — | Not capturable at span boundary (R-005, G-3). |
-| `gen_ai.conversation.id` | string | Added (Tier 2) | host env registry: `CLAUDE_CODE_SESSION_ID` → else `GH_ADDRESS_CR_CONVERSATION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
+| `gen_ai.conversation.id` | string | Added (Tier 2) | designed entry point `GH_ADDRESS_CR_CONVERSATION_ID` → else passive fallback `CLAUDE_CODE_SESSION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
 | `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
 | `gen_ai.agent.name` | string | Added (Tier 2) | `AI_AGENT` env | Omitted when absent. Public-safe product string. |
 | `vcs.change.id` | string | Added (Tier 1) | PR number from argv | Only for PR-scoped commands; omitted otherwise. FR-012. |
@@ -81,13 +81,18 @@ Determinism: same `environ` → same returned context. Unit-testable in isolatio
 ## Entity 4 — Agent Session Context (new, transient — Tier 2)
 
 Pure function `detect_agent_session(environ) -> dict[str, str]`:
-- **Conversation-id registry** (ordered, first match wins):
-  `CLAUDE_CODE_SESSION_ID` → `GH_ADDRESS_CR_CONVERSATION_ID`. On match, returns
+- **Conversation-id source** (first match wins, bounded to exactly two entries —
+  this is intentionally **not** a growing per-vendor detection list, Principle
+  X): (1) `GH_ADDRESS_CR_CONVERSATION_ID` — the **designed, vendor-neutral
+  entry point** any agent can set (via skill guidance or manual export); (2)
+  `CLAUDE_CODE_SESSION_ID` — a **passive, zero-configuration fallback** used
+  only because it is free today for Claude Code. On match, returns
   `{gen_ai.conversation.id: <value>, gen_ai.conversation.id.source: <env name>}`.
+  A new agent vendor is onboarded by having it set the designed entry point —
+  **not** by adding a new detection branch here.
 - **Agent name**: `AI_AGENT` → `gen_ai.agent.name` when present.
 - Empty dict when nothing matches (→ attributes omitted, fail-open).
 - All returned values pass the public-safe sanitation path before use.
-- Registry is a module-level table so new hosts can be added without logic change.
 
 ## Entity 5 — VCS Change Context (new, transient — Tier 1)
 

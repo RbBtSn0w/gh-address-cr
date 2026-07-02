@@ -117,6 +117,24 @@ response instead of hiding them behind artifact paths.
 
 When exactly one cached PR session exists, PR-scoped commands may omit `<owner/repo> <pr_number>`. If the runtime reports `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target explicitly instead of guessing.
 
+### Session Correlation
+
+Each `gh-address-cr` invocation emits one OpenTelemetry span carrying the
+sanitized command, exit outcome, and (when identifiable) the GitHub PR being
+worked on. To let an observability backend group every invocation from the
+current agent session together, export a stable, per-session identifier as
+`GH_ADDRESS_CR_CONVERSATION_ID` before invoking any `gh-address-cr` command,
+and keep the same value for every invocation within that session:
+
+```text
+export GH_ADDRESS_CR_CONVERSATION_ID="<a stable id unique to this session>"
+```
+
+This is optional and additive: omitting it does not change command behavior,
+output, or exit codes. Some hosts (Claude Code) are already detected
+automatically with no action needed; setting `GH_ADDRESS_CR_CONVERSATION_ID`
+is the vendor-neutral way to get the same correlation on any host.
+
 ## Execution Ladder
 
 1. If the PR number is unknown, run `active-pr`; it only returns OPEN PRs and fails loud for none or many.

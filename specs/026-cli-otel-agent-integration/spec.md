@@ -199,6 +199,10 @@ and a hashed repository id with no plain owner/URL, and the non-PR run carries n
 
 - Q: For a PR-scoped run, the plain `owner/repo` still shipped via `process.command_args`/`gen_ai.tool.call.arguments` (a normal positional arg), even though `vcs.*` is hashed. For a published skill on a shared gateway, keep or scrub it? → A: **Scrub it** — redact the `owner/repo` token from `command_args`/`tool.call.arguments` (position-preserving `"[redacted]"`) so the plain owner reaches no attribute; the repo stays groupable via the hashed `vcs.repository.name` + `vcs.change.id`.
 
+### Session 2026-07-03
+
+- Q: Should `gen_ai.conversation.id` precedence be framed as "`GH_ADDRESS_CR_CONVERSATION_ID` is a fallback override for hosts without their own session var" (host-detection-registry design), or as "`GH_ADDRESS_CR_CONVERSATION_ID` is THE designed, vendor-neutral entry point, and `CLAUDE_CODE_SESSION_ID` passive detection is just a zero-config convenience default"? → A: **The latter.** A per-vendor host-detection registry that grows one branch per agent vendor violates Principle X (unbounded state space). `GH_ADDRESS_CR_CONVERSATION_ID` is the stable, documented, vendor-neutral contract that any agent (via skill guidance or manual export) can set; `CLAUDE_CODE_SESSION_ID` stays a passive, zero-configuration fallback specifically because Claude Code exports it for free today. Under this framing, the explicit primary contract correctly outranks the incidentally-detected fallback when both are present — **no code change**, only the rationale and FR-011/data-model wording needed correcting (they previously described `GH_ADDRESS_CR_CONVERSATION_ID` as a reactive "override for other hosts" rather than the designed primary entry point).
+
 ## Requirements *(mandatory)*
 
 ### Scope Decisions (v1 MVP — confirmed 2026-07-01)
@@ -234,6 +238,12 @@ behavioral change.
   (plain `vcs.change.id` + `vcs.provider.name`; hashed `vcs.repository.name`;
   conditional `vcs.change.state`; no plain owner/URL). Elevates the span from
   "which tool ran" to "which GitHub PR was being worked on".
+- **G-6 — Skill guidance for `GH_ADDRESS_CR_CONVERSATION_ID`**: **CONFIRMED &
+  BUILT** 2026-07-03. `GH_ADDRESS_CR_CONVERSATION_ID` (FR-011) is the designed,
+  vendor-neutral entry point for session correlation, not a per-vendor
+  fallback; `skill/SKILL.md` now instructs the agent to export it before
+  invoking `gh-address-cr`, so any agent vendor gets correlation with zero new
+  code (only the free Claude Code fallback worked before this gate).
 
 ### Functional Requirements
 
@@ -299,14 +309,25 @@ behavioral change.
   malformed explicit `--traceparent` flag value) belongs to the deferred G-2
   scope; **in v1 only the fail-open behavior is active and tested**, so this
   requirement is fully covered by the fail-open assertions (no v1 test gap).
-- **FR-011** (Tier 2 — passive agent-session correlation): The CLI MUST
-  passively read a known set of host environment variables and, when present,
-  record `gen_ai.conversation.id` (from `CLAUDE_CODE_SESSION_ID`, else the
-  generic override `GH_ADDRESS_CR_CONVERSATION_ID`) plus a `.source`
+- **FR-011** (Tier 2 — agent-session correlation): `GH_ADDRESS_CR_CONVERSATION_ID`
+  is the **designed, vendor-neutral, public entry point** for session
+  correlation — the stable env-var contract any agent (via skill guidance or a
+  manual export) sets to identify its session, so adding a new agent vendor
+  requires **no new code branch**. `CLAUDE_CODE_SESSION_ID` is a **passive,
+  zero-configuration fallback** used only because Claude Code already exports it
+  for free (demo-verified 2026-07-01) — it is a convenience default, not part of
+  the designed contract, and MUST NOT be extended into a growing per-vendor
+  detection registry (Principle X, bounded state space).
+  When present, the CLI records `gen_ai.conversation.id` plus a `.source`
   sub-attribute naming the env var used, and `gen_ai.agent.name` (from
-  `AI_AGENT`). The source set MUST be an extensible registry. When no known
-  variable is present, the CLI MUST omit these attributes (fail-open) and MUST
-  NOT require any agent cooperation, CLI flag, or skill change. The recorded
+  `AI_AGENT`). Precedence: the designed entry point
+  `GH_ADDRESS_CR_CONVERSATION_ID` wins when set — an explicit, intentional value
+  correctly outranks an incidentally-detected passive fallback; otherwise
+  `CLAUDE_CODE_SESSION_ID` is used. When neither is present, the CLI MUST omit
+  these attributes (fail-open); no agent cooperation is strictly required (the
+  Claude Code fallback is free), but the designed entry point becomes exact for
+  any agent once its skill guidance sets it — **G-6**, `skill/SKILL.md`
+  "Session Correlation" section, confirmed and built 2026-07-03. The recorded
   values MUST pass the existing public-safe sanitation path.
 - **FR-012** (Tier 1 — VCS GitHub-PR mapping): When the invoked command's
   arguments identify a GitHub PR (`owner/repo <pr_number>`), the CLI MUST record

@@ -400,7 +400,14 @@ def safe_command_args(argv: list[str]) -> list[str]:
 def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     """Detect and return agent session correlation attributes from environ.
 
-    Precedence: GH_ADDRESS_CR_CONVERSATION_ID first, then CLAUDE_CODE_SESSION_ID.
+    GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
+    any agent can set (e.g. via skill guidance); CLAUDE_CODE_SESSION_ID is a
+    passive, zero-configuration fallback used only because Claude Code exports
+    it for free. This is intentionally bounded to these two sources, not a
+    growing per-vendor detection registry (Principle X): a new agent vendor is
+    onboarded by setting the designed entry point, not by adding a branch here.
+    Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
+    CLAUDE_CODE_SESSION_ID (passive fallback).
     """
     res = {}
 

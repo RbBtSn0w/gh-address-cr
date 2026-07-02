@@ -298,6 +298,41 @@ lookups; conditional-from-session keeps it fail-open and zero-latency).
 
 ---
 
+## R-011 — `GH_ADDRESS_CR_CONVERSATION_ID` is the designed entry point, not a fallback (correction, 2026-07-03)
+
+**Decision**: Reframe the Tier 2 correlation source. `GH_ADDRESS_CR_CONVERSATION_ID`
+is **the designed, vendor-neutral public entry point** for session correlation —
+the one stable env-var contract any agent sets (via skill guidance or manual
+export) to identify its session. `CLAUDE_CODE_SESSION_ID` is a **passive,
+zero-configuration fallback**, populated only because Claude Code exports it
+for free (R-009). Precedence (designed entry point first, then passive
+fallback) is unchanged from the implemented code — only the rationale and
+FR-011/data-model wording were corrected.
+
+**Rationale**: The original framing ("`CLAUDE_CODE_SESSION_ID` now, plus a
+generic override `GH_ADDRESS_CR_CONVERSATION_ID` for other hosts") implied a
+**host-detection registry** that grows one branch per agent vendor — exactly
+the "per-vendor env var whack-a-mole" this feature exists to avoid, and a
+direct Principle X violation (unbounded state space). The corrected framing
+bounds the registry to exactly two sources forever: one designed contract, one
+free convenience default. Onboarding a new agent vendor means telling that
+vendor's skill/agent to set `GH_ADDRESS_CR_CONVERSATION_ID` — **zero new code**.
+
+**Alternatives considered**:
+- *Per-vendor host-detection registry (original framing)* → rejected: violates
+  Principle X; every new agent vendor requires a new code branch.
+- *Drop the passive Claude Code fallback entirely, require explicit export
+  always* → rejected: loses a working zero-configuration default that is
+  demo-verified free today; the fallback and the designed entry point serve
+  different purposes and coexist cleanly.
+
+**Landability verdict**: ✅ **No code change** (precedence was already correct).
+Docs/rationale corrected. **Follow-up (G-6, pending confirmation)**: add
+`skill/` guidance instructing agents to export `GH_ADDRESS_CR_CONVERSATION_ID`,
+which is what makes the designed entry point actually used beyond Claude Code.
+
+---
+
 ## Consolidated feasibility summary
 
 | Dimension | Piece | Verdict | Gate |
