@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import unittest
 
 from opentelemetry.sdk.trace import TracerProvider
@@ -26,31 +25,42 @@ class TestCliOtelExecution(unittest.TestCase):
         self.provider.add_span_processor(self.processor)
         self.tracer = self.provider.get_tracer("test_cli_otel_execution")
 
+    def tearDown(self) -> None:
+        from gh_address_cr import telemetry
+
+        telemetry._reset_telemetry_for_tests()
+
+    def _run_via_main_and_get_span(self):
+        """Drive the CLI entrypoint (__main__), which owns identity assembly."""
+        from unittest.mock import patch as _patch
+
+        from gh_address_cr.__main__ import main
+
+        with (
+            _patch("sys.argv", ["gh-address-cr"]),
+            _patch("gh_address_cr.__main__.cli_main", return_value=0),
+            _patch("gh_address_cr.__main__.initialize_telemetry", return_value=self.tracer),
+            _patch("gh_address_cr.__main__.shutdown_telemetry"),
+        ):
+            main([])
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        return spans[0]
+
     def test_successful_run_records_execution_identity_and_success_status(self) -> None:
-        """T004: Test a successful execution of a function wrapped by run_traced records execution identity and success status."""
-        def dummy_operation() -> str:
-            return "success"
-
-        result = run_traced(
-            self.tracer,
-            "gh-address-cr.cli",
-            dummy_operation,
-        )
-
-        self.assertEqual(result, "success")
-
-        exported_spans = self.exporter.get_finished_spans()
-        self.assertEqual(len(exported_spans), 1)
-        span = exported_spans[0]
+        """T004: A successful CLI run (via __main__) records execution identity,
+        single INTERNAL span, exit 0, and no error.type."""
+        span = self._run_via_main_and_get_span()
 
         # Assert basic span fields
         self.assertEqual(span.name, "gh-address-cr.cli")
         self.assertEqual(span.kind, SpanKind.INTERNAL)
 
-        # Assert execution identity attributes
+        # Assert execution identity attributes (owned by __main__: argv[0] basename)
         attributes = span.attributes
         self.assertIn(PROCESS_EXECUTABLE_NAME, attributes)
-        self.assertEqual(attributes[PROCESS_EXECUTABLE_NAME], os.path.basename(sys.executable))
+        # __main__ derives executable.name from sys.argv[0] (patched to "gh-address-cr")
+        self.assertEqual(attributes[PROCESS_EXECUTABLE_NAME], "gh-address-cr")
 
         self.assertIn(PROCESS_PID, attributes)
         self.assertEqual(attributes[PROCESS_PID], os.getpid())

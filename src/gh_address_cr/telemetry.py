@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
@@ -20,10 +19,7 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
-    PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
-    PROCESS_PARENT_PID,
-    PROCESS_PID,
 )
 
 SERVICE_NAME_VALUE = "gh-address-cr"
@@ -155,22 +151,10 @@ def run_traced(
         set_status_on_exception=False,
         context=context,
     ) as span:
-        # Record execution identity attributes
-        span.set_attribute(PROCESS_EXECUTABLE_NAME, os.path.basename(sys.executable))
-        span.set_attribute(PROCESS_PID, os.getpid())
-
-        # Record parent pid fail-open
-        try:
-            span.set_attribute(PROCESS_PARENT_PID, os.getppid())
-        except Exception:
-            pass
-
-        # Record agent session correlation
-        from gh_address_cr.core.telemetry_safety import detect_agent_session
-        agent_attrs = detect_agent_session(os.environ)
-        for key, val in agent_attrs.items():
-            span.set_attribute(key, val)
-
+        # run_traced owns span lifecycle + parent context + exit.code/error.type
+        # only. Execution identity (executable.name/pid/parent_pid), agent-session
+        # correlation, args, gen_ai, and vcs attributes are assembled by the CLI
+        # entrypoint (__main__) and passed in via ``attributes``.
         if attributes:
             for key, value in attributes.items():
                 span.set_attribute(key, value)
