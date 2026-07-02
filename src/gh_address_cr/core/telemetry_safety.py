@@ -409,19 +409,17 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
     CLAUDE_CODE_SESSION_ID (passive fallback).
     """
-    res = {}
+    res: dict[str, str] = {}
 
-    # 1. Conversation ID
-    conv_id = None
-    source = None
+    # 1. Conversation ID (paired in one tuple so mypy narrows both together)
+    conv_id_source: tuple[str, str] | None = None
     if "GH_ADDRESS_CR_CONVERSATION_ID" in environ:
-        conv_id = environ["GH_ADDRESS_CR_CONVERSATION_ID"]
-        source = "GH_ADDRESS_CR_CONVERSATION_ID"
+        conv_id_source = (environ["GH_ADDRESS_CR_CONVERSATION_ID"], "GH_ADDRESS_CR_CONVERSATION_ID")
     elif "CLAUDE_CODE_SESSION_ID" in environ:
-        conv_id = environ["CLAUDE_CODE_SESSION_ID"]
-        source = "CLAUDE_CODE_SESSION_ID"
+        conv_id_source = (environ["CLAUDE_CODE_SESSION_ID"], "CLAUDE_CODE_SESSION_ID")
 
-    if conv_id is not None:
+    if conv_id_source is not None:
+        conv_id, source = conv_id_source
         try:
             # Route through the public-safe path
             safe_conv_id = _safe_identity_label(conv_id, field=source)

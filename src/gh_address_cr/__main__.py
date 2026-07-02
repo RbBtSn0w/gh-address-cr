@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Sequence
 
 from gh_address_cr import __version__
 from gh_address_cr.cli import main as cli_main
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     if vcs_attrs and repo is not None:
         sanitized_args = ["[redacted]" if arg == repo else arg for arg in sanitized_args]
 
-    attributes = {
+    attributes: dict[str, str | bool | int | float | Sequence[str]] = {
         "service.version": __version__,
         "cli.entrypoint": "gh-address-cr",
         PROCESS_EXECUTABLE_NAME: os.path.basename(sys.argv[0]) or "gh-address-cr",
