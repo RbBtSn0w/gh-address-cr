@@ -1,3 +1,9 @@
+## [3.5.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.4.0...v3.5.0) (2026-07-02)
+
+### Features
+
+* Add CLI span attributes documentation for AI agent scenarios ([e4d21ba](https://github.com/RbBtSn0w/gh-address-cr/commit/e4d21baf56953c593a51a452e23ef1eb6a54d02a))
+
 ## [3.4.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.3.0...v3.4.0) (2026-07-02)
 
 ### Features
