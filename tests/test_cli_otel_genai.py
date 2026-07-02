@@ -133,6 +133,31 @@ class TestCliOtelGenai(unittest.TestCase):
 
         self.assertNotIn(GEN_AI_TOOL_CALL_RESULT, attributes)
 
+    def test_pr_owner_repo_redacted_from_all_span_attributes(self) -> None:
+        """T029/C-12: a PR-scoped run must not leak the plain owner/repo in ANY
+        span attribute (command_args / tool.call.arguments), only the hashed
+        vcs.repository.name. The redacted repo slot preserves position."""
+        span = self._run_cli_main_and_get_span(["review", "acme-corp/secret-widgets", "123"])
+        attributes = span.attributes
+
+        # No plain owner/repo/URL anywhere on the span
+        for value in attributes.values():
+            value_str = str(value)
+            self.assertNotIn("acme-corp", value_str)
+            self.assertNotIn("secret-widgets", value_str)
+            self.assertNotIn("github.com", value_str)
+
+        # command_args still carries the command + PR number + redacted repo slot
+        cmd_args = list(attributes[PROCESS_COMMAND_ARGS])
+        self.assertIn("review", cmd_args)
+        self.assertIn("123", cmd_args)
+        self.assertIn("[redacted]", cmd_args)
+        # tool.call.arguments still equals command_args (shared sanitized value)
+        self.assertEqual(cmd_args, json.loads(attributes[GEN_AI_TOOL_CALL_ARGUMENTS]))
+        # the PR is still identifiable via the hashed repo + PR number
+        self.assertEqual(attributes.get("vcs.change.id"), "123")
+        self.assertEqual(len(attributes.get("vcs.repository.name")), 64)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ the telemetry module re-imports them so call sites stay unchanged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,27 @@ from typing import Any
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_CONVERSATION_ID,
+    VCS_CHANGE_ID,
+    VCS_CHANGE_STATE,
+    VCS_PROVIDER_NAME,
+    VCS_REPOSITORY_NAME,
+)
+
+# Commands that operate on a GitHub PR (`owner/repo <pr>`); only these carry vcs.*
+_PR_SCOPED_COMMANDS = frozenset(
+    {
+        "active-pr",
+        "address",
+        "review",
+        "threads",
+        "findings",
+        "adapter",
+        "final-gate",
+        "agent",
+        "review-to-findings",
+        "submit-action",
+        "command-session",
+    }
 )
 
 UNSAFE_METADATA_KEYS = {
@@ -421,3 +443,49 @@ def derive_tool_name(argv: list[str] | None) -> str:
     if first.startswith("-") or first in ("help", "version"):
         return "gh-address-cr"
     return first
+
+
+def repo_hash(owner_repo: str) -> str:
+    """Return a stable, one-way, case-insensitive digest of ``owner/repo``.
+
+    Public-safe: the plain owner/repo name never appears in the output. Same
+    repository (case-insensitively) always hashes identically; different
+    repositories differ. Not used for security — only to group telemetry per
+    repository without leaking private identifiers (spec FR-012 / R-010).
+    """
+    normalized = owner_repo.strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def map_vcs_attributes(
+    command: str,
+    repo: str | None,
+    pr_number: object | None,
+    session: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Map a PR-scoped invocation to public-safe ``vcs.*`` span attributes.
+
+    Returns ``{}`` unless ``command`` is PR-scoped and both ``repo`` and
+    ``pr_number`` are present. Emits plain ``vcs.change.id`` (PR number) and
+    ``vcs.provider.name=github``; ``vcs.repository.name`` is the one-way
+    :func:`repo_hash` of ``owner/repo`` (never the plain name or URL).
+    ``vcs.change.state`` is included only when the caller supplies it via
+    ``session["status"]`` (no telemetry-driven GitHub lookup).
+    """
+    if command not in _PR_SCOPED_COMMANDS:
+        return {}
+    if not repo or pr_number is None:
+        return {}
+
+    attrs: dict[str, str] = {
+        VCS_PROVIDER_NAME: "github",
+        VCS_CHANGE_ID: str(pr_number),
+        VCS_REPOSITORY_NAME: repo_hash(repo),
+    }
+
+    if session:
+        state = session.get("status")
+        if isinstance(state, str) and state:
+            attrs[VCS_CHANGE_STATE] = state
+
+    return attrs

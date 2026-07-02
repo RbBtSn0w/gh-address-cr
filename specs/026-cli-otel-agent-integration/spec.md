@@ -2,7 +2,7 @@
 
 **Feature Branch**: `026-cli-otel-agent-integration`
 **Created**: 2026-07-01
-**Status**: Draft
+**Status**: Verified
 **Input**: User description: "AI 场景下 CLI 工具 OTel 接入全景指南. 包含 semantice for cli 和 semantice for ai agent. 维度一：建立 CLI 基础执行视角 (Execution Span) ... 维度二：实现与 Agent 的上下文握手 (Context Linking) ... 维度三：注入 AI Agent 业务语义 (GenAI Context) ..."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -195,6 +195,10 @@ and a hashed repository id with no plain owner/URL, and the non-PR run carries n
 - Q: Emit `vcs.change.state` (open/merged/closed)? → A: Only when the PR state is **already present in session data** (zero extra cost, fail-open); omit otherwise — no telemetry-driven GitHub lookup.
 - Q: Source design for `gen_ai.conversation.id` (passive env read) → A: An **extensible registry** — `CLAUDE_CODE_SESSION_ID` now, plus a generic override env `GH_ADDRESS_CR_CONVERSATION_ID` for other hosts; omit the attribute entirely when none is present (fail-open).
 
+### Session 2026-07-02
+
+- Q: For a PR-scoped run, the plain `owner/repo` still shipped via `process.command_args`/`gen_ai.tool.call.arguments` (a normal positional arg), even though `vcs.*` is hashed. For a published skill on a shared gateway, keep or scrub it? → A: **Scrub it** — redact the `owner/repo` token from `command_args`/`tool.call.arguments` (position-preserving `"[redacted]"`) so the plain owner reaches no attribute; the repo stays groupable via the hashed `vcs.repository.name` + `vcs.change.id`.
+
 ## Requirements *(mandatory)*
 
 ### Scope Decisions (v1 MVP — confirmed 2026-07-01)
@@ -313,7 +317,12 @@ behavioral change.
   (open/closed/merged/wip) only when that state is already available in session
   data at zero extra cost, and MUST omit it otherwise (no telemetry-driven
   GitHub lookup). For commands that do not identify a PR (e.g. `version`,
-  `doctor`), all `vcs.*` attributes MUST be omitted (fail-open).
+  `doctor`), all `vcs.*` attributes MUST be omitted (fail-open). For a PR-scoped
+  invocation, the plain `owner/repo` positional token MUST additionally be
+  redacted from `process.command_args` and `gen_ai.tool.call.arguments`
+  (position-preserving `"[redacted]"`), so the plain owner/repo reaches **no**
+  span attribute; the PR stays identifiable via the hashed `vcs.repository.name`
+  + `vcs.change.id`.
 
 ### Constitution Alignment *(mandatory)*
 

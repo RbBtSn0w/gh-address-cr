@@ -103,6 +103,11 @@ Pure function `map_vcs_attributes(command, repo, pr_number, session) -> dict[str
   - `vcs.change.state` = session-provided state **only if already present**;
     otherwise omitted.
 - MUST NOT emit plain `owner` or `vcs.repository.url.full`.
+- **Command-args scrub (privacy)**: for a PR-scoped invocation, `__main__`
+  redacts the plain `owner/repo` positional token in the sanitized argv to
+  `"[redacted]"` before setting `process.command_args` / `gen_ai.tool.call.arguments`,
+  so the plain owner/repo reaches no span attribute. (Done in `__main__`, not in
+  `safe_command_args`, so the generic sanitizer's contract is unchanged.)
 
 ## State transitions
 None. One span per process; attributes are set at start (identity, args, parent

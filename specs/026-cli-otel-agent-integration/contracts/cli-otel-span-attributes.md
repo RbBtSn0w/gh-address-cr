@@ -90,8 +90,12 @@ landable subset; "GATED" = requires human confirmation before build.
 - `vcs.change.state` is present **only** when already available in session data;
   otherwise absent (no telemetry-driven GitHub lookup).
 - For non-PR commands (`version`, `doctor`), **all `vcs.*` are absent**.
-- **Enforced (privacy)**: no span attribute contains the plain `owner` string or
-  `vcs.repository.url.full`; a test asserts absence across a sampled PR run.
+- For a PR-scoped run the plain `owner/repo` token is redacted from
+  `process.command_args` and `gen_ai.tool.call.arguments` (`"[redacted]"`,
+  position-preserving), so the plain owner/repo appears in **no** attribute.
+- **Enforced (privacy)**: a test asserts no span attribute contains the plain
+  `owner`/`repo` string or `vcs.repository.url.full` across a sampled PR run,
+  while `command_args` still shows the command + PR number + redacted repo slot.
 
 ## GATED contracts (NOT built until confirmed)
 - **C-9 (G-2) `--traceparent`**: a global public flag accepting a full W3C
