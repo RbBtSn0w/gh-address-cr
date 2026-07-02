@@ -51,31 +51,17 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Inspects active and terminal claims.
 - `gh-address-cr agent reclaim <owner/repo> <pr_number>`
   - Expires stale leases without deleting accepted evidence.
-- `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source <source> --format agent-jsonl --input <path>|-`
-  - Imports safe PR-scoped telemetry from a generic agent or host-specific adapter. This does not mutate review item state.
-- `gh-address-cr telemetry ingest <owner/repo> <pr_number> --source codex --format codex-host-json --input <path>|-`
-- Codex native session logs can also be auto-discovered by `final-gate` through the packaged `codex` host profile when `CODEX_THREAD_ID` is available; that path emits the same `agent-jsonl` contract and does not emit raw arguments or outputs.
-  - Imports safe aggregate Codex host exports such as tokens, tool usage, duration, and status into the same canonical event model.
-- `gh-address-cr telemetry summary <owner/repo> <pr_number> [--format json|markdown]`
-  - Emits the combined runtime and imported telemetry efficiency report with a coverage label and report artifact path.
-- `gh-address-cr telemetry doctor <owner/repo> <pr_number> [--format json|markdown]`
-  - Diagnoses CLI health telemetry, host profile autodiscovery, telemetry storage, and the latest CLI machine `reason_code`/`next_action`. This does not mutate review item state.
 - `gh-address-cr command-session --input <commands.json>|-`
   - Executes multiple one-shot runtime commands in one process and emits a discrete result for every operation.
 - `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
-  - Emits a guarded dry-run plan for triage, leasing, submission, publish, and final-gate steps. Side-effecting execution is not enabled by default.
+  - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
-Final-gate also supports a host integration hook. If `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` points to a safe JSONL feed, `gh-address-cr final-gate` imports that feed before writing `audit_summary.md` and `efficiency-report.json`. `GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE` defaults to `assistant-host`, and `GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`.
+## Telemetry Coverage
 
-## Telemetry Event Contract
-
-Generic agent telemetry uses JSONL. Each line is one event with these required fields: `source`, `kind`, `operation`, `status`, and either `duration_ms` or both `started_at` and `ended_at`. Recommended fields are `schema_version`, `source_session_id`, `event_id`, `metadata`, and `correlation_id`.
-
-Supported `kind` values are `tool_call`, `command`, `wait`, `retry`, `validation`, and `agent_step`. Supported `status` values are `success`, `failure`, `timeout`, `cancelled`, and `unknown`.
-
-Telemetry must be public-safe before import. Do not include tokens, credentials, raw prompts, usernames, private machine identifiers, or unnecessary absolute local paths. The runtime computes `event_fingerprint` after canonical normalization and uses it as the authoritative duplicate key. Duplicate or overlapping imports must appear in `duplicate_fingerprints` and must not inflate report counts, durations, or slowest-operation rankings.
-
-Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`. Missing host telemetry is a coverage fact, not a final-gate failure by default. If coverage is degraded or `cli_health_issues` is non-empty, use `telemetry doctor` to identify the profile, storage, or CLI reason-code path that should feed the next fix.
+Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`.
+Telemetry is runtime-owned observed evidence and does not mutate review state.
+Missing or degraded telemetry is a coverage fact, not a final-gate failure by
+default.
 
 ## Workflow Decision JSON
 

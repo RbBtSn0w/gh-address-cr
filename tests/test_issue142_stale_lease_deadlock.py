@@ -301,34 +301,3 @@ class Issue142ReplyEvidenceIngestTest(PythonScriptTestCase):
 
         self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
         self.assertTrue(result.passed, result.to_machine_summary())
-
-    def test_reply_posted_fold_preserves_author_login_on_rebuild(self):
-        """A ``reply_posted`` ledger event must carry ``author_login`` through a
-        cache rebuild (#143), so the login-match guarantee survives a
-        session.json rebuild from the durable ledger."""
-        from types import SimpleNamespace
-
-        from gh_address_cr.core.runtime_kernel.session_projection import apply_ledger_events
-
-        base = {
-            "github-thread:PRRT_x": {
-                "item_id": "github-thread:PRRT_x",
-                "item_kind": "github_thread",
-            }
-        }
-        record = SimpleNamespace(
-            event_type="reply_posted",
-            item_id="github-thread:PRRT_x",
-            payload={
-                "thread_id": "PRRT_x",
-                "reply_url": "https://example.test/reply",
-                "author_login": "agent-login",
-            },
-            record_id="rec-1",
-            timestamp="2026-06-21T12:00:00+00:00",
-        )
-
-        folded = apply_ledger_events(base, [record])
-        evidence = folded["github-thread:PRRT_x"]["reply_evidence"]
-        self.assertEqual(evidence["reply_url"], "https://example.test/reply")
-        self.assertEqual(evidence["author_login"], "agent-login")

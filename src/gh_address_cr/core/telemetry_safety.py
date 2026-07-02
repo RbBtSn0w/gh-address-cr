@@ -7,12 +7,40 @@ the telemetry module re-imports them so call sites stay unchanged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
+
+from gh_address_cr.core.otel_semconv import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_CONVERSATION_ID,
+    VCS_CHANGE_ID,
+    VCS_CHANGE_STATE,
+    VCS_PROVIDER_NAME,
+    VCS_REPOSITORY_NAME,
+)
+
+# Commands that operate on a GitHub PR (`owner/repo <pr>`); only these carry vcs.*
+_PR_SCOPED_COMMANDS = frozenset(
+    {
+        "active-pr",
+        "address",
+        "review",
+        "threads",
+        "findings",
+        "adapter",
+        "final-gate",
+        "agent",
+        "review-to-findings",
+        "submit-action",
+        "command-session",
+    }
+)
 
 UNSAFE_METADATA_KEYS = {
     "token",
@@ -339,3 +367,130 @@ def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, 
         inline_env[key] = value
         index += 1
     return argv[index:], inline_env
+
+
+def safe_command_args(argv: list[str]) -> list[str]:
+    """Sanitize command line arguments to redact sensitive inputs for telemetry."""
+    res = []
+    for arg in argv:
+        if "=" in arg:
+            lhs, eq, rhs = arg.partition("=")
+            key = lhs.lstrip("-")
+            if (
+                _is_unsafe_metadata_key(key)
+                or _contains_token_marker(rhs)
+                or _contains_private_identifier(rhs)
+                or _looks_like_unnecessary_absolute_path(rhs)
+            ):
+                res.append(f"{lhs}=[redacted]")
+            else:
+                res.append(arg)
+        else:
+            if (
+                _contains_token_marker(arg)
+                or _contains_private_identifier(arg)
+                or _looks_like_unnecessary_absolute_path(arg)
+            ):
+                res.append("[redacted]")
+            else:
+                res.append(arg)
+    return res
+
+
+def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
+    """Detect and return agent session correlation attributes from environ.
+
+    GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
+    any agent can set (e.g. via skill guidance); CLAUDE_CODE_SESSION_ID is a
+    passive, zero-configuration fallback used only because Claude Code exports
+    it for free. This is intentionally bounded to these two sources, not a
+    growing per-vendor detection registry (Principle X): a new agent vendor is
+    onboarded by setting the designed entry point, not by adding a branch here.
+    Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
+    CLAUDE_CODE_SESSION_ID (passive fallback).
+    """
+    res: dict[str, str] = {}
+
+    # 1. Conversation ID (paired in one tuple so mypy narrows both together)
+    conv_id_source: tuple[str, str] | None = None
+    if "GH_ADDRESS_CR_CONVERSATION_ID" in environ:
+        conv_id_source = (environ["GH_ADDRESS_CR_CONVERSATION_ID"], "GH_ADDRESS_CR_CONVERSATION_ID")
+    elif "CLAUDE_CODE_SESSION_ID" in environ:
+        conv_id_source = (environ["CLAUDE_CODE_SESSION_ID"], "CLAUDE_CODE_SESSION_ID")
+
+    if conv_id_source is not None:
+        conv_id, source = conv_id_source
+        try:
+            # Route through the public-safe path
+            safe_conv_id = _safe_identity_label(conv_id, field=source)
+            res[GEN_AI_CONVERSATION_ID] = safe_conv_id
+            res["gen_ai.conversation.id.source"] = source
+        except ValueError:
+            pass
+
+    # 2. Agent Name
+    if "AI_AGENT" in environ:
+        agent_name = environ["AI_AGENT"]
+        try:
+            safe_agent_name = _safe_identity_label(agent_name, field="AI_AGENT")
+            res[GEN_AI_AGENT_NAME] = safe_agent_name
+        except ValueError:
+            pass
+
+    return res
+
+
+def derive_tool_name(argv: list[str] | None) -> str:
+    """Derive the GenAI tool name from the command line arguments."""
+    if not argv:
+        return "gh-address-cr"
+    first = argv[0]
+    if first.startswith("-") or first in ("help", "version"):
+        return "gh-address-cr"
+    return first
+
+
+def repo_hash(owner_repo: str) -> str:
+    """Return a stable, one-way, case-insensitive digest of ``owner/repo``.
+
+    Public-safe: the plain owner/repo name never appears in the output. Same
+    repository (case-insensitively) always hashes identically; different
+    repositories differ. Not used for security — only to group telemetry per
+    repository without leaking private identifiers (spec FR-012 / R-010).
+    """
+    normalized = owner_repo.strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def map_vcs_attributes(
+    command: str,
+    repo: str | None,
+    pr_number: object | None,
+    session: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Map a PR-scoped invocation to public-safe ``vcs.*`` span attributes.
+
+    Returns ``{}`` unless ``command`` is PR-scoped and both ``repo`` and
+    ``pr_number`` are present. Emits plain ``vcs.change.id`` (PR number) and
+    ``vcs.provider.name=github``; ``vcs.repository.name`` is the one-way
+    :func:`repo_hash` of ``owner/repo`` (never the plain name or URL).
+    ``vcs.change.state`` is included only when the caller supplies it via
+    ``session["status"]`` (no telemetry-driven GitHub lookup).
+    """
+    if command not in _PR_SCOPED_COMMANDS:
+        return {}
+    if not repo or pr_number is None:
+        return {}
+
+    attrs: dict[str, str] = {
+        VCS_PROVIDER_NAME: "github",
+        VCS_CHANGE_ID: str(pr_number),
+        VCS_REPOSITORY_NAME: repo_hash(repo),
+    }
+
+    if session:
+        state = session.get("status")
+        if isinstance(state, str) and state:
+            attrs[VCS_CHANGE_STATE] = state
+
+    return attrs

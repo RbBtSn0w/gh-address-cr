@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from gh_address_cr.core.github_thread_state import (
@@ -10,19 +11,25 @@ from gh_address_cr.core.github_thread_state import (
     is_resolved_github_thread,
     is_terminal_github_thread,
 )
-from gh_address_cr.core.runtime_kernel.events import (
-    CHECK_RUN_OBSERVED,
-    LOCAL_ITEM_OBSERVED,
-    LOGIC_VALIDATION_OBSERVED,
-    PENDING_REVIEW_OBSERVED,
-    REVIEW_THREAD_OBSERVED,
-    RUNTIME_FACT_SCHEMA_VERSION,
-    RuntimeFact,
-    sort_runtime_facts,
-)
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 
 JsonDict = dict[str, Any]
+
+RUNTIME_FACT_SCHEMA_VERSION = "1.0"
+REVIEW_THREAD_OBSERVED = "review_thread_observed"
+LOCAL_ITEM_OBSERVED = "local_item_observed"
+PENDING_REVIEW_OBSERVED = "pending_review_observed"
+CHECK_RUN_OBSERVED = "check_run_observed"
+LOGIC_VALIDATION_OBSERVED = "logic_validation_observed"
+SUPPORTED_FACT_KINDS = frozenset(
+    {
+        REVIEW_THREAD_OBSERVED,
+        LOCAL_ITEM_OBSERVED,
+        PENDING_REVIEW_OBSERVED,
+        CHECK_RUN_OBSERVED,
+        LOGIC_VALIDATION_OBSERVED,
+    }
+)
 
 FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"
 FINAL_GATE_MISSING_REPLY_EVIDENCE = "FINAL_GATE_MISSING_REPLY_EVIDENCE"
@@ -74,6 +81,45 @@ FAILURE_ORDER = (
 )
 
 ADAPTER_OBSERVED_AT = "1970-01-01T00:00:00Z"
+
+
+@dataclass(frozen=True)
+class RuntimeFact:
+    schema_version: str
+    fact_kind: str
+    fact_id: str
+    observed_at: str
+    sequence: int
+    payload: JsonDict
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict | "RuntimeFact") -> "RuntimeFact":
+        if isinstance(payload, RuntimeFact):
+            return payload
+        schema_version = _require_string(payload, "schema_version")
+        if schema_version != RUNTIME_FACT_SCHEMA_VERSION:
+            raise ValueError(f"unsupported runtime fact schema_version: {schema_version}")
+        fact_kind = _require_string(payload, "fact_kind")
+        if fact_kind not in SUPPORTED_FACT_KINDS:
+            raise ValueError(f"unsupported runtime fact kind: {fact_kind}")
+        fact_id = _require_string(payload, "fact_id")
+        observed_at = _require_string(payload, "observed_at")
+        _parse_observed_at(observed_at)
+        sequence = _optional_int(payload, "sequence")
+        fact_payload = payload.get("payload", {})
+        if not isinstance(fact_payload, dict):
+            raise ValueError("payload must be a JSON object")
+        return cls(
+            schema_version=schema_version,
+            fact_kind=fact_kind,
+            fact_id=fact_id,
+            observed_at=observed_at,
+            sequence=sequence,
+            payload=dict(fact_payload),
+        )
+
+    def sort_key(self) -> tuple[datetime, int, str]:
+        return (_parse_observed_at(self.observed_at), self.sequence, self.fact_id)
 
 
 @dataclass(frozen=True)
@@ -433,3 +479,41 @@ def _string_or_none(value: Any) -> str | None:
         return None
     text = str(value)
     return text if text else None
+
+
+def _require_string(payload: Mapping[str, Any], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or value.strip() == "":
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return value
+
+
+def _optional_int(payload: Mapping[str, Any], field_name: str, default: int = 0) -> int:
+    value = payload.get(field_name, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
+    return value
+
+
+def _parse_observed_at(value: str) -> datetime:
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        raise ValueError(f"observed_at must be an RFC3339 timestamp with timezone: {value}") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"observed_at must include a timezone offset: {value}")
+    return parsed.astimezone(timezone.utc)
+
+
+def sort_runtime_facts(
+    facts: Iterable[dict[str, Any] | RuntimeFact],
+) -> tuple[RuntimeFact, ...]:
+    parsed_facts = tuple(RuntimeFact.from_dict(fact) for fact in facts)
+    seen_keys = set()
+    for fact in parsed_facts:
+        sort_key = fact.sort_key()
+        if sort_key in seen_keys:
+            raise ValueError(f"duplicate runtime fact ordering key: {fact.fact_id}")
+        seen_keys.add(sort_key)
+    return tuple(sorted(parsed_facts, key=lambda fact: fact.sort_key()))

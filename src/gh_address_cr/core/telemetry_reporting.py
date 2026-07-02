@@ -134,7 +134,7 @@ def _cli_health_issues(
                 "host-autodiscovery",
                 True,
                 diagnostic,
-                "Run telemetry doctor to inspect profile environment, transcript discovery, and PR attribution.",
+                "Inspect the runtime telemetry environment and PR attribution inputs.",
             )
         elif "telemetry input unavailable" in diagnostic:
             add(
@@ -152,7 +152,7 @@ def _cli_health_issues(
                 "telemetry-store",
                 True,
                 diagnostic,
-                "Repair or remove the malformed telemetry artifact, then rerun telemetry summary.",
+                "Repair or remove the malformed telemetry artifact, then rerun final-gate.",
             )
         elif diagnostic == "TELEMETRY_TIMING_UNAVAILABLE":
             add(
@@ -177,7 +177,7 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "source": "runtime-summary",
             "retryable": True,
             "detail": "last machine summary is not a regular file",
-            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun final-gate.",
         }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -188,7 +188,7 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "source": "runtime-summary",
             "retryable": True,
             "detail": f"last machine summary unreadable: {type(exc).__name__}",
-            "next_action": "Repair the runtime summary artifact, then rerun telemetry doctor.",
+            "next_action": "Repair the runtime summary artifact, then rerun final-gate.",
         }
     except ValueError:
         return {
@@ -197,7 +197,7 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "source": "runtime-summary",
             "retryable": True,
             "detail": "last machine summary invalid JSON",
-            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun final-gate.",
         }
     if not isinstance(payload, dict):
         return {
@@ -206,7 +206,7 @@ def _last_machine_summary_health_issue(paths: core_paths.SessionPaths) -> dict[s
             "source": "runtime-summary",
             "retryable": True,
             "detail": "last machine summary must be a JSON object",
-            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun telemetry doctor.",
+            "next_action": "Repair or remove the malformed last-machine-summary artifact, then rerun final-gate.",
         }
     status = str(payload.get("status") or "UNKNOWN")
     observed_reason = str(payload.get("reason_code") or "UNKNOWN_REASON")

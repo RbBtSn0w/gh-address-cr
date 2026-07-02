@@ -5,15 +5,22 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
 
 import requests
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+from gh_address_cr.core.otel_semconv import (
+    ERROR_TYPE,
+    PROCESS_EXIT_CODE,
+)
 
 SERVICE_NAME_VALUE = "gh-address-cr"
 TELEMETRY_ENVIRONMENT_VARIABLE = "GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT"
@@ -111,29 +118,66 @@ def _shutdown_provider(provider: TracerProvider) -> None:
         return
 
 
+def resolve_parent_context(environ: Mapping[str, str]) -> Context | None:
+    """Resolve the parent context from the environment.
+
+    Extracts traceparent using TraceContextTextMapPropagator, supporting
+    both TRACEPARENT and traceparent keys. Fail-open.
+    """
+    try:
+        val = environ.get("TRACEPARENT") or environ.get("traceparent")
+        if not val:
+            return None
+        return TraceContextTextMapPropagator().extract(carrier={"traceparent": val})
+    except Exception:
+        return None
+
+
 def run_traced(
     tracer: Tracer,
     span_name: str,
     operation: Callable[[], T],
     *,
-    attributes: Mapping[str, str | bool | int | float] | None = None,
+    attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
+    context: Context | None = None,
 ) -> T:
     """Run an operation in a span and explicitly record failures."""
+    if context is None:
+        context = resolve_parent_context(os.environ)
+
     with tracer.start_as_current_span(
         span_name,
         record_exception=False,
         set_status_on_exception=False,
+        context=context,
     ) as span:
+        # run_traced owns span lifecycle + parent context + exit.code/error.type
+        # only. Execution identity (executable.name/pid/parent_pid), agent-session
+        # correlation, args, gen_ai, and vcs attributes are assembled by the CLI
+        # entrypoint (__main__) and passed in via ``attributes``.
         if attributes:
             for key, value in attributes.items():
                 span.set_attribute(key, value)
+
         try:
-            return operation()
+            result = operation()
+            # Normal Return
+            exit_code = result if isinstance(result, int) and not isinstance(result, bool) else 0
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+            return result
         except SystemExit as error:
-            if error.code not in (None, 0):
-                _record_sanitized_error(span, error)
+            exit_code = error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
             raise
         except BaseException as error:
+            span.set_attribute(PROCESS_EXIT_CODE, 1)
+            if isinstance(error, KeyboardInterrupt):
+                err_type = "keyboard_interrupt"
+            elif isinstance(error, TimeoutError):
+                err_type = "timeout"
+            else:
+                err_type = "_OTHER"
+            span.set_attribute(ERROR_TYPE, err_type)
             _record_sanitized_error(span, error)
             raise
 

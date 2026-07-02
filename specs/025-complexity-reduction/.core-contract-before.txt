@@ -1,0 +1,80 @@
+gh-address-cr review --help
+usage: gh-address-cr review [--auto-simple] <owner/repo> <pr_number> [--input <path>|-] [--human|--machine|--lean|--summary]
+
+High-level PR review entrypoint.
+
+Use when you want the full PR review workflow to run automatically.
+This command waits for external review findings when they are absent,
+then tells you to re-run the same review command once handoff artifacts are filled.
+You may still provide findings JSON explicitly via --input <path> or --input -.
+Use --auto-simple for a lightweight GitHub thread-only path that does not wait for external review findings.
+Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.
+Default output is a structured JSON summary. Use --human for narrative text.
+--machine remains a compatibility alias for the default machine summary.
+
+
+gh-address-cr threads --help
+usage: gh-address-cr threads <owner/repo> <pr_number> [--human|--machine|--lean|--summary]
+
+High-level GitHub review-thread entrypoint.
+
+Use when only GitHub review threads need processing.
+Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.
+Default output is a structured JSON summary. Use --human for narrative text.
+--machine remains a compatibility alias for the default machine summary.
+
+
+gh-address-cr final-gate --help
+usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]
+
+Host telemetry hook:
+  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>
+  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.
+  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.
+
+
+representative_final_gate_machine_summary
+{
+  "artifact_path": null,
+  "check_requirement": null,
+  "commands": {
+    "address": "gh-address-cr address octo/example 77 --lean",
+    "batch_next": "gh-address-cr agent next octo/example 77 --batch --agent-id <agent_id>",
+    "final_gate": "gh-address-cr final-gate octo/example 77",
+    "publish": "gh-address-cr agent publish octo/example 77",
+    "resolve": "gh-address-cr agent resolve octo/example 77 <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>",
+    "resolve_batch": "gh-address-cr agent resolve octo/example 77 --batch --input batch-response.json",
+    "resolve_decline": "gh-address-cr agent resolve octo/example 77 --reject --match-files --files <paths> --homogeneous-reason <why>",
+    "resolve_homogeneous": "gh-address-cr agent resolve octo/example 77 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>",
+    "resolve_stale": "gh-address-cr agent resolve octo/example 77 --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files"
+  },
+  "counts": {
+    "blocking_github_items_count": 0,
+    "blocking_items_count": 0,
+    "blocking_local_items_count": 0,
+    "github_threads_missing_reply_count": 0,
+    "logic_validation_advisory_count": 0,
+    "logic_validation_blocking_count": 0,
+    "missing_validation_evidence_count": 0,
+    "pending_current_login_review_count": 0,
+    "pending_review_count": 0,
+    "pr_checks_count": 0,
+    "pr_checks_failed_count": 0,
+    "pr_checks_not_green_count": 0,
+    "pr_checks_pending_count": 0,
+    "unresolved_github_threads_count": 0,
+    "unresolved_remote_threads_count": 0
+  },
+  "exit_code": 0,
+  "failure_codes": [],
+  "gate_scope": "final",
+  "item_id": null,
+  "item_kind": null,
+  "logic_validation_signals": [],
+  "next_action": "Completion may be claimed.",
+  "pr_number": "77",
+  "reason_code": null,
+  "repo": "octo/example",
+  "status": "PASSED",
+  "waiting_on": null
+}

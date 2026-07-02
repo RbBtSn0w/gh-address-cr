@@ -4,11 +4,11 @@ from tests.helpers import PythonScriptTestCase
 
 
 class NativeWorkflowReplacementTest(PythonScriptTestCase):
-    def test_legacy_cr_loop_command_is_unsupported_without_session_mutation(self):
+    def test_removed_cr_loop_command_is_unknown_without_session_mutation(self):
         result = self.run_runtime_module("cr-loop", "remote", self.repo, self.pr)
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Unsupported legacy command: cr-loop", result.stderr)
+        self.assertIn("Unknown command. Supported commands:", result.stderr)
         self.assertFalse(self.session_file().exists())
 
     def test_native_review_with_findings_uses_public_waiting_for_fix_contract(self):

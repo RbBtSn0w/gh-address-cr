@@ -211,8 +211,9 @@ class TracedExecutionTests(unittest.TestCase):
         span.record_exception.assert_not_called()
         span.set_status.assert_not_called()
 
-    def test_nonzero_system_exit_is_recorded_as_error(self) -> None:
+    def test_nonzero_system_exit_is_not_recorded_as_error(self) -> None:
         from gh_address_cr import telemetry
+        from gh_address_cr.core.otel_semconv import PROCESS_EXIT_CODE
 
         span = MagicMock()
         context_manager = MagicMock()
@@ -224,8 +225,9 @@ class TracedExecutionTests(unittest.TestCase):
             telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(2)))
 
         self.assertEqual(raised.exception.code, 2)
-        self.assertEqual(str(span.record_exception.call_args.args[0]), "SystemExit")
-        self.assertEqual(span.set_status.call_args.args[0].status_code.name, "ERROR")
+        span.record_exception.assert_not_called()
+        span.set_status.assert_not_called()
+        span.set_attribute.assert_any_call(PROCESS_EXIT_CODE, 2)
 
     @patch("gh_address_cr.__main__.shutdown_telemetry")
     @patch("gh_address_cr.__main__.initialize_telemetry")

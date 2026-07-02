@@ -38,7 +38,6 @@ PUBLIC_COMMANDS = {
     "findings",
     "adapter",
     "doctor",
-    "telemetry",
     "command-session",
     "final-gate",
     "review-to-findings",

@@ -1,0 +1,67 @@
+editable_install=.venv/bin/python -m pip install -e .
+unit_tests=Ran 986 tests in 12.071s
+unit_tests_status=OK
+ruff_status=passed
+protected_layers=OK
+
+gh_address_cr_help:
+usage: gh-address-cr [-h] [--machine] [--human] [--version]
+                     {active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,consolidation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}
+                     [repo] [pr_number] ...
+
+Unified Python CLI for gh-address-cr.
+
+positional arguments:
+  {active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,consolidation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}
+                        High-level commands:
+                          gh-address-cr active-pr [--repo owner/repo] [--head branch]
+                          gh-address-cr address owner/repo 123 [--human|--lean|--summary]
+                          gh-address-cr review owner/repo 123 [--human]
+                          gh-address-cr review --auto-simple owner/repo 123 [--human|--lean|--summary]
+                          gh-address-cr threads owner/repo 123 [--human|--lean|--summary]
+                          gh-address-cr doctor [owner/repo] [123]
+                          gh-address-cr version
+                          gh-address-cr findings owner/repo 123 --input findings.json [--human]
+                          gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py
+                        Notes:
+                          review waits for external review findings when they are absent.
+                          High-level commands are the agent-safe public surface.
+                          For `adapter`, flags after <adapter_cmd...> are passed through to the adapter command.
+                        Utility commands:
+                          gh-address-cr review-to-findings owner/repo 123 --input finding-blocks.md
+                          gh-address-cr submit-feedback --category workflow-gap --title ... --summary ... --expected ... --actual ...
+                          review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.
+                        Runtime commands:
+                          gh-address-cr agent manifest
+                          gh-address-cr agent resolve owner/repo 123 <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>
+                          gh-address-cr agent resolve owner/repo 123 --batch --input batch-response.json
+                          gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>
+                          gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files
+                          gh-address-cr final-gate owner/repo 123
+                          gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl
+                          gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]
+                          gh-address-cr telemetry doctor owner/repo 123 [--format json|markdown]
+                          gh-address-cr evaluation rebuild [--repo owner/repo] [--pr-number 123]
+                          gh-address-cr evaluation show owner/repo 123 [--run-id run-id]
+                          gh-address-cr evaluation compare --baseline-version 3.1.10 --candidate-version 3.2.0
+                          gh-address-cr consolidation status [--json]
+                          gh-address-cr consolidation parity --slice <id> --facts <path> [--json]
+                          gh-address-cr command-session --input commands.json
+  repo                  Owner/repo name.
+  pr_number             Pull request number.
+  args                  Arguments passed through to the selected subcommand.
+
+options:
+  -h, --help            show this help message and exit
+  --machine             Compatibility alias for the default structured JSON summary.
+  --human               Emit human-oriented text instead of the default machine summary.
+  --version, -v         show program's version number and exit
+
+
+final_gate_help:
+usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]
+
+Host telemetry hook:
+  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>
+  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.
+  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.

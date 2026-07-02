@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
@@ -23,15 +22,12 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
-from gh_address_cr.commands.consolidation import handle_consolidation_command
 from gh_address_cr.commands.doctor import handle_doctor_command
-from gh_address_cr.commands.evaluation import handle_evaluation_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
     HighLevelReviewRuntime,
     summary_commands,
 )
-from gh_address_cr.commands.telemetry import handle_telemetry_command
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
 from gh_address_cr.core.io import write_json_atomic
@@ -49,52 +45,26 @@ from gh_address_cr.intake.findings import (
     parse_records as native_parse_records,
 )
 
-HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
-NATIVE_HIGH_LEVEL_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
+OUTPUT_MODE_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
+NATIVE_REVIEW_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
 PUBLIC_COMMANDS = {
-    *NATIVE_HIGH_LEVEL_COMMANDS,
+    *NATIVE_REVIEW_COMMANDS,
     *UTILITY_COMMANDS,
     "active-pr",
     "agent",
     "command-session",
-    "consolidation",
     "doctor",
-    "evaluation",
     "final-gate",
-    "telemetry",
 }
 PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
-UNSUPPORTED_LEGACY_COMMANDS = {
-    "audit-report",
-    "batch-resolve",
-    "clean-state",
-    "code-review-adapter",
-    "control-plane",
-    "cr-loop",
-    "generate-reply",
-    "ingest-findings",
-    "list-threads",
-    "mark-handled",
-    "post-reply",
-    "prepare-code-review",
-    "publish-finding",
-    "resolve-thread",
-    "run-local-review",
-    "run-once",
-    "session-engine",
-}
 OUTPUT_FLAGS = {"--machine", "--human"}
 LEAN_FLAGS = {"--lean", "--summary"}
-HIGH_LEVEL_GH_COMMANDS = {"address", "review", "threads", "adapter"}
+GITHUB_PRECHECK_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
 PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
-
-
-def _legacy_module(name: str) -> Any:
-    raise RuntimeError(f"Legacy module imports are not supported by the native CLI path: {name}")
 
 
 def _normalize_finding(record: dict) -> dict:
@@ -160,9 +130,10 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
     if requested_lean and "--human" in requested_flags:
         print("--lean/--summary and --human are mutually exclusive.", file=sys.stderr)
         return False
-    if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
+    if args.command not in OUTPUT_MODE_COMMANDS and requested_flags:
         print(
-            f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr
+            f"--machine and --human are only supported for {', '.join(sorted(OUTPUT_MODE_COMMANDS))}.",
+            file=sys.stderr,
         )
         return False
     if args.command not in {"address", "review", "threads"} and requested_lean:
@@ -547,7 +518,7 @@ def parse_pr_url(value: str) -> tuple[str, str] | None:
 
 
 def normalize_high_level_target_args(args: argparse.Namespace) -> None:
-    if args.command not in HIGH_LEVEL_COMMANDS or not args.args:
+    if args.command not in OUTPUT_MODE_COMMANDS or not args.args:
         return
     parsed = parse_pr_url(args.args[0])
     if parsed is None:
@@ -688,7 +659,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             next_action=f"Provide an adapter command after `gh-address-cr adapter {repo} {pr_number}`.",
         )
 
-    if args.command in HIGH_LEVEL_GH_COMMANDS:
+    if args.command in GITHUB_PRECHECK_COMMANDS:
         gh_preflight = preflight_github_cli(args, repo, pr_number)
         if gh_preflight is not None:
             return gh_preflight
@@ -762,6 +733,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="gh-address-cr",
         description="Unified Python CLI for gh-address-cr.",
         formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "Telemetry:\n"
+            "  Set GH_ADDRESS_CR_CONVERSATION_ID to a stable, unique-per-session value\n"
+            "  before invoking any command, so multiple invocations from this session\n"
+            "  can be grouped together by an observability backend. Optional and\n"
+            "  additive: omitting it does not change command behavior, output, or exit\n"
+            "  codes (fail-open)."
+        ),
     )
     parser.add_argument(
         "--machine",
@@ -781,7 +760,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,telemetry,evaluation,consolidation,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{active-pr,address,review,threads,findings,adapter,doctor,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -808,14 +787,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>\n"
             "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files\n"
             "  gh-address-cr final-gate owner/repo 123\n"
-            "  gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input telemetry.jsonl\n"
-            "  gh-address-cr telemetry summary owner/repo 123 [--format json|markdown]\n"
-            "  gh-address-cr telemetry doctor owner/repo 123 [--format json|markdown]\n"
-            "  gh-address-cr evaluation rebuild [--repo owner/repo] [--pr-number 123]\n"
-            "  gh-address-cr evaluation show owner/repo 123 [--run-id run-id]\n"
-            "  gh-address-cr evaluation compare --baseline-version 3.1.10 --candidate-version 3.2.0\n"
-            "  gh-address-cr consolidation status [--json]\n"
-            "  gh-address-cr consolidation parity --slice <id> --facts <path> [--json]\n"
             "  gh-address-cr command-session --input commands.json\n"
         ),
     )
@@ -857,15 +828,6 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
             passthrough.append("--machine")
         return handle_final_gate(args.repo, args.pr_number, passthrough)
 
-    if args.command == "telemetry":
-        if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
-            print(
-                "--machine, --human, --lean, and --summary are not supported for telemetry commands.",
-                file=sys.stderr,
-            )
-            return 2
-        return handle_telemetry_command(args.repo, args.pr_number, args.args)
-
     if args.command == "command-session":
         if args.machine or args.human:
             print("--machine and --human are not supported for command-session.", file=sys.stderr)
@@ -877,20 +839,6 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
         return 0
 
     return None
-
-
-def _dispatch_evaluation_command(args: argparse.Namespace) -> int:
-    if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
-        print("Root output flags are not supported for evaluation commands.", file=sys.stderr)
-        return 2
-    return handle_evaluation_command(args.repo, args.pr_number, args.args)
-
-
-def _dispatch_consolidation_command(args: argparse.Namespace) -> int:
-    if args.machine or args.human or getattr(args, "lean", False) or getattr(args, "summary", False):
-        print("Root output flags are not supported for consolidation commands.", file=sys.stderr)
-        return 2
-    return handle_consolidation_command(args.repo, args.pr_number, args.args)
 
 
 def _expand_target_args(args: argparse.Namespace) -> None:
@@ -922,7 +870,7 @@ def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
     if args.command == "review-to-findings":
         if args.machine or args.human:
             print(
-                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                f"--machine and --human are only supported for {', '.join(sorted(OUTPUT_MODE_COMMANDS))}.",
                 file=sys.stderr,
             )
             return 2
@@ -934,7 +882,7 @@ def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
     if args.command == "submit-feedback":
         if args.machine or args.human:
             print(
-                f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.",
+                f"--machine and --human are only supported for {', '.join(sorted(OUTPUT_MODE_COMMANDS))}.",
                 file=sys.stderr,
             )
             return 2
@@ -947,17 +895,8 @@ def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
 
 
 def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
-    """Handle legacy, unknown, and native high-level commands. Always returns a code."""
-    if args.command in UNSUPPORTED_LEGACY_COMMANDS:
-        print(
-            f"Unsupported legacy command: {args.command}. "
-            "Use current workflows such as `gh-address-cr review <owner/repo> <pr_number>`, "
-            "`gh-address-cr address <owner/repo> <pr_number>`, or `gh-address-cr agent ...`.",
-            file=sys.stderr,
-        )
-        return 2
-
-    if args.command not in NATIVE_HIGH_LEVEL_COMMANDS:
+    """Handle unknown commands and native review/address entrypoints."""
+    if args.command not in NATIVE_REVIEW_COMMANDS:
         supported_commands = ", ".join(sorted(PUBLIC_COMMANDS))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
@@ -965,14 +904,14 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     if not normalize_output_args(args):
         return 2
     normalize_high_level_target_args(args)
-    if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
+    if args.command in OUTPUT_MODE_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0
-    if args.command in HIGH_LEVEL_COMMANDS and len(args.args) < 2:
+    if args.command in OUTPUT_MODE_COMMANDS and len(args.args) < 2:
         args.args, scope_error = _maybe_prepend_implicit_scope(args.args)
         if scope_error is not None:
             return _emit_scope_resolution_error(scope_error)
-    if args.command in HIGH_LEVEL_COMMANDS:
+    if args.command in OUTPUT_MODE_COMMANDS:
         preflight_rc = preflight_high_level(args)
         if preflight_rc is not None:
             return preflight_rc
@@ -981,12 +920,6 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-
-    if args.command == "evaluation":
-        return _dispatch_evaluation_command(args)
-
-    if args.command == "consolidation":
-        return _dispatch_consolidation_command(args)
 
     rc = _dispatch_management_commands(args)
     if rc is not None:

@@ -12,8 +12,7 @@ publishes GitHub replies/resolves.
 
 > **Upgrading from 2.x?** 3.0 is a breaking release: the `agent fix`,
 > `agent trivial-fix`, `agent fix-all`, `agent resolve-stale`, and
-> `agent submit-batch` commands are replaced by a single `agent resolve`. See the
-> [3.0 migration guide](docs/migration-3.0.md).
+> `agent submit-batch` commands are replaced by a single `agent resolve`.
 
 Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `skill/SKILL.md`.
@@ -90,8 +89,16 @@ A zero unresolved-thread count alone is not sufficient.
 
 ## OpenTelemetry traces
 
-The versioned public behavior and architecture boundary are defined by
-[`otel-tracing.v1`](docs/contracts/otel-tracing-v1.md).
+`otel-tracing.v1` is the versioned public behavior and architecture boundary
+for process tracing.
+
+- Process-level observability owner: the CLI process
+- External inputs: command invocation and environment-based telemetry opt-out
+- Span projection: one root span per CLI invocation
+- Export policy: OTLP/HTTP through the configured relay
+- Side-effect boundary: tracing observes runtime behavior and remains separate from PR-scoped workflow telemetry
+- Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
+- Recovery and replay: tracing is fail-open and must not block command completion
 
 The installed CLI exports one process-level OTLP/HTTP trace to:
 
@@ -100,7 +107,8 @@ https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
 
 The service name is `gh-address-cr`. The client contains no API key; the
-Cloudflare Worker injects backend credentials. To disable network tracing:
+Cloudflare Worker as the security relay injects backend credentials. To disable
+network tracing:
 
 ```bash
 export DISABLE_TELEMETRY=1
@@ -150,8 +158,6 @@ Primary commands:
 - `review`
 - `address`
 - `final-gate`
-- `telemetry ingest`
-- `telemetry summary`
 
 Advanced integration commands:
 
@@ -169,83 +175,18 @@ Advanced integration commands:
 - `agent publish`
 - `agent leases`
 - `agent reclaim`
-- `agent orchestrate autopilot`
 - `command-session`
 - `doctor`
-- `evaluation observe`
-- `evaluation rebuild`
-- `evaluation show`
-- `evaluation compare`
 
 High-level commands emit machine-readable JSON summaries by default. Use
 `--human` when a person needs narrative output and `--lean` where supported for
 low-token agent context.
 
-Telemetry commands are PR-scoped and do not mutate review item state:
-
-```bash
-gh-address-cr telemetry ingest owner/repo 123 --source generic-agent --format agent-jsonl --input agent-telemetry.jsonl
-gh-address-cr telemetry summary owner/repo 123 --format markdown
-gh-address-cr telemetry doctor owner/repo 123
-gh-address-cr telemetry ingest owner/repo 123 --source codex --format codex-host-json --input codex-host.json
-```
-
-Assistant hosts can also provide a final-gate ingestion hook by setting:
-
-```bash
-export GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=agent-telemetry.jsonl
-export GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE=assistant-host
-gh-address-cr final-gate owner/repo 123
-```
-
-`GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT` defaults to `agent-jsonl`. The hook uses
-the same telemetry ingestion contract before final-gate artifacts are written.
-When `GH_ADDRESS_CR_HOST_TELEMETRY_INPUT` is not set, `final-gate` can
-auto-discover first-party Claude Code and Codex native session logs through
-packaged host profiles. Codex native capture emits the same `agent-jsonl`
-contract as other hosts; `codex-host-json` remains available for explicit
-aggregate Codex exports.
-
 Every final efficiency summary reports one coverage label: `complete`,
-`partial`, `runtime-only`, or `unavailable`. Imported events are normalized to
-runtime-owned `event_fingerprint` values; duplicate or overlapping imports are
-reported through `accepted_fingerprints` and `duplicate_fingerprints` without
-inflating counts, durations, or slowest-operation rankings. Corrupted external
-telemetry remains fail-open for review and final-gate flows, while telemetry
-commands fail loudly with reason codes and diagnostics.
-
-Use `telemetry doctor` when coverage is `runtime-only` or `unavailable`, or
-when the efficiency report contains `cli_health_issues`. The doctor report
-checks packaged Codex/Claude Code profiles, host session environment, transcript
-discovery, PR attribution window availability, telemetry storage, and the latest
-CLI machine `reason_code`/`next_action` so telemetry can point to concrete
-repair work instead of only reporting slow or missing events.
-
-Evaluation is a separate read-only plane over archived runtime evidence. It
-never replies, resolves, publishes, changes session state, or satisfies
-`final-gate`. Build the disposable local catalog and inspect one archived run:
-
-```bash
-gh-address-cr evaluation rebuild --repo owner/repo --pr-number 123
-gh-address-cr evaluation show owner/repo 123 --run-id final-gate
-```
-
-After a later reviewer round, capture privacy-safe observations and compare
-matched runtime cohorts:
-
-```bash
-gh-address-cr evaluation observe owner/repo 123 --run-id final-gate
-gh-address-cr evaluation rebuild --repo owner/repo --pr-number 123
-gh-address-cr evaluation compare --baseline-version 3.1.10 --candidate-version 3.2.0
-```
-
-Comparison output keeps quality, workflow economics, and operational health
-separate. Missing coverage, fewer than ten eligible runs per matched cohort, or
-unsupported correlation returns `INSUFFICIENT_EVIDENCE` as a valid conclusion.
-Evaluation capture and report-generation overhead are reported separately; a
-250 ms budget breach degrades operational health without blocking review
-resolution.
-
+`partial`, `runtime-only`, or `unavailable`. The runtime records process and
+workflow telemetry for the surviving core path and keeps telemetry fail-open:
+reduced coverage is reported in the summary, but it does not change the review
+verdict by itself.
 For GitHub review-thread replies, the single mutating entrypoint is
 `agent resolve`; it records classification internally, so no separate
 `agent classify` round-trip is needed. Shared files/validation evidence is not the
@@ -259,8 +200,8 @@ When `resolve` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
 write a fillable `batch-response-skeleton.json` before `agent resolve --batch`.
 
 When exactly one PR session is cached, PR-scoped commands such as `address`,
-`review`, `threads`, `final-gate`, and `telemetry summary` may omit
-`<owner/repo> <pr_number>`. No-session and multi-session cases fail loud with
+`review`, `threads`, and `final-gate` may omit `<owner/repo> <pr_number>`.
+No-session and multi-session cases fail loud with
 `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`.
 
 Use `agent resolve --trivial` only for documentation or typo-only GitHub review
@@ -278,9 +219,25 @@ compatibility path, but JSON avoids whitespace-sensitive parsing.
 inside one process and returns one result per operation. Failed operations do
 not suppress later operations.
 
-`agent orchestrate autopilot` is guarded dry-run planning by default. It emits a
-deterministic plan for classify, lease, submit, publish, and final-gate steps.
-Side-effecting autopilot execution is not enabled in this v1 contract.
+`agent orchestrate` remains an optional advanced surface. The default supported
+path is still single-agent `review` / `address` / `agent resolve` /
+`agent publish` / `final-gate`; no orchestration session is required for normal
+PR handling.
+
+## Architecture and Packaging
+
+`gh-address-cr` is the preferred and stable automation entrypoint.
+
+- Published skill payload: the entire `skill/` directory
+- Repo-level verification harness: `tests/`
+- If a rule or instruction must ship with the installed skill, it must live inside `skill/`
+
+When blast radius requires kernel-style modeling, the design follows
+`external facts -> events -> projections -> policy -> command plan/outbox`.
+Architecture Preflight must name the artifact truth boundary, any
+self-referential completion risk, and the recovery model. If review feedback
+keeps adding edge cases without reducing state space, stop expanding
+conditionals and update the architecture spec instead.
 
 ## Runtime and adapter boundary
 
@@ -308,16 +265,230 @@ The OpenAI curated Plugin Directory is not a self-service publish target in this
 repository. The committed `.agents/plugins/marketplace.json` points at the
 generated community distribution artifact.
 
-## Documentation
+## Command Topology (ASCII)
 
-- [3.0 migration guide](docs/migration-3.0.md)
-- [Installation and distribution](docs/installation.md)
-- [CLI reference](docs/cli-reference.md)
-- [Workflows](docs/workflows.md)
-- [Architecture](docs/architecture.md)
-- [Compatibility inventory](docs/compatibility-inventory.md)
-- [Development and release](docs/development.md)
-- [Troubleshooting](docs/troubleshooting.md)
+```text
+active-pr
+review
+review [--auto-simple]
+address [--lean|--summary]
+threads [--lean|--summary]
+findings --input <json|->
+adapter <adapter_cmd...>
+doctor
+command-session --input <operations.json|->
+final-gate
+review-to-findings --input <finding-blocks.md|->
+submit-feedback
+submit-action <action-request.json>
+version / --version
+--machine
+--human
+
+manifest
+classify
+next --role <role>
+next --batch
+submit
+resolve <item_id>
+resolve --trivial
+resolve --batch
+resolve --homogeneous-reason
+resolve --stale --match-files
+evidence add
+evidence list
+publish
+leases
+reclaim
+orchestrate start/status/step/resume/stop/submit/autopilot
+
+WAITING_FOR_EXTERNAL_REVIEW
+WAITING_FOR_SIMPLE_ADDRESS
+PER_THREAD_EVIDENCE_REQUIRED -> next --batch
+producer output
+session items
+agent classify
+ActionResponse or BatchActionResponse
+agent submit or agent resolve --batch
+accepted evidence
+agent publish (GitHub thread side effects only)
+final-gate
+completion_summary_line
+completion_summary
+runtime-owned leases + request_id values
+agent resolve --batch validates lease ownership and request context
+```
+
+Stable machine summary fields:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `commands`
+- `exit_code`
+
+Use `--lean` or `--summary` when reducing token load. Machine summaries also
+surface the current-login pending review count.
+
+## Advanced / Developer Integration
+
+The public user flow above does not require manual `--input`, producer
+selection, or mode routing.
+
+For explicit automation or repository-root invocation, the main command is:
+`gh-address-cr review <owner/repo> <pr_number>`.
+
+`adapter` is for adapter-produced findings plus PR orchestration.
+
+`review` handles both local findings and GitHub review threads in one run.
+`findings` handles local findings only; it does not process GitHub review
+threads.
+
+`findings --sync` requires an explicit `--source`.
+`review-to-findings` does not accept arbitrary Markdown. It only accepts the
+fixed `finding` block format.
+
+The wrapper `--human` and `--machine` belong before `adapter`; remaining flags
+are passed through to the adapter command unchanged.
+
+```text
+$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
+$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
+gh-address-cr --human adapter owner/repo 123 python3 tools/review_adapter.py
+gh-address-cr adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
+```
+
+Any external review producer may satisfy the handoff.
+
+- `producer-request.md`
+- `incoming-findings.json`
+- `incoming-findings.md`
+- `WAITING_FOR_EXTERNAL_REVIEW`
+- source-scoped producer result
+- `[]` is a valid explicit producer result
+
+Published fix replies surface exactly one canonical `Review signal:` line when
+severity or reviewer priority evidence exists.
+
+## Workflow Patterns
+
+## Automatic Review Workflow
+
+1. Run `gh-address-cr review <owner/repo> <pr_number>`.
+2. Ingest existing findings or wait for external review handoff.
+3. Resolve items through `agent resolve` and publish through `agent publish`.
+4. Finish with `final-gate`.
+
+for GitHub thread `fix`: `fix_reply`
+- `summary`
+- `files`
+
+for GitHub thread `clarify` or `defer`: `reply_markdown`
+
+Minimal user prompt:
+
+`Run gh-address-cr review for this PR, follow the machine summary, and finish with final-gate.`
+
+Ready-to-use prompt variants:
+
+- Short generic:
+  `Review this PR through gh-address-cr and follow the runtime status map.`
+- Explicit `$code-review` producer:
+  `Run the external review producer, convert fixed finding blocks if needed, ingest them, then continue gh-address-cr review.`
+- Any external review producer:
+  `Any external review producer may satisfy the handoff if it emits findings JSON or fixed finding blocks.`
+
+如果你自己就是外部 review producer，请直接输出 findings JSON 或固定 `finding` blocks。
+
+不要只输出普通 Markdown 审查报告。
+
+Advanced producer categories:
+
+- adapter-produced findings
+- fixed `finding` block conversion
+- explicit `findings --sync --source <producer>` handoff
+
+## Runtime Distribution
+
+Install the released runtime CLI:
+
+- `pipx install gh-address-cr`
+- `uv tool install gh-address-cr`
+
+Install with Homebrew:
+
+- `brew tap RbBtSn0w/tap`
+- `brew install gh-address-cr`
+- `brew upgrade gh-address-cr`
+- `brew test gh-address-cr`
+
+GitHub-direct runtime validation install:
+
+- `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git`
+
+Local editable development install:
+
+- `python3 -m pip install -e .`
+
+Packaged skill install:
+
+- `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill`
+
+The packaged skill does not install the runtime CLI package.
+
+Upgrade from skill-shim usage:
+
+- Install the runtime CLI with `pipx` or `uv tool`
+- Keep `--skill skill` for the packaged adapter
+- Homebrew tap distribution remains available
+
+## Compatibility Inventory
+
+Preserved Public Contracts:
+
+- `review`
+- `address`
+- `threads`
+- `findings`
+- `submit-action`
+- `final-gate`
+
+Unsupported historical root commands:
+
+- `legacy_scripts`
+
+Removed Or Unsupported Surfaces:
+
+- removed migration/evaluation command surfaces
+- legacy script entrypoints
+
+Internal Naming Rule:
+
+- the shipped runtime and packaged skill remain `gh-address-cr`
+
+## Troubleshooting
+
+When machine output is ambiguous, inspect:
+
+- `status`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `commands`
+- `artifact_path`
+
+Outdated / `STALE` GitHub threads still count as unresolved until explicitly
+handled. Prefer `agent resolve --stale --match-files`.
+
+## Additional Repository Files
+
 - [Privacy](PRIVACY.md)
 - [Security](SECURITY.md)
 - [Terms](TERMS.md)

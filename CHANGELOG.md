@@ -1,3 +1,13 @@
+## [4.0.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.3.0...v4.0.0) (2026-07-01)
+
+### ⚠ BREAKING CHANGES
+
+* remove the public `consolidation` and `evaluation` commands
+
+### Features
+
+* reduce the runtime to the protected core PR journey and remove the 023/024 meta-layers
+
 ## [3.3.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.2.2...v3.3.0) (2026-07-01)
 
 ### Features

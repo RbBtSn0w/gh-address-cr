@@ -79,46 +79,6 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         self.assertEqual(payload["repo"], "octo/example")
         self.assertEqual(payload["pr_number"], "77")
 
-    def test_telemetry_ingest_resolves_single_cached_session_with_option_values(self):
-        self._write_session()
-        payload_path = self.state_dir / "codex-host.json"
-        payload_path.write_text(
-            json.dumps(
-                {
-                    "session_id": "codex-run-1",
-                    "turns": [
-                        {
-                            "id": "turn-1",
-                            "duration_ms": 10,
-                            "status": "success",
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        result = self.run_cmd(
-            [
-                sys.executable,
-                str(CLI_PY),
-                "telemetry",
-                "ingest",
-                "--source",
-                "codex",
-                "--format",
-                "codex-host-json",
-                "--input",
-                str(payload_path),
-            ]
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        imported = json.loads(result.stdout)
-        self.assertEqual(imported["status"], "SUCCESS")
-        self.assertEqual(imported["repo"], "octo/example")
-        self.assertEqual(imported["pr_number"], "77")
-
     def test_high_level_command_rejects_ambiguous_cached_session(self):
         self._write_session("octo/example", "77")
         self._write_session("octo/other", "12")
@@ -161,16 +121,6 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "PARTIAL_PR_SCOPE")
-
-    def test_telemetry_command_rejects_partial_explicit_scope_instead_of_using_cache(self):
-        self._write_session("octo/example", "77")
-
-        result = self.run_cmd([sys.executable, str(CLI_PY), "telemetry", "summary", "octo/explicit"])
-
-        self.assertEqual(result.returncode, 2)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["reason_code"], "PARTIAL_PR_SCOPE")
-
 
 class Issue78WorkflowDecisionTests(unittest.TestCase):
     def test_valid_json_workflow_decision_contract(self):
@@ -336,7 +286,7 @@ class Issue78CommandSessionTests(PythonScriptTestCase):
     def test_command_session_emits_discrete_results_and_continues_after_failure(self):
         request = {
             "operations": [
-                {"id": "bad", "argv": ["telemetry", "summary"]},
+                {"id": "bad", "argv": ["bogus-command"]},
                 {"id": "ok", "argv": ["version"]},
             ]
         }

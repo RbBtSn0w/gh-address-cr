@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -23,54 +22,7 @@ from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import telemetry as core_telemetry
-from gh_address_cr.core import telemetry_health
-from gh_address_cr.core.evaluation.archive import finalize_run_manifest
-from gh_address_cr.core.host_telemetry import attribution as host_attribution
-from gh_address_cr.core.host_telemetry import capture as host_capture
-from gh_address_cr.core.host_telemetry import discovery as host_discovery
-from gh_address_cr.core.host_telemetry import profile as host_profile
 from gh_address_cr.core.io import write_json_atomic
-
-HOST_TELEMETRY_INPUT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_INPUT"
-HOST_TELEMETRY_SOURCE_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE"
-HOST_TELEMETRY_FORMAT_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT"
-
-
-def finalize_manifest_fail_open(
-    target: Path,
-    *,
-    repo: str,
-    pr_number: str,
-    run_id: str,
-    passed: bool,
-    counts: dict[str, int],
-    telemetry_report: Any | None,
-) -> dict[str, Any] | None:
-    try:
-        sources = []
-        if telemetry_report:
-            sources = [str(row.get("source")) for row in telemetry_report.get("sources", []) if isinstance(row, dict)]
-        manifest = finalize_run_manifest(
-            target,
-            repo=repo,
-            pr_number=pr_number,
-            run_id=run_id,
-            final_gate_passed=passed,
-            final_gate_counts=counts,
-            telemetry_sources=sources,
-        )
-        if telemetry_report is not None:
-            overhead = float(manifest.get("evaluation_capture_overhead_ms") or 0.0)
-            telemetry_report["evaluation_capture_overhead_ms"] = overhead
-            telemetry_report["evaluation_capture_budget_ms"] = 250.0
-            telemetry_report["evaluation_capture_status"] = "degraded" if overhead > 250.0 else "healthy"
-            if overhead > 250.0:
-                telemetry_report.setdefault("diagnostics", []).append("EVALUATION_CAPTURE_OVERHEAD_EXCEEDED")
-        return manifest
-    except Exception:
-        if telemetry_report is not None:
-            telemetry_report.setdefault("diagnostics", []).append("EVALUATION_MANIFEST_UNAVAILABLE")
-        return None
 
 
 def _parse_final_gate_args(
@@ -79,12 +31,6 @@ def _parse_final_gate_args(
     parser = argparse.ArgumentParser(
         prog="gh-address-cr final-gate",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Host telemetry hook:\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl.\n"
-        ),
     )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--machine", action="store_true", help="Emit structured machine-readable JSON.")
@@ -109,18 +55,6 @@ def _parse_final_gate_args(
     if scope_error is not None:
         return None, emit_scope_resolution_error(scope_error)
     return parser.parse_args(scoped_args), None
-
-
-def _ingest_telemetry_if_needed(repo: str, pr_number: str) -> None:
-    if ingest_host_telemetry_from_environment(repo, pr_number) is None:
-        autodiscovery_summary = ingest_host_telemetry_via_autodiscovery(repo, pr_number)
-        if autodiscovery_summary is None:
-            telemetry_health.record_autodiscovery_miss(
-                repo,
-                pr_number,
-                telemetry_health.active_autodiscovery_misses(repo, pr_number),
-            )
-
 
 def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
@@ -187,11 +121,7 @@ def _emit_machine_summary(
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
     if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
         print(
-            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]\n\n"
-            "Host telemetry hook:\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_INPUT=<path> gh-address-cr final-gate <owner/repo> <pr_number>\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_SOURCE defaults to assistant-host.\n"
-            "  GH_ADDRESS_CR_HOST_TELEMETRY_FORMAT defaults to agent-jsonl."
+            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]"
         )
         return 0
 
@@ -200,7 +130,6 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return error_code
     assert parsed is not None
 
-    _ingest_telemetry_if_needed(parsed.repo, parsed.pr_number)
     machine_requested = bool(parsed.machine)
 
     try:
@@ -232,16 +161,6 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
         parsed, result, summary_path, telemetry_report
     )
-    finalize_manifest_fail_open(
-        summary_path.parent,
-        repo=parsed.repo,
-        pr_number=parsed.pr_number,
-        run_id=parsed.audit_id or "final-gate",
-        passed=result.passed,
-        counts=dict(result.counts),
-        telemetry_report=telemetry_report,
-    )
-
     if parsed.machine:
         _emit_machine_summary(result, summary_path, telemetry_report)
     else:
@@ -266,124 +185,6 @@ def emit_final_gate_machine_error(repo: str, pr_number: str, reason_code: str, m
         "failure_codes": [reason_code],
     }
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-
-
-def ingest_host_telemetry_from_environment(repo: str, pr_number: str) -> dict | None:
-    input_path = os.environ.get(HOST_TELEMETRY_INPUT_ENV)
-    if not input_path:
-        return None
-    source = os.environ.get(HOST_TELEMETRY_SOURCE_ENV) or "assistant-host"
-    fmt = os.environ.get(HOST_TELEMETRY_FORMAT_ENV) or "agent-jsonl"
-    try:
-        return ingest_host_telemetry_input(repo, pr_number, input_path=input_path, source=source, fmt=fmt)
-    except Exception as exc:
-        core_telemetry._log_telemetry_failure("host telemetry ingestion", exc)
-        return safe_hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-
-
-def ingest_host_telemetry_input(
-    repo: str,
-    pr_number: str,
-    *,
-    input_path: str,
-    source: str,
-    fmt: str,
-) -> dict | None:
-    try:
-        raw = Path(input_path).read_text(encoding="utf-8")
-    except OSError:
-        return safe_input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    return core_telemetry.import_external_telemetry(repo, pr_number, source=source, fmt=fmt, raw=raw)
-
-
-def safe_input_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
-    try:
-        return core_telemetry.input_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    except Exception as exc:
-        core_telemetry._log_telemetry_failure("input unavailable summary creation", exc)
-        return None
-
-
-def safe_hook_unavailable_import_summary(repo: str, pr_number: str, *, source: str, fmt: str) -> dict | None:
-    try:
-        return core_telemetry.hook_unavailable_import_summary(repo, pr_number, source=source, fmt=fmt)
-    except Exception as exc:
-        core_telemetry._log_telemetry_failure("hook unavailable summary creation", exc)
-        return None
-
-
-AUTO_ENV = "GH_ADDRESS_CR_HOST_TELEMETRY_AUTO"
-_HOST_PROFILE_DIR = Path(__file__).resolve().parents[1] / "core" / "host_telemetry" / "profiles"
-
-
-def _autodiscovery_session_id(profile: host_profile.HostProfile) -> str | None:
-    return host_discovery.first_env_value(profile.discovery.get("session_id_env") or ["SESSION_ID"])
-
-
-def _load_host_profiles() -> list[host_profile.HostProfile]:
-    profiles: list[host_profile.HostProfile] = []
-    for path in sorted(_HOST_PROFILE_DIR.glob("*.json")):
-        try:
-            profiles.append(host_profile.load_profile(path))
-        except ValueError:
-            continue
-    return profiles
-
-
-def ingest_host_telemetry_via_autodiscovery(repo: str, pr_number: str, *, session_id: str | None = None) -> dict | None:
-    if os.environ.get(HOST_TELEMETRY_INPUT_ENV):
-        return None  # explicit input wins; handled by ingest_host_telemetry_from_environment
-    if os.environ.get(AUTO_ENV) == "0":
-        return None
-    for profile in _load_host_profiles():
-        active_session_id = session_id or _autodiscovery_session_id(profile)
-        if not active_session_id:
-            continue
-        summary = _ingest_profile_via_autodiscovery(repo, pr_number, profile, active_session_id)
-        if summary is not None:
-            return summary
-    return None
-
-
-def _ingest_profile_via_autodiscovery(
-    repo: str,
-    pr_number: str,
-    profile: host_profile.HostProfile,
-    session_id: str,
-) -> dict | None:
-    try:
-        slug = host_discovery.project_slug_from_cwd(os.getcwd())
-        resolved = host_discovery.resolve_glob(profile.discovery["glob"], project_slug=slug, session_id=session_id)
-        transcript = host_discovery.discover_transcript(resolved)
-        if transcript is None:
-            return None
-        start_iso = host_attribution.session_created_at(repo, pr_number)
-        now_iso = host_attribution.now_iso()
-        if not start_iso:
-            return None
-        all_lines = host_capture.read_lines(transcript)
-        sid_path = profile.record.get("session_id_path", "sessionId")
-        timestamp_path = profile.fields.get("timestamp_path", "timestamp")
-        sessions = host_attribution.distinct_sessions_in_window(
-            all_lines, start_iso=start_iso, now_iso=now_iso, session_id_path=sid_path, timestamp_path=timestamp_path
-        )
-        if len(sessions) > 1:
-            return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
-        text, outcome = host_capture.capture_agent_jsonl(
-            profile, transcript=transcript, session_id=session_id, start_iso=start_iso, now_iso=now_iso
-        )
-        if outcome != "captured" or not text:
-            if outcome == "degraded":
-                return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
-            return None
-        marker = core_paths.state_dir() / ".host-telemetry-consent" / f"{profile.source}.marker"
-        host_discovery.consent_notice_once(profile.source, marker)
-        return core_telemetry.import_external_telemetry(
-            repo, pr_number, source=profile.source, fmt="agent-jsonl", raw=text
-        )
-    except Exception as exc:
-        core_telemetry._log_telemetry_failure("auto-discovery session telemetry capture", exc)
-        return safe_hook_unavailable_import_summary(repo, pr_number, source=profile.source, fmt="agent-jsonl")
 
 
 def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:

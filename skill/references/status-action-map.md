@@ -55,12 +55,6 @@ If `reason_code` is `DOCTOR_FAILED`:
 If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 - **Action**: You must produce review findings. Emit a JSON findings file or a fixed `finding` block format. Do NOT wait for stdin.
 
-## Advanced Diagnostics
-
-If you need rollout visibility, parity proof, or deprecation inventory for feature work such as runtime consolidation:
-- **Action**: Use the advanced `consolidation` family directly: `gh-address-cr consolidation status --json`, `gh-address-cr consolidation parity --slice <id> --facts <path> --json`, `gh-address-cr consolidation rollout --slice <id> --to <stage> --json`, and `gh-address-cr consolidation deprecations --json`.
-- **Boundary**: Treat these as operator/diagnostic commands only. They report or control versioned rollout artifacts, but they do not replace `review`, `address`, `threads`, `agent`, or `final-gate` as the authoritative review-resolution path.
-
 ## Stop Conditions
 
 If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
