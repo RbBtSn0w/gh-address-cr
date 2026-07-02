@@ -1,3 +1,9 @@
+## [3.4.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.3.0...v3.4.0) (2026-07-02)
+
+### Features
+
+* CLI OpenTelemetry instrumentation for AI agent scenarios ([#182](https://github.com/RbBtSn0w/gh-address-cr/issues/182)) ([b82c494](https://github.com/RbBtSn0w/gh-address-cr/commit/b82c494131ddfc122c12a6426730f10099ef2e6d)), closes [#180](https://github.com/RbBtSn0w/gh-address-cr/issues/180)
+
 ## [4.0.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.3.0...v4.0.0) (2026-07-01)
 
 ### ⚠ BREAKING CHANGES
