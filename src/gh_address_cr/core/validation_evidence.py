@@ -35,30 +35,43 @@ def validation_evidence_has_success(value: Any) -> bool:
     so a terminal item cannot satisfy the gate with failing validation logs.
     A bare command string (no result) keeps the system default of "passed".
     """
-    if value is None:
-        return False
+    if not value:
+        if type(value) is str or isinstance(value, str):
+            return False
+        return False if value is None else bool(value)
+
     if isinstance(value, str):
         text = value.strip()
         if not text:
             return False
-        # Honour an explicit `<command>=<result>` verdict so a failing string
-        # (e.g. "pytest=failed") does not satisfy the gate (#117). A trailing
-        # token that is not a known verdict is treated as part of the command.
         _command, separator, result = text.rpartition("=")
         if separator and result.strip().lower() in KNOWN_VALIDATION_RESULT_TOKENS:
             return validation_result_is_success(result)
         return True
+
     if isinstance(value, dict):
-        if "command" in value or "result" in value or "exit_code" in value:
-            exit_code = value.get("exit_code")
-            if exit_code is not None:
-                try:
-                    if int(exit_code) != 0:
-                        return False
-                except (TypeError, ValueError):
-                    pass
-            return validation_result_is_success(value.get("result"))
-        return any(validation_evidence_has_success(inner) for inner in value.values())
+        return _check_dict_evidence(value)
+
     if isinstance(value, (list, tuple, set)):
-        return any(validation_evidence_has_success(inner) for inner in value)
-    return bool(value)
+        for inner in value:
+            if validation_evidence_has_success(inner):
+                return True
+        return False
+
+    return True
+
+
+def _check_dict_evidence(value: dict) -> bool:
+    if "command" in value or "result" in value or "exit_code" in value:
+        exit_code = value.get("exit_code")
+        if exit_code is not None:
+            try:
+                if int(exit_code) != 0:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        return validation_result_is_success(value.get("result"))
+    for inner in value.values():
+        if validation_evidence_has_success(inner):
+            return True
+    return False

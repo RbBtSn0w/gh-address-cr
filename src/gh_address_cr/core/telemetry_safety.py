@@ -236,8 +236,7 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
 
 
 _KEY_MARKER_PAIRS = [
-    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])"))
-    for marker in UNSAFE_METADATA_KEY_MARKERS
+    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])")) for marker in UNSAFE_METADATA_KEY_MARKERS
 ]
 _KEY_RE = re.compile(r"(^|[_-])key($|[_-])")
 

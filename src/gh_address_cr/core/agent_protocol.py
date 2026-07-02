@@ -1123,7 +1123,7 @@ def _split_validation_command_record(raw: str) -> tuple[str, str, float | None]:
 
 def _looks_like_validation_result(value: str) -> bool:
     normalized = value.strip().lower()
-    if not normalized or any(char.isspace() for char in normalized):
+    if not normalized:
         return False
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 
@@ -1377,7 +1377,10 @@ def _claims_direct_github_side_effect(response: dict[str, Any]) -> bool:
         "thread_resolved",
         "resolved_thread_id",
     }
-    return any(key in response for key in forbidden_keys)
+    for key in forbidden_keys:
+        if key in response:
+            return True
+    return False
 
 
 def _record_response_rejected(

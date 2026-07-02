@@ -216,7 +216,12 @@ def _enforce_fast_fix_routing(
     """Reject runs that must instead route through stale resolution or per-thread batch evidence."""
     if stale_only:
         return
-    if any(is_stale_or_outdated_github_thread(item) for item in matches):
+    has_stale = False
+    for item in matches:
+        if is_stale_or_outdated_github_thread(item):
+            has_stale = True
+            break
+    if has_stale:
         next_action = (
             f"Use `gh-address-cr agent resolve {repo} {pr_number} "
             "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files` "

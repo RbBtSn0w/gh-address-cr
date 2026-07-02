@@ -166,7 +166,11 @@ def run_traced(
             span.set_attribute(PROCESS_EXIT_CODE, exit_code)
             return result
         except SystemExit as error:
-            exit_code = error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            exit_code = (
+                error.code
+                if isinstance(error.code, int) and not isinstance(error.code, bool)
+                else (0 if error.code is None else 1)
+            )
             span.set_attribute(PROCESS_EXIT_CODE, exit_code)
             raise
         except BaseException as error:

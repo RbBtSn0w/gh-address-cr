@@ -117,7 +117,7 @@ def split_validation_command(value: str) -> tuple[str, str]:
 
 def looks_like_validation_result(value: str) -> bool:
     normalized = value.strip().lower()
-    if not normalized or any(char.isspace() for char in normalized):
+    if not normalized:
         return False
     return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
 

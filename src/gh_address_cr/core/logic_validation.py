@@ -106,15 +106,21 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
 
 
 def _has_content(value: Any) -> bool:
-    if value is None:
+    if not value:
         return False
     if isinstance(value, str):
-        return bool(value.strip())
+        return not value.isspace()
     if isinstance(value, Mapping):
-        return any(_has_content(item) for item in value.values())
+        for item in value.values():
+            if _has_content(item):
+                return True
+        return False
     if isinstance(value, (list, tuple, set)):
-        return any(_has_content(item) for item in value)
-    return bool(value)
+        for item in value:
+            if _has_content(item):
+                return True
+        return False
+    return True
 
 
 def _requires_validation_evidence(item: Mapping[str, Any], item_kind: str, state: str) -> bool:

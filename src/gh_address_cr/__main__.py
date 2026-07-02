@@ -94,5 +94,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         shutdown_telemetry()
 
+
 if __name__ == "__main__":
     raise SystemExit(main())

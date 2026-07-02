@@ -325,10 +325,10 @@ def _source_rows(
 def _error_prone_operations(events: list[ExternalTelemetryEvent]) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     for event in events:
-        row = grouped.setdefault(
-            event.operation,
-            {"operation": event.operation, "events": 0, "failures": 0, "retries": 0, "timeouts": 0, "sources": set()},
-        )
+        op = event.operation
+        if op not in grouped:
+            grouped[op] = {"operation": op, "events": 0, "failures": 0, "retries": 0, "timeouts": 0, "sources": set()}
+        row = grouped[op]
         row["events"] += 1
         row["sources"].add(event.source)
         if event.status in {"failure", "cancelled"}:
