@@ -568,58 +568,71 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
 
+    from gh_address_cr.core.otel_semconv import GH_ADDRESS_CR_ADAPTER_SPAN_NAME
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.core.telemetry_safety import command_label
+    from gh_address_cr.core.telemetry_safety import (
+        classify_workflow_span_layer,
+        command_label,
+        workflow_step_span_attributes,
+    )
     from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
-    from gh_address_cr.telemetry import add_current_span_event
+    from gh_address_cr.telemetry import start_child_span
 
     start_time = time.time()
     result = None
     error: str | None = None
     exit_code = 1
     adapter_label = command_label(argv) or "adapter"
-    add_current_span_event(
-        "gh_address_cr.adapter.start",
-        attributes={
-            "gh_address_cr.adapter.command_label": adapter_label,
-            "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,
-        },
+    layer = classify_workflow_span_layer(
+        has_independent_duration=True,
+        has_independent_count=True,
+        has_error_boundary=True,
+        externally_visible=True,
     )
-    try:
-        run_argv, inline_env = _split_inline_env_assignments(argv)
-        if not run_argv:
-            return None, "adapter requires an executable after inline environment assignments."
-        run_env = None
-        if inline_env:
-            run_env = os.environ.copy()
-            run_env.update(inline_env)
-        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
-        exit_code = result.returncode
-    except Exception as exc:
-        error = str(exc)
-    finally:
-        end_time = time.time()
-        add_current_span_event(
-            "gh_address_cr.adapter.end",
-            {
-                "gh_address_cr.adapter.command_label": adapter_label,
-                "gh_address_cr.adapter.exit_code": exit_code,
-            },
-        )
+    span_attributes = {
+        **workflow_step_span_attributes(step_name="adapter", step_kind=layer),
+        "gh_address_cr.adapter.command_label": adapter_label,
+        "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,
+    }
+    with start_child_span(
+        GH_ADDRESS_CR_ADAPTER_SPAN_NAME,
+        attributes=span_attributes,
+    ):
         try:
-            SessionTelemetry.get_instance().record(
-                command=adapter_label,
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_code,
-            )
-        except Exception as exc:  # intentionally broad: telemetry must not break command execution
-            from gh_address_cr.core.command_runner import telemetry_debug_enabled
+            run_argv, inline_env = _split_inline_env_assignments(argv)
+            if not run_argv:
+                return None, "adapter requires an executable after inline environment assignments."
+            run_env = None
+            if inline_env:
+                run_env = os.environ.copy()
+                run_env.update(inline_env)
+            result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
+            exit_code = result.returncode
+        except Exception as exc:
+            error = str(exc)
+        finally:
+            from gh_address_cr.telemetry import set_current_span_attributes
 
-            if telemetry_debug_enabled():
-                sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
+            set_current_span_attributes(
+                {
+                    "gh_address_cr.adapter.command_label": adapter_label,
+                    "gh_address_cr.adapter.exit_code": exit_code,
+                }
+            )
+            try:
+                SessionTelemetry.get_instance().record(
+                    command=adapter_label,
+                    start_time=start_time,
+                    end_time=time.time(),
+                    exit_code=exit_code,
+                )
+            except Exception as exc:  # intentionally broad: telemetry must not break command execution
+                from gh_address_cr.core.command_runner import telemetry_debug_enabled
+
+                if telemetry_debug_enabled():
+                    sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
 
     if error is not None:
         return None, error

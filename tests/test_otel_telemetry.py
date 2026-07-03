@@ -261,7 +261,7 @@ class TracedExecutionTests(unittest.TestCase):
         event_names = [event.name for event in spans[0].events]
         self.assertEqual(event_names, ["gh-address-cr.test.phase.start", "gh-address-cr.test.phase.end"])
 
-    def test_command_session_emits_operation_timeline_events(self) -> None:
+    def test_command_session_emits_child_span_for_operation_and_summary_event(self) -> None:
         from gh_address_cr import telemetry
         from gh_address_cr.commands.command_session import handle_command_session
 
@@ -283,22 +283,19 @@ class TracedExecutionTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         spans = exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        event_names = [event.name for event in spans[0].events]
+        self.assertEqual(len(spans), 2)
+        root_span = next(span for span in spans if span.name == "gh-address-cr.cli")
+        operation_span = next(span for span in spans if span.name == "gh_address_cr.command_session.operation")
+        self.assertEqual(root_span.attributes["gh_address_cr.command.name"], "command-session")
+        self.assertEqual(root_span.attributes["gh_address_cr.command.path"], "command-session")
         self.assertEqual(
-            event_names,
-            [
-                "gh_address_cr.command_session.operation.start",
-                "gh_address_cr.command_session.operation.end",
-                "gh_address_cr.command_session.summary",
-            ],
+            operation_span.parent.span_id,
+            root_span.context.span_id,
         )
-        self.assertEqual(spans[0].attributes["gh_address_cr.command.name"], "command-session")
-        self.assertEqual(spans[0].attributes["gh_address_cr.command.path"], "command-session")
-        start_event_attrs = dict(spans[0].events[0].attributes or {})
-        end_event_attrs = dict(spans[0].events[1].attributes or {})
-        self.assertEqual(start_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
-        self.assertEqual(end_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
+        self.assertEqual(operation_span.attributes["gh_address_cr.command_session.operation_id"], "op-1")
+        self.assertEqual(operation_span.attributes["gh_address_cr.command.name"], "version")
+        event_names = [event.name for event in root_span.events]
+        self.assertEqual(event_names, ["gh_address_cr.command_session.summary"])
 
     def test_command_session_redacts_unsafe_operation_ids_in_timeline_events(self) -> None:
         from gh_address_cr import telemetry
@@ -329,10 +326,9 @@ class TracedExecutionTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         spans = exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        for event in spans[0].events[:2]:
-            attributes = dict(event.attributes or {})
-            self.assertEqual(attributes["gh_address_cr.command_session.operation_id"], "[redacted]")
+        self.assertEqual(len(spans), 2)
+        operation_span = next(span for span in spans if span.name == "gh_address_cr.command_session.operation")
+        self.assertEqual(operation_span.attributes["gh_address_cr.command_session.operation_id"], "[redacted]")
 
     def test_cli_main_keeps_single_span_while_recording_command_attributes(self) -> None:
         from unittest.mock import patch as _patch

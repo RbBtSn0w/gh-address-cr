@@ -10,11 +10,12 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
+    GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
     PROCESS_PID,
 )
-from gh_address_cr.telemetry import run_traced
+from gh_address_cr.telemetry import run_traced, start_child_span
 
 
 class TestCliOtelExecution(unittest.TestCase):
@@ -199,6 +200,25 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertEqual(attributes.get(PROCESS_EXIT_CODE), 2)
         self.assertNotIn(ERROR_TYPE, attributes)
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
+
+    def test_child_span_helper_preserves_root_invocation_parentage(self) -> None:
+        """Layered model: promoted workflow spans remain children under the single root invocation span."""
+
+        def operation() -> int:
+            with start_child_span(
+                GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME,
+                attributes={"gh_address_cr.command_session.operation_id": "op-1"},
+            ):
+                return 0
+
+        result = run_traced(self.tracer, "gh-address-cr.cli", operation)
+
+        self.assertEqual(result, 0)
+        exported_spans = self.exporter.get_finished_spans()
+        self.assertEqual(len(exported_spans), 2)
+        root_span = next(span for span in exported_spans if span.name == "gh-address-cr.cli")
+        child_span = next(span for span in exported_spans if span.name == GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME)
+        self.assertEqual(child_span.parent.span_id, root_span.context.span_id)
 
 
 if __name__ == "__main__":

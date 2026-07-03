@@ -11,9 +11,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_CONVERSATION_ID,
+    GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME,
     PROCESS_PARENT_PID,
 )
-from gh_address_cr.telemetry import run_traced
+from gh_address_cr.telemetry import run_traced, start_child_span
 
 
 class TestCliOtelContext(unittest.TestCase):
@@ -181,3 +182,29 @@ class TestCliOtelContext(unittest.TestCase):
         self.assertNotIn(GEN_AI_CONVERSATION_ID, span.attributes)
         self.assertNotIn("gen_ai.conversation.id.source", span.attributes)
         self.assertNotIn(GEN_AI_AGENT_NAME, span.attributes)
+
+    def test_root_session_correlation_survives_child_span_creation(self) -> None:
+        """Layered model: root invocation span keeps session-correlation attrs when child spans are emitted."""
+
+        def operation() -> int:
+            with start_child_span(GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME):
+                return 0
+
+        result = run_traced(
+            self.tracer,
+            "gh-address-cr.cli",
+            operation,
+            attributes={
+                GEN_AI_CONVERSATION_ID: "session-123",
+                "gen_ai.conversation.id.source": "GH_ADDRESS_CR_CONVERSATION_ID",
+                GEN_AI_AGENT_NAME: "claude-cli",
+            },
+        )
+
+        self.assertEqual(result, 0)
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(len(spans), 2)
+        root_span = next(span for span in spans if span.name == "gh-address-cr.cli")
+        self.assertEqual(root_span.attributes.get(GEN_AI_CONVERSATION_ID), "session-123")
+        self.assertEqual(root_span.attributes.get("gen_ai.conversation.id.source"), "GH_ADDRESS_CR_CONVERSATION_ID")
+        self.assertEqual(root_span.attributes.get(GEN_AI_AGENT_NAME), "claude-cli")
