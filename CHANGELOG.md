@@ -1,3 +1,9 @@
+## [3.5.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.1...v3.5.2) (2026-07-03)
+
+### Bug Fixes
+
+* Adopt layered OTel workflow model as default governance principle ([#186](https://github.com/RbBtSn0w/gh-address-cr/issues/186)) ([b3ea16f](https://github.com/RbBtSn0w/gh-address-cr/commit/b3ea16f7b804c086d9c8bf85eebdb767ab0f4586))
+
 ## [3.5.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.0...v3.5.1) (2026-07-03)
 
 ### Bug Fixes
