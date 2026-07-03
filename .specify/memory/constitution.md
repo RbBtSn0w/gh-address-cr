@@ -1,27 +1,28 @@
 <!--
 Sync Impact Report
-Version change: 1.5.1 -> 2.0.0
+Version change: 2.0.0 -> 2.1.0
 Amendment reason:
-- Reclassify universal multi-agent, telemetry, and runtime-kernel MUSTs as blast-radius-triggered governance.
-- Add a minimal-viable / complexity-budget principle that defines the protected baseline.
-- Align AGENTS.md preflight guidance with the reduced architecture contract.
+- Adopt the layered OpenTelemetry workflow model (spec 027-otel-layered-model) as default
+  governance guidance under Principle VIII, with explicit evidence-gated exceptions.
 Version bump rationale:
-- MAJOR: Redefined public architecture boundaries and governance gates for reduction work.
+- MINOR: Materially expands Principle VIII with new normative layered-span guidance; no
+  existing principle is removed or redefined incompatibly.
 Modified principles:
-- VI. Multi-Agent Coordination and Claim Leases
-- VIII. Telemetry Is Attributed Observed Evidence
-- IX. First-Principles Runtime Kernel
+- VIII. Telemetry Is Attributed Observed Evidence (added Layered Workflow Telemetry Model)
 Added sections:
-- X. Minimal Viable Baseline and Complexity Budget
+- None
 Removed sections:
 - None
 Templates requiring updates:
-- AGENTS.md: ✅ updated
-- specs/025-complexity-reduction/*: ✅ updated
+- AGENTS.md: ✅ consistent (points to Principle VIII by reference; no edit needed)
+- .specify/templates/plan-template.md: ✅ reviewed, generic telemetry-boundary check still valid
+- .specify/templates/spec-template.md: ✅ reviewed, generic telemetry-boundary check still valid
+- specs/027-otel-layered-model/*: ✅ source of amendment (spec/plan/contract/research)
 Runtime guidance requiring updates:
-- None
+- None (runtime already implements the layered model; this codifies it as governance)
 Follow-up items:
-- Keep repo-root docs and packaged-skill guidance aligned whenever a reduced surface removes a documented command or architecture.
+- Prior 2.0.0 reduction follow-up remains: keep repo-root docs and packaged-skill guidance
+  aligned whenever a reduced surface removes a documented command or architecture.
 -->
 # GH Address CR Constitution
 
@@ -174,6 +175,23 @@ Core review-resolution flows (`review`, `address`, publish, reply, resolve, and
 `final-gate`) MUST remain fail-open for missing or damaged telemetry and surface
 `runtime-only`, `partial`, or `unavailable` coverage instead of blocking review
 completion.
+
+Workflow telemetry MUST follow a layered model by default: (1) exactly one root
+invocation span per short-lived CLI execution serves as the product-timeline
+anchor; (2) a workflow step is promoted to a child span ONLY when it owns
+independent duration AND at least one of independent count, independent error
+boundary, or externally visible product/operational value (the first approved
+child-span candidates are `gh_address_cr.adapter` and
+`gh_address_cr.command_session.operation`); (3) checkpoint-style phase markers
+such as `preflight`, `session`, `ingest`, `gate`, and summary markers remain
+span events. Cross-invocation sessions MUST stay correlation-first and MUST NOT
+invent synthetic parent-child span links across process boundaries.
+
+This layered model is the DEFAULT governance rule, not an exception-free hard
+rule. A deviation — promoting a checkpoint to a span, demoting an approved child
+span, or introducing new child spans — is permitted only when it carries
+explicit rationale, verification evidence, and reviewer-visible approval criteria
+recorded with the change.
 
 Rationale: The runtime cannot assume every agent host exposes complete telemetry.
 Honest coverage labels, source attribution, and privacy filtering let efficiency
@@ -344,4 +362,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 2.0.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-07-01
+**Version**: 2.1.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-07-03

@@ -64,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     attributes.update(vcs_attrs)
 
     try:
+        # The process span remains the invocation anchor. Child workflow spans,
+        # when promoted, are emitted by downstream runtime call sites under this
+        # root rather than replacing it with a synthetic session parent.
         return run_traced(
             tracer,
             "gh-address-cr.cli",

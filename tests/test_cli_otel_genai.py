@@ -13,8 +13,10 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
+    GH_ADDRESS_CR_ADAPTER_SPAN_NAME,
     PROCESS_COMMAND_ARGS,
 )
+from gh_address_cr.telemetry import run_traced, start_child_span
 
 
 class TestCliOtelGenai(unittest.TestCase):
@@ -157,6 +159,33 @@ class TestCliOtelGenai(unittest.TestCase):
         # the PR is still identifiable via the hashed repo + PR number
         self.assertEqual(attributes.get("vcs.change.id"), "123")
         self.assertEqual(len(attributes.get("vcs.repository.name")), 64)
+
+    def test_root_genai_attributes_remain_on_invocation_span_when_child_span_exists(self) -> None:
+        """Layered model: promoted child spans do not replace the root span's GenAI tool identity."""
+
+        def operation() -> int:
+            with start_child_span(GH_ADDRESS_CR_ADAPTER_SPAN_NAME):
+                return 0
+
+        result = run_traced(
+            self.tracer,
+            "gh-address-cr.cli",
+            operation,
+            attributes={
+                GEN_AI_OPERATION_NAME: "execute_tool",
+                GEN_AI_TOOL_NAME: "review",
+                GEN_AI_TOOL_CALL_ARGUMENTS: json.dumps(["review", "[redacted]", "123"]),
+                PROCESS_COMMAND_ARGS: ("review", "[redacted]", "123"),
+            },
+        )
+
+        self.assertEqual(result, 0)
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(len(spans), 2)
+        root_span = next(span for span in spans if span.name == "gh-address-cr.cli")
+        self.assertEqual(root_span.attributes.get(GEN_AI_OPERATION_NAME), "execute_tool")
+        self.assertEqual(root_span.attributes.get(GEN_AI_TOOL_NAME), "review")
+        self.assertEqual(json.loads(root_span.attributes[GEN_AI_TOOL_CALL_ARGUMENTS]), ["review", "[redacted]", "123"])
 
 
 if __name__ == "__main__":

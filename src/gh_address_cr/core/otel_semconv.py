@@ -33,6 +33,12 @@ from opentelemetry.semconv._incubating.attributes.vcs_attributes import (
     VCS_REPOSITORY_NAME,
 )
 
+GH_ADDRESS_CR_SPAN_KIND = "gh_address_cr.span.kind"
+GH_ADDRESS_CR_WORKFLOW_STEP_KIND = "gh_address_cr.workflow.step.kind"
+GH_ADDRESS_CR_WORKFLOW_STEP_NAME = "gh_address_cr.workflow.step.name"
+GH_ADDRESS_CR_ADAPTER_SPAN_NAME = "gh_address_cr.adapter"
+GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME = "gh_address_cr.command_session.operation"
+
 __all__ = [
     # Error attributes
     "ERROR_TYPE",
@@ -54,4 +60,10 @@ __all__ = [
     "VCS_PROVIDER_NAME",
     "VCS_REPOSITORY_NAME",
     "VCS_CHANGE_STATE",
+    # gh-address-cr custom telemetry keys
+    "GH_ADDRESS_CR_SPAN_KIND",
+    "GH_ADDRESS_CR_WORKFLOW_STEP_KIND",
+    "GH_ADDRESS_CR_WORKFLOW_STEP_NAME",
+    "GH_ADDRESS_CR_ADAPTER_SPAN_NAME",
+    "GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME",
 ]

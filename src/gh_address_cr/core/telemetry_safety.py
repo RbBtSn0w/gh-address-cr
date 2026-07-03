@@ -19,6 +19,9 @@ from typing import Any
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_CONVERSATION_ID,
+    GH_ADDRESS_CR_SPAN_KIND,
+    GH_ADDRESS_CR_WORKFLOW_STEP_KIND,
+    GH_ADDRESS_CR_WORKFLOW_STEP_NAME,
     VCS_CHANGE_ID,
     VCS_CHANGE_STATE,
     VCS_PROVIDER_NAME,
@@ -522,3 +525,29 @@ def map_vcs_attributes(
             attrs[VCS_CHANGE_STATE] = state
 
     return attrs
+
+
+def classify_workflow_span_layer(
+    *,
+    has_independent_duration: bool,
+    has_independent_count: bool = False,
+    has_error_boundary: bool = False,
+    externally_visible: bool = False,
+) -> str:
+    """Classify a workflow element as a child span or checkpoint event.
+
+    The layered workflow model promotes only independently measurable work to a
+    child span; everything else remains event-first.
+    """
+    if has_independent_duration and (has_independent_count or has_error_boundary or externally_visible):
+        return "child_span"
+    return "event"
+
+
+def workflow_step_span_attributes(*, step_name: str, step_kind: str) -> dict[str, str]:
+    """Return stable custom attributes for promoted workflow child spans."""
+    return {
+        GH_ADDRESS_CR_SPAN_KIND: "child",
+        GH_ADDRESS_CR_WORKFLOW_STEP_NAME: step_name,
+        GH_ADDRESS_CR_WORKFLOW_STEP_KIND: step_kind,
+    }
