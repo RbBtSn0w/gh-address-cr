@@ -949,7 +949,7 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
 
 
 def main(argv: list[str] | None = None) -> int:
-    from gh_address_cr.telemetry import set_current_span_attributes, traced_span
+    from gh_address_cr.telemetry import set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
@@ -961,25 +961,21 @@ def main(argv: list[str] | None = None) -> int:
         }
     )
 
-    with traced_span("gh-address-cr.command", attributes=span_attributes) as span:
-        rc = _dispatch_management_commands(args)
-        if rc is not None:
-            if span is not None:
-                span.set_attribute("gh_address_cr.command.exit_code", rc)
-            return rc
-
-        _expand_target_args(args)
-
-        rc = _dispatch_passthrough_commands(args)
-        if rc is not None:
-            if span is not None:
-                span.set_attribute("gh_address_cr.command.exit_code", rc)
-            return rc
-
-        rc = _dispatch_high_level_commands(args)
-        if span is not None:
-            span.set_attribute("gh_address_cr.command.exit_code", rc)
+    rc = _dispatch_management_commands(args)
+    if rc is not None:
+        set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
+
+    _expand_target_args(args)
+
+    rc = _dispatch_passthrough_commands(args)
+    if rc is not None:
+        set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
+        return rc
+
+    rc = _dispatch_high_level_commands(args)
+    set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
+    return rc
 
 
 if __name__ == "__main__":

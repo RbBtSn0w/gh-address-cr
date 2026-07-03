@@ -8,10 +8,10 @@ landable subset; "GATED" = requires human confirmation before build.
 ## C-1 Single span (MVP)
 - Exactly one span named `gh-address-cr.cli`, kind `INTERNAL`, per invocation.
 - No additional span, tracer, processor, or exporter is introduced.
-- CLI workflow spans MAY carry internal phase events for command/session
-  progress (for example preflight, session, ingest, gate, and summary
-  markers). Events do not create additional spans and preserve the existing
-  trace shape.
+- The root CLI span MAY carry internal phase events for command/session
+  progress (for example preflight, session, ingest, gate, summary, and
+  subprocess markers). Events do not create additional spans and preserve the
+  single-span trace shape.
 - **Enforced**: a test asserts `len(exported_spans) == 1` and
   `span.kind == SpanKind.INTERNAL` for a representative invocation.
 

@@ -5,9 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
 
 import requests
@@ -40,7 +38,6 @@ _OTEL_EXPORT_LOGGERS = (
 _trace_provider: TracerProvider | None = None
 _tracer: Tracer | None = None
 _logger_disabled_states: dict[str, bool] = {}
-_active_tracer: ContextVar[Tracer | None] = ContextVar("gh_address_cr_active_tracer", default=None)
 
 T = TypeVar("T")
 
@@ -148,87 +145,49 @@ def run_traced(
     if context is None:
         context = resolve_parent_context(os.environ)
 
-    active_tracer_token = _active_tracer.set(tracer)
-    try:
-        with tracer.start_as_current_span(
-            span_name,
-            record_exception=False,
-            set_status_on_exception=False,
-            context=context,
-        ) as span:
-            # run_traced owns span lifecycle + parent context + exit.code/error.type
-            # only. Execution identity (executable.name/pid/parent_pid), agent-session
-            # correlation, args, gen_ai, and vcs attributes are assembled by the CLI
-            # entrypoint (__main__) and passed in via ``attributes``.
-            if attributes:
-                for key, value in attributes.items():
-                    span.set_attribute(key, value)
+    with tracer.start_as_current_span(
+        span_name,
+        record_exception=False,
+        set_status_on_exception=False,
+        context=context,
+    ) as span:
+        # run_traced owns span lifecycle + parent context + exit.code/error.type
+        # only. Execution identity (executable.name/pid/parent_pid), agent-session
+        # correlation, args, gen_ai, and vcs attributes are assembled by the CLI
+        # entrypoint (__main__) and passed in via ``attributes``.
+        if attributes:
+            for key, value in attributes.items():
+                span.set_attribute(key, value)
 
-            try:
-                result = operation()
-                # Normal Return
-                exit_code = result if isinstance(result, int) and not isinstance(result, bool) else 0
-                span.set_attribute(PROCESS_EXIT_CODE, exit_code)
-                return result
-            except SystemExit as error:
-                exit_code = (
-                    error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
-                )
-                span.set_attribute(PROCESS_EXIT_CODE, exit_code)
-                return exit_code
-            except BaseException as error:
-                span.set_attribute(PROCESS_EXIT_CODE, 1)
-                if isinstance(error, KeyboardInterrupt):
-                    err_type = "keyboard_interrupt"
-                elif isinstance(error, TimeoutError):
-                    err_type = "timeout"
-                else:
-                    err_type = "_OTHER"
-                span.set_attribute(ERROR_TYPE, err_type)
-                _record_sanitized_error(span, error)
-                raise
-    finally:
-        _active_tracer.reset(active_tracer_token)
+        try:
+            result = operation()
+            # Normal Return
+            exit_code = result if isinstance(result, int) and not isinstance(result, bool) else 0
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+            return result
+        except SystemExit as error:
+            exit_code = (
+                error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            )
+            span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+            return exit_code
+        except BaseException as error:
+            span.set_attribute(PROCESS_EXIT_CODE, 1)
+            if isinstance(error, KeyboardInterrupt):
+                err_type = "keyboard_interrupt"
+            elif isinstance(error, TimeoutError):
+                err_type = "timeout"
+            else:
+                err_type = "_OTHER"
+            span.set_attribute(ERROR_TYPE, err_type)
+            _record_sanitized_error(span, error)
+            raise
 
 
 def _record_sanitized_error(span: Span, error: BaseException) -> None:
     sanitized_error = RuntimeError(type(error).__name__)
     span.record_exception(sanitized_error)
     span.set_status(Status(StatusCode.ERROR))
-
-
-@contextmanager
-def traced_span(
-    span_name: str,
-    *,
-    attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
-) -> Iterator[Span | None]:
-    """Create a best-effort child span under the active CLI span when available."""
-    tracer = _active_tracer.get()
-    if tracer is None:
-        yield None
-        return
-
-    with tracer.start_as_current_span(
-        span_name,
-        record_exception=False,
-        set_status_on_exception=False,
-    ) as span:
-        if attributes:
-            for key, value in attributes.items():
-                span.set_attribute(key, value)
-        try:
-            yield span
-        except BaseException as error:
-            if isinstance(error, KeyboardInterrupt):
-                span.set_attribute(ERROR_TYPE, "keyboard_interrupt")
-            elif isinstance(error, TimeoutError):
-                span.set_attribute(ERROR_TYPE, "timeout")
-            else:
-                span.set_attribute(ERROR_TYPE, "_OTHER")
-            _record_sanitized_error(span, error)
-            raise
-
 
 def set_current_span_attributes(attributes: Mapping[str, str | bool | int | float | Sequence[str]]) -> None:
     span = get_current_span()

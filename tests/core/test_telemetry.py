@@ -2790,6 +2790,7 @@ class TestTelemetry(unittest.TestCase):
             mock_run.assert_called_once()
             self.assertEqual(mock_run.call_args.args[0], ["my-adapter", "--fast"])
             self.assertEqual(mock_run.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
+            self.assertEqual(mock_run.call_args.kwargs["timeout"], 300.0)
             
             self.assertEqual(len(tracker.metrics), 1)
             self.assertEqual(tracker.metrics[0].command, "my-adapter")

@@ -283,9 +283,8 @@ class TracedExecutionTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         spans = exporter.get_finished_spans()
-        command_session_spans = [span for span in spans if span.name == "gh-address-cr.command-session"]
-        self.assertEqual(len(command_session_spans), 1)
-        event_names = [event.name for event in command_session_spans[0].events]
+        self.assertEqual(len(spans), 1)
+        event_names = [event.name for event in spans[0].events]
         self.assertEqual(
             event_names,
             [
@@ -294,8 +293,8 @@ class TracedExecutionTests(unittest.TestCase):
                 "gh_address_cr.command_session.summary",
             ],
         )
-        start_event_attrs = dict(command_session_spans[0].events[0].attributes or {})
-        end_event_attrs = dict(command_session_spans[0].events[1].attributes or {})
+        start_event_attrs = dict(spans[0].events[0].attributes or {})
+        end_event_attrs = dict(spans[0].events[1].attributes or {})
         self.assertEqual(start_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
         self.assertEqual(end_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
 
@@ -328,11 +327,33 @@ class TracedExecutionTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         spans = exporter.get_finished_spans()
-        command_session_spans = [span for span in spans if span.name == "gh-address-cr.command-session"]
-        self.assertEqual(len(command_session_spans), 1)
-        for event in command_session_spans[0].events[:2]:
+        self.assertEqual(len(spans), 1)
+        for event in spans[0].events[:2]:
             attributes = dict(event.attributes or {})
             self.assertEqual(attributes["gh_address_cr.command_session.operation_id"], "[redacted]")
+
+    def test_cli_main_keeps_single_span_while_recording_command_attributes(self) -> None:
+        from unittest.mock import patch as _patch
+
+        from gh_address_cr.__main__ import main
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_cli_main_single_span")
+
+        with (
+            _patch("sys.argv", ["gh-address-cr", "version"]),
+            _patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+            _patch("gh_address_cr.__main__.shutdown_telemetry"),
+        ):
+            result = main(["version"])
+
+        self.assertEqual(result, 0)
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        self.assertEqual(spans[0].attributes["gh_address_cr.command.path"], "version")
+        self.assertEqual(spans[0].attributes["gh_address_cr.command.exit_code"], 0)
 
     @patch("gh_address_cr.__main__.shutdown_telemetry")
     @patch("gh_address_cr.__main__.initialize_telemetry")

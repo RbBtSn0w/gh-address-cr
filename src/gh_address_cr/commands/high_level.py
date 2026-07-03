@@ -39,6 +39,8 @@ from gh_address_cr.intake.findings import (
     with_local_item_fields,
 )
 
+ADAPTER_TIMEOUT_SECONDS = 300.0
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -567,58 +569,57 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     import time
 
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.core.telemetry_safety import (
-        command_label,
-        safe_command_args,
-    )
+    from gh_address_cr.core.telemetry_safety import command_label
     from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
-    from gh_address_cr.telemetry import traced_span
+    from gh_address_cr.telemetry import add_current_span_event
 
     start_time = time.time()
     result = None
     error: str | None = None
     exit_code = 1
     adapter_label = command_label(argv) or "adapter"
-    with traced_span(
-        "gh-address-cr.adapter",
+    add_current_span_event(
+        "gh_address_cr.adapter.start",
         attributes={
-            "gh_address_cr.span.kind": "adapter",
             "gh_address_cr.adapter.command_label": adapter_label,
-            "gen_ai.operation.name": "execute_tool",
-            "gen_ai.tool.name": adapter_label,
-            "gen_ai.tool.call.arguments": json.dumps(safe_command_args(argv)),
+            "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,
         },
-    ) as span:
+    )
+    try:
+        run_argv, inline_env = _split_inline_env_assignments(argv)
+        if not run_argv:
+            return None, "adapter requires an executable after inline environment assignments."
+        run_env = None
+        if inline_env:
+            run_env = os.environ.copy()
+            run_env.update(inline_env)
+        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
+        exit_code = result.returncode
+    except Exception as exc:
+        error = str(exc)
+    finally:
+        end_time = time.time()
+        add_current_span_event(
+            "gh_address_cr.adapter.end",
+            {
+                "gh_address_cr.adapter.command_label": adapter_label,
+                "gh_address_cr.adapter.exit_code": exit_code,
+            },
+        )
         try:
-            run_argv, inline_env = _split_inline_env_assignments(argv)
-            if not run_argv:
-                return None, "adapter requires an executable after inline environment assignments."
-            run_env = None
-            if inline_env:
-                run_env = os.environ.copy()
-                run_env.update(inline_env)
-            result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env)
-            exit_code = result.returncode
-        except Exception as exc:
-            error = str(exc)
-        finally:
-            end_time = time.time()
-            if span is not None:
-                span.set_attribute("gh_address_cr.adapter.exit_code", exit_code)
-            try:
-                SessionTelemetry.get_instance().record(
-                    command=adapter_label,
-                    start_time=start_time,
-                    end_time=end_time,
-                    exit_code=exit_code,
-                )
-            except Exception as exc:  # intentionally broad: telemetry must not break command execution
-                from gh_address_cr.core.command_runner import telemetry_debug_enabled
+            SessionTelemetry.get_instance().record(
+                command=adapter_label,
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+            )
+        except Exception as exc:  # intentionally broad: telemetry must not break command execution
+            from gh_address_cr.core.command_runner import telemetry_debug_enabled
 
-                if telemetry_debug_enabled():
-                    sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry record failed: {type(exc).__name__}: {exc}\n")
 
     if error is not None:
         return None, error
