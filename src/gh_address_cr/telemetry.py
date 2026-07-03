@@ -189,12 +189,25 @@ def _record_sanitized_error(span: Span, error: BaseException) -> None:
     span.record_exception(sanitized_error)
     span.set_status(Status(StatusCode.ERROR))
 
+
 def set_current_span_attributes(attributes: Mapping[str, str | bool | int | float | Sequence[str]]) -> None:
     span = get_current_span()
     if not span.is_recording():
         return
     for key, value in attributes.items():
         span.set_attribute(key, value)
+
+
+def get_current_span_attributes(
+    keys: Sequence[str],
+) -> dict[str, str | bool | int | float | Sequence[str]]:
+    span = get_current_span()
+    if not span.is_recording():
+        return {}
+    current_attributes = getattr(span, "attributes", None)
+    if not isinstance(current_attributes, Mapping):
+        return {}
+    return {key: current_attributes[key] for key in keys if key in current_attributes}
 
 
 def add_current_span_event(

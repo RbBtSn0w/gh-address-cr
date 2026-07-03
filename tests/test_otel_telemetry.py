@@ -293,6 +293,8 @@ class TracedExecutionTests(unittest.TestCase):
                 "gh_address_cr.command_session.summary",
             ],
         )
+        self.assertEqual(spans[0].attributes["gh_address_cr.command.name"], "command-session")
+        self.assertEqual(spans[0].attributes["gh_address_cr.command.path"], "command-session")
         start_event_attrs = dict(spans[0].events[0].attributes or {})
         end_event_attrs = dict(spans[0].events[1].attributes or {})
         self.assertEqual(start_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")

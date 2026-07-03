@@ -949,33 +949,40 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
 
 
 def main(argv: list[str] | None = None) -> int:
-    from gh_address_cr.telemetry import set_current_span_attributes
+    from gh_address_cr.telemetry import get_current_span_attributes, set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
     span_attributes = _command_span_attributes(effective_argv, args)
+    prior_command_attributes = get_current_span_attributes(
+        ["gh_address_cr.command.name", "gh_address_cr.command.path"]
+    )
+    restore_command_scope = "gh_address_cr.command.path" in prior_command_attributes
     set_current_span_attributes(
         {
             "gh_address_cr.command.name": str(args.command),
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    try:
+        rc = _dispatch_management_commands(args)
+        if rc is not None:
+            set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
+            return rc
 
-    rc = _dispatch_management_commands(args)
-    if rc is not None:
+        _expand_target_args(args)
+
+        rc = _dispatch_passthrough_commands(args)
+        if rc is not None:
+            set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
+            return rc
+
+        rc = _dispatch_high_level_commands(args)
         set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
-
-    _expand_target_args(args)
-
-    rc = _dispatch_passthrough_commands(args)
-    if rc is not None:
-        set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
-        return rc
-
-    rc = _dispatch_high_level_commands(args)
-    set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
-    return rc
+    finally:
+        if restore_command_scope:
+            set_current_span_attributes(prior_command_attributes)
 
 
 if __name__ == "__main__":

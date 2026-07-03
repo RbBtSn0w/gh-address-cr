@@ -57,7 +57,13 @@ def handle_command_session(passthrough: list[str]) -> int:
         return 2
 
     results = []
-    set_current_span_attributes({"gh_address_cr.command_session.operation_count": len(operations)})
+    set_current_span_attributes(
+        {
+            "gh_address_cr.command.name": "command-session",
+            "gh_address_cr.command.path": "command-session",
+            "gh_address_cr.command_session.operation_count": len(operations),
+        }
+    )
     for index, operation in enumerate(operations):
         operation_id = (
             str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
