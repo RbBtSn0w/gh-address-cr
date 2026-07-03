@@ -31,6 +31,12 @@ from gh_address_cr.commands.high_level import (
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.otel_semconv import (
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_NAME,
+)
+from gh_address_cr.core.telemetry_safety import sanitize_cli_argv
 from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
@@ -918,20 +924,62 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
+def _command_span_name(args: argparse.Namespace) -> str:
+    if args.command != "agent":
+        return str(args.command)
+    subcommand = ""
+    if args.repo and args.repo not in {"-h", "--help"}:
+        subcommand = str(args.repo)
+    return f"agent.{subcommand}" if subcommand else "agent"
+
+
+def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
+    sanitized_args, vcs_attrs = sanitize_cli_argv(effective_argv, command_argv=effective_argv)
+    command_path = _command_span_name(args)
+    attributes: dict[str, str | bool | int | float] = {
+        "gh_address_cr.span.kind": "command",
+        "gh_address_cr.command.name": str(args.command),
+        "gh_address_cr.command.path": command_path,
+        GEN_AI_OPERATION_NAME: "execute_tool",
+        GEN_AI_TOOL_NAME: command_path,
+        GEN_AI_TOOL_CALL_ARGUMENTS: json.dumps(sanitized_args),
+    }
+    attributes.update(vcs_attrs)
+    return attributes
+
+
 def main(argv: list[str] | None = None) -> int:
+    from gh_address_cr.telemetry import set_current_span_attributes, traced_span
+
+    effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
+    span_attributes = _command_span_attributes(effective_argv, args)
+    set_current_span_attributes(
+        {
+            "gh_address_cr.command.name": str(args.command),
+            "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
+        }
+    )
 
-    rc = _dispatch_management_commands(args)
-    if rc is not None:
+    with traced_span("gh-address-cr.command", attributes=span_attributes) as span:
+        rc = _dispatch_management_commands(args)
+        if rc is not None:
+            if span is not None:
+                span.set_attribute("gh_address_cr.command.exit_code", rc)
+            return rc
+
+        _expand_target_args(args)
+
+        rc = _dispatch_passthrough_commands(args)
+        if rc is not None:
+            if span is not None:
+                span.set_attribute("gh_address_cr.command.exit_code", rc)
+            return rc
+
+        rc = _dispatch_high_level_commands(args)
+        if span is not None:
+            span.set_attribute("gh_address_cr.command.exit_code", rc)
         return rc
-
-    _expand_target_args(args)
-
-    rc = _dispatch_passthrough_commands(args)
-    if rc is not None:
-        return rc
-
-    return _dispatch_high_level_commands(args)
 
 
 if __name__ == "__main__":

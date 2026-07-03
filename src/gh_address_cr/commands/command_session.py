@@ -21,6 +21,7 @@ def handle_command_session(passthrough: list[str]) -> int:
     as separate processes instead.
     """
     from gh_address_cr.cli import main
+    from gh_address_cr.telemetry import traced_span
 
     parser = argparse.ArgumentParser(prog="gh-address-cr command-session")
     parser.add_argument("--input", required=True)
@@ -54,43 +55,55 @@ def handle_command_session(passthrough: list[str]) -> int:
         return 2
 
     results = []
-    for index, operation in enumerate(operations):
-        operation_id = (
-            str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
-        )
-        argv = operation.get("argv") if isinstance(operation, dict) else None
-        if not isinstance(argv, list) or not all(isinstance(arg, str) for arg in argv):
+    with traced_span(
+        "gh-address-cr.command-session",
+        attributes={
+            "gh_address_cr.span.kind": "command-session",
+            "gh_address_cr.command_session.operation_count": len(operations),
+        },
+    ) as session_span:
+        for index, operation in enumerate(operations):
+            operation_id = (
+                str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
+            )
+            argv = operation.get("argv") if isinstance(operation, dict) else None
+            if not isinstance(argv, list) or not all(isinstance(arg, str) for arg in argv):
+                results.append(
+                    {
+                        "id": operation_id,
+                        "status": "FAILED",
+                        "reason_code": "COMMAND_SESSION_OPERATION_INVALID",
+                        "exit_code": 2,
+                        "stdout": "",
+                        "stderr": "operation argv must be a string array",
+                    }
+                )
+                continue
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                try:
+                    exit_code = main(list(argv))
+                except SystemExit as exc:
+                    exit_code = exc.code if isinstance(exc.code, int) else 2
+                except Exception as exc:
+                    stderr.write(f"Unhandled exception: {exc}\n")
+                    exit_code = 2
             results.append(
                 {
                     "id": operation_id,
-                    "status": "FAILED",
-                    "reason_code": "COMMAND_SESSION_OPERATION_INVALID",
-                    "exit_code": 2,
-                    "stdout": "",
-                    "stderr": "operation argv must be a string array",
+                    "status": "SUCCESS" if exit_code == 0 else "FAILED",
+                    "reason_code": "COMMAND_SESSION_STEP_OK" if exit_code == 0 else "COMMAND_SESSION_STEP_FAILED",
+                    "exit_code": exit_code,
+                    "stdout": stdout.getvalue(),
+                    "stderr": stderr.getvalue(),
                 }
             )
-            continue
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            try:
-                exit_code = main(list(argv))
-            except SystemExit as exc:
-                exit_code = exc.code if isinstance(exc.code, int) else 2
-            except Exception as exc:
-                stderr.write(f"Unhandled exception: {exc}\n")
-                exit_code = 2
-        results.append(
-            {
-                "id": operation_id,
-                "status": "SUCCESS" if exit_code == 0 else "FAILED",
-                "reason_code": "COMMAND_SESSION_STEP_OK" if exit_code == 0 else "COMMAND_SESSION_STEP_FAILED",
-                "exit_code": exit_code,
-                "stdout": stdout.getvalue(),
-                "stderr": stderr.getvalue(),
-            }
-        )
+        if session_span is not None:
+            session_span.set_attribute(
+                "gh_address_cr.command_session.failed_operations",
+                sum(1 for result in results if result["exit_code"] != 0),
+            )
     session_exit = 0 if all(result["exit_code"] == 0 for result in results) else 2
     summary = {
         "status": "SUCCESS" if session_exit == 0 else "PARTIAL",

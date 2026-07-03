@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -55,61 +56,79 @@ def run_cmd(
     import time
 
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.core.telemetry_safety import command_label
+    from gh_address_cr.core.telemetry_safety import command_label, safe_command_args
+    from gh_address_cr.telemetry import traced_span
 
     attempts = max(1, retries)
     start_time = time.time()
     result: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(attempts):
-        try:
-            result = subprocess.run(
-                cmd,
-                input=stdin,
-                text=True,
-                capture_output=True,
-                env=runtime_subprocess_env(),
-                timeout=timeout,
-            )
-            if (
-                result.returncode != 0
-                and cmd
-                and cmd[0] == "gh"
-                and attempt < attempts - 1
-                and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
-            ):
-                time.sleep(2**attempt)
-                continue
-            break
-        except subprocess.TimeoutExpired as exc:
+    tool_name = command_label(cmd) or "subprocess"
+    sanitized_cmd = safe_command_args(cmd)
+    with traced_span(
+        "gh-address-cr.subprocess",
+        attributes={
+            "gh_address_cr.span.kind": "subprocess",
+            "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.retries": attempts,
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": tool_name,
+            "gen_ai.tool.call.arguments": json.dumps(sanitized_cmd),
+        },
+    ) as span:
+        for attempt in range(attempts):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=stdin,
+                    text=True,
+                    capture_output=True,
+                    env=runtime_subprocess_env(),
+                    timeout=timeout,
+                )
+                if (
+                    result.returncode != 0
+                    and cmd
+                    and cmd[0] == "gh"
+                    and attempt < attempts - 1
+                    and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+                ):
+                    time.sleep(2**attempt)
+                    continue
+                break
+            except subprocess.TimeoutExpired as exc:
+                result = subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=124,
+                    stdout=timeout_stream_text(exc.stdout),
+                    stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+                )
+                if cmd and cmd[0] == "gh" and attempt < attempts - 1:
+                    time.sleep(2**attempt)
+                    continue
+                break
+        if result is None:
             result = subprocess.CompletedProcess(
                 args=cmd,
-                returncode=124,
-                stdout=timeout_stream_text(exc.stdout),
-                stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+                returncode=1,
+                stdout="",
+                stderr="Command failed before producing a result.",
             )
-            if cmd and cmd[0] == "gh" and attempt < attempts - 1:
-                time.sleep(2**attempt)
-                continue
-            break
-    if result is None:
-        result = subprocess.CompletedProcess(
-            args=cmd,
-            returncode=1,
-            stdout="",
-            stderr="Command failed before producing a result.",
-        )
-    end_time = time.time()
-    exit_code = result.returncode
+        end_time = time.time()
+        exit_code = result.returncode
 
-    try:
-        SessionTelemetry.get_instance().record(
-            command=command_label(cmd),
-            start_time=start_time,
-            end_time=end_time,
-            exit_code=exit_code,
-        )
-    except Exception as telemetry_exc:
-        if telemetry_debug_enabled():
-            sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
+        if span is not None:
+            span.set_attribute("gh_address_cr.subprocess.attempts_used", attempt + 1)
+            span.set_attribute("gh_address_cr.subprocess.exit_code", exit_code)
 
-    return result
+        try:
+            SessionTelemetry.get_instance().record(
+                command=tool_name,
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+            )
+        except Exception as telemetry_exc:
+            if telemetry_debug_enabled():
+                sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
+
+        return result
