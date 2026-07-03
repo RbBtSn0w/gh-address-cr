@@ -14,7 +14,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer
+from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from gh_address_cr.core.otel_semconv import (
@@ -140,7 +140,7 @@ def run_traced(
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
     context: Context | None = None,
-) -> T:
+) -> T | int:
     """Run an operation in a span and explicitly record failures."""
     if context is None:
         context = resolve_parent_context(os.environ)
@@ -166,9 +166,11 @@ def run_traced(
             span.set_attribute(PROCESS_EXIT_CODE, exit_code)
             return result
         except SystemExit as error:
-            exit_code = error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            exit_code = (
+                error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
+            )
             span.set_attribute(PROCESS_EXIT_CODE, exit_code)
-            raise
+            return exit_code
         except BaseException as error:
             span.set_attribute(PROCESS_EXIT_CODE, 1)
             if isinstance(error, KeyboardInterrupt):
@@ -186,6 +188,39 @@ def _record_sanitized_error(span: Span, error: BaseException) -> None:
     sanitized_error = RuntimeError(type(error).__name__)
     span.record_exception(sanitized_error)
     span.set_status(Status(StatusCode.ERROR))
+
+
+def set_current_span_attributes(attributes: Mapping[str, str | bool | int | float | Sequence[str]]) -> None:
+    span = get_current_span()
+    if not span.is_recording():
+        return
+    for key, value in attributes.items():
+        span.set_attribute(key, value)
+
+
+def get_current_span_attributes(
+    keys: Sequence[str],
+) -> dict[str, str | bool | int | float | Sequence[str]]:
+    span = get_current_span()
+    if not span.is_recording():
+        return {}
+    current_attributes = getattr(span, "attributes", None)
+    if not isinstance(current_attributes, Mapping):
+        return {}
+    return {key: current_attributes[key] for key in keys if key in current_attributes}
+
+
+def add_current_span_event(
+    name: str,
+    attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
+) -> None:
+    span = get_current_span()
+    if not span.is_recording():
+        return
+    if attributes:
+        span.add_event(name, attributes=dict(attributes))
+        return
+    span.add_event(name)
 
 
 def _reset_telemetry_for_tests() -> None:

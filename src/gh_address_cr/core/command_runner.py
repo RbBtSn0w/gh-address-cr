@@ -56,10 +56,19 @@ def run_cmd(
 
     from gh_address_cr.core.telemetry import SessionTelemetry
     from gh_address_cr.core.telemetry_safety import command_label
+    from gh_address_cr.telemetry import add_current_span_event
 
     attempts = max(1, retries)
     start_time = time.time()
     result: subprocess.CompletedProcess[str] | None = None
+    tool_name = command_label(cmd) or "subprocess"
+    add_current_span_event(
+        "gh_address_cr.subprocess.start",
+        {
+            "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.retries": attempts,
+        },
+    )
     for attempt in range(attempts):
         try:
             result = subprocess.run(
@@ -100,10 +109,18 @@ def run_cmd(
         )
     end_time = time.time()
     exit_code = result.returncode
+    add_current_span_event(
+        "gh_address_cr.subprocess.end",
+        {
+            "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.attempts_used": attempt + 1,
+            "gh_address_cr.subprocess.exit_code": exit_code,
+        },
+    )
 
     try:
         SessionTelemetry.get_instance().record(
-            command=command_label(cmd),
+            command=tool_name,
             start_time=start_time,
             end_time=end_time,
             exit_code=exit_code,

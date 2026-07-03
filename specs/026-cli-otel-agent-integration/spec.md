@@ -500,8 +500,8 @@ behavioral change.
   implementation detail to be fixed during planning, not a user-facing
   contract.
 - This feature extends the single existing process span (`gh-address-cr.cli`
-  in `src/gh_address_cr/__main__.py`); it does not introduce per-subcommand
-  child spans.
+  in `src/gh_address_cr/__main__.py`) with per-phase timeline events; it does
+  not introduce per-subcommand spans.
 - The upstream OpenTelemetry CLI and GenAI semantic conventions are
   currently published under "Development" status; this spec targets the
   attribute names as currently published and accepts that upstream renames

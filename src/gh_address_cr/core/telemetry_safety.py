@@ -397,6 +397,34 @@ def safe_command_args(argv: list[str]) -> list[str]:
     return res
 
 
+def detect_cli_vcs_scope(argv: list[str] | None) -> tuple[str, str | None, str | None, dict[str, str]]:
+    """Derive the CLI command plus best-effort PR scope telemetry attributes.
+
+    The input is the CLI argv *without* the executable token, matching
+    ``sys.argv[1:]`` / ``main(argv)``.
+    """
+    effective_argv = list(argv or [])
+    command = derive_tool_name(effective_argv)
+    try:
+        repo = next((token for token in effective_argv if token.count("/") == 1 and " " not in token), None)
+        pr_number = next((token for token in effective_argv if token.isdigit()), None)
+        vcs_attrs = map_vcs_attributes(command, repo, pr_number)
+    except Exception:
+        repo, pr_number, vcs_attrs = None, None, {}
+    return command, repo, pr_number, vcs_attrs
+
+
+def sanitize_cli_argv(argv: list[str], *, command_argv: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
+    """Sanitize CLI arguments and redact plain PR owner/repo when applicable."""
+    effective_command_argv = list(command_argv) if command_argv is not None else list(argv)
+    command, repo, _pr_number, vcs_attrs = detect_cli_vcs_scope(effective_command_argv)
+    sanitized = safe_command_args(list(argv))
+    if vcs_attrs and repo is not None:
+        sanitized = ["[redacted]" if arg == repo else arg for arg in sanitized]
+    _ = command
+    return sanitized, vcs_attrs
+
+
 def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     """Detect and return agent session correlation attributes from environ.
 

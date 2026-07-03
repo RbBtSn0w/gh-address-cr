@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import sys
+import time
 from pathlib import Path
 
 
@@ -21,6 +22,8 @@ def handle_command_session(passthrough: list[str]) -> int:
     as separate processes instead.
     """
     from gh_address_cr.cli import main
+    from gh_address_cr.core.telemetry_safety import _safe_diagnostic_text, command_label
+    from gh_address_cr.telemetry import add_current_span_event, set_current_span_attributes
 
     parser = argparse.ArgumentParser(prog="gh-address-cr command-session")
     parser.add_argument("--input", required=True)
@@ -54,6 +57,13 @@ def handle_command_session(passthrough: list[str]) -> int:
         return 2
 
     results = []
+    set_current_span_attributes(
+        {
+            "gh_address_cr.command.name": "command-session",
+            "gh_address_cr.command.path": "command-session",
+            "gh_address_cr.command_session.operation_count": len(operations),
+        }
+    )
     for index, operation in enumerate(operations):
         operation_id = (
             str(operation.get("id") or f"op-{index + 1}") if isinstance(operation, dict) else f"op-{index + 1}"
@@ -71,6 +81,17 @@ def handle_command_session(passthrough: list[str]) -> int:
                 }
             )
             continue
+        op_started_at = time.monotonic()
+        op_command = command_label(argv) or "command"
+        safe_operation_id = _safe_diagnostic_text(operation_id)
+        add_current_span_event(
+            "gh_address_cr.command_session.operation.start",
+            {
+                "gh_address_cr.command_session.operation_id": safe_operation_id,
+                "gh_address_cr.command_session.operation_index": index + 1,
+                "gh_address_cr.command.name": op_command,
+            },
+        )
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -81,6 +102,16 @@ def handle_command_session(passthrough: list[str]) -> int:
             except Exception as exc:
                 stderr.write(f"Unhandled exception: {exc}\n")
                 exit_code = 2
+        add_current_span_event(
+            "gh_address_cr.command_session.operation.end",
+            {
+                "gh_address_cr.command_session.operation_id": safe_operation_id,
+                "gh_address_cr.command_session.operation_index": index + 1,
+                "gh_address_cr.command.name": op_command,
+                "gh_address_cr.command_session.operation_exit_code": exit_code,
+                "gh_address_cr.command_session.operation_duration_ms": round((time.monotonic() - op_started_at) * 1000, 3),
+            },
+        )
         results.append(
             {
                 "id": operation_id,
@@ -91,6 +122,15 @@ def handle_command_session(passthrough: list[str]) -> int:
                 "stderr": stderr.getvalue(),
             }
         )
+    failed_operations = sum(1 for result in results if result["exit_code"] != 0)
+    set_current_span_attributes({"gh_address_cr.command_session.failed_operations": failed_operations})
+    add_current_span_event(
+        "gh_address_cr.command_session.summary",
+        {
+            "gh_address_cr.command_session.operation_count": len(results),
+            "gh_address_cr.command_session.failed_operations": failed_operations,
+        },
+    )
     session_exit = 0 if all(result["exit_code"] == 0 for result in results) else 2
     summary = {
         "status": "SUCCESS" if session_exit == 0 else "PARTIAL",

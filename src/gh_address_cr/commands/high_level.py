@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,8 @@ from gh_address_cr.intake.findings import (
     normalize_findings_payload,
     with_local_item_fields,
 )
+
+ADAPTER_TIMEOUT_SECONDS = 300.0
 
 
 def _utc_now() -> str:
@@ -566,17 +569,24 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     import time
 
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.core.telemetry_safety import (
-        command_label,
-    )
+    from gh_address_cr.core.telemetry_safety import command_label
     from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
+    from gh_address_cr.telemetry import add_current_span_event
 
     start_time = time.time()
     result = None
     error: str | None = None
     exit_code = 1
+    adapter_label = command_label(argv) or "adapter"
+    add_current_span_event(
+        "gh_address_cr.adapter.start",
+        attributes={
+            "gh_address_cr.adapter.command_label": adapter_label,
+            "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,
+        },
+    )
     try:
         run_argv, inline_env = _split_inline_env_assignments(argv)
         if not run_argv:
@@ -585,15 +595,22 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         if inline_env:
             run_env = os.environ.copy()
             run_env.update(inline_env)
-        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env)
+        result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
         exit_code = result.returncode
     except Exception as exc:
         error = str(exc)
     finally:
         end_time = time.time()
+        add_current_span_event(
+            "gh_address_cr.adapter.end",
+            {
+                "gh_address_cr.adapter.command_label": adapter_label,
+                "gh_address_cr.adapter.exit_code": exit_code,
+            },
+        )
         try:
             SessionTelemetry.get_instance().record(
-                command=command_label(argv),
+                command=adapter_label,
                 start_time=start_time,
                 end_time=end_time,
                 exit_code=exit_code,
@@ -779,6 +796,8 @@ class HighLevelReviewRuntime:
         return 5
 
     def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
+        from gh_address_cr.telemetry import add_current_span_event
+
         parsed = _parse_native_high_level_args(command, passthrough_args)
         repo = parsed.repo
         pr_number = str(parsed.pr_number)
@@ -786,16 +805,65 @@ class HighLevelReviewRuntime:
         run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
         auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
 
+        phase_started_at = time.monotonic()
+        add_current_span_event(
+            "gh_address_cr.high_level.phase.start",
+            {
+                "gh_address_cr.high_level.command": command,
+                "gh_address_cr.high_level.phase": "preflight",
+            },
+        )
         exit_code, preloaded_findings_input = self._run_preflight_checks(command, parsed, repo, pr_number)
+        add_current_span_event(
+            "gh_address_cr.high_level.phase.end",
+            {
+                "gh_address_cr.high_level.command": command,
+                "gh_address_cr.high_level.phase": "preflight",
+                "gh_address_cr.high_level.exit_code": exit_code if exit_code is not None else 0,
+                "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
+            },
+        )
         if exit_code is not None:
             return exit_code
 
+        phase_started_at = time.monotonic()
+        add_current_span_event(
+            "gh_address_cr.high_level.phase.start",
+            {
+                "gh_address_cr.high_level.command": command,
+                "gh_address_cr.high_level.phase": "session",
+            },
+        )
         session = _load_or_create_session(repo, pr_number)
+        add_current_span_event(
+            "gh_address_cr.high_level.phase.end",
+            {
+                "gh_address_cr.high_level.command": command,
+                "gh_address_cr.high_level.phase": "session",
+                "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
+            },
+        )
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:
+            phase_started_at = time.monotonic()
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.start",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "ingest",
+                },
+            )
             session, remote_threads = self._ingest_and_load_threads(
                 command, parsed, session, preloaded_findings_input, repo, pr_number
+            )
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.end",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "ingest",
+                    "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
+                },
             )
             _recalc_native_metrics(session)
             if auto_simple and _blocking_local_items(session):
@@ -810,7 +878,23 @@ class HighLevelReviewRuntime:
                     human=human,
                     lean=lean,
                 )
+            phase_started_at = time.monotonic()
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.start",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "gate",
+                },
+            )
             result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.end",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "gate",
+                    "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
+                },
+            )
         except (FindingsFormatError, OSError) as exc:
             return self._handle_format_error(
                 exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
@@ -818,9 +902,17 @@ class HighLevelReviewRuntime:
         except GitHubError as exc:
             return self._handle_github_error(
                 exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
-            )
+                )
 
         if auto_simple and not result.passed:
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.end",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "emit_summary",
+                    "gh_address_cr.high_level.status": "blocked",
+                },
+            )
             if _auto_simple_local_gate_failed(result):
                 return _emit_auto_simple_not_eligible(
                     command=command,
@@ -864,11 +956,19 @@ class HighLevelReviewRuntime:
                 item=item,
                 include_threads=True,
                 lean=lean,
-            )
+                )
             _emit_native_summary(summary, human=human)
             return 5
 
         if not result.passed:
+            add_current_span_event(
+                "gh_address_cr.high_level.phase.end",
+                {
+                    "gh_address_cr.high_level.command": command,
+                    "gh_address_cr.high_level.phase": "emit_summary",
+                    "gh_address_cr.high_level.status": "blocked",
+                },
+            )
             item = _first_blocking_item(session)
             artifact_path = None
             reason_code = "BLOCKING_ITEMS_REMAIN"
@@ -912,6 +1012,14 @@ class HighLevelReviewRuntime:
             _emit_native_summary(summary, human=human)
             return 5
 
+        add_current_span_event(
+            "gh_address_cr.high_level.phase.end",
+            {
+                "gh_address_cr.high_level.command": command,
+                "gh_address_cr.high_level.phase": "emit_summary",
+                "gh_address_cr.high_level.status": "passed",
+            },
+        )
         _set_loop_state(session, run_id=run_id, status="PASSED", iteration=1, max_iterations=parsed.max_iterations)
         _recalc_native_metrics(session)
         session_store.save_session(repo, pr_number, session)
