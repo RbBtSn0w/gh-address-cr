@@ -159,17 +159,16 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_system_exit_zero_records_success(self) -> None:
-        """T005: Test that SystemExit with code 0 propagates and records exit code 0 without error.type."""
+        """T005: Test that SystemExit with code 0 returns exit code 0 without error.type."""
         def dummy_operation() -> None:
             raise SystemExit(0)
 
-        with self.assertRaises(SystemExit) as context:
-            run_traced(
-                self.tracer,
-                "gh-address-cr.cli",
-                dummy_operation,
-            )
-        self.assertEqual(context.exception.code, 0)
+        result = run_traced(
+            self.tracer,
+            "gh-address-cr.cli",
+            dummy_operation,
+        )
+        self.assertEqual(result, 0)
 
         exported_spans = self.exporter.get_finished_spans()
         self.assertEqual(len(exported_spans), 1)
@@ -181,17 +180,16 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_system_exit_nonzero_records_status_without_error_type(self) -> None:
-        """T005: Test that SystemExit with a non-zero code propagates and records exit code but no error.type or ERROR status."""
+        """T005: Test that SystemExit with a non-zero code returns exit code but no error.type or ERROR status."""
         def dummy_operation() -> None:
             raise SystemExit(2)
 
-        with self.assertRaises(SystemExit) as context:
-            run_traced(
-                self.tracer,
-                "gh-address-cr.cli",
-                dummy_operation,
-            )
-        self.assertEqual(context.exception.code, 2)
+        result = run_traced(
+            self.tracer,
+            "gh-address-cr.cli",
+            dummy_operation,
+        )
+        self.assertEqual(result, 2)
 
         exported_spans = self.exporter.get_finished_spans()
         self.assertEqual(len(exported_spans), 1)

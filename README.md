@@ -176,6 +176,10 @@ tool calls without extra instrumentation:
   a stable one-way hash, never the plain `owner/repo` string.
   `vcs.change.state` appears only when already available from session data.
   Non-PR commands (`version`, `doctor`) carry no `vcs.*` attributes.
+- CLI workflow spans may also include phase events for long-running workflows
+  such as preflight, session load, ingestion, gate evaluation, and summary
+  emission. These events stay within the existing trace contract while making
+  the Honeycomb timeline easier to read.
 
 A malformed or missing `TRACEPARENT` never blocks or changes the CLI's exit
 code; a well-formed one makes the span a child of that remote context. See

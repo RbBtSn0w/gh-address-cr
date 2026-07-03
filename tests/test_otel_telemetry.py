@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 
 class OpenTelemetryInitializationTests(unittest.TestCase):
@@ -204,10 +211,9 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = MagicMock()
         tracer.start_as_current_span.return_value = context_manager
 
-        with self.assertRaises(SystemExit) as raised:
-            telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(0)))
+        result = telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(0)))
 
-        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(result, 0)
         span.record_exception.assert_not_called()
         span.set_status.assert_not_called()
 
@@ -221,13 +227,112 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = MagicMock()
         tracer.start_as_current_span.return_value = context_manager
 
-        with self.assertRaises(SystemExit) as raised:
-            telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(2)))
+        result = telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(2)))
 
-        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(result, 2)
         span.record_exception.assert_not_called()
         span.set_status.assert_not_called()
         span.set_attribute.assert_any_call(PROCESS_EXIT_CODE, 2)
+
+    def test_span_event_helper_emits_events_on_the_active_span(self) -> None:
+        from gh_address_cr import telemetry
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_span_event_helper")
+
+        def operation() -> int:
+            telemetry.add_current_span_event(
+                "gh-address-cr.test.phase.start",
+                {"gh_address_cr.test.phase": "start", "gh_address_cr.test.step": 1},
+            )
+            telemetry.add_current_span_event(
+                "gh-address-cr.test.phase.end",
+                {"gh_address_cr.test.phase": "end", "gh_address_cr.test.step": 1},
+            )
+            return 0
+
+        result = telemetry.run_traced(tracer, "gh-address-cr.cli", operation)
+
+        self.assertEqual(result, 0)
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        event_names = [event.name for event in spans[0].events]
+        self.assertEqual(event_names, ["gh-address-cr.test.phase.start", "gh-address-cr.test.phase.end"])
+
+    def test_command_session_emits_operation_timeline_events(self) -> None:
+        from gh_address_cr import telemetry
+        from gh_address_cr.commands.command_session import handle_command_session
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_command_session_events")
+
+        payload = {"operations": [{"id": "op-1", "argv": ["version"]}]}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            request_path = Path(temp_dir) / "command-session.json"
+            request_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            result = telemetry.run_traced(
+                tracer,
+                "gh-address-cr.cli",
+                lambda: handle_command_session(["--input", str(request_path)]),
+            )
+
+        self.assertEqual(result, 0)
+        spans = exporter.get_finished_spans()
+        command_session_spans = [span for span in spans if span.name == "gh-address-cr.command-session"]
+        self.assertEqual(len(command_session_spans), 1)
+        event_names = [event.name for event in command_session_spans[0].events]
+        self.assertEqual(
+            event_names,
+            [
+                "gh_address_cr.command_session.operation.start",
+                "gh_address_cr.command_session.operation.end",
+                "gh_address_cr.command_session.summary",
+            ],
+        )
+        start_event_attrs = dict(command_session_spans[0].events[0].attributes or {})
+        end_event_attrs = dict(command_session_spans[0].events[1].attributes or {})
+        self.assertEqual(start_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
+        self.assertEqual(end_event_attrs["gh_address_cr.command_session.operation_id"], "op-1")
+
+    def test_command_session_redacts_unsafe_operation_ids_in_timeline_events(self) -> None:
+        from gh_address_cr import telemetry
+        from gh_address_cr.commands.command_session import handle_command_session
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_command_session_event_redaction")
+
+        payload = {
+            "operations": [
+                {
+                    "id": "/Users/snow/secrets/token=ghp_example",
+                    "argv": ["version"],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            request_path = Path(temp_dir) / "command-session.json"
+            request_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            result = telemetry.run_traced(
+                tracer,
+                "gh-address-cr.cli",
+                lambda: handle_command_session(["--input", str(request_path)]),
+            )
+
+        self.assertEqual(result, 0)
+        spans = exporter.get_finished_spans()
+        command_session_spans = [span for span in spans if span.name == "gh-address-cr.command-session"]
+        self.assertEqual(len(command_session_spans), 1)
+        for event in command_session_spans[0].events[:2]:
+            attributes = dict(event.attributes or {})
+            self.assertEqual(attributes["gh_address_cr.command_session.operation_id"], "[redacted]")
 
     @patch("gh_address_cr.__main__.shutdown_telemetry")
     @patch("gh_address_cr.__main__.initialize_telemetry")

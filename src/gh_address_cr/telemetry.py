@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 import logging
 import os
 import threading
-from collections.abc import Callable, Mapping, Sequence
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TypeVar
 
 import requests
@@ -144,7 +143,7 @@ def run_traced(
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
     context: Context | None = None,
-) -> T:
+) -> T | int:
     """Run an operation in a span and explicitly record failures."""
     if context is None:
         context = resolve_parent_context(os.environ)
@@ -176,7 +175,7 @@ def run_traced(
                     error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else (0 if error.code is None else 1)
                 )
                 span.set_attribute(PROCESS_EXIT_CODE, exit_code)
-                raise
+                return exit_code
             except BaseException as error:
                 span.set_attribute(PROCESS_EXIT_CODE, 1)
                 if isinstance(error, KeyboardInterrupt):
@@ -237,6 +236,19 @@ def set_current_span_attributes(attributes: Mapping[str, str | bool | int | floa
         return
     for key, value in attributes.items():
         span.set_attribute(key, value)
+
+
+def add_current_span_event(
+    name: str,
+    attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
+) -> None:
+    span = get_current_span()
+    if not span.is_recording():
+        return
+    if attributes:
+        span.add_event(name, attributes=dict(attributes))
+        return
+    span.add_event(name)
 
 
 def _reset_telemetry_for_tests() -> None:
