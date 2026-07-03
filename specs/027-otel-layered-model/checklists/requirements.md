@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning  
 **Created**: 2026-07-03  
-**Feature**: [spec.md](/Users/snow/Documents/GitHub/gh-address-cr-skill/specs/027-otel-layered-model/spec.md)
+**Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 

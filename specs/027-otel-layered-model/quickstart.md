@@ -3,7 +3,7 @@
 ## Prerequisites
 
 ```bash
-cd /Users/snow/Documents/GitHub/gh-address-cr-skill
+cd <repo-root>
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 ```

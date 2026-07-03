@@ -178,14 +178,14 @@ def run_traced(
                 )
                 span.set_attribute(PROCESS_EXIT_CODE, exit_code)
                 return exit_code
-            except BaseException as error:
+            except KeyboardInterrupt as error:
                 span.set_attribute(PROCESS_EXIT_CODE, 1)
-                if isinstance(error, KeyboardInterrupt):
-                    err_type = "keyboard_interrupt"
-                elif isinstance(error, TimeoutError):
-                    err_type = "timeout"
-                else:
-                    err_type = "_OTHER"
+                span.set_attribute(ERROR_TYPE, "keyboard_interrupt")
+                _record_sanitized_error(span, error)
+                raise
+            except Exception as error:
+                span.set_attribute(PROCESS_EXIT_CODE, 1)
+                err_type = "timeout" if isinstance(error, TimeoutError) else "_OTHER"
                 span.set_attribute(ERROR_TYPE, err_type)
                 _record_sanitized_error(span, error)
                 raise
@@ -243,10 +243,16 @@ def start_child_span(
     Maintainer rule: only use this for independently measurable workflow
     operations. Checkpoint-style timeline annotations should stay as
     ``add_current_span_event(...)`` on the current active span.
+
+    Constitutional guarantee: this never starts a new root span. If there is
+    no recording parent span in the current context (for example, called
+    outside ``run_traced``), it falls back to yielding the current
+    (non-recording) span instead of silently starting an unparented trace.
     """
     tracer = _active_tracer.get() or _tracer
-    if tracer is None:
-        yield get_current_span()
+    current_span = get_current_span()
+    if tracer is None or not current_span.is_recording():
+        yield current_span
         return
     with tracer.start_as_current_span(
         name,
