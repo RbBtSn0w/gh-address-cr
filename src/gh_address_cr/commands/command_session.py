@@ -111,7 +111,11 @@ def handle_command_session(passthrough: list[str]) -> int:
                 try:
                     exit_code = main(list(argv))
                 except SystemExit as exc:
-                    exit_code = exc.code if isinstance(exc.code, int) else 2
+                    exit_code = (
+                        exc.code
+                        if isinstance(exc.code, int) and not isinstance(exc.code, bool)
+                        else (0 if exc.code is None else 1)
+                    )
                 except Exception as exc:
                     stderr.write(f"Unhandled exception: {exc}\n")
                     exit_code = 2

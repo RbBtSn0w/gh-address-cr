@@ -297,7 +297,7 @@ class TracedExecutionTests(unittest.TestCase):
         event_names = [event.name for event in root_span.events]
         self.assertEqual(event_names, ["gh_address_cr.command_session.summary"])
 
-    def test_command_session_redacts_unsafe_operation_ids_in_timeline_events(self) -> None:
+    def test_command_session_redacts_unsafe_operation_ids_on_operation_span(self) -> None:
         from gh_address_cr import telemetry
         from gh_address_cr.commands.command_session import handle_command_session
 
