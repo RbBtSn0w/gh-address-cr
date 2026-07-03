@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -591,7 +592,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         has_error_boundary=True,
         externally_visible=True,
     )
-    span_attributes = {
+    span_attributes: dict[str, str | bool | int | float | Sequence[str]] = {
         **workflow_step_span_attributes(step_name="adapter", step_kind=layer),
         "gh_address_cr.adapter.command_label": adapter_label,
         "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,

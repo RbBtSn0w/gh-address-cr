@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TypeVar
@@ -237,7 +237,7 @@ def start_child_span(
     name: str,
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
-):
+) -> Iterator[Span]:
     """Start a child span under the current active span when tracing is active.
 
     Maintainer rule: only use this for independently measurable workflow
