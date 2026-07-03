@@ -201,3 +201,9 @@ Task: "Refactor command-session per-operation execution to emit child spans in s
 2. One engineer handles adapter child-span work
 3. One engineer handles command-session child-span work
 4. After runtime shape stabilizes, documentation/contract finalization can proceed in parallel with final verification
+
+---
+
+## Phase 7: Convergence
+
+- [X] T038 Promote the layered telemetry model into `.specify/memory/constitution.md` as the default workflow-telemetry governance principle (root invocation span / independently measurable child spans / checkpoint events), with explicit evidence-gated exceptions carrying rationale, verification evidence, and reviewer-visible approval criteria, per FR-009a / spec Governance Outcome / research Decision 6 (missing)
