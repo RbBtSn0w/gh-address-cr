@@ -1,3 +1,9 @@
+## [3.5.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.0...v3.5.1) (2026-07-03)
+
+### Bug Fixes
+
+* add agent timeline events to CLI span ([#185](https://github.com/RbBtSn0w/gh-address-cr/issues/185)) ([b12b683](https://github.com/RbBtSn0w/gh-address-cr/commit/b12b683ff798b0f33e41fbca6b15fba4bc1dc3b0))
+
 ## [3.5.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.4.0...v3.5.0) (2026-07-02)
 
 ### Features
