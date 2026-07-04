@@ -147,7 +147,11 @@ class GitHubClient:
                 or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             )
             for thread in threads:
-                relation = "original_concern_author" if reviewer and reviewer == thread.get("first_author_login") else "other_reviewer"
+                relation = (
+                    "original_concern_author"
+                    if reviewer and reviewer == thread.get("first_author_login")
+                    else "other_reviewer"
+                )
                 if relation != "original_concern_author":
                     continue
                 thread_id = str(thread.get("id") or "")

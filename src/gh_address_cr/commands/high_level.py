@@ -609,7 +609,9 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
             if inline_env:
                 run_env = os.environ.copy()
                 run_env.update(inline_env)
-            result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
+            result = subprocess.run(
+                run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS
+            )
             exit_code = result.returncode
         except Exception as exc:
             error = str(exc)
@@ -916,7 +918,7 @@ class HighLevelReviewRuntime:
         except GitHubError as exc:
             return self._handle_github_error(
                 exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
-                )
+            )
 
         if auto_simple and not result.passed:
             add_current_span_event(
@@ -970,7 +972,7 @@ class HighLevelReviewRuntime:
                 item=item,
                 include_threads=True,
                 lean=lean,
-                )
+            )
             _emit_native_summary(summary, human=human)
             return 5
 

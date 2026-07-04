@@ -933,7 +933,9 @@ def _command_span_name(args: argparse.Namespace) -> str:
     return f"agent.{subcommand}" if subcommand else "agent"
 
 
-def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
+def _command_span_attributes(
+    effective_argv: list[str], args: argparse.Namespace
+) -> dict[str, str | bool | int | float]:
     sanitized_args, vcs_attrs = sanitize_cli_argv(effective_argv, command_argv=effective_argv)
     command_path = _command_span_name(args)
     attributes: dict[str, str | bool | int | float] = {
@@ -954,9 +956,7 @@ def main(argv: list[str] | None = None) -> int:
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
     span_attributes = _command_span_attributes(effective_argv, args)
-    prior_command_attributes = get_current_span_attributes(
-        ["gh_address_cr.command.name", "gh_address_cr.command.path"]
-    )
+    prior_command_attributes = get_current_span_attributes(["gh_address_cr.command.name", "gh_address_cr.command.path"])
     restore_command_scope = "gh_address_cr.command.path" in prior_command_attributes
     set_current_span_attributes(
         {
