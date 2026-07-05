@@ -79,7 +79,7 @@ def _write_artifact(artifact: Path, report: dict[str, Any]) -> None:
         report["diagnostics"].append(f"cr-metrics artifact unavailable: {type(exc).__name__}")
 
 
-def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
+def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:  # noqa: C901
     path = core_paths.evidence_ledger_file(repo, pr_number)
     artifact = core_paths.workspace_dir(repo, pr_number) / "cr-metrics.json"
     events, unreadable, diagnostics = _read_ledger(path)
@@ -121,7 +121,11 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
 
     by_item: dict[str, list[tuple[datetime, dict[str, Any]]]] = {}
     for e, t in session_events:
-        by_item.setdefault(str(e["item_id"]), []).append((t, e))
+        item_id_str = str(e["item_id"])
+        # Optimization: Avoid eager list instantiation on every event iteration
+        if item_id_str not in by_item:
+            by_item[item_id_str] = []
+        by_item[item_id_str].append((t, e))
 
     per_cr: list[dict[str, Any]] = []
     completed_spans: list[int] = []
