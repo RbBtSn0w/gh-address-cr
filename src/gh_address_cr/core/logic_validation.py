@@ -131,16 +131,13 @@ def _requires_validation_evidence(item: Mapping[str, Any], item_kind: str, state
 
 
 def _github_resolution(item: Mapping[str, Any]) -> str:
-    accepted_response = item.get("accepted_response")
-    if isinstance(accepted_response, Mapping):
+    for source in (item.get("accepted_response"), item):
+        if not isinstance(source, Mapping):
+            continue
         for key in ("resolution", "decision", "action"):
-            value = accepted_response.get(key)
+            value = source.get(key)
             if _has_content(value):
                 return str(value).strip().lower()
-    for key in ("resolution", "decision", "action"):
-        value = item.get(key)
-        if _has_content(value):
-            return str(value).strip().lower()
     classification_evidence = item.get("classification_evidence")
     if isinstance(classification_evidence, Mapping):
         value = classification_evidence.get("classification")
