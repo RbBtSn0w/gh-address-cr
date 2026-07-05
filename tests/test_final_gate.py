@@ -547,6 +547,26 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("Gate FAILED: Do not send completion summary. Recommended status update:", guidance)
         self.assertIn("1 blocking logic-validation signals", guidance)
 
+    def test_logic_validation_blocker_next_action_points_to_validation_reconcile_command(self):
+        session = self.passing_session()
+        thread = session["items"]["github-thread:THREAD_DONE"]
+        thread["state"] = "published"
+        thread["status"] = "CLOSED"
+        thread["decision"] = "fix"
+        thread["classification_evidence"] = {"classification": "fix"}
+        thread["reply_evidence"] = {"reply_url": "https://example.test/reply", "author_login": "agent-login"}
+        thread.pop("validation_evidence")
+
+        result = self.evaluate(
+            session,
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["reason_code"], "FINAL_GATE_LOGIC_VALIDATION_BLOCKING")
+        self.assertIn("agent evidence add", summary["next_action"])
+        self.assertIn("--item-id github-thread:THREAD_DONE", summary["next_action"])
+
     def test_build_completion_summary_guidance_edge_cases(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance
         session = self.passing_session()

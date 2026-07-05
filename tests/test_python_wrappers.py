@@ -473,6 +473,8 @@ else:
         self.assertEqual(summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
         self.assertEqual(summary["waiting_on"], "external_review")
         self.assertIn("rerun the same review command", summary["next_action"])
+        self.assertIn("review-to-findings", summary["next_action"])
+        self.assertIn("findings", summary["next_action"])
         self.assertEqual(summary["repo"], self.repo)
         request_path = Path(summary["artifact_path"])
         self.assertTrue(request_path.exists())
@@ -481,6 +483,9 @@ else:
         self.assertIsNone(summary["counts"]["blocking_items_count"])
         self.assertTrue((self.workspace_dir() / "incoming-findings.json").exists())
         self.assertTrue((self.workspace_dir() / "incoming-findings.md").exists())
+        request_text = request_path.read_text(encoding="utf-8")
+        self.assertIn("gh-address-cr review-to-findings", request_text)
+        self.assertIn("gh-address-cr findings", request_text)
         self.assertIn("external review producer", result.stderr)
         summary_path = self.workspace_dir() / "last-machine-summary.json"
         self.assertTrue(summary_path.exists())

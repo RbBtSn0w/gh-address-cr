@@ -8,6 +8,8 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
+    GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+    GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
     PROCESS_COMMAND_ARGS,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
@@ -39,3 +41,5 @@ class OtelSemconvPinsTestCase(unittest.TestCase):
         self.assertEqual(VCS_REPOSITORY_NAME, "vcs.repository.name")
         self.assertEqual(VCS_CHANGE_STATE, "vcs.change.state")
         self.assertEqual(ERROR_TYPE, "error.type")
+        self.assertEqual(GH_ADDRESS_CR_CLI_INIT_SPAN_NAME, "gh_address_cr.cli.init")
+        self.assertEqual(GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME, "gh_address_cr.subprocess")
