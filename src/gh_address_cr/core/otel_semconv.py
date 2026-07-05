@@ -37,7 +37,9 @@ GH_ADDRESS_CR_SPAN_KIND = "gh_address_cr.span.kind"
 GH_ADDRESS_CR_WORKFLOW_STEP_KIND = "gh_address_cr.workflow.step.kind"
 GH_ADDRESS_CR_WORKFLOW_STEP_NAME = "gh_address_cr.workflow.step.name"
 GH_ADDRESS_CR_ADAPTER_SPAN_NAME = "gh_address_cr.adapter"
+GH_ADDRESS_CR_CLI_INIT_SPAN_NAME = "gh_address_cr.cli.init"
 GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME = "gh_address_cr.command_session.operation"
+GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME = "gh_address_cr.subprocess"
 
 __all__ = [
     # Error attributes
@@ -65,5 +67,7 @@ __all__ = [
     "GH_ADDRESS_CR_WORKFLOW_STEP_KIND",
     "GH_ADDRESS_CR_WORKFLOW_STEP_NAME",
     "GH_ADDRESS_CR_ADAPTER_SPAN_NAME",
+    "GH_ADDRESS_CR_CLI_INIT_SPAN_NAME",
     "GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME",
+    "GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME",
 ]

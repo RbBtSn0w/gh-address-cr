@@ -35,8 +35,14 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_NAME,
+    GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+    PROCESS_COMMAND_ARGS,
 )
-from gh_address_cr.core.telemetry_safety import sanitize_cli_argv
+from gh_address_cr.core.telemetry_safety import (
+    classify_workflow_span_layer,
+    sanitize_cli_argv,
+    workflow_step_span_attributes,
+)
 from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
@@ -278,6 +284,15 @@ def ensure_external_review_handoff(repo: str, pr_number: str) -> Path:
             "Accepted handoff formats:\n\n"
             f"1. Preferred: write findings JSON to `{incoming_json}`\n"
             f"2. Fallback: write fixed `finding` blocks to `{incoming_md}`\n\n"
+            "Shortest paths:\n\n"
+            f"- Fastest: write JSON to `{incoming_json}`, then rerun:\n"
+            f"  `gh-address-cr review {repo} {pr_number}`\n"
+            f"- If you already have fixed `finding` blocks, convert them with:\n"
+            f"  `gh-address-cr review-to-findings {repo} {pr_number} --input {incoming_md}`\n"
+            f"  then rerun `gh-address-cr review {repo} {pr_number}`\n"
+            f"- If you want explicit local ingestion before PR orchestration, run:\n"
+            f"  `gh-address-cr findings {repo} {pr_number} --input {incoming_json}`\n"
+            f"  then `gh-address-cr review {repo} {pr_number}`\n\n"
             "Required finding fields:\n\n"
             "- `title`\n"
             "- `body`\n"
@@ -710,8 +725,11 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             reason_code="WAITING_FOR_EXTERNAL_REVIEW",
             waiting_on="external_review",
             next_action=(
-                "Provide findings JSON in `incoming-findings.json` or fixed `finding` blocks "
-                "in `incoming-findings.md`, then rerun the same review command."
+                "Fastest path: provide findings JSON in `incoming-findings.json`, then rerun the same review command. "
+                "If you already have fixed `finding` blocks, run "
+                f"`gh-address-cr review-to-findings {repo} {pr_number} --input incoming-findings.md`, then rerun the same review command. "
+                "For explicit local ingestion, run "
+                f"`gh-address-cr findings {repo} {pr_number} --input incoming-findings.json`, then `gh-address-cr review {repo} {pr_number}`."
             ),
             artifact_path=str(request_path),
             exit_code=WAITING_FOR_EXTERNAL_REVIEW_EXIT,
@@ -902,25 +920,49 @@ def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
 
 def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     """Handle unknown commands and native review/address entrypoints."""
+    from gh_address_cr.telemetry import set_current_span_attributes, start_child_span
+
     if args.command not in NATIVE_REVIEW_COMMANDS:
         supported_commands = ", ".join(sorted(PUBLIC_COMMANDS))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
-    normalize_leading_high_level_options(args)
-    if not normalize_output_args(args):
-        return 2
-    normalize_high_level_target_args(args)
-    if args.command in OUTPUT_MODE_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
-        print(alias_help(args.command), end="")
-        return 0
-    if args.command in OUTPUT_MODE_COMMANDS and len(args.args) < 2:
-        args.args, scope_error = _maybe_prepend_implicit_scope(args.args)
-        if scope_error is not None:
-            return _emit_scope_resolution_error(scope_error)
-    if args.command in OUTPUT_MODE_COMMANDS:
-        preflight_rc = preflight_high_level(args)
-        if preflight_rc is not None:
-            return preflight_rc
+    sanitized_args, _ = sanitize_cli_argv(["gh-address-cr", args.command, *args.args], command_argv=[args.command, *args.args])
+    layer = classify_workflow_span_layer(
+        has_independent_duration=True,
+        has_independent_count=True,
+        has_error_boundary=True,
+        externally_visible=True,
+    )
+    with start_child_span(
+        GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+        attributes={
+            **workflow_step_span_attributes(step_name="cli-init", step_kind=layer),
+            "gh_address_cr.command.name": str(args.command),
+            "gh_address_cr.command.path": str(args.command),
+            PROCESS_COMMAND_ARGS: sanitized_args[1:],
+        },
+    ):
+        normalize_leading_high_level_options(args)
+        if not normalize_output_args(args):
+            set_current_span_attributes({"gh_address_cr.cli.init.exit_code": 2})
+            return 2
+        normalize_high_level_target_args(args)
+        if args.command in OUTPUT_MODE_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
+            print(alias_help(args.command), end="")
+            set_current_span_attributes({"gh_address_cr.cli.init.exit_code": 0})
+            return 0
+        if args.command in OUTPUT_MODE_COMMANDS and len(args.args) < 2:
+            args.args, scope_error = _maybe_prepend_implicit_scope(args.args)
+            if scope_error is not None:
+                rc = _emit_scope_resolution_error(scope_error)
+                set_current_span_attributes({"gh_address_cr.cli.init.exit_code": rc})
+                return rc
+        if args.command in OUTPUT_MODE_COMMANDS:
+            preflight_rc = preflight_high_level(args)
+            if preflight_rc is not None:
+                set_current_span_attributes({"gh_address_cr.cli.init.exit_code": preflight_rc})
+                return preflight_rc
+        set_current_span_attributes({"gh_address_cr.cli.init.exit_code": 0})
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 

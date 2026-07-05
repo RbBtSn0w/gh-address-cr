@@ -127,6 +127,29 @@ class LogicValidationSignalTest(unittest.TestCase):
 
                 self.assertEqual(signals, [])
 
+    def test_accepted_reject_response_overrides_stale_fix_classification(self):
+        session = {
+            "items": {
+                "github-thread:reject": {
+                    "item_id": "github-thread:reject",
+                    "item_kind": "github_thread",
+                    "state": "published",
+                    "reply_evidence": {"reply_url": "https://example.test/reply"},
+                    "decision": "fix",
+                    "classification_evidence": {"classification": "fix"},
+                    "publish_resolution": "reject",
+                    "accepted_response": {
+                        "resolution": "reject",
+                        "reply_markdown": "Declining this non-blocking concern.",
+                    },
+                }
+            }
+        }
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
+
     def test_state_contradiction_generates_blocking_signal(self):
         session = {
             "items": {

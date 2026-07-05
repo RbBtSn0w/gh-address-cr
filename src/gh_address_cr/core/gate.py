@@ -89,7 +89,13 @@ class GateResult:
             "artifact_path": None,
             "reason_code": self.reason_code,
             "waiting_on": self.waiting_on,
-            "next_action": _next_action(self.reason_code, repo=self.repo, pr_number=self.pr_number, passed=self.passed),
+            "next_action": _next_action(
+                self.reason_code,
+                repo=self.repo,
+                pr_number=self.pr_number,
+                passed=self.passed,
+                logic_validation_signals=self.logic_validation_signals,
+            ),
             "exit_code": self.exit_code,
             # Authoritative completion proof (pending reviews + checks evaluated),
             # distinct from the inline pre-gate emitted by review/address/threads.
@@ -361,10 +367,38 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "resolve_homogeneous": command_templates.resolve_homogeneous(repo, pr_number),
         "resolve_decline": command_templates.resolve_decline(repo, pr_number),
         "resolve_stale": command_templates.resolve_stale(repo, pr_number),
+        "evidence_add_validation": command_templates.evidence_add_validation(repo, pr_number),
     }
 
 
-def _next_action_with_pr(reason_code: str, repo: str, pr_number: str) -> str | None:
+def _logic_validation_next_action(
+    repo: str,
+    pr_number: str,
+    logic_validation_signals: list[dict[str, Any]] | None,
+) -> str | None:
+    if not logic_validation_signals:
+        return None
+    blocking = [signal for signal in logic_validation_signals if signal.get("gate_effect") == "blocking"]
+    if len(blocking) != 1:
+        return None
+    signal = blocking[0]
+    if signal.get("signal_type") != "missing_required_evidence":
+        return None
+    item_id = str(signal.get("item_id") or "").strip()
+    if not item_id.startswith("github-thread:"):
+        return None
+    reconcile = command_templates.evidence_add_validation(repo, pr_number, item_id=item_id)
+    final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
+    return f"Record terminal-thread validation evidence with `{reconcile}`, then rerun {final_gate}."
+
+
+def _next_action_with_pr(
+    reason_code: str,
+    repo: str,
+    pr_number: str,
+    *,
+    logic_validation_signals: list[dict[str, Any]] | None = None,
+) -> str | None:
     final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
     if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
         return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
@@ -380,6 +414,8 @@ def _next_action_with_pr(reason_code: str, repo: str, pr_number: str) -> str | N
         return f"Run `gh-address-cr agent evidence add {repo} {pr_number} ...`, then rerun {final_gate}."
     if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
         return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
+        return _logic_validation_next_action(repo, pr_number, logic_validation_signals)
     return None
 
 
@@ -403,13 +439,25 @@ def _next_action_generic(reason_code: str) -> str:
     return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
 
 
-def _next_action(reason_code: str | None, *, repo: str = "", pr_number: str = "", passed: bool = False) -> str:
+def _next_action(
+    reason_code: str | None,
+    *,
+    repo: str = "",
+    pr_number: str = "",
+    passed: bool = False,
+    logic_validation_signals: list[dict[str, Any]] | None = None,
+) -> str:
     if reason_code is None:
         if passed:
             return "Completion may be claimed."
         return "Status unknown: pending check results."
     if repo and pr_number:
-        result = _next_action_with_pr(reason_code, repo, pr_number)
+        result = _next_action_with_pr(
+            reason_code,
+            repo,
+            pr_number,
+            logic_validation_signals=logic_validation_signals,
+        )
         if result is not None:
             return result
     return _next_action_generic(reason_code)

@@ -166,6 +166,25 @@ def resolve_stale(repo: str, pr_number: str) -> str:
     )
 
 
+def evidence_add_validation(repo: str, pr_number: str, *, item_id: str = "<item_id>") -> str:
+    return shell_command(
+        "gh-address-cr",
+        "agent",
+        "evidence",
+        "add",
+        repo,
+        pr_number,
+        "--item-id",
+        item_id,
+        "--commit",
+        "<sha>",
+        "--files",
+        "<paths>",
+        "--validation",
+        "<cmd=passed>",
+    )
+
+
 def publish(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "agent", "publish", repo, pr_number)
 

@@ -3,7 +3,22 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+from gh_address_cr.core.otel_semconv import (
+    ERROR_TYPE,
+    GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
+    PROCESS_COMMAND_ARGS,
+    PROCESS_EXECUTABLE_NAME,
+    PROCESS_EXIT_CODE,
+)
+from gh_address_cr.core.telemetry_safety import (
+    classify_workflow_span_layer,
+    command_label,
+    safe_command_args,
+    workflow_step_span_attributes,
+)
 
 TRANSIENT_GH_FAILURE_MARKERS = (
     "502",
@@ -52,67 +67,96 @@ def run_cmd(
     retries: int = 3,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    import time
-
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.core.telemetry_safety import command_label
-    from gh_address_cr.telemetry import add_current_span_event
+    from gh_address_cr.telemetry import add_current_span_event, set_current_span_attributes, start_child_span
 
     attempts = max(1, retries)
     start_time = time.time()
     result: subprocess.CompletedProcess[str] | None = None
     tool_name = command_label(cmd) or "subprocess"
+    safe_args = safe_command_args(list(cmd))
+    layer = classify_workflow_span_layer(
+        has_independent_duration=True,
+        has_independent_count=True,
+        has_error_boundary=True,
+        externally_visible=True,
+    )
     add_current_span_event(
         "gh_address_cr.subprocess.start",
         {
+            "gh_address_cr.command.name": tool_name,
             "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.command_args": safe_args,
             "gh_address_cr.subprocess.retries": attempts,
         },
     )
-    for attempt in range(attempts):
-        try:
-            result = subprocess.run(
-                cmd,
-                input=stdin,
-                text=True,
-                capture_output=True,
-                env=runtime_subprocess_env(),
-                timeout=timeout,
-            )
-            if (
-                result.returncode != 0
-                and cmd
-                and cmd[0] == "gh"
-                and attempt < attempts - 1
-                and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
-            ):
-                time.sleep(2**attempt)
-                continue
-            break
-        except subprocess.TimeoutExpired as exc:
+    with start_child_span(
+        GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
+        attributes={
+            **workflow_step_span_attributes(step_name="subprocess", step_kind=layer),
+            "gh_address_cr.command.name": tool_name,
+            "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.retries": attempts,
+            PROCESS_EXECUTABLE_NAME: os.path.basename(cmd[0]) if cmd else "subprocess",
+            PROCESS_COMMAND_ARGS: safe_args,
+        },
+    ):
+        for attempt in range(attempts):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=stdin,
+                    text=True,
+                    capture_output=True,
+                    env=runtime_subprocess_env(),
+                    timeout=timeout,
+                )
+                if (
+                    result.returncode != 0
+                    and cmd
+                    and cmd[0] == "gh"
+                    and attempt < attempts - 1
+                    and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+                ):
+                    time.sleep(2**attempt)
+                    continue
+                break
+            except subprocess.TimeoutExpired as exc:
+                result = subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=124,
+                    stdout=timeout_stream_text(exc.stdout),
+                    stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+                )
+                set_current_span_attributes({ERROR_TYPE: "timeout"})
+                if cmd and cmd[0] == "gh" and attempt < attempts - 1:
+                    time.sleep(2**attempt)
+                    continue
+                break
+        if result is None:
             result = subprocess.CompletedProcess(
                 args=cmd,
-                returncode=124,
-                stdout=timeout_stream_text(exc.stdout),
-                stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+                returncode=1,
+                stdout="",
+                stderr="Command failed before producing a result.",
             )
-            if cmd and cmd[0] == "gh" and attempt < attempts - 1:
-                time.sleep(2**attempt)
-                continue
-            break
-    if result is None:
-        result = subprocess.CompletedProcess(
-            args=cmd,
-            returncode=1,
-            stdout="",
-            stderr="Command failed before producing a result.",
+        end_time = time.time()
+        exit_code = result.returncode
+        set_current_span_attributes(
+            {
+                "gh_address_cr.subprocess.attempts_used": attempt + 1,
+                "gh_address_cr.subprocess.duration_ms": round((end_time - start_time) * 1000, 3),
+                PROCESS_EXIT_CODE: exit_code,
+            }
         )
     end_time = time.time()
     exit_code = result.returncode
     add_current_span_event(
         "gh_address_cr.subprocess.end",
         {
+            "gh_address_cr.command.name": tool_name,
             "gh_address_cr.subprocess.command_label": tool_name,
+            "gh_address_cr.subprocess.command_args": safe_args,
             "gh_address_cr.subprocess.attempts_used": attempt + 1,
             "gh_address_cr.subprocess.exit_code": exit_code,
         },
