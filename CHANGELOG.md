@@ -1,3 +1,9 @@
+## [3.5.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.2...v3.5.3) (2026-07-05)
+
+### Bug Fixes
+
+* close review workflow gaps and add CLI child spans ([#190](https://github.com/RbBtSn0w/gh-address-cr/issues/190)) ([11a6a4e](https://github.com/RbBtSn0w/gh-address-cr/commit/11a6a4efb057a6750895d5930ea6ddb66f55d065))
+
 ## [3.5.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.1...v3.5.2) (2026-07-03)
 
 ### Bug Fixes
