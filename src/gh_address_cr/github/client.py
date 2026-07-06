@@ -22,6 +22,7 @@ from gh_address_cr.github.transient_failures import is_transient_github_failure_
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 
+
 class GitHubClient:
     def __init__(self, *, runner: Runner | None = None):
         self._runner = runner or self._default_runner
@@ -134,7 +135,11 @@ class GitHubClient:
                 or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             )
             for thread in threads:
-                relation = "original_concern_author" if reviewer and reviewer == thread.get("first_author_login") else "other_reviewer"
+                relation = (
+                    "original_concern_author"
+                    if reviewer and reviewer == thread.get("first_author_login")
+                    else "other_reviewer"
+                )
                 if relation != "original_concern_author":
                     continue
                 thread_id = str(thread.get("id") or "")

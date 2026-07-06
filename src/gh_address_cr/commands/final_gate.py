@@ -56,6 +56,7 @@ def _parse_final_gate_args(
         return None, emit_scope_resolution_error(scope_error)
     return parser.parse_args(scoped_args), None
 
+
 def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
     result: core_gate.GateResult,
