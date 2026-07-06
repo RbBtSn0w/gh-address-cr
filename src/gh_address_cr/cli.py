@@ -920,7 +920,7 @@ def _dispatch_passthrough_commands(args: argparse.Namespace) -> int | None:
 
 def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     """Handle unknown commands and native review/address entrypoints."""
-    from gh_address_cr.telemetry import set_current_span_attributes, start_child_span
+    from gh_address_cr.otel_tracing import set_current_span_attributes, start_child_span
 
     if args.command not in NATIVE_REVIEW_COMMANDS:
         supported_commands = ", ".join(sorted(PUBLIC_COMMANDS))
@@ -991,7 +991,7 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
 
 
 def main(argv: list[str] | None = None) -> int:
-    from gh_address_cr.telemetry import get_current_span_attributes, set_current_span_attributes
+    from gh_address_cr.otel_tracing import get_current_span_attributes, set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)

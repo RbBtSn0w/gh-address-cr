@@ -4,6 +4,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from gh_address_cr.github.transient_failures import NETWORK_TRANSIENT_MARKERS
+
 AUTH_MARKERS = (
     "authentication",
     "gh auth login",
@@ -14,13 +16,8 @@ AUTH_MARKERS = (
 )
 NETWORK_MARKERS = (
     "could not resolve host",
-    "failed to connect",
-    "error connecting",
     "network is unreachable",
-    "temporary failure",
-    "connection reset",
-    "timeout",
-    "timed out",
+    *NETWORK_TRANSIENT_MARKERS,
 )
 SANDBOX_MARKERS = (
     "operation not permitted",

@@ -19,25 +19,14 @@ from gh_address_cr.core.telemetry_safety import (
     safe_command_args,
     workflow_step_span_attributes,
 )
-
-TRANSIENT_GH_FAILURE_MARKERS = (
-    "502",
-    "503",
-    "temporary failure",
-    "timeout",
-    "timed out",
-    "connection reset",
-    "graphql error",
-    "graphql failed",
-)
+from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
 
 def is_transient_gh_failure(
     stderr: str | None = None, stdout: str | None = None, returncode: int | None = None
 ) -> bool:
     _ = returncode
-    text = f"{stderr or ''}\n{stdout or ''}".lower()
-    return any(marker in text for marker in TRANSIENT_GH_FAILURE_MARKERS)
+    return is_transient_github_failure_text(stderr, stdout)
 
 
 def telemetry_debug_enabled() -> bool:
@@ -68,7 +57,7 @@ def run_cmd(
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     from gh_address_cr.core.telemetry import SessionTelemetry
-    from gh_address_cr.telemetry import add_current_span_event, set_current_span_attributes, start_child_span
+    from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
 
     attempts = max(1, retries)
     start_time = time.time()

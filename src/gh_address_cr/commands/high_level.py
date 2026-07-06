@@ -9,9 +9,10 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from gh_address_cr.core import command_templates
@@ -579,7 +580,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
     from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
-    from gh_address_cr.telemetry import start_child_span
+    from gh_address_cr.otel_tracing import start_child_span
 
     start_time = time.time()
     result = None
@@ -614,7 +615,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         except Exception as exc:
             error = str(exc)
         finally:
-            from gh_address_cr.telemetry import set_current_span_attributes
+            from gh_address_cr.otel_tracing import set_current_span_attributes
 
             set_current_span_attributes(
                 {
@@ -657,6 +658,31 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
             print(f"Review workflow {status}")
         return
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+
+
+@contextmanager
+def _high_level_phase(command: str, phase: str) -> Iterator[dict[str, str | int | float]]:
+    from gh_address_cr.otel_tracing import add_current_span_event
+
+    started_at = time.monotonic()
+    add_current_span_event(
+        "gh_address_cr.high_level.phase.start",
+        {
+            "gh_address_cr.high_level.command": command,
+            "gh_address_cr.high_level.phase": phase,
+        },
+    )
+    end_attributes: dict[str, str | int | float] = {}
+    try:
+        yield end_attributes
+    finally:
+        payload: dict[str, str | int | float] = {
+            "gh_address_cr.high_level.command": command,
+            "gh_address_cr.high_level.phase": phase,
+            "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - started_at) * 1000, 3),
+        }
+        payload.update(end_attributes)
+        add_current_span_event("gh_address_cr.high_level.phase.end", payload)
 
 
 class HighLevelReviewRuntime:
@@ -810,7 +836,7 @@ class HighLevelReviewRuntime:
         return 5
 
     def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
-        from gh_address_cr.telemetry import add_current_span_event
+        from gh_address_cr.otel_tracing import add_current_span_event
 
         parsed = _parse_native_high_level_args(command, passthrough_args)
         repo = parsed.repo
@@ -819,66 +845,21 @@ class HighLevelReviewRuntime:
         run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
         auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
 
-        phase_started_at = time.monotonic()
-        add_current_span_event(
-            "gh_address_cr.high_level.phase.start",
-            {
-                "gh_address_cr.high_level.command": command,
-                "gh_address_cr.high_level.phase": "preflight",
-            },
-        )
-        exit_code, preloaded_findings_input = self._run_preflight_checks(command, parsed, repo, pr_number)
-        add_current_span_event(
-            "gh_address_cr.high_level.phase.end",
-            {
-                "gh_address_cr.high_level.command": command,
-                "gh_address_cr.high_level.phase": "preflight",
-                "gh_address_cr.high_level.exit_code": exit_code if exit_code is not None else 0,
-                "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
-            },
-        )
+        with _high_level_phase(command, "preflight") as phase:
+            exit_code, preloaded_findings_input = self._run_preflight_checks(command, parsed, repo, pr_number)
+            phase["gh_address_cr.high_level.exit_code"] = exit_code if exit_code is not None else 0
         if exit_code is not None:
             return exit_code
 
-        phase_started_at = time.monotonic()
-        add_current_span_event(
-            "gh_address_cr.high_level.phase.start",
-            {
-                "gh_address_cr.high_level.command": command,
-                "gh_address_cr.high_level.phase": "session",
-            },
-        )
-        session = _load_or_create_session(repo, pr_number)
-        add_current_span_event(
-            "gh_address_cr.high_level.phase.end",
-            {
-                "gh_address_cr.high_level.command": command,
-                "gh_address_cr.high_level.phase": "session",
-                "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
-            },
-        )
+        with _high_level_phase(command, "session"):
+            session = _load_or_create_session(repo, pr_number)
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:
-            phase_started_at = time.monotonic()
-            add_current_span_event(
-                "gh_address_cr.high_level.phase.start",
-                {
-                    "gh_address_cr.high_level.command": command,
-                    "gh_address_cr.high_level.phase": "ingest",
-                },
-            )
-            session, remote_threads = self._ingest_and_load_threads(
-                command, parsed, session, preloaded_findings_input, repo, pr_number
-            )
-            add_current_span_event(
-                "gh_address_cr.high_level.phase.end",
-                {
-                    "gh_address_cr.high_level.command": command,
-                    "gh_address_cr.high_level.phase": "ingest",
-                    "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
-                },
-            )
+            with _high_level_phase(command, "ingest"):
+                session, remote_threads = self._ingest_and_load_threads(
+                    command, parsed, session, preloaded_findings_input, repo, pr_number
+                )
             _recalc_native_metrics(session)
             if auto_simple and _blocking_local_items(session):
                 return _emit_auto_simple_not_eligible(
@@ -892,23 +873,8 @@ class HighLevelReviewRuntime:
                     human=human,
                     lean=lean,
                 )
-            phase_started_at = time.monotonic()
-            add_current_span_event(
-                "gh_address_cr.high_level.phase.start",
-                {
-                    "gh_address_cr.high_level.command": command,
-                    "gh_address_cr.high_level.phase": "gate",
-                },
-            )
-            result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
-            add_current_span_event(
-                "gh_address_cr.high_level.phase.end",
-                {
-                    "gh_address_cr.high_level.command": command,
-                    "gh_address_cr.high_level.phase": "gate",
-                    "gh_address_cr.high_level.elapsed_ms": round((time.monotonic() - phase_started_at) * 1000, 3),
-                },
-            )
+            with _high_level_phase(command, "gate"):
+                result = core_gate.evaluate_final_gate(session, remote_threads=remote_threads)
         except (FindingsFormatError, OSError) as exc:
             return self._handle_format_error(
                 exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
@@ -916,7 +882,7 @@ class HighLevelReviewRuntime:
         except GitHubError as exc:
             return self._handle_github_error(
                 exc, command, repo, pr_number, run_id, parsed.max_iterations, session, human, lean
-                )
+            )
 
         if auto_simple and not result.passed:
             add_current_span_event(
@@ -970,7 +936,7 @@ class HighLevelReviewRuntime:
                 item=item,
                 include_threads=True,
                 lean=lean,
-                )
+            )
             _emit_native_summary(summary, human=human)
             return 5
 

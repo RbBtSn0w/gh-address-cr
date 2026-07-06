@@ -12,7 +12,7 @@ from gh_address_cr import (
     SUPPORTED_SKILL_CONTRACT_VERSIONS,
     __version__,
 )
-from gh_address_cr.core import agent_protocol, protocol_codes, workflow_matching
+from gh_address_cr.core import agent_batch, agent_protocol, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _load_response_json_object,
@@ -125,7 +125,7 @@ def fast_fix_from_batch_input(
     )
     _validate_fix_all_input_item_reply_evidence(batch)
     _validate_fix_all_input_stale_threads(repo, pr_number, batch)
-    submitted = agent_protocol.submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=now)
+    submitted = agent_batch.submit_batch_action_response(repo, pr_number, batch_path=batch_path, now=now)
     payload = {
         "status": "FAST_FIX_ALL_ACCEPTED",
         "repo": repo,
@@ -602,6 +602,78 @@ def fast_fix_item(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    normalized_severity, requested_priority_evidence = _validate_fast_fix_inputs(
+        repo,
+        pr_number,
+        item_id=item_id,
+        files=files,
+        validation_commands=validation_commands,
+        commit_hash=commit_hash,
+        summary=summary,
+        why=why,
+        severity=severity,
+        severity_note=severity_note,
+        review_priority=review_priority,
+    )
+    classification, requested = _prepare_fast_fix_request(
+        repo,
+        pr_number,
+        item_id=item_id,
+        agent_id=agent_id,
+        why=why,
+        review_priority_evidence=requested_priority_evidence,
+        now=now,
+    )
+    response_path, response = _build_fast_fix_response(
+        repo,
+        pr_number,
+        requested=requested,
+        item_id=item_id,
+        agent_id=agent_id,
+        summary=summary,
+        why=why,
+        commit_hash=commit_hash,
+        files=files,
+        validation_commands=validation_commands,
+        normalized_severity=normalized_severity,
+        severity_note=severity_note,
+    )
+    submitted = agent_protocol.submit_action_response(
+        repo,
+        pr_number,
+        response_path=response_path,
+        now=now,
+        publish=publish,
+        github_client=github_client,
+    )
+
+    return {
+        "status": "FAST_FIX_COMPLETE" if publish else "FAST_FIX_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": item_id,
+        "classification": classification,
+        "request_path": requested["request_path"],
+        "response_path": str(response_path),
+        "submit": submitted,
+        "next_action": submitted["next_action"],
+    }
+
+
+def _validate_fast_fix_inputs(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    files: list[str],
+    validation_commands: list[dict[str, Any]],
+    commit_hash: str,
+    summary: str,
+    why: str,
+    severity: str | None,
+    severity_note: str | None,
+    review_priority: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
     normalized_files = _normalize_string_list(files)
     normalized_validation = _normalize_validation_command_records(validation_commands)
     if not normalized_files:
@@ -672,77 +744,87 @@ def fast_fix_item(
             message="agent resolve --review-priority must be high, medium, or low.",
             payload={"item_id": item_id},
         )
+    return normalized_severity, requested_priority_evidence
 
-    try:
-        classification = agent_protocol.record_classification(
-            repo,
-            pr_number,
-            item_id=item_id,
-            classification="fix",
-            agent_id=agent_id,
-            note=why,
-        )
-        requested = agent_protocol.issue_action_request(
-            repo,
-            pr_number,
-            role="fixer",
-            agent_id=agent_id,
-            item_id=item_id,
-            now=now,
-        )
-        if requested_priority_evidence:
-            session = session_store.load_session(repo, pr_number)
-            item = _items(session).get(item_id)
-            if isinstance(item, dict):
-                item["review_priority_evidence"] = requested_priority_evidence
-                session_store.save_session(repo, pr_number, session)
-        request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
-        response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
-        fix_reply = {
-            "summary": summary,
-            "why": why,
-            "commit_hash": commit_hash.strip(),
-            "files": normalized_files,
-        }
-        if normalized_severity:
-            fix_reply["severity"] = normalized_severity
-        if severity_note and severity_note.strip():
-            fix_reply["severity_note"] = severity_note.strip()
-        response = {
-            "schema_version": PROTOCOL_VERSION,
-            "request_id": request["request_id"],
-            "lease_id": request["lease_id"],
-            "agent_id": agent_id,
-            "item_id": item_id,
-            "resolution": "fix",
-            "note": summary,
-            "files": normalized_files,
-            "validation_commands": normalized_validation,
-            "fix_reply": fix_reply,
-        }
-        write_json_atomic(response_path, response)
-        submitted = agent_protocol.submit_action_response(
-            repo,
-            pr_number,
-            response_path=response_path,
-            now=now,
-            publish=publish,
-            github_client=github_client,
-        )
-    except WorkflowError:
-        raise
 
-    return {
-        "status": "FAST_FIX_COMPLETE" if publish else "FAST_FIX_ACCEPTED",
-        "repo": repo,
-        "pr_number": str(pr_number),
-        "item_id": item_id,
-        "classification": classification,
-        "request_path": requested["request_path"],
-        "response_path": str(response_path),
-        "submit": submitted,
-        "next_action": submitted["next_action"],
+def _prepare_fast_fix_request(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    why: str,
+    review_priority_evidence: dict[str, Any] | None,
+    now: datetime | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    classification = agent_protocol.record_classification(
+        repo,
+        pr_number,
+        item_id=item_id,
+        classification="fix",
+        agent_id=agent_id,
+        note=why,
+    )
+    requested = agent_protocol.issue_action_request(
+        repo,
+        pr_number,
+        role="fixer",
+        agent_id=agent_id,
+        item_id=item_id,
+        now=now,
+    )
+    if review_priority_evidence:
+        session = session_store.load_session(repo, pr_number)
+        item = _items(session).get(item_id)
+        if isinstance(item, dict):
+            item["review_priority_evidence"] = review_priority_evidence
+            session_store.save_session(repo, pr_number, session)
+    return classification, requested
+
+
+def _build_fast_fix_response(
+    repo: str,
+    pr_number: str,
+    *,
+    requested: dict[str, Any],
+    item_id: str,
+    agent_id: str,
+    summary: str,
+    why: str,
+    commit_hash: str,
+    files: list[str],
+    validation_commands: list[dict[str, Any]],
+    normalized_severity: str | None,
+    severity_note: str | None,
+) -> tuple[Path, dict[str, Any]]:
+    normalized_files = _normalize_string_list(files)
+    normalized_validation = _normalize_validation_command_records(validation_commands)
+    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+    response_path = session_store.workspace_dir(repo, pr_number) / f"fast-fix-response-{request['request_id']}.json"
+    fix_reply = {
+        "summary": summary,
+        "why": why,
+        "commit_hash": commit_hash.strip(),
+        "files": normalized_files,
     }
+    if normalized_severity:
+        fix_reply["severity"] = normalized_severity
+    if severity_note and severity_note.strip():
+        fix_reply["severity_note"] = severity_note.strip()
+    response = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": request["request_id"],
+        "lease_id": request["lease_id"],
+        "agent_id": agent_id,
+        "item_id": item_id,
+        "resolution": "fix",
+        "note": summary,
+        "files": normalized_files,
+        "validation_commands": normalized_validation,
+        "fix_reply": fix_reply,
+    }
+    write_json_atomic(response_path, response)
+    return response_path, response
 
 
 def trivial_fix_item(
@@ -805,16 +887,6 @@ def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]
     if not (path_trivial or text_trivial):
         return False, "Thread does not look like a documentation or typo-only concern."
     return True, "Thread is eligible for documentation or typo fast path."
-
-
-def fast_fix_matching_threads(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    return workflow_matching.fast_fix_matching_threads(*args, **kwargs)
-
-
-def decline_matching_threads(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    return workflow_matching.decline_matching_threads(*args, **kwargs)
-
-
 THREAD_ALIAS_RE = re.compile(r"^T(\d+)$")
 
 
