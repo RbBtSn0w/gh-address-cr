@@ -1,3 +1,9 @@
+## [3.5.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.3...v3.5.4) (2026-07-06)
+
+### Bug Fixes
+
+* resolve issue 191 architecture debt ([#193](https://github.com/RbBtSn0w/gh-address-cr/issues/193)) ([fb0a564](https://github.com/RbBtSn0w/gh-address-cr/commit/fb0a5641aa5cc58ad207d83b77c7be1de63f3963))
+
 ## [3.5.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.2...v3.5.3) (2026-07-05)
 
 ### Bug Fixes
