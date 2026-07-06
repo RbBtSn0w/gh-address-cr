@@ -6,8 +6,9 @@ used by tests and callers while the implementation lives in `otel_tracing.py`.
 
 from __future__ import annotations
 
-from gh_address_cr import otel_tracing as _impl
 from opentelemetry.trace import Tracer
+
+from gh_address_cr import otel_tracing as _impl
 
 TracerProvider = _impl.TracerProvider
 OTLPSpanExporter = _impl.OTLPSpanExporter
