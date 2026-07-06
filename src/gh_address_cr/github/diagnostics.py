@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from gh_address_cr.github.transient_failures import TRANSIENT_GITHUB_FAILURE_MARKERS
+from gh_address_cr.github.transient_failures import NETWORK_TRANSIENT_MARKERS
 
 AUTH_MARKERS = (
     "authentication",
@@ -17,7 +17,7 @@ AUTH_MARKERS = (
 NETWORK_MARKERS = (
     "could not resolve host",
     "network is unreachable",
-    *TRANSIENT_GITHUB_FAILURE_MARKERS[2:8],
+    *NETWORK_TRANSIENT_MARKERS,
 )
 SANDBOX_MARKERS = (
     "operation not permitted",

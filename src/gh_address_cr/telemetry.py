@@ -7,6 +7,7 @@ used by tests and callers while the implementation lives in `otel_tracing.py`.
 from __future__ import annotations
 
 from gh_address_cr import otel_tracing as _impl
+from opentelemetry.trace import Tracer
 
 TracerProvider = _impl.TracerProvider
 OTLPSpanExporter = _impl.OTLPSpanExporter
@@ -46,9 +47,9 @@ __all__ = [
 
 
 def _sync_patchable_globals() -> None:
-    _impl.TracerProvider = TracerProvider
-    _impl.OTLPSpanExporter = OTLPSpanExporter
-    _impl.BatchSpanProcessor = BatchSpanProcessor
+    _impl.TracerProvider = TracerProvider  # type: ignore[misc]
+    _impl.OTLPSpanExporter = OTLPSpanExporter  # type: ignore[misc]
+    _impl.BatchSpanProcessor = BatchSpanProcessor  # type: ignore[misc]
     _impl.TELEMETRY_ENVIRONMENT_VARIABLE = TELEMETRY_ENVIRONMENT_VARIABLE
     _impl.OTLP_TRACES_ENDPOINT = OTLP_TRACES_ENDPOINT
     _impl.EXPORT_TIMEOUT_SECONDS = EXPORT_TIMEOUT_SECONDS
@@ -57,7 +58,7 @@ def _sync_patchable_globals() -> None:
     _impl._OTEL_EXPORT_LOGGERS = _OTEL_EXPORT_LOGGERS
 
 
-def initialize_telemetry():
+def initialize_telemetry() -> Tracer:
     _sync_patchable_globals()
     return _impl.initialize_telemetry()
 

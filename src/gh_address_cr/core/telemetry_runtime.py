@@ -95,7 +95,7 @@ class SessionTelemetry:
                         continue
                     try:
                         payload = json.loads(line)
-                    except json.JSONDecodeError:
+                    except ValueError:
                         continue
                     metric = self._metric_from_payload(payload)
                     if metric is not None:

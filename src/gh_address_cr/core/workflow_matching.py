@@ -67,7 +67,7 @@ class _FastFixContext:
 def _build_fast_fix_context(
     *,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     commit_hash: str,
     severity: str | None,
     homogeneous_reason: str | None,
@@ -466,7 +466,7 @@ def fast_fix_matching_threads(
     agent_id: str,
     commit_hash: str,
     files: list[str],
-    validation_commands: list[dict[str, str]],
+    validation_commands: list[dict[str, Any]],
     include_stale: bool = False,
     stale_only: bool = False,
     severity: str | None = None,
