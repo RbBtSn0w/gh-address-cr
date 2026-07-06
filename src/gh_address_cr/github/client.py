@@ -18,22 +18,9 @@ from gh_address_cr.github.errors import (
     GitHubRateLimitError,
     GitHubTransientError,
 )
+from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
-
-TRANSIENT_MARKERS = (
-    "502",
-    "503",
-    "error connecting",
-    "failed to connect",
-    "temporary failure",
-    "timeout",
-    "timed out",
-    "connection reset",
-    "graphql error",
-    "graphql failed",
-)
-
 
 class GitHubClient:
     def __init__(self, *, runner: Runner | None = None):
@@ -482,5 +469,4 @@ def _completed_command(result: subprocess.CompletedProcess) -> list[str]:
 
 
 def _is_transient(stderr: str | None, stdout: str | None) -> bool:
-    text = f"{stderr or ''}\n{stdout or ''}".lower()
-    return any(marker in text for marker in TRANSIENT_MARKERS)
+    return is_transient_github_failure_text(stderr, stdout)

@@ -38,19 +38,19 @@ FIXTURES_DIR = ROOT / "tests" / "fixtures" / "action_protocol"
 
 
 class ActionProtocolTestCase(unittest.TestCase):
-    def test_core_agent_protocol_facade_exports_public_protocol_symbols(self):
-        from gh_address_cr.core import agent_protocol
+    def test_core_agent_protocol_exports_canonical_protocol_symbols(self):
+        from gh_address_cr.core import agent_batch, agent_protocol
 
         expected_symbols = [
             "issue_action_request",
-            "issue_batch_action_request",
             "record_classification",
             "submit_action_response",
-            "submit_batch_action_response",
         ]
         for symbol in expected_symbols:
             with self.subTest(symbol=symbol):
                 self.assertTrue(callable(getattr(agent_protocol, symbol)))
+        self.assertTrue(callable(agent_batch.issue_batch_action_request))
+        self.assertTrue(callable(agent_batch.submit_batch_action_response))
 
     def work_item(self, **overrides):
         payload = {

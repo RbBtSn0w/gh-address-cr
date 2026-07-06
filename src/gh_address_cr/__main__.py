@@ -21,7 +21,7 @@ from gh_address_cr.core.telemetry_safety import (
     detect_agent_session,
     sanitize_cli_argv,
 )
-from gh_address_cr.telemetry import (
+from gh_address_cr.otel_tracing import (
     initialize_telemetry,
     resolve_parent_context,
     run_traced,

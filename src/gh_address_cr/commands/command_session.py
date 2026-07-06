@@ -29,7 +29,7 @@ def handle_command_session(passthrough: list[str]) -> int:
         command_label,
         workflow_step_span_attributes,
     )
-    from gh_address_cr.telemetry import add_current_span_event, set_current_span_attributes, start_child_span
+    from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
 
     parser = argparse.ArgumentParser(prog="gh-address-cr command-session")
     parser.add_argument("--input", required=True)

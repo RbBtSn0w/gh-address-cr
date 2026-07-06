@@ -1,29 +1,34 @@
 from __future__ import annotations
 
 import json
-import math
-import os
 import time
 import uuid
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from hashlib import sha256
-from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes
-from gh_address_cr.core.command_runner import telemetry_debug_enabled
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.telemetry_adapters import (
+    CodexHostJsonAdapter,
+    GenericAgentJsonlAdapter,
+    TelemetryAdapter,
+    get_adapter,
+    register_adapter,
+    unregister_adapter,
+)
+from gh_address_cr.core.telemetry_external_events import (
+    event_fingerprint as _event_fingerprint,
+)
+from gh_address_cr.core.telemetry_external_events import (
+    load_external_events_with_diagnostics as _load_external_events_with_diagnostics,
+)
+from gh_address_cr.core.telemetry_external_events import (
+    normalize_external_event as _normalize_external_event,
+)
 from gh_address_cr.core.telemetry_models import (
-    MAX_DURATION_SECONDS,
-    MAX_ERROR_RATE_PERCENT,
-    SAFE_KINDS,
-    SAFE_STATUSES,
-    EfficiencyReport,
     EfficiencyReportPayload,
-    ExecutionMetric,
     ExternalTelemetryEvent,
     TelemetryParseResult,
 )
@@ -37,469 +42,46 @@ from gh_address_cr.core.telemetry_reporting import (
     _safe_os_error_diagnostic,
     _source_rows,
 )
+from gh_address_cr.core.telemetry_runtime import (
+    SessionTelemetry,
+    _log_telemetry_failure,
+    configure_context_safely,
+)
 from gh_address_cr.core.telemetry_safety import (
     _contains_control_character,
     _contains_private_identifier,
     _contains_token_marker,
-    _json_loads_strict,
     _looks_like_unnecessary_absolute_path,
-    _safe_correlation_id,
     _safe_diagnostic_text,
-    _safe_identity_label,
-    _safe_metadata,
-    _safe_operation,
-    _safe_optional_timestamp,
     _safe_runtime_operation,
-    _safe_source_label,
-    _safe_source_session_id,
 )
 
+__all__ = [
+    "CodexHostJsonAdapter",
+    "ExternalTelemetryEvent",
+    "GenericAgentJsonlAdapter",
+    "SessionTelemetry",
+    "TelemetryAdapter",
+    "TelemetryParseResult",
+    "autodiscovery_miss_import_summary",
+    "build_efficiency_report",
+    "configure_context_safely",
+    "get_adapter",
+    "hook_unavailable_import_summary",
+    "import_external_telemetry",
+    "input_unavailable_import_summary",
+    "_log_telemetry_failure",
+    "register_adapter",
+    "unregister_adapter",
+]
 
-def _log_telemetry_failure(action: str, exc: BaseException) -> None:
-    """Telemetry is best-effort; never raise into callers, but surface under the debug flag."""
-    if telemetry_debug_enabled():
-        import sys
-
-        sys.stderr.write(f"Telemetry {action} failed: {type(exc).__name__}: {exc}\n")
-
-
-def configure_context_safely(repo: str, pr_number: str) -> None:
-    """Configure the telemetry session context without ever raising into the caller."""
-    try:
-        SessionTelemetry.get_instance().configure_context(repo, str(pr_number))
-    except Exception as exc:  # intentionally broad: telemetry must not break core flows
-        _log_telemetry_failure("context configuration", exc)
-
-
-class TelemetryAdapter(ABC):
-    @abstractmethod
-    def parse(self, raw: str, source: str) -> TelemetryParseResult:
-        """Parse raw telemetry into a TelemetryParseResult.
-
-        Expected producer/input failures must be represented by a rejected
-        TelemetryParseResult or by raising ValueError/TypeError. Adapter
-        implementations should validate payload shape before indexing so
-        malformed input does not leak KeyError or IndexError; those exception
-        types are treated as adapter bugs and fail loud at the import boundary.
-        """
-        pass
-
-
-class TelemetryAdapterRegistry:
-    def __init__(self) -> None:
-        self._adapters: dict[tuple[str, str | None], TelemetryAdapter] = {}
-
-    def register(self, fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
-        key = (fmt, source)
-        if key in self._adapters:
-            raise ValueError(f"Adapter for format '{fmt}' and source '{source}' is already registered.")
-        self._adapters[key] = adapter
-
-    def get_adapter(self, fmt: str, source: str | None = None) -> TelemetryAdapter | None:
-        if source is not None:
-            adapter = self._adapters.get((fmt, source))
-            if adapter is not None:
-                return adapter
-        return self._adapters.get((fmt, None))
-
-    def unregister(self, fmt: str, source: str | None = None) -> None:
-        self._adapters.pop((fmt, source), None)
-
-
-_registry = TelemetryAdapterRegistry()
-
-
-def register_adapter(fmt: str, adapter: TelemetryAdapter, source: str | None = None) -> None:
-    _registry.register(fmt, adapter, source)
-
-
-def get_adapter(fmt: str, source: str | None = None) -> TelemetryAdapter | None:
-    return _registry.get_adapter(fmt, source)
-
-
-def unregister_adapter(fmt: str, source: str | None = None) -> None:
-    _registry.unregister(fmt, source)
-
-
-class GenericAgentJsonlAdapter(TelemetryAdapter):
-    def parse(self, raw: str, source: str) -> TelemetryParseResult:
-        accepted: list[ExternalTelemetryEvent] = []
-        diagnostics: list[str] = []
-        rejected_count = 0
-        unsafe_seen = False
-        malformed_seen = False
-
-        for line_number, line in enumerate(raw.splitlines(), start=1):
-            if not line.strip():
-                continue
-            try:
-                payload = _json_loads_strict(line)
-            except json.JSONDecodeError as exc:
-                malformed_seen = True
-                rejected_count += 1
-                diagnostics.append(f"line {line_number}: invalid JSON: {exc.msg}")
-                continue
-            except ValueError as exc:
-                malformed_seen = True
-                rejected_count += 1
-                diagnostics.append(f"line {line_number}: invalid JSON: {exc}")
-                continue
-            try:
-                event = _normalize_external_event(payload, declared_source=source)
-            except ValueError as exc:
-                message = str(exc)
-                if message.startswith("UNSAFE:"):
-                    unsafe_seen = True
-                    diagnostics.append(f"line {line_number}: {message.removeprefix('UNSAFE:')}")
-                else:
-                    malformed_seen = True
-                    diagnostics.append(f"line {line_number}: {message}")
-                rejected_count += 1
-                continue
-            accepted.append(event)
-
-        return TelemetryParseResult(
-            events=accepted,
-            rejected_count=rejected_count,
-            unsafe_seen=unsafe_seen,
-            malformed_seen=malformed_seen,
-            diagnostics=diagnostics,
-            events_are_normalized=True,
-        )
-
-
-class CodexHostJsonAdapter(TelemetryAdapter):
-    def parse(self, raw: str, source: str) -> TelemetryParseResult:
-        try:
-            payload = _json_loads_strict(raw)
-        except json.JSONDecodeError as exc:
-            return TelemetryParseResult([], 1, False, True, [f"invalid JSON: {exc.msg}"])
-        except ValueError as exc:
-            return TelemetryParseResult([], 1, False, True, [f"invalid JSON: {exc}"])
-        if not isinstance(payload, dict):
-            return TelemetryParseResult([], 1, False, True, ["codex host payload must be an object"])
-
-        session_id = str(payload.get("session_id") or payload.get("thread_id") or "")
-        if not session_id:
-            return TelemetryParseResult([], 1, False, True, ["codex host payload missing session_id"])
-        turns = payload.get("turns")
-        if not isinstance(turns, list):
-            return TelemetryParseResult([], 1, False, True, ["codex host payload turns must be a list"])
-
-        events: list[ExternalTelemetryEvent] = []
-        diagnostics: list[str] = []
-        rejected = 0
-        for index, turn in enumerate(turns):
-            if not isinstance(turn, dict):
-                rejected += 1
-                diagnostics.append(f"turn {index}: turn must be an object")
-                continue
-            event_id = str(turn.get("id") or turn.get("turn_id") or f"turn-{index}")
-            duration_ms = _coerce_duration_ms(_first_present(turn, "duration_ms", "duration"))
-            if duration_ms is None:
-                rejected += 1
-                diagnostics.append(f"turn {index}: missing duration_ms")
-                continue
-            metadata = _codex_turn_metadata(turn)
-            events.append(
-                ExternalTelemetryEvent(
-                    schema_version="telemetry.external.v1",
-                    source=source,
-                    source_session_id=session_id,
-                    event_id=event_id,
-                    kind="agent_step",
-                    operation=str(turn.get("operation") or "codex.turn"),
-                    status=_normalize_host_status(turn.get("status")),
-                    duration_ms=duration_ms,
-                    started_at=_optional_str(turn.get("started_at")),
-                    ended_at=_optional_str(turn.get("ended_at")),
-                    metadata=metadata,
-                    correlation_id=_optional_str(turn.get("correlation_id")),
-                )
-            )
-            tool_calls = turn.get("tool_calls") or []
-            if isinstance(tool_calls, list):
-                for tool_index, tool in enumerate(tool_calls):
-                    if not isinstance(tool, dict):
-                        continue
-                    tool_duration = _coerce_duration_ms(_first_present(tool, "duration_ms", "duration")) or 0
-                    events.append(
-                        ExternalTelemetryEvent(
-                            schema_version="telemetry.external.v1",
-                            source=source,
-                            source_session_id=session_id,
-                            event_id=f"{event_id}:tool-{tool_index}",
-                            kind="tool_call",
-                            operation=str(tool.get("name") or tool.get("operation") or "tool_call"),
-                            status=_normalize_host_status(tool.get("status")),
-                            duration_ms=tool_duration,
-                            started_at=_optional_str(tool.get("started_at")),
-                            ended_at=_optional_str(tool.get("ended_at")),
-                            metadata={},
-                            correlation_id=event_id,
-                        )
-                    )
-        return TelemetryParseResult(events, rejected, False, bool(rejected), diagnostics)
-
-
-def _first_present(payload: dict[str, Any], *keys: str) -> Any | None:
-    for key in keys:
-        if key in payload and payload[key] is not None:
-            return payload[key]
-    return None
-
-
-def _codex_turn_metadata(turn: dict[str, Any]) -> dict[str, Any]:
-    metadata: dict[str, Any] = {}
-    tokens = turn.get("tokens")
-    if isinstance(tokens, dict):
-        for source_key, target_key in (
-            ("input", "token_input_count"),
-            ("output", "token_output_count"),
-            ("total", "token_total_count"),
-        ):
-            value = _coerce_positive_count(tokens.get(source_key))
-            if value is not None:
-                metadata[target_key] = value
-    tool_calls = turn.get("tool_calls")
-    if isinstance(tool_calls, list):
-        metadata["tool_call_count"] = len(tool_calls)
-    return metadata
-
-
-def _coerce_duration_ms(value: Any) -> int | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(number) or number < 0:
-        return None
-    return int(number)
-
-
-def _coerce_positive_count(value: Any) -> int | None:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number >= 0 else None
-
-
-def _normalize_host_status(value: Any) -> str:
-    status = str(value or "unknown").lower()
-    return status if status in SAFE_STATUSES else "unknown"
-
-
-def _optional_str(value: Any) -> str | None:
-    if value in (None, ""):
-        return None
-    return str(value)
-
-
-register_adapter("agent-jsonl", GenericAgentJsonlAdapter())
+register_adapter(
+    "agent-jsonl",
+    GenericAgentJsonlAdapter(
+        normalize_external_event=lambda payload, source: _normalize_external_event(payload, declared_source=source)
+    ),
+)
 register_adapter("codex-host-json", CodexHostJsonAdapter(), source="codex")
-
-
-class SessionTelemetry:
-    _instance: ClassVar[SessionTelemetry | None] = None
-
-    def __init__(self) -> None:
-        self.metrics: list[ExecutionMetric] = []
-        self.telemetry_file: Path | None = None
-        self._loaded_files: set[Path] = set()
-        self.paths: core_paths.SessionPaths | None = None
-
-    @classmethod
-    def get_instance(cls) -> SessionTelemetry:
-        if cls._instance is None:
-            cls._instance = SessionTelemetry()
-        return cls._instance
-
-    @classmethod
-    def reset(cls) -> None:
-        cls._instance = None
-
-    def configure_context(self, repo: str, pr_number: str) -> None:
-        self.metrics.clear()
-        self._loaded_files.clear()
-        self.paths = core_paths.SessionPaths(repo, pr_number)
-        path = self.paths.workspace_dir / "telemetry.jsonl"
-        self.configure_file(path)
-
-    def configure_file(self, path: Path) -> None:
-        self.telemetry_file = path
-        self._load_persisted_metrics(path)
-
-    def _load_persisted_metrics(self, path: Path) -> None:
-        if path in self._loaded_files:
-            return
-        self._loaded_files.add(path)
-        try:
-            if not path.is_file():
-                return
-            loaded_metrics: list[ExecutionMetric] = []
-            with path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    metric = self._metric_from_payload(payload)
-                    if metric is not None:
-                        loaded_metrics.append(metric)
-            self.metrics.extend(loaded_metrics)
-        except OSError:
-            return
-
-    @staticmethod
-    def _metric_from_payload(payload: object) -> ExecutionMetric | None:
-        if not isinstance(payload, dict):
-            return None
-        try:
-            start_time = float(payload["start_time"])
-            end_time = float(payload["end_time"])
-            if not math.isfinite(start_time) or not math.isfinite(end_time):
-                return None
-            return ExecutionMetric(
-                command=str(payload["command"]),
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=int(payload["exit_code"]),
-                is_retry=bool(payload.get("is_retry", False)),
-                pid=int(payload.get("pid", 0)),
-                execution_id=str(payload.get("execution_id") or ""),
-            )
-        except (KeyError, TypeError, ValueError):
-            return None
-
-    def record(
-        self,
-        command: str,
-        start_time: float,
-        end_time: float,
-        exit_code: int,
-        pid: int | None = None,
-        execution_id: str | None = None,
-    ) -> None:
-        is_retry = False
-        if self.metrics:
-            last_metric = self.metrics[-1]
-            if last_metric.command == command and not last_metric.is_success:
-                is_retry = True
-
-        metric = ExecutionMetric(
-            command=command,
-            start_time=start_time,
-            end_time=end_time,
-            exit_code=exit_code,
-            is_retry=is_retry,
-            pid=pid if pid is not None else os.getpid(),
-            execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
-        )
-        self.metrics.append(metric)
-        self._persist_metric(metric)
-
-    def _persist_metric(self, metric: ExecutionMetric) -> None:
-        if self.telemetry_file is None:
-            return
-        try:
-            self.telemetry_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.telemetry_file.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(metric.to_dict(), sort_keys=True) + "\n")
-        except OSError:
-            return
-
-    def evaluate_efficiency(self) -> list[str]:
-        flags: list[str] = []
-        if not self.metrics:
-            return flags
-
-        def _display_command(command: str) -> str:
-            if len(command) > 50:
-                return f"{command[:50]}..."
-            return command
-
-        # 1. Individual Duration check
-        for m in self.metrics:
-            if m.duration > MAX_DURATION_SECONDS:
-                flags.append(
-                    f"`{_display_command(m.command)}` took {m.duration:.1f}s (Exceeds {int(MAX_DURATION_SECONDS)}s threshold)."
-                )
-            if m.exit_code == 124:
-                flags.append(f"CRITICAL: `{_display_command(m.command)}` hit execution timeout (hung).")
-
-        # 2. Global Error Rate check
-        total_inv = len(self.metrics)
-        successes = sum(1 for m in self.metrics if m.is_success)
-        error_rate = ((total_inv - successes) / total_inv) * 100.0
-        if error_rate > MAX_ERROR_RATE_PERCENT:
-            flags.append(f"Global error rate is {error_rate:.1f}% (Exceeds {MAX_ERROR_RATE_PERCENT}% threshold).")
-
-        # 3. Consecutive Retries check
-        consecutive_retries: dict[str, int] = {}
-        current_command: str | None = None
-        current_retry_count = 0
-
-        for m in self.metrics:
-            if m.command != current_command:
-                if current_command is not None:
-                    consecutive_retries[current_command] = max(
-                        consecutive_retries.get(current_command, 0),
-                        current_retry_count,
-                    )
-                current_command = m.command
-                current_retry_count = 0
-            if m.is_retry:
-                current_retry_count += 1
-
-        if current_command is not None:
-            consecutive_retries[current_command] = max(
-                consecutive_retries.get(current_command, 0),
-                current_retry_count,
-            )
-
-        for cmd, count in consecutive_retries.items():
-            if count >= 1:
-                retry_word = "retry" if count == 1 else "retries"
-                flags.append(
-                    f"`{_display_command(cmd)}` ran {count + 1} times consecutively with {count} {retry_word} (High Retry Rate)."
-                )
-
-        return flags
-
-    def get_report(self) -> EfficiencyReport:
-        total_inv = len(self.metrics)
-        if total_inv == 0:
-            return EfficiencyReport(0, 0.0, 0.0, [], [])
-
-        total_dur = sum(m.duration for m in self.metrics)
-        successes = sum(1 for m in self.metrics if m.is_success)
-        success_rate = (successes / total_inv) * 100.0
-
-        flags = self.evaluate_efficiency()
-
-        return EfficiencyReport(
-            total_invocations=total_inv,
-            total_duration=total_dur,
-            success_rate=success_rate,
-            flagged_inefficiencies=flags,
-            metrics=list(self.metrics),
-        )
-
-    def get_summary_string(self) -> str | None:
-        if not self.metrics:
-            return None
-
-        report = self.get_report()
-        summary = f"{report.total_invocations} tools invoked ({report.success_rate:.0f}% success). Total tool duration: {report.total_duration:.1f}s."
-
-        if report.flagged_inefficiencies:
-            summary += "\n> ⚠️ **Inefficiencies Detected**:\n"
-            summary += "\n".join(f"> - {f}" for f in report.flagged_inefficiencies)
-
-        return summary
 
 
 def _failed_import_summary(
@@ -937,289 +519,6 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
     if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in diagnostics:
         diagnostics.append("TELEMETRY_OVERHEAD_EXCEEDED")
     return report
-
-
-def _normalize_external_event(payload: object, *, declared_source: str) -> ExternalTelemetryEvent:
-    if not isinstance(payload, dict):
-        raise ValueError("record must be a JSON object")
-    source_text = str(payload.get("source") or declared_source)
-    required = ("kind", "operation", "status")
-    missing = [key for key in required if not payload.get(key)]
-    if not source_text:
-        missing.insert(0, "source")
-    if missing:
-        raise ValueError(f"missing required field(s): {', '.join(missing)}")
-    source = _safe_source_label(source_text)
-    payload_dict = cast(dict[str, Any], payload)
-    schema_version = _safe_identity_label(str(payload_dict.get("schema_version") or "1.0"), field="schema_version")
-    kind = _safe_identity_label(str(payload_dict["kind"]), field="kind")
-    status = _safe_identity_label(str(payload_dict["status"]), field="status")
-    if kind not in SAFE_KINDS:
-        raise ValueError(f"unsupported kind: {kind}")
-    if status not in SAFE_STATUSES:
-        raise ValueError(f"unsupported status: {status}")
-    duration_ms = _event_duration_ms(payload_dict)
-    metadata = _safe_metadata(payload_dict.get("metadata") or {})
-    raw_session_id = payload_dict.get("source_session_id")
-    session_id = _safe_source_session_id(
-        raw_session_id if isinstance(raw_session_id, str) and raw_session_id else "unknown-session"
-    )
-    operation_payload = payload_dict["operation"]
-    if not isinstance(operation_payload, str):
-        raise ValueError("operation must be a string")
-    operation = _safe_operation(operation_payload)
-    started_at = _safe_optional_timestamp(payload_dict.get("started_at"), field="started_at")
-    ended_at = _safe_optional_timestamp(payload_dict.get("ended_at"), field="ended_at")
-    correlation_id = (
-        _safe_correlation_id(str(payload_dict["correlation_id"])) if payload_dict.get("correlation_id") else None
-    )
-    event_id = str(
-        (
-            _safe_identity_label(str(payload_dict["event_id"]), field="event_id")
-            if payload_dict.get("event_id")
-            else None
-        )
-        or _derive_event_id(
-            source=source,
-            source_session_id=session_id,
-            kind=kind,
-            operation=operation,
-            status=status,
-            duration_ms=duration_ms,
-            started_at=started_at,
-            ended_at=ended_at,
-            correlation_id=correlation_id,
-        )
-    )
-    event = ExternalTelemetryEvent(
-        schema_version=schema_version,
-        source=source,
-        source_session_id=session_id,
-        event_id=event_id,
-        kind=kind,
-        operation=operation,
-        status=status,
-        duration_ms=duration_ms,
-        started_at=started_at,
-        ended_at=ended_at,
-        metadata=metadata,
-        correlation_id=correlation_id,
-    )
-    return ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)})
-
-
-def _derive_event_id(
-    *,
-    source: str,
-    source_session_id: str,
-    kind: str,
-    operation: str,
-    status: str,
-    duration_ms: int,
-    started_at: str | None,
-    ended_at: str | None,
-    correlation_id: str | None,
-) -> str:
-    canonical = {
-        "source": source,
-        "source_session_id": source_session_id,
-        "kind": kind,
-        "operation": operation,
-        "status": status,
-        "duration_ms": duration_ms,
-        "started_at": started_at,
-        "ended_at": ended_at,
-        "correlation_id": correlation_id,
-    }
-    return uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(canonical, sort_keys=True, separators=(",", ":"))).hex
-
-
-def _event_fingerprint(event: ExternalTelemetryEvent) -> str:
-    if event.correlation_id and event.started_at and event.ended_at:
-        event_identity = event.correlation_id
-    elif event.correlation_id:
-        event_identity = f"{event.correlation_id}:{event.event_id}"
-    else:
-        event_identity = event.event_id
-    canonical = {
-        "source": event.source,
-        "source_session_id": event.source_session_id,
-        "event_identity": event_identity,
-        "kind": event.kind,
-        "operation": event.operation,
-        "duration_ms": event.duration_ms,
-        "started_at": event.started_at,
-        "ended_at": event.ended_at,
-        "status": event.status,
-        "correlation_id": event.correlation_id,
-    }
-    return sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def _event_duration_ms(payload: dict[str, Any]) -> int:
-    if payload.get("duration_ms") is not None:
-        value = payload["duration_ms"]
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError("duration_ms must be an integer") from None
-        if value < 0:
-            raise ValueError("duration_ms must be non-negative")
-        return value
-    started = payload.get("started_at")
-    ended = payload.get("ended_at")
-    if not started or not ended:
-        raise ValueError("duration_ms or started_at plus ended_at is required")
-    try:
-        start_dt = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("started_at and ended_at must be ISO timestamps") from None
-    if (start_dt.tzinfo is None) != (end_dt.tzinfo is None):
-        raise ValueError("timestamp timezone awareness must match")
-    try:
-        duration = int((end_dt - start_dt).total_seconds() * 1000)
-    except TypeError:
-        raise ValueError("timestamp timezone awareness must match") from None
-    if duration < 0:
-        raise ValueError("event duration must be non-negative")
-    return duration
-
-
-def _load_external_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEvent]:
-    events, _diagnostics = _load_external_events_with_diagnostics(paths)
-    return events
-
-
-def _load_external_events_with_diagnostics(
-    paths: core_paths.SessionPaths,
-) -> tuple[list[ExternalTelemetryEvent], list[str]]:
-    path = paths.external_telemetry_file
-    if not path.exists():
-        return [], []
-    if not path.is_file():
-        return [], [f"external telemetry store is not a regular file: {path.name}"]
-    events: list[ExternalTelemetryEvent] = []
-    diagnostics: list[str] = []
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    payload = _json_loads_strict(line)
-                    events.append(_load_stored_external_event(payload))
-                except json.JSONDecodeError as exc:
-                    diagnostics.append(f"external telemetry line {line_number}: invalid JSON: {exc.msg}")
-                except ValueError as exc:
-                    diagnostics.append(f"external telemetry line {line_number}: {_safe_diagnostic_text(str(exc))}")
-    except OSError as exc:
-        return [], [f"external telemetry unreadable: {exc}"]
-    return events, diagnostics
-
-
-def _sanitize_stored_identity_field(field: str, value: str) -> str:
-    """Apply the field-specific sanitization/whitelist for a stored telemetry string field."""
-    if field == "kind":
-        kind = _safe_identity_label(value, field=field)
-        if kind not in SAFE_KINDS:
-            raise ValueError(f"unsupported kind: {kind}")
-        return kind
-    if field == "status":
-        status = _safe_identity_label(value, field=field)
-        if status not in SAFE_STATUSES:
-            raise ValueError(f"unsupported status: {status}")
-        return status
-    if field in ("schema_version", "event_id"):
-        return _safe_identity_label(value, field=field)
-    if field == "source_session_id":
-        return _safe_source_session_id(value)
-    if field == "operation":
-        return _safe_operation(value)
-    return value
-
-
-def _extract_stored_required_strings(payload: dict[str, Any], source: str) -> dict[str, str]:
-    """Validate and sanitize the required string fields of a stored telemetry record."""
-    required_strings = ("schema_version", "source_session_id", "event_id", "kind", "operation", "status")
-    values: dict[str, str] = {"source": _safe_source_label(source)}
-    missing: list[str] = []
-    for field in required_strings:
-        value = payload.get(field)
-        if value in (None, ""):
-            missing.append(field)
-            continue
-        if not isinstance(value, str):
-            raise ValueError(f"{field} must be a string")
-        values[field] = _sanitize_stored_identity_field(field, value)
-    if missing:
-        raise ValueError(f"missing required field(s): {', '.join(missing)}")
-    return values
-
-
-def _load_stored_external_event(payload: object) -> ExternalTelemetryEvent:
-    if not isinstance(payload, dict):
-        raise ValueError("record must be a JSON object")
-    payload_dict = cast(dict[str, Any], payload)
-    source = payload_dict.get("source")
-    if not source:
-        raise ValueError("missing required field(s): source")
-    if not isinstance(source, str):
-        raise ValueError("source must be a string")
-    values = _extract_stored_required_strings(payload_dict, source)
-    duration_ms = payload_dict.get("duration_ms")
-    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
-        raise ValueError("duration_ms must be an integer")
-    if duration_ms < 0:
-        raise ValueError("duration_ms must be non-negative")
-    metadata = payload_dict.get("metadata")
-    if metadata is None:
-        metadata = {}
-    metadata = _safe_metadata(metadata)
-    started_at = _stored_optional_timestamp(payload_dict.get("started_at"), field="started_at")
-    ended_at = _stored_optional_timestamp(payload_dict.get("ended_at"), field="ended_at")
-    correlation_raw = payload_dict.get("correlation_id")
-    correlation_id = None
-    if correlation_raw is not None:
-        if not isinstance(correlation_raw, str):
-            raise ValueError("correlation_id must be a string")
-        correlation_id = _safe_correlation_id(correlation_raw)
-    event_fingerprint = payload_dict.get("event_fingerprint")
-    if event_fingerprint is not None and not isinstance(event_fingerprint, str):
-        raise ValueError("event_fingerprint must be a string")
-    event = ExternalTelemetryEvent(
-        schema_version=values["schema_version"],
-        source=values["source"],
-        source_session_id=values["source_session_id"],
-        event_id=values["event_id"],
-        kind=values["kind"],
-        operation=values["operation"],
-        status=values["status"],
-        duration_ms=duration_ms,
-        started_at=started_at,
-        ended_at=ended_at,
-        metadata=dict(metadata),
-        correlation_id=correlation_id,
-        event_fingerprint=event_fingerprint or "",
-    )
-    canonical_fingerprint = _event_fingerprint(event)
-    if event.event_fingerprint != canonical_fingerprint:
-        event = ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": canonical_fingerprint})
-    return event
-
-
-def _stored_optional_string(value: object, *, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field} must be a string")
-    return value
-
-
-def _stored_optional_timestamp(value: object, *, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field} must be a string")
-    return _safe_optional_timestamp(value, field=field)
 
 
 def _dedupe_events(events: list[ExternalTelemetryEvent]) -> tuple[list[ExternalTelemetryEvent], list[str]]:

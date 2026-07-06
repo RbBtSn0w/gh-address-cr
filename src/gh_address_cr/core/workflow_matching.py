@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import MAX_PARALLEL_CLAIMS, PROTOCOL_VERSION
-from gh_address_cr.core import agent_protocol, command_templates, leases, protocol_codes
+from gh_address_cr.core import agent_batch, agent_protocol, command_templates, leases, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _normalize_validation_command_records,
@@ -450,7 +450,7 @@ def _process_fast_fix_matches(
             commit_hash=commit_hash,
             severity_note=severity_note,
         )
-        batch_result = agent_protocol.submit_batch_action_response(
+        batch_result = agent_batch.submit_batch_action_response(
             repo, pr_number, batch_path=batch_path, now=current_time
         )
         accepted_count += int(batch_result.get("accepted_count") or 0)

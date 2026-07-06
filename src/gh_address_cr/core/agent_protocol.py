@@ -1416,19 +1416,3 @@ def _required_response_field(
             message=f"ActionResponse is missing `{field}`.",
         )
     return str(value)
-
-
-# Batch action-request orchestration lives in agent_batch, which imports shared
-# helpers from this module. To keep `agent_protocol.issue_batch_action_request`
-# working without a load-time import cycle, delegate lazily at call time — this is
-# robust regardless of which module is imported first.
-def issue_batch_action_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    from gh_address_cr.core.agent_batch import issue_batch_action_request as _impl
-
-    return _impl(*args, **kwargs)
-
-
-def submit_batch_action_response(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    from gh_address_cr.core.agent_batch import submit_batch_action_response as _impl
-
-    return _impl(*args, **kwargs)

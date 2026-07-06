@@ -26,7 +26,15 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.commands.common import (
     prepend_optional as _prepend_optional,
 )
-from gh_address_cr.core import agent_protocol, leases, protocol_codes, publisher, workflow
+from gh_address_cr.core import (
+    agent_batch,
+    agent_protocol,
+    leases,
+    protocol_codes,
+    publisher,
+    workflow,
+    workflow_matching,
+)
 from gh_address_cr.core.errors import WorkflowError
 
 PUBLIC_COMMANDS = {
@@ -203,7 +211,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
         if parsed.now:
             now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
         if parsed.batch:
-            payload = agent_protocol.issue_batch_action_request(
+            payload = agent_batch.issue_batch_action_request(
                 parsed.repo,
                 parsed.pr_number,
                 agent_id=parsed.agent_id,
@@ -425,10 +433,8 @@ def _resolve_published_flag(payload: dict) -> bool:
     return False
 
 
-def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+def _validate_resolve_mode(parsed: argparse.Namespace) -> None:
     if parsed.trivial and not parsed.item_id:
-        # Without this guard, --trivial with no <item_id> would fall through to the
-        # match-all branch and bypass the trivial-eligibility check entirely (#117).
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="TRIVIAL_REQUIRES_ITEM_ID",
@@ -439,8 +445,6 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
     if parsed.item_id and (
         parsed.batch or parsed.input or parsed.stale or parsed.homogeneous_reason or parsed.reject or parsed.clarify
     ):
-        # Match-all / batch modes are file/lease-scoped and do not consume an
-        # <item_id>; fail fast instead of silently ignoring it.
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="ITEM_ID_NOT_ALLOWED_FOR_MODE",
@@ -451,118 +455,108 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
                 "--reject/--clarify, or --homogeneous-reason."
             ),
         )
-    if parsed.reject or parsed.clarify:
-        resolution = "reject" if parsed.reject else "clarify"
-        if not parsed.match_files:
-            raise WorkflowError(
-                status="DECLINE_ALL_REJECTED",
-                reason_code="MISSING_MATCH_FILES",
-                waiting_on="decline_input",
-                exit_code=2,
-                message=f"agent resolve --{resolution} requires --match-files so the decline stays file-scoped.",
-            )
-        if parsed.commit or parsed.validation:
-            raise WorkflowError(
-                status="DECLINE_ALL_REJECTED",
-                reason_code="CONFLICTING_RESOLVE_MODE",
-                waiting_on="resolve_mode",
-                exit_code=2,
-                message=(
-                    f"agent resolve --{resolution} declines threads with a shared reply and "
-                    "does not accept --commit or --validation (use the fix path for code changes)."
-                ),
-            )
-        return workflow.decline_matching_threads(
-            parsed.repo,
-            parsed.pr_number,
-            agent_id=parsed.agent_id,
-            files=_parse_agent_files(parsed.files, parsed.file),
-            resolution=resolution,
-            homogeneous_reason=parsed.homogeneous_reason,
-            concern_label=parsed.concern_label,
-            include_stale=parsed.include_stale,
-            publish=parsed.publish,
-            now=now_dt,
-        )
-    if parsed.batch or parsed.input:
-        if not parsed.input:
-            raise WorkflowError(
-                status=protocol_codes.FAST_FIX_ALL_REJECTED,
-                reason_code="MISSING_BATCH_INPUT",
-                waiting_on="batch_action_response",
-                exit_code=2,
-                message="agent resolve --batch requires --input <BatchActionResponse>.",
-            )
-        return workflow.fast_fix_from_batch_input(
-            parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
-        )
 
-    if parsed.stale:
-        if not parsed.match_files:
-            raise WorkflowError(
-                status="STALE_RESOLUTION_REJECTED",
-                reason_code="MISSING_MATCH_FILES",
-                waiting_on="stale_resolution_input",
-                exit_code=2,
-                message="agent resolve --stale requires --match-files so stale synchronization stays file-scoped.",
-            )
-        if not parsed.commit:
-            raise WorkflowError(
-                status="STALE_RESOLUTION_REJECTED",
-                reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
-                waiting_on="stale_resolution_input",
-                exit_code=2,
-                message="agent resolve --stale requires --commit.",
-            )
-        files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(
-            parsed.commit, rejected_status="STALE_RESOLUTION_REJECTED", command_name="agent resolve --stale"
-        )
-        return workflow.fast_fix_matching_threads(
-            parsed.repo,
-            parsed.pr_number,
-            agent_id=parsed.agent_id,
-            commit_hash=parsed.commit,
-            files=files,
-            validation_commands=_parse_agent_validation(parsed.validation),
-            include_stale=True,
-            stale_only=True,
-            severity=parsed.severity,
-            severity_note=parsed.severity_note,
-            publish=parsed.publish,
-            now=now_dt,
-        )
 
-    if not parsed.item_id:
-        # Match-all-by-files mode (was `fix-all`): homogeneous shortcut or per-thread rejection.
-        if not parsed.commit:
-            raise WorkflowError(
-                status=protocol_codes.FAST_FIX_ALL_REJECTED,
-                reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
-                waiting_on="fast_fix_input",
-                exit_code=2,
-                message="agent resolve requires --commit, or pass an <item_id> for a single-thread fix.",
-            )
-        files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(parsed.commit)
-        return workflow.fast_fix_matching_threads(
-            parsed.repo,
-            parsed.pr_number,
-            agent_id=parsed.agent_id,
-            commit_hash=parsed.commit,
-            files=files,
-            validation_commands=_parse_agent_validation(parsed.validation),
-            include_stale=parsed.include_stale,
-            severity=parsed.severity,
-            severity_note=parsed.severity_note,
-            homogeneous_reason=parsed.homogeneous_reason,
-            concern_label=parsed.concern_label,
-            publish=parsed.publish,
-            now=now_dt,
+def _dispatch_decline_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    resolution = "reject" if parsed.reject else "clarify"
+    if not parsed.match_files:
+        raise WorkflowError(
+            status="DECLINE_ALL_REJECTED",
+            reason_code="MISSING_MATCH_FILES",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve --{resolution} requires --match-files so the decline stays file-scoped.",
         )
+    if parsed.commit or parsed.validation:
+        raise WorkflowError(
+            status="DECLINE_ALL_REJECTED",
+            reason_code="CONFLICTING_RESOLVE_MODE",
+            waiting_on="resolve_mode",
+            exit_code=2,
+            message=(
+                f"agent resolve --{resolution} declines threads with a shared reply and "
+                "does not accept --commit or --validation (use the fix path for code changes)."
+            ),
+        )
+    return workflow_matching.decline_matching_threads(
+        parsed.repo,
+        parsed.pr_number,
+        agent_id=parsed.agent_id,
+        files=_parse_agent_files(parsed.files, parsed.file),
+        resolution=resolution,
+        homogeneous_reason=parsed.homogeneous_reason,
+        concern_label=parsed.concern_label,
+        include_stale=parsed.include_stale,
+        publish=parsed.publish,
+        now=now_dt,
+    )
 
-    # Accept a lean thread alias (T1..Tn) in place of the long item_id (#135).
+
+def _dispatch_stale_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    if not parsed.match_files:
+        raise WorkflowError(
+            status="STALE_RESOLUTION_REJECTED",
+            reason_code="MISSING_MATCH_FILES",
+            waiting_on="stale_resolution_input",
+            exit_code=2,
+            message="agent resolve --stale requires --match-files so stale synchronization stays file-scoped.",
+        )
+    if not parsed.commit:
+        raise WorkflowError(
+            status="STALE_RESOLUTION_REJECTED",
+            reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
+            waiting_on="stale_resolution_input",
+            exit_code=2,
+            message="agent resolve --stale requires --commit.",
+        )
+    files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(
+        parsed.commit, rejected_status="STALE_RESOLUTION_REJECTED", command_name="agent resolve --stale"
+    )
+    return workflow_matching.fast_fix_matching_threads(
+        parsed.repo,
+        parsed.pr_number,
+        agent_id=parsed.agent_id,
+        commit_hash=parsed.commit,
+        files=files,
+        validation_commands=_parse_agent_validation(parsed.validation),
+        include_stale=True,
+        stale_only=True,
+        severity=parsed.severity,
+        severity_note=parsed.severity_note,
+        publish=parsed.publish,
+        now=now_dt,
+    )
+
+
+def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    if not parsed.commit:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_ALL_REJECTED,
+            reason_code=protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
+            waiting_on="fast_fix_input",
+            exit_code=2,
+            message="agent resolve requires --commit, or pass an <item_id> for a single-thread fix.",
+        )
+    files = _parse_agent_files(parsed.files, parsed.file) or _changed_files_for_commit(parsed.commit)
+    return workflow_matching.fast_fix_matching_threads(
+        parsed.repo,
+        parsed.pr_number,
+        agent_id=parsed.agent_id,
+        commit_hash=parsed.commit,
+        files=files,
+        validation_commands=_parse_agent_validation(parsed.validation),
+        include_stale=parsed.include_stale,
+        severity=parsed.severity,
+        severity_note=parsed.severity_note,
+        homogeneous_reason=parsed.homogeneous_reason,
+        concern_label=parsed.concern_label,
+        publish=parsed.publish,
+        now=now_dt,
+    )
+
+
+def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
     parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
-
-    # Single-item modes (default fix or --trivial) require commit + summary + why.
     missing = [
         flag
         for flag, value in (
@@ -580,36 +574,52 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
             exit_code=2,
             message=f"agent resolve {parsed.item_id} requires {', '.join(missing)} for a single-thread fix.",
         )
+    shared_kwargs = {
+        "repo": parsed.repo,
+        "pr_number": parsed.pr_number,
+        "item_id": parsed.item_id,
+        "agent_id": parsed.agent_id,
+        "commit_hash": parsed.commit,
+        "files": _parse_agent_files(parsed.files, parsed.file),
+        "validation_commands": _parse_agent_validation(parsed.validation),
+        "summary": parsed.summary,
+        "why": parsed.why,
+        "publish": parsed.publish,
+        "now": now_dt,
+    }
     if parsed.trivial:
-        return workflow.trivial_fix_item(
-            parsed.repo,
-            parsed.pr_number,
-            item_id=parsed.item_id,
-            agent_id=parsed.agent_id,
-            commit_hash=parsed.commit,
-            files=_parse_agent_files(parsed.files, parsed.file),
-            validation_commands=_parse_agent_validation(parsed.validation),
-            summary=parsed.summary,
-            why=parsed.why,
-            publish=parsed.publish,
-            now=now_dt,
-        )
+        return workflow.trivial_fix_item(**shared_kwargs)
     return workflow.fast_fix_item(
-        parsed.repo,
-        parsed.pr_number,
-        item_id=parsed.item_id,
-        agent_id=parsed.agent_id,
-        commit_hash=parsed.commit,
-        files=_parse_agent_files(parsed.files, parsed.file),
-        validation_commands=_parse_agent_validation(parsed.validation),
-        summary=parsed.summary,
-        why=parsed.why,
+        **shared_kwargs,
         severity=parsed.severity,
         severity_note=parsed.severity_note,
         review_priority=parsed.review_priority,
-        publish=parsed.publish,
-        now=now_dt,
     )
+
+
+def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    _validate_resolve_mode(parsed)
+    if parsed.reject or parsed.clarify:
+        return _dispatch_decline_resolution(parsed, now_dt=now_dt)
+    if parsed.batch or parsed.input:
+        if not parsed.input:
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_ALL_REJECTED,
+                reason_code="MISSING_BATCH_INPUT",
+                waiting_on="batch_action_response",
+                exit_code=2,
+                message="agent resolve --batch requires --input <BatchActionResponse>.",
+            )
+        return workflow.fast_fix_from_batch_input(
+            parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
+        )
+
+    if parsed.stale:
+        return _dispatch_stale_resolution(parsed, now_dt=now_dt)
+
+    if not parsed.item_id:
+        return _dispatch_match_all_resolution(parsed, now_dt=now_dt)
+    return _dispatch_single_item_resolution(parsed, now_dt=now_dt)
 
 
 def _resolve_viewer_login() -> str:
