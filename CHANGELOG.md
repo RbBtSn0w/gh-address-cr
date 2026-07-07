@@ -1,3 +1,9 @@
+## [3.5.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.4...v3.5.5) (2026-07-07)
+
+### Bug Fixes
+
+* harden workflow gap recovery ([#201](https://github.com/RbBtSn0w/gh-address-cr/issues/201)) ([33655f1](https://github.com/RbBtSn0w/gh-address-cr/commit/33655f112d5474d75df86cf167faec7673b3f88d))
+
 ## [3.5.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.3...v3.5.4) (2026-07-06)
 
 ### Bug Fixes
