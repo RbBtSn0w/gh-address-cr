@@ -194,6 +194,55 @@ class Issue142StaleLeaseDeadlockTest(PythonScriptTestCase):
         self.assertEqual(session["leases"]["lease-verify"]["role"], "verifier")
         self.assertEqual(session["items"]["github-thread:stale"]["state"], "claimed")
 
+    def test_direct_item_resolve_reports_lease_owner_instead_of_no_eligible_item(self):
+        """An item blocked by another active lease must report lease ownership
+        and recovery details instead of a generic no-work response."""
+        locked = open_item(
+            "github-thread:locked",
+            item_kind="github_thread",
+            source="github",
+            path="src/locked.py",
+            body="Please fix this locked concern.",
+            state="open",
+            status="OPEN",
+            active_lease_id="lease-other",
+            thread_id="PRRT_locked",
+        )
+        self.write_session(
+            items=[locked],
+            leases={"lease-other": _batch_lease("lease-other", "github-thread:locked", "other-agent")},
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
+            "github-thread:locked",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/locked.py",
+            "--summary",
+            "Fix locked issue.",
+            "--why",
+            "Apply requested change.",
+            "--validation",
+            "python3 -m unittest tests.test_locked=passed",
+            "--now",
+            NOW.isoformat(),
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "LEASE_LOCKED_ITEM")
+        self.assertEqual(payload["reason_code"], "LEASE_LOCKED_ITEM")
+        self.assertEqual(payload["waiting_on"], "lease")
+        self.assertEqual(payload["lease_recovery"]["agent_id"], "other-agent")
+        self.assertIn("agent leases", payload["next_action"])
+
 
 class Issue142ReplyEvidenceIngestTest(PythonScriptTestCase):
     def write_session(self, *, items):

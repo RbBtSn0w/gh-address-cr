@@ -602,6 +602,13 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
             "Fix GitHub network connectivity or sandbox network access, then rerun the command.",
             "GitHub CLI `gh` could not reach GitHub. Inspect `gh auth status` stderr and network/sandbox access before rerunning.",
         )
+    if category == "permission_mismatch":
+        return (
+            "GH_PERMISSION_MISMATCH",
+            "github_permission",
+            "Sync the wrapper/runtime GitHub permission grants, then rerun the command.",
+            "GitHub CLI `gh` was blocked by a wrapper permission mismatch rather than missing authentication.",
+        )
     if category in {"environment", "sandbox"}:
         return (
             "GH_ENVIRONMENT_FAILED",

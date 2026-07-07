@@ -33,7 +33,10 @@ If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKI
 - **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent resolve`. Use `gh-address-cr agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
 If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
-- **Action**: Run `gh-address-cr agent publish <owner/repo> <pr_number>` when accepted evidence is present, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
+- **Action**: Follow the returned `next_action`. If accepted publish-ready evidence exists, this may still route to `gh-address-cr agent publish <owner/repo> <pr_number>`. If the blocking thread is already terminal and not claimable, the recovery path must instead use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>`, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
+
+If `reason_code` is `LEASE_LOCKED_ITEM`:
+- **Action**: Do not retry blindly. Inspect `lease_recovery` and run `gh-address-cr agent leases <owner/repo> <pr_number>` to see the authoritative owner, lease status, and safe recovery command before trying item-mode `agent resolve` again.
 
 If a GitHub thread has `state=stale` or `status=STALE`:
 - **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate.
@@ -47,6 +50,9 @@ If `reason_code` is `GH_AUTH_FAILED` or `GITHUB_AUTH_FAILED`:
 If `reason_code` is `GH_NETWORK_FAILED`, `GITHUB_NETWORK_FAILED`, `GH_ENVIRONMENT_FAILED`, or `GITHUB_ENVIRONMENT_FAILED`:
 - **Action**: Inspect `diagnostics.command`, `diagnostics.stderr_category`, and `diagnostics.stderr_excerpt`. Fix network, sandbox, PATH, or local permission issues before retrying; do not treat these as code-review findings.
 
+If `reason_code` is `GH_PERMISSION_MISMATCH`:
+- **Action**: Treat this as a wrapper/runtime permission-sync problem, not a generic auth or sandbox failure. Inspect `diagnostics.source_scope`, `diagnostics.stderr_excerpt`, and the active runner grants, sync the wrapper/runtime permission view, then rerun the blocked command. The stable `waiting_on` category is `github_permission`.
+
 If `reason_code` is `DOCTOR_FAILED`:
 - **Action**: Inspect each failed `checks[]` row. Fix GitHub CLI, auth, repository access, or state/cache writeability, then rerun `gh-address-cr doctor` before retrying the blocked command.
 
@@ -59,6 +65,7 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 
 If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
 - **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success. The final response must include the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`; explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present.
+- **Telemetry note**: `runtime-only` coverage is advisory for local loops when host telemetry was not imported. Report it honestly, but do not escalate it as a review-resolution blocker by itself.
 
 If `status` is `NO_ACTIVE_PR`:
 - **Action**: No OPEN PR matches the branch. Open a PR or pass an explicit PR number; do not fall back to MERGED/CLOSED PRs.

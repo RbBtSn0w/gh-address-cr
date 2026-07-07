@@ -137,5 +137,5 @@ A task is complete only when:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/027-otel-layered-model/plan.md
+at specs/028-workflow-gap-recovery/plan.md
 <!-- SPECKIT END -->

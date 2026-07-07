@@ -468,15 +468,9 @@ def _gather_attention_items(
     abnormal_implications = []
     abnormal_names = []
 
-    if coverage != "complete":
+    if coverage not in {"complete", "runtime-only"}:
         abnormal_names.append(f"incomplete telemetry coverage ({coverage})")
-        if coverage == "runtime-only":
-            desc = (
-                "Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly "
-                "imported/ingested prior to the final gate check, meaning the metrics represent only command-level "
-                "events tracked by the local session runner."
-            )
-        elif coverage == "unavailable":
+        if coverage == "unavailable":
             desc = "Telemetry coverage is unavailable. No usable efficiency telemetry events exist for the current session."
         else:
             desc = (

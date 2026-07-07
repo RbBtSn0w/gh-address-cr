@@ -56,6 +56,8 @@ class GateResult:
     failure_codes: list[str]
     check_requirement: str | None = None
     logic_validation_signals: list[dict[str, Any]] | None = None
+    reply_evidence_blockers: list[dict[str, Any]] | None = None
+    historical_reply_items: list[dict[str, Any]] | None = None
 
     @property
     def passed(self) -> bool:
@@ -95,6 +97,7 @@ class GateResult:
                 pr_number=self.pr_number,
                 passed=self.passed,
                 logic_validation_signals=self.logic_validation_signals,
+                reply_evidence_blockers=self.reply_evidence_blockers,
             ),
             "exit_code": self.exit_code,
             # Authoritative completion proof (pending reviews + checks evaluated),
@@ -104,6 +107,8 @@ class GateResult:
             "check_requirement": self.check_requirement,
             "commands": _final_gate_commands(self.repo, self.pr_number),
             "logic_validation_signals": list(self.logic_validation_signals or []),
+            "reply_evidence_blockers": list(self.reply_evidence_blockers or []),
+            "historical_reply_items": list(self.historical_reply_items or []),
         }
 
 
@@ -195,6 +200,8 @@ def evaluate_final_gate(
         failure_codes=list(decision.failure_codes),
         check_requirement=check_requirement,
         logic_validation_signals=logic_validation_signals,
+        reply_evidence_blockers=list(projection.missing_reply_items),
+        historical_reply_items=list(projection.historical_reply_items),
     )
 
 
@@ -367,6 +374,7 @@ def _final_gate_commands(repo: str, pr_number: str) -> dict[str, str]:
         "resolve_homogeneous": command_templates.resolve_homogeneous(repo, pr_number),
         "resolve_decline": command_templates.resolve_decline(repo, pr_number),
         "resolve_stale": command_templates.resolve_stale(repo, pr_number),
+        "evidence_add_reply": command_templates.evidence_add_reply(repo, pr_number),
         "evidence_add_validation": command_templates.evidence_add_validation(repo, pr_number),
     }
 
@@ -398,11 +406,27 @@ def _next_action_with_pr(
     pr_number: str,
     *,
     logic_validation_signals: list[dict[str, Any]] | None = None,
+    reply_evidence_blockers: list[dict[str, Any]] | None = None,
 ) -> str | None:
     final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
     if reason_code == FINAL_GATE_UNRESOLVED_REMOTE_THREADS:
         return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
     if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
+        reconcile_blocker = next(
+            (
+                blocker
+                for blocker in (reply_evidence_blockers or [])
+                if blocker.get("recoverability") == "reconcile"
+            ),
+            None,
+        )
+        if reconcile_blocker is not None:
+            reconcile = command_templates.evidence_add_reply(
+                repo,
+                pr_number,
+                item_id=str(reconcile_blocker.get("item_id") or "<item_id>"),
+            )
+            return f"Record terminal-thread reply evidence with `{reconcile}`, then rerun {final_gate}."
         return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
     if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
         return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."
@@ -446,6 +470,7 @@ def _next_action(
     pr_number: str = "",
     passed: bool = False,
     logic_validation_signals: list[dict[str, Any]] | None = None,
+    reply_evidence_blockers: list[dict[str, Any]] | None = None,
 ) -> str:
     if reason_code is None:
         if passed:
@@ -457,6 +482,7 @@ def _next_action(
             repo,
             pr_number,
             logic_validation_signals=logic_validation_signals,
+            reply_evidence_blockers=reply_evidence_blockers,
         )
         if result is not None:
             return result
