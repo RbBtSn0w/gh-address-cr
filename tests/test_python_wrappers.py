@@ -263,11 +263,13 @@ else:
                 "exit_code",
                 "failure_codes",
                 "gate_scope",
+                "historical_reply_items",
                 "item_id",
                 "item_kind",
                 "logic_validation_signals",
                 "next_action",
                 "pr_number",
+                "reply_evidence_blockers",
                 "reason_code",
                 "repo",
                 "status",
@@ -1826,6 +1828,29 @@ else:
         self.assertEqual(summary["diagnostics"]["stderr_category"], "network")
         self.assertEqual(summary["diagnostics"]["command"][:3], ["gh", "api", "graphql"])
         self.assertIn("api.github.com", summary["diagnostics"]["stderr_excerpt"])
+
+    def test_cli_review_permission_mismatch_maps_to_github_permission(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/bin/sh",
+                    'if [ "$1" = "auth" ]; then echo "safeclis/gh: Permission denied for gh.create despite granted runner permission" >&2; exit 1; fi',
+                    "exit 1",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr, "--input", "-"], stdin="[]")
+
+        self.assertNotEqual(result.returncode, 0)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["reason_code"], "GH_PERMISSION_MISMATCH")
+        self.assertEqual(summary["waiting_on"], "github_permission")
+        self.assertEqual(summary["diagnostics"]["stderr_category"], "permission_mismatch")
 
     def test_findings_requires_explicit_source_for_sync(self):
         result = self.run_cmd(

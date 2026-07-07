@@ -35,6 +35,13 @@ def efficiency_report_markdown(report: dict[str, Any]) -> str:
         "",
         "### Sources",
     ]
+    if report["coverage_label"] == "runtime-only":
+        lines.extend(
+            [
+                "_Runtime-only coverage is advisory for local loops when host telemetry was not imported._",
+                "",
+            ]
+        )
     lines.extend(
         f"- {source['source']} ({source['source_type']}): {source['event_count']} events, {source['coverage_status']}"
         for source in report["sources"]

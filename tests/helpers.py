@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 SKILL_ROOT = ROOT / "skill"
+WORKFLOW_GAP_FIXTURE = ROOT / "tests" / "fixtures" / "session_engine" / "workflow_gap_recovery.json"
 RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
 IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "commands"
 SCRIPTS_DIR = IMPLEMENTATIONS_DIR
@@ -18,6 +19,12 @@ CLI_PY = RUNTIME_PACKAGE_DIR / "cli.py"
 REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
 SUBMIT_FEEDBACK_PY = IMPLEMENTATIONS_DIR / "submit_feedback.py"
 SUBMIT_ACTION_PY = IMPLEMENTATIONS_DIR / "submit_action.py"
+
+
+def load_workflow_gap_fixture(name: str) -> dict:
+    payload = json.loads(WORKFLOW_GAP_FIXTURE.read_text(encoding="utf-8"))
+    value = payload[name]
+    return dict(value) if isinstance(value, dict) else value
 
 
 
@@ -250,4 +257,3 @@ def _patched_subprocess_run(original_run, *run_args, **run_kwargs):
         sys.stderr.write(_decode_stream(res.stderr))
         object.__setattr__(res, "stderr", None)
     return res
-

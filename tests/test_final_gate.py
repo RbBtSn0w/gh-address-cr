@@ -125,7 +125,35 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(result.counts["github_threads_missing_reply_count"], 1)
         summary = result.to_machine_summary()
         self.assertEqual(summary["waiting_on"], "reply_evidence")
-        self.assertIn("gh-address-cr agent publish octo/example 77", summary["next_action"])
+        self.assertIn("gh-address-cr agent evidence add octo/example 77", summary["next_action"])
+        self.assertIn("--reply-url", summary["next_action"])
+        self.assertEqual(summary["reply_evidence_blockers"][0]["recoverability"], "reconcile")
+
+    def test_historical_closed_thread_without_reply_evidence_is_non_blocking(self):
+        result = self.evaluate(
+            {
+                "repo": "octo/example",
+                "pr_number": "77",
+                "items": {
+                    "github-thread:THREAD_HISTORY": {
+                        "item_id": "github-thread:THREAD_HISTORY",
+                        "item_kind": "github_thread",
+                        "thread_id": "THREAD_HISTORY",
+                        "state": "closed",
+                        "status": "CLOSED",
+                        "historical_remote_only": True,
+                        "blocking": False,
+                    }
+                },
+            },
+            remote_threads=[{"id": "THREAD_HISTORY", "isResolved": True}],
+        )
+
+        self.assertTrue(result.passed, result.to_machine_summary())
+        self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["historical_reply_items"][0]["reason_code"], "CLOSED_HISTORICAL_ITEM")
+        self.assertEqual(summary["historical_reply_items"][0]["recoverability"], "non_blocking")
 
     def test_pending_review_from_current_login_fails(self):
         result = self.evaluate(
@@ -377,6 +405,27 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertIn("host telemetry was not imported", summary_model["coverage_note"])
         self.assertIn("runtime command events only", summary_model["coverage_note"])
 
+    def test_runtime_only_telemetry_does_not_trigger_abnormal_guidance(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_guidance
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "runtime-only",
+            "total_events": 2,
+            "success_rate": 100.0,
+            "confidence": "medium",
+            "inefficiency_flags": [],
+            "report_artifact": "path/to/report.json",
+        }
+
+        guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+
+        self.assertNotIn("Attention Items & Implications", guidance)
+        self.assertNotIn("IMPLICATION PROMPT", guidance)
+
     def test_build_completion_summary_line_renders_inefficiency_flags(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line
         result = self.evaluate(
@@ -599,7 +648,7 @@ class FinalGateTestCase(unittest.TestCase):
         # Test runtime-only coverage label
         telemetry_report["coverage_label"] = "runtime-only"
         guidance_runtime = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
-        self.assertIn("Telemetry coverage is runtime-only. This indicates that host-side telemetry was not explicitly", guidance_runtime)
+        self.assertNotIn("Telemetry coverage is runtime-only.", guidance_runtime)
 
     def test_completion_summary_guidance_keeps_telemetry_degradation_fail_open(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_guidance

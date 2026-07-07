@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
+from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_TERMINAL_STATES,
     is_resolved_github_thread,
@@ -127,6 +128,7 @@ class FinalGateProjection:
     counts: dict[str, int]
     unresolved_remote_threads: tuple[JsonDict, ...] = ()
     missing_reply_items: tuple[JsonDict, ...] = ()
+    historical_reply_items: tuple[JsonDict, ...] = ()
     blocking_github_items: tuple[JsonDict, ...] = ()
     blocking_local_items: tuple[JsonDict, ...] = ()
     missing_validation_items: tuple[JsonDict, ...] = ()
@@ -260,10 +262,16 @@ def project_final_gate(
     blocking_local_items = tuple(item for item in local_items if _is_local_blocking(item))
     blocking_github_items = tuple(item for item in github_items if _is_blocking_item(item))
     blocking_items = tuple(item for item in items if _is_blocking_item(item))
-    missing_reply_items = tuple(
-        item
+    reply_evidence_details = tuple(
+        _reply_evidence_detail(item, remote_by_id)
         for item in github_items
         if _github_thread_requires_reply_evidence(item, remote_by_id) and not _has_reply_evidence(item, current_login)
+    )
+    missing_reply_items = tuple(
+        detail for detail in reply_evidence_details if detail.get("recoverability") != "non_blocking"
+    )
+    historical_reply_items = tuple(
+        detail for detail in reply_evidence_details if detail.get("recoverability") == "non_blocking"
     )
     missing_validation_items = tuple(
         item for item in local_items if _is_terminal_local_item(item) and not _has_validation_evidence(item)
@@ -296,6 +304,7 @@ def project_final_gate(
         counts={key: counts[key] for key in COUNT_KEYS},
         unresolved_remote_threads=unresolved_remote_threads,
         missing_reply_items=missing_reply_items,
+        historical_reply_items=historical_reply_items,
         blocking_github_items=blocking_github_items,
         blocking_local_items=blocking_local_items,
         missing_validation_items=missing_validation_items,
@@ -367,6 +376,56 @@ def _github_thread_requires_reply_evidence(
     if thread_id and thread_id in remote_by_id:
         return thread_is_resolved(remote_by_id[thread_id])
     return is_terminal_github_thread(item)
+
+
+def _reply_evidence_detail(
+    item: Mapping[str, Any],
+    remote_by_id: Mapping[str, Mapping[str, Any]],
+) -> JsonDict:
+    thread_id = thread_identifier(item)
+    remote_thread = remote_by_id.get(thread_id or "")
+    if _is_non_blocking_historical_reply_gap(item, remote_thread):
+        return {
+            "item_id": _item_id(item),
+            "thread_id": thread_id,
+            "state": _state(item),
+            "reason_code": protocol_codes.CLOSED_HISTORICAL_ITEM,
+            "recoverability": "non_blocking",
+        }
+    return {
+        "item_id": _item_id(item),
+        "thread_id": thread_id,
+        "state": _state(item),
+        "reason_code": FINAL_GATE_MISSING_REPLY_EVIDENCE,
+        "recoverability": "reconcile",
+    }
+
+
+def _is_non_blocking_historical_reply_gap(
+    item: Mapping[str, Any],
+    remote_thread: Mapping[str, Any] | None,
+) -> bool:
+    if not bool(item.get("historical_remote_only")):
+        return False
+    if remote_thread is not None and not thread_is_resolved(remote_thread):
+        return False
+    return not _has_runtime_reply_expectation(item)
+
+
+def _has_runtime_reply_expectation(item: Mapping[str, Any]) -> bool:
+    if item.get("reply_posted") or has_content(item.get("reply_url")):
+        return True
+    if isinstance(item.get("reply_evidence"), Mapping):
+        return True
+    if isinstance(item.get("accepted_response"), Mapping):
+        return True
+    if has_content(item.get("publish_resolution")):
+        return True
+    if isinstance(item.get("classification_evidence"), Mapping):
+        return True
+    if has_content(item.get("decision")):
+        return True
+    return False
 
 
 def _has_reply_evidence(item: Mapping[str, Any], current_login: str | None) -> bool:

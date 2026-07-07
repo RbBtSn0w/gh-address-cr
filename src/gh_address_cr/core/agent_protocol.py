@@ -172,6 +172,31 @@ def issue_action_request(
 
     item_id, item = _next_item(session, role, item_id=item_id)
     if item is None:
+        locked_lease = _active_lease_for_item(session, item_id) if item_id else None
+        if item_id and locked_lease is not None:
+            lease_id = str(locked_lease.get("lease_id") or "")
+            recovery = calculate_lease_recovery_state(
+                session,
+                lease_id,
+                agent_id=agent_id,
+                role=role,
+                item_id=item_id,
+                request_hash=str(locked_lease.get("request_hash") or ""),
+                now=current_time,
+            ).to_dict()
+            session_store.save_session(repo, pr_number, session)
+            raise WorkflowError(
+                status=protocol_codes.LEASE_LOCKED_ITEM,
+                reason_code=protocol_codes.LEASE_LOCKED_ITEM,
+                waiting_on="lease",
+                exit_code=4,
+                message=(
+                    f"`{item_id}` is locked by active lease `{lease_id}` owned by "
+                    f"`{recovery.get('agent_id') or 'unknown'}` ({recovery.get('lease_status') or 'unknown'}). "
+                    f"Run `gh-address-cr agent leases {repo} {pr_number}` to inspect the owner and recovery state."
+                ),
+                payload={"item_id": item_id, "lease_recovery": recovery},
+            )
         session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
             status=protocol_codes.NO_ELIGIBLE_ITEM,
@@ -1226,6 +1251,18 @@ def _item_is_open(item: dict[str, Any]) -> bool:
     return str(item.get("state") or item.get("status") or "open").lower() in (
         GITHUB_THREAD_CLAIMABLE_STATES - {"stale"}
     )
+
+
+def _active_lease_for_item(session: dict[str, Any], item_id: str) -> dict[str, Any] | None:
+    for lease in session.get("leases", {}).values():
+        if not isinstance(lease, dict):
+            continue
+        if str(lease.get("item_id")) != str(item_id):
+            continue
+        if lease.get("status") not in {"active", "submitted"}:
+            continue
+        return lease
+    return None
 
 
 def _has_classification_evidence(item: dict[str, Any]) -> bool:

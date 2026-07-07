@@ -41,6 +41,7 @@ Agent protocol commands:
 /gh-address-cr agent resolve <owner/repo> <pr_number> --reject|--clarify --match-files --files <paths> --homogeneous-reason <why>
 /gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files
 /gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>
+/gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>
 /gh-address-cr agent publish <owner/repo> <pr_number>
 /gh-address-cr agent leases <owner/repo> <pr_number>
 /gh-address-cr agent reclaim <owner/repo> <pr_number>
@@ -111,7 +112,9 @@ Telemetry degradation is visible but does not block core PR completion by
 itself: `final-gate` reports coverage, diagnostics, and overhead budget
 findings while preserving review-state pass/fail authority. If diagnostics
 include `TELEMETRY_OVERHEAD_EXCEEDED`, report the impact in the completion
-summary instead of retrying the review workflow. Briefly explain abnormal
+summary instead of retrying the review workflow. `runtime-only` coverage is an
+advisory local-loop condition when host telemetry was not imported; mention it
+briefly instead of escalating it as a gate blocker. Briefly explain abnormal
 coverage, diagnostics, success-rate drops, or inefficiency flags in the final
 response instead of hiding them behind artifact paths.
 
@@ -152,6 +155,12 @@ is the vendor-neutral way to get the same correlation on any host.
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
 
 GitHub review comment reply tasks must be submitted to the runtime before they can be published. The single mutating entrypoint is `gh-address-cr agent resolve`; it records classification internally, so no separate `agent classify` step is needed on this path. For one thread, run `agent resolve <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>`. When one set of files/validation evidence addresses multiple threads, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton, then `agent resolve --batch --input <batch-response.json>` keeping per-thread summary/why entries. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, `agent resolve --trivial` only for documentation or typo-only threads (else `TRIVIAL_THREAD_NOT_ELIGIBLE`), and `agent resolve --stale --match-files` for STALE/outdated threads. To **decline** (not fix) the same repeated concern across many threads with one shared reply, use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files` (no commit/validation); the same body-identity gate blocks declining threads that raise distinct concerns. Then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. `agent publish` is the single canonical publish path; each `agent resolve` form also accepts `--publish` to publish accepted evidence immediately and reports `published` in its result. The granular `agent classify` / `agent next` / `agent submit` commands remain available as the low-level protocol that `resolve` is built on.
+
+If `final-gate` reports `FINAL_GATE_MISSING_REPLY_EVIDENCE` for a thread that is already terminal and no longer claimable, do not loop on `agent publish`. Use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>` to reconcile durable reply evidence, then rerun `final-gate`.
+
+If item-mode `agent resolve <item_id> ...` reports `LEASE_LOCKED_ITEM`, inspect `lease_recovery` and run `gh-address-cr agent leases <owner/repo> <pr_number>` before retrying. The blocking condition is active lease ownership, not “no work”.
+
+If a blocked command reports `GH_PERMISSION_MISMATCH`, treat it as wrapper/runtime grant drift. Inspect `diagnostics.source_scope`, sync the wrapper-visible GitHub permissions with the active runner grants, then rerun the same command.
 
 When resolving, record each `--validation` with its measured timing suffix
 (`@<n>ms`/`@<n>s`) so efficiency reporting has real duration. Run

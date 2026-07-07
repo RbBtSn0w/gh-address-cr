@@ -29,6 +29,8 @@ Use `completion_summary_line`, the structured `completion_summary` object, `PR C
 
 Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
 
+For local development loops, `runtime-only` is advisory rather than abnormal by itself. Report the label and its implication, but do not expand it into a blocker or mandatory exception narrative unless additional telemetry diagnostics, inefficiency flags, or gate blockers are also present.
+
 If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
 
 Final-gate machine output may include `logic_validation_signals`. Signals with `gate_effect=blocking` are completion blockers and must be fixed or explained through runtime evidence before claiming completion. Signals with `gate_effect=advisory` are non-blocking diagnostics; mention their implication when relevant, but do not treat them as a second review producer or as permission to bypass evidence, publish, or final-gate.

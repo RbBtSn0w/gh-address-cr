@@ -923,10 +923,72 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["failed_count"], 1)
         self.assertEqual(payload["item_ids"], ["github-thread:abc"])
         self.assertEqual(payload["failed"][0]["item_id"], "github-thread:def")
-        self.assertEqual(payload["failed"][0]["reason_code"], "NO_ELIGIBLE_ITEM")
+        self.assertEqual(payload["failed"][0]["reason_code"], "LEASE_LOCKED_ITEM")
+        self.assertIn("agent leases", payload["failed"][0]["next_action"])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+
+    def test_agent_resolve_item_reports_active_batch_lease_owner(self):
+        self.write_session(
+            items=[
+                open_item(
+                    "github-thread:def",
+                    item_kind="github_thread",
+                    source="github",
+                    path="src/second.py",
+                    thread_id="PRRT_def",
+                    active_lease_id="lease-existing",
+                )
+            ],
+            leases={
+                "lease-existing": {
+                    "lease_id": "lease-existing",
+                    "item_id": "github-thread:def",
+                    "agent_id": "batch-agent",
+                    "role": "fixer",
+                    "status": "active",
+                    "created_at": NOW.isoformat(),
+                    "expires_at": (NOW + timedelta(hours=1)).isoformat(),
+                    "resume_token": "resume:req_existing",
+                    "request_hash": "existing-request-hash",
+                    "request_id": "req_existing",
+                    "conflict_keys": [],
+                }
+            },
+        )
+
+        result = self.run_runtime_module(
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
+            "github-thread:def",
+            "--agent-id",
+            "codex-1",
+            "--commit",
+            "abc123",
+            "--files",
+            "src/second.py",
+            "--summary",
+            "Fix the second thread.",
+            "--why",
+            "The patch addresses the requested change.",
+            "--validation",
+            "python3 -m unittest tests.test_shared=passed",
+            "--now",
+            NOW.isoformat(),
+        )
+
+        self.assertEqual(result.returncode, 4)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "LEASE_LOCKED_ITEM")
+        self.assertEqual(payload["reason_code"], "LEASE_LOCKED_ITEM")
+        self.assertEqual(payload["waiting_on"], "lease")
+        self.assertEqual(payload["item_id"], "github-thread:def")
+        self.assertEqual(payload["lease_recovery"]["lease_id"], "lease-existing")
+        self.assertEqual(payload["lease_recovery"]["agent_id"], "batch-agent")
+        self.assertIn("agent leases", payload["next_action"])
 
     def test_agent_fix_all_requires_validation(self):
         self.write_session(

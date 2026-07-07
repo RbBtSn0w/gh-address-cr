@@ -1,0 +1,87 @@
+{
+  "reply_reconcile_blocker": {
+    "session": {
+      "repo": "octo/example",
+      "pr_number": "77",
+      "items": {
+        "github-thread:THREAD_DONE": {
+          "item_id": "github-thread:THREAD_DONE",
+          "item_kind": "github_thread",
+          "thread_id": "THREAD_DONE",
+          "state": "closed",
+          "status": "CLOSED",
+          "blocking": false
+        }
+      }
+    },
+    "remote_threads": [
+      {
+        "id": "THREAD_DONE",
+        "isResolved": true
+      }
+    ],
+    "current_login": "agent-login"
+  },
+  "historical_closed_item": {
+    "session": {
+      "repo": "octo/example",
+      "pr_number": "77",
+      "items": {
+        "github-thread:THREAD_HISTORY": {
+          "item_id": "github-thread:THREAD_HISTORY",
+          "item_kind": "github_thread",
+          "thread_id": "THREAD_HISTORY",
+          "state": "closed",
+          "status": "CLOSED",
+          "blocking": false,
+          "historical_remote_only": true
+        }
+      }
+    },
+    "remote_threads": [
+      {
+        "id": "THREAD_HISTORY",
+        "isResolved": true
+      }
+    ],
+    "current_login": "agent-login"
+  },
+  "lease_locked_item": {
+    "session": {
+      "session_id": "session_77",
+      "repo": "octo/example",
+      "pr_number": "77",
+      "status": "WAITING_FOR_FIX",
+      "items": {
+        "github-thread:THREAD_LOCKED": {
+          "item_id": "github-thread:THREAD_LOCKED",
+          "item_kind": "github_thread",
+          "source": "github",
+          "path": "src/locked.py",
+          "thread_id": "THREAD_LOCKED",
+          "state": "open",
+          "status": "OPEN",
+          "active_lease_id": "lease-existing"
+        }
+      },
+      "leases": {
+        "lease-existing": {
+          "lease_id": "lease-existing",
+          "item_id": "github-thread:THREAD_LOCKED",
+          "agent_id": "batch-agent",
+          "role": "fixer",
+          "status": "active",
+          "created_at": "2026-04-24T12:00:00+00:00",
+          "expires_at": "2026-04-24T13:00:00+00:00",
+          "resume_token": "resume:req_existing",
+          "request_hash": "existing-request-hash",
+          "request_id": "req_existing",
+          "conflict_keys": []
+        }
+      },
+      "ledger_path": "<workspace>/evidence.jsonl",
+      "metrics": {}
+    }
+  },
+  "permission_mismatch_stderr": "safeclis/gh: Permission denied for gh.create despite granted runner permission"
+}

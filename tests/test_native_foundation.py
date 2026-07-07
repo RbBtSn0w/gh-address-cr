@@ -195,9 +195,22 @@ class NativeFoundationTests(unittest.TestCase):
 
         self.assertEqual(github_waiting_on({"stderr_category": "auth"}), "github_auth")
         self.assertEqual(github_waiting_on({"stderr_category": "network"}), "github_network")
+        self.assertEqual(github_waiting_on({"stderr_category": "permission_mismatch"}), "github_permission")
         self.assertEqual(github_waiting_on({"stderr_category": "sandbox"}), "github_environment")
         self.assertEqual(github_waiting_on({"stderr_category": "rate_limit"}), "github_rate_limit")
         self.assertEqual(github_waiting_on({"stderr_category": "unknown"}), "github")
+
+    def test_github_permission_denied_wrapper_is_classified_as_permission_mismatch(self):
+        from gh_address_cr.github.diagnostics import classify_github_failure
+
+        diagnostics = classify_github_failure(
+            "safeclis/gh: Permission denied for gh.create despite granted runner permission",
+            "",
+            1,
+            ["gh", "pr", "create"],
+        )
+
+        self.assertEqual(diagnostics["stderr_category"], "permission_mismatch")
 
 
 if __name__ == "__main__":

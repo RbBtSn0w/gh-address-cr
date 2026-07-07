@@ -25,6 +25,12 @@ SANDBOX_MARKERS = (
     "sandbox",
     "not permitted",
 )
+PERMISSION_MISMATCH_MARKERS = (
+    "safeclis/gh",
+    "gh.create",
+    "granted runner permission",
+    "granted permission",
+)
 ENVIRONMENT_MARKERS = (
     "missing github cli",
     "`gh` on path",
@@ -60,6 +66,8 @@ def classify_github_failure(
     category = _stderr_category(text)
     diagnostics: dict[str, Any] = {
         "stderr_category": category,
+        "severity": "blocking",
+        "source_scope": _source_scope(category),
     }
     if command:
         diagnostics["command"] = [str(part) for part in command]
@@ -76,6 +84,8 @@ def github_waiting_on(diagnostics: Mapping[str, Any] | None) -> str:
         return "github_auth"
     if category == "network":
         return "github_network"
+    if category == "permission_mismatch":
+        return "github_permission"
     if category in {"environment", "sandbox"}:
         return "github_environment"
     if category == "rate_limit":
@@ -83,9 +93,21 @@ def github_waiting_on(diagnostics: Mapping[str, Any] | None) -> str:
     return "github"
 
 
+def _source_scope(category: str) -> str:
+    if category == "permission_mismatch":
+        return "github_wrapper"
+    if category in {"environment", "sandbox"}:
+        return "local_environment"
+    if category in {"auth", "network", "rate_limit", "api", "not_found"}:
+        return "github_cli"
+    return "github"
+
+
 def _stderr_category(text: str) -> str:
     if any(marker in text for marker in AUTH_MARKERS):
         return "auth"
+    if "permission denied" in text and any(marker in text for marker in PERMISSION_MISMATCH_MARKERS):
+        return "permission_mismatch"
     if any(marker in text for marker in SANDBOX_MARKERS):
         return "sandbox"
     if any(marker in text for marker in ENVIRONMENT_MARKERS):
