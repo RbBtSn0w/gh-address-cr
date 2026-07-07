@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
@@ -21,7 +22,7 @@ SUBMIT_FEEDBACK_PY = IMPLEMENTATIONS_DIR / "submit_feedback.py"
 SUBMIT_ACTION_PY = IMPLEMENTATIONS_DIR / "submit_action.py"
 
 
-def load_workflow_gap_fixture(name: str) -> dict:
+def load_workflow_gap_fixture(name: str) -> Any:
     payload = json.loads(WORKFLOW_GAP_FIXTURE.read_text(encoding="utf-8"))
     value = payload[name]
     return dict(value) if isinstance(value, dict) else value

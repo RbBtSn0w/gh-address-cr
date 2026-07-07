@@ -155,6 +155,58 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(summary["historical_reply_items"][0]["reason_code"], "CLOSED_HISTORICAL_ITEM")
         self.assertEqual(summary["historical_reply_items"][0]["recoverability"], "non_blocking")
 
+    def test_historical_closed_thread_without_remote_fact_still_blocks(self):
+        result = self.evaluate(
+            {
+                "repo": "octo/example",
+                "pr_number": "77",
+                "items": {
+                    "github-thread:THREAD_HISTORY": {
+                        "item_id": "github-thread:THREAD_HISTORY",
+                        "item_kind": "github_thread",
+                        "thread_id": "THREAD_HISTORY",
+                        "state": "closed",
+                        "status": "CLOSED",
+                        "historical_remote_only": True,
+                        "blocking": False,
+                    }
+                },
+            },
+            remote_threads=[],
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_REPLY_EVIDENCE")
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["reply_evidence_blockers"][0]["recoverability"], "reconcile")
+        self.assertEqual(summary["historical_reply_items"], [])
+
+    def test_historical_non_terminal_thread_with_resolved_remote_still_blocks(self):
+        result = self.evaluate(
+            {
+                "repo": "octo/example",
+                "pr_number": "77",
+                "items": {
+                    "github-thread:THREAD_HISTORY": {
+                        "item_id": "github-thread:THREAD_HISTORY",
+                        "item_kind": "github_thread",
+                        "thread_id": "THREAD_HISTORY",
+                        "state": "open",
+                        "status": "OPEN",
+                        "historical_remote_only": True,
+                        "blocking": True,
+                    }
+                },
+            },
+            remote_threads=[{"id": "THREAD_HISTORY", "isResolved": True}],
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason_code, "FINAL_GATE_MISSING_REPLY_EVIDENCE")
+        summary = result.to_machine_summary()
+        self.assertEqual(summary["reply_evidence_blockers"][0]["recoverability"], "reconcile")
+        self.assertEqual(summary["historical_reply_items"], [])
+
     def test_pending_review_from_current_login_fails(self):
         result = self.evaluate(
             self.passing_session(),

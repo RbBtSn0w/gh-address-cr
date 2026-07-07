@@ -407,7 +407,9 @@ def _is_non_blocking_historical_reply_gap(
 ) -> bool:
     if not bool(item.get("historical_remote_only")):
         return False
-    if remote_thread is not None and not thread_is_resolved(remote_thread):
+    if remote_thread is None or not thread_is_resolved(remote_thread):
+        return False
+    if not is_terminal_github_thread(item):
         return False
     return not _has_runtime_reply_expectation(item)
 
