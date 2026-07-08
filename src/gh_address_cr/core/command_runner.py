@@ -90,12 +90,16 @@ def _run_subprocess_attempt(
     except OSError as exc:
         # Spawn failure (e.g. executable missing -> FileNotFoundError): 127.
         return (
-            subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"Failed to execute {tool_name}: {exc}"),
+            subprocess.CompletedProcess(
+                args=cmd, returncode=127, stdout="", stderr=f"Failed to execute {tool_name}: {exc}"
+            ),
             None,
         )
     try:
         stdout, stderr = process.communicate(input=stdin, timeout=timeout)
-        return subprocess.CompletedProcess(args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr), process.pid
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr
+        ), process.pid
     except subprocess.TimeoutExpired as exc:
         _terminate(process)
         return (
@@ -111,7 +115,9 @@ def _run_subprocess_attempt(
         # Unexpected I/O failure talking to the child; reap and report 127.
         _terminate(process)
         return (
-            subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"Subprocess I/O error for {tool_name}: {exc}"),
+            subprocess.CompletedProcess(
+                args=cmd, returncode=127, stdout="", stderr=f"Subprocess I/O error for {tool_name}: {exc}"
+            ),
             process.pid,
         )
 

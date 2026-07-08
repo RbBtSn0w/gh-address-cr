@@ -413,11 +413,7 @@ def _next_action_with_pr(
         return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
     if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
         reconcile_blocker = next(
-            (
-                blocker
-                for blocker in (reply_evidence_blockers or [])
-                if blocker.get("recoverability") == "reconcile"
-            ),
+            (blocker for blocker in (reply_evidence_blockers or []) if blocker.get("recoverability") == "reconcile"),
             None,
         )
         if reconcile_blocker is not None:
