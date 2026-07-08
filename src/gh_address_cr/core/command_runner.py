@@ -12,6 +12,7 @@ from gh_address_cr.core.otel_semconv import (
     PROCESS_COMMAND_ARGS,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
+    PROCESS_PID,
 )
 from gh_address_cr.core.telemetry_safety import (
     classify_workflow_span_layer,
@@ -56,6 +57,8 @@ def run_cmd(
     retries: int = 3,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    from opentelemetry.trace import SpanKind
+
     from gh_address_cr.core.telemetry import SessionTelemetry
     from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
 
@@ -81,6 +84,7 @@ def run_cmd(
     )
     with start_child_span(
         GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
+        kind=SpanKind.CLIENT,
         attributes={
             **workflow_step_span_attributes(step_name="subprocess", step_kind=layer),
             "gh_address_cr.command.name": tool_name,
@@ -91,14 +95,19 @@ def run_cmd(
         },
     ):
         for attempt in range(attempts):
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE if stdin is not None else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=runtime_subprocess_env(),
+            )
+            set_current_span_attributes({PROCESS_PID: process.pid})
             try:
-                result = subprocess.run(
-                    cmd,
-                    input=stdin,
-                    text=True,
-                    capture_output=True,
-                    env=runtime_subprocess_env(),
-                    timeout=timeout,
+                stdout, stderr = process.communicate(input=stdin, timeout=timeout)
+                result = subprocess.CompletedProcess(
+                    args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr
                 )
                 if (
                     result.returncode != 0
@@ -111,6 +120,8 @@ def run_cmd(
                     continue
                 break
             except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.communicate()
                 result = subprocess.CompletedProcess(
                     args=cmd,
                     returncode=124,
@@ -131,13 +142,14 @@ def run_cmd(
             )
         end_time = time.time()
         exit_code = result.returncode
-        set_current_span_attributes(
-            {
-                "gh_address_cr.subprocess.attempts_used": attempt + 1,
-                "gh_address_cr.subprocess.duration_ms": round((end_time - start_time) * 1000, 3),
-                PROCESS_EXIT_CODE: exit_code,
-            }
-        )
+        span_attributes: dict[str, str | int | float] = {
+            "gh_address_cr.subprocess.attempts_used": attempt + 1,
+            "gh_address_cr.subprocess.duration_ms": round((end_time - start_time) * 1000, 3),
+            PROCESS_EXIT_CODE: exit_code,
+        }
+        if exit_code != 0:
+            span_attributes[ERROR_TYPE] = "timeout" if exit_code == 124 else str(exit_code)
+        set_current_span_attributes(span_attributes)
     end_time = time.time()
     exit_code = result.returncode
     add_current_span_event(

@@ -101,6 +101,32 @@ landable subset; "GATED" = requires human confirmation before build.
   `owner`/`repo` string or `vcs.repository.url.full` across a sampled PR run,
   while `command_args` still shows the command + PR number + redacted repo slot.
 
+## C-13 Subprocess caller span — CLI spans "Client (caller)" alignment (MVP)
+- The `gh_address_cr.subprocess` child span (wrapping `gh`/other external
+  invocations) is span kind `CLIENT`, per the OTel CLI spans "Client (caller)
+  spans" convention (distinct from the root span's `INTERNAL` "Execution
+  (callee)" kind).
+- It carries `process.executable.name` (already present), `process.pid` of
+  the spawned child process (sourced from `Popen.pid`, refreshed per retry
+  attempt), and `process.exit.code` of the last attempt.
+- `error.type` is present **iff** the final `process.exit.code != 0` — this
+  span follows the generic OTel "error iff exit≠0" rule (unlike the root
+  span's C-3 deviation), because a non-zero exit from an *external* tool is a
+  genuine operational failure, not one of gh-address-cr's own Status-to-Action
+  outcome codes. Value is the literal `"timeout"` on a timeout (exit 124),
+  else the stringified exit code (bounded cardinality, consistent with the
+  spec's own `error.type` example of using an HTTP-status-like string).
+- `process.executable.path` is intentionally **not** set on either this span
+  or the root span: on this project's target platforms the resolved path
+  reliably contains `/Users/<user>/...` or `/home/<user>/...`, which
+  `telemetry_safety._looks_like_unnecessary_absolute_path` already treats as
+  unsafe. Emitting it would leak local usernames. Since the attribute is
+  Recommended (not Required) in the spec, it is omitted rather than sanitized
+  down to a value that duplicates `process.executable.name`.
+- **Enforced**: `tests/test_command_runner_otel_span.py` (in-memory span
+  exporter) asserts CLIENT kind, `process.pid` presence, and `error.type`
+  presence/absence across success, non-zero exit, and timeout.
+
 ## GATED contracts (NOT built until confirmed)
 - **C-9 (G-2) `--traceparent`**: a global public flag accepting a full W3C
   traceparent string; when valid it is used for correlation with precedence over
@@ -115,5 +141,5 @@ landable subset; "GATED" = requires human confirmation before build.
 `python3 -m unittest discover -s tests` (new files
 `tests/test_cli_otel_execution.py`, `tests/test_cli_otel_context.py`,
 `tests/test_cli_otel_genai.py`, `tests/test_telemetry_safety_command_args.py`,
-`tests/test_otel_semconv_pins.py`) +
+`tests/test_otel_semconv_pins.py`, `tests/test_command_runner_otel_span.py`) +
 smoke `python3 -m gh_address_cr --help`. See [quickstart.md](../quickstart.md).

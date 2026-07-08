@@ -16,7 +16,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
+from opentelemetry.trace import NoOpTracer, Span, SpanKind, Status, StatusCode, Tracer, get_current_span
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from gh_address_cr.core.otel_semconv import (
@@ -237,6 +237,7 @@ def start_child_span(
     name: str,
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
+    kind: SpanKind = SpanKind.INTERNAL,
 ) -> Iterator[Span]:
     """Start a child span under the current active span when tracing is active.
 
@@ -258,6 +259,7 @@ def start_child_span(
         name,
         record_exception=False,
         set_status_on_exception=False,
+        kind=kind,
     ) as span:
         if attributes:
             for key, value in attributes.items():
