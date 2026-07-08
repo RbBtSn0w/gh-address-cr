@@ -138,7 +138,7 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_nonzero_status_return_records_exit_code_without_error_type(self) -> None:
-        """T005: Test that a non-zero status return from a dummy operation records exit code but no error.type or ERROR status."""
+        """C-3: an exempted status exit code (e.g. 6=waiting) records exit code but no error.type or ERROR status."""
         def dummy_operation() -> int:
             return 6
 
@@ -146,6 +146,7 @@ class TestCliOtelExecution(unittest.TestCase):
             self.tracer,
             "gh-address-cr.cli",
             dummy_operation,
+            non_error_exit_codes={2, 4, 5, 6},
         )
 
         self.assertEqual(result, 6)
@@ -158,6 +159,30 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertEqual(attributes.get(PROCESS_EXIT_CODE), 6)
         self.assertNotIn(ERROR_TYPE, attributes)
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
+
+    def test_genuine_failure_return_records_error_type_and_status(self) -> None:
+        """C-3: a non-zero exit code that is NOT an exempted status code (e.g. 1=FAILED)
+        is a genuine error: error.type=_OTHER and ERROR span status."""
+        def dummy_operation() -> int:
+            return 1
+
+        result = run_traced(
+            self.tracer,
+            "gh-address-cr.cli",
+            dummy_operation,
+            non_error_exit_codes={2, 4, 5, 6},
+        )
+
+        self.assertEqual(result, 1)
+
+        exported_spans = self.exporter.get_finished_spans()
+        self.assertEqual(len(exported_spans), 1)
+        span = exported_spans[0]
+
+        attributes = span.attributes
+        self.assertEqual(attributes.get(PROCESS_EXIT_CODE), 1)
+        self.assertEqual(attributes.get(ERROR_TYPE), "_OTHER")
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_system_exit_zero_records_success(self) -> None:
         """T005: Test that SystemExit with code 0 returns exit code 0 without error.type."""
@@ -181,7 +206,7 @@ class TestCliOtelExecution(unittest.TestCase):
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_system_exit_nonzero_records_status_without_error_type(self) -> None:
-        """T005: Test that SystemExit with a non-zero code returns exit code but no error.type or ERROR status."""
+        """C-3: SystemExit with an exempted status code (2=needs-action) records exit code but no error.type or ERROR status."""
         def dummy_operation() -> None:
             raise SystemExit(2)
 
@@ -189,6 +214,7 @@ class TestCliOtelExecution(unittest.TestCase):
             self.tracer,
             "gh-address-cr.cli",
             dummy_operation,
+            non_error_exit_codes={2, 4, 5, 6},
         )
         self.assertEqual(result, 2)
 

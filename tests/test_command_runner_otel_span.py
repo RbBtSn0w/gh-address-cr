@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, StatusCode
 
 from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.core.otel_semconv import (
@@ -44,16 +45,20 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertEqual(span.attributes[PROCESS_EXECUTABLE_NAME], "true")
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 0)
         self.assertNotIn(ERROR_TYPE, span.attributes)
+        # Success: span status must NOT be ERROR.
+        self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
-    def test_nonzero_exit_records_error_type(self) -> None:
+    def test_nonzero_exit_records_error_type_and_error_status(self) -> None:
         with patch("gh_address_cr.core.command_runner.is_transient_gh_failure", return_value=False):
             run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["false"], retries=1))
 
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 1)
         self.assertEqual(span.attributes[ERROR_TYPE], "1")
+        # Per CLI spans semconv, exit.code != 0 => span status ERROR.
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
-    def test_timeout_records_timeout_error_type_and_exit_124(self) -> None:
+    def test_timeout_records_timeout_error_type_and_error_status(self) -> None:
         run_traced(
             self.tracer,
             "gh-address-cr.cli",
@@ -63,6 +68,32 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 124)
         self.assertEqual(span.attributes[ERROR_TYPE], "timeout")
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
+
+    def test_transient_timeout_then_success_leaves_no_error_residue(self) -> None:
+        """A gh command that times out once then succeeds on retry must not
+        leave error.type/ERROR status on the final exit.code == 0 span."""
+        real_run_cmd = run_cmd
+        timed_out = subprocess.TimeoutExpired(cmd=["gh", "api"], timeout=0.05)
+        first = MagicMock()
+        first.pid = 111
+        # First communicate() times out; the post-kill drain call returns.
+        first.communicate.side_effect = [timed_out, ("", "")]
+        second = MagicMock()
+        second.pid = 222
+        second.returncode = 0
+        second.communicate.return_value = ("{}", "")
+
+        with (
+            patch("gh_address_cr.core.command_runner.subprocess.Popen", side_effect=[first, second]),
+            patch("gh_address_cr.core.command_runner.time.sleep"),
+        ):
+            run_traced(self.tracer, "gh-address-cr.cli", lambda: real_run_cmd(["gh", "api"], retries=2))
+
+        span = self._subprocess_span()
+        self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 0)
+        self.assertNotIn(ERROR_TYPE, span.attributes)
+        self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TypeVar
@@ -143,8 +143,17 @@ def run_traced(
     *,
     attributes: Mapping[str, str | bool | int | float | Sequence[str]] | None = None,
     context: Context | None = None,
+    non_error_exit_codes: Collection[int] = (),
 ) -> T | int:
-    """Run an operation in a span and explicitly record failures."""
+    """Run an operation in a span and explicitly record failures.
+
+    Core CLI-spans error rule: a non-zero exit code marks the span as an error
+    (``error.type`` + ERROR status). ``non_error_exit_codes`` lets the domain
+    layer exempt exit codes that are a deliberate status vocabulary rather than
+    failures (see ``STATUS_EXIT_CODES`` in ``cli.py`` and contract C-3); those
+    exempted codes record ``process.exit.code`` only. A propagated exception is
+    always an error regardless of the exempt set.
+    """
     if context is None:
         context = resolve_parent_context(os.environ)
 
@@ -169,6 +178,7 @@ def run_traced(
                 # Normal Return
                 exit_code = result if isinstance(result, int) and not isinstance(result, bool) else 0
                 span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+                _mark_exit_outcome(span, exit_code, non_error_exit_codes)
                 return result
             except SystemExit as error:
                 exit_code = (
@@ -177,6 +187,7 @@ def run_traced(
                     else (0 if error.code is None else 1)
                 )
                 span.set_attribute(PROCESS_EXIT_CODE, exit_code)
+                _mark_exit_outcome(span, exit_code, non_error_exit_codes)
                 return exit_code
             except KeyboardInterrupt as error:
                 span.set_attribute(PROCESS_EXIT_CODE, 1)
@@ -191,6 +202,19 @@ def run_traced(
                 raise
     finally:
         _active_tracer.reset(token)
+
+
+def _mark_exit_outcome(span: Span, exit_code: int, non_error_exit_codes: Collection[int]) -> None:
+    """Apply the CLI-spans error rule to a non-crash exit.
+
+    A non-zero exit code is an error (``error.type`` = ``_OTHER`` per the OTel
+    well-known fallback + ERROR span status) unless it is a domain status code
+    exempted via ``non_error_exit_codes``.
+    """
+    if exit_code == 0 or exit_code in non_error_exit_codes:
+        return
+    span.set_attribute(ERROR_TYPE, "_OTHER")
+    span.set_status(Status(StatusCode.ERROR))
 
 
 def _record_sanitized_error(span: Span, error: BaseException) -> None:

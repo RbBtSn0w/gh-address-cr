@@ -57,7 +57,7 @@ def run_cmd(
     retries: int = 3,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    from opentelemetry.trace import SpanKind
+    from opentelemetry.trace import SpanKind, Status, StatusCode
 
     from gh_address_cr.core.telemetry import SessionTelemetry
     from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
@@ -93,7 +93,7 @@ def run_cmd(
             PROCESS_EXECUTABLE_NAME: os.path.basename(cmd[0]) if cmd else "subprocess",
             PROCESS_COMMAND_ARGS: safe_args,
         },
-    ):
+    ) as span:
         for attempt in range(attempts):
             process = subprocess.Popen(
                 cmd,
@@ -128,7 +128,6 @@ def run_cmd(
                     stdout=timeout_stream_text(exc.stdout),
                     stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
                 )
-                set_current_span_attributes({ERROR_TYPE: "timeout"})
                 if cmd and cmd[0] == "gh" and attempt < attempts - 1:
                     time.sleep(2**attempt)
                     continue
@@ -147,9 +146,15 @@ def run_cmd(
             "gh_address_cr.subprocess.duration_ms": round((end_time - start_time) * 1000, 3),
             PROCESS_EXIT_CODE: exit_code,
         }
+        # Caller-span convention (CLI spans semconv): a non-zero exit from an
+        # external tool is a genuine error, so record error.type AND set the
+        # span status to ERROR. Set both once, from the final exit code, so a
+        # transient timeout that later succeeds on retry leaves neither behind.
         if exit_code != 0:
             span_attributes[ERROR_TYPE] = "timeout" if exit_code == 124 else str(exit_code)
         set_current_span_attributes(span_attributes)
+        if exit_code != 0:
+            span.set_status(Status(StatusCode.ERROR))
     end_time = time.time()
     exit_code = result.returncode
     add_current_span_event(

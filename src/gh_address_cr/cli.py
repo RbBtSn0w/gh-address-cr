@@ -76,6 +76,15 @@ GITHUB_PRECHECK_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 PR_IO_PREFLIGHT_EXIT = 5
+NEEDS_HUMAN_EXIT = 4
+NEEDS_ACTION_EXIT = 2
+# Non-zero exit codes that are deliberate Status-to-Action outcomes rather than
+# failures (Principle VIII); the process span MUST NOT flag these as errors.
+# 2 = needs-action, 4 = needs-human, 5 = blocked/preflight, 6 = waiting-for-review.
+# Exit 1 (FAILED/UNKNOWN) and any other non-zero code remain genuine errors.
+STATUS_EXIT_CODES = frozenset(
+    {NEEDS_ACTION_EXIT, NEEDS_HUMAN_EXIT, PR_IO_PREFLIGHT_EXIT, WAITING_FOR_EXTERNAL_REVIEW_EXIT}
+)
 PR_URL_RE = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$")
 
 
