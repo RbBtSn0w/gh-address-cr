@@ -56,6 +56,75 @@ def runtime_subprocess_env() -> dict[str, str]:
     return env
 
 
+def _terminate(process: subprocess.Popen[str]) -> None:
+    """Kill a subprocess and reap it with a bound so cleanup can't hang."""
+    try:
+        process.kill()
+    except OSError:
+        # kill() can race the process exit (ProcessLookupError on POSIX,
+        # PermissionError on Windows); a dead process needs no killing.
+        pass
+    try:
+        process.communicate(timeout=_KILL_REAP_TIMEOUT_SECONDS)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
+def _run_subprocess_attempt(
+    cmd: list[str], stdin: str | None, timeout: float | None, tool_name: str
+) -> tuple[subprocess.CompletedProcess[str], int | None]:
+    """Run one subprocess attempt, converting spawn/timeout/IO failures into a
+    deterministic ``CompletedProcess`` so the caller span always carries a
+    ``process.exit.code``. Returns ``(result, pid)``; ``pid`` is ``None`` when
+    the process never spawned.
+    """
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE if stdin is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=runtime_subprocess_env(),
+        )
+    except OSError as exc:
+        # Spawn failure (e.g. executable missing -> FileNotFoundError): 127.
+        return (
+            subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"Failed to execute {tool_name}: {exc}"),
+            None,
+        )
+    try:
+        stdout, stderr = process.communicate(input=stdin, timeout=timeout)
+        return subprocess.CompletedProcess(args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr), process.pid
+    except subprocess.TimeoutExpired as exc:
+        _terminate(process)
+        return (
+            subprocess.CompletedProcess(
+                args=cmd,
+                returncode=124,
+                stdout=timeout_stream_text(exc.stdout),
+                stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
+            ),
+            process.pid,
+        )
+    except OSError as exc:
+        # Unexpected I/O failure talking to the child; reap and report 127.
+        _terminate(process)
+        return (
+            subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"Subprocess I/O error for {tool_name}: {exc}"),
+            process.pid,
+        )
+
+
+def _should_retry_gh(result: subprocess.CompletedProcess[str], cmd: list[str], attempt: int, attempts: int) -> bool:
+    """Whether a failed `gh` attempt is worth retrying (timeout, or transient)."""
+    if not cmd or cmd[0] != "gh" or attempt >= attempts - 1 or result.returncode == 0:
+        return False
+    if result.returncode == 124:
+        return True
+    return is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
+
+
 def run_cmd(
     cmd: list[str],
     *,
@@ -101,53 +170,13 @@ def run_cmd(
         },
     ) as span:
         for attempt in range(attempts):
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE if stdin is not None else None,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=runtime_subprocess_env(),
-            )
-            set_current_span_attributes({PROCESS_PID: process.pid})
-            try:
-                stdout, stderr = process.communicate(input=stdin, timeout=timeout)
-                result = subprocess.CompletedProcess(
-                    args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr
-                )
-                if (
-                    result.returncode != 0
-                    and cmd
-                    and cmd[0] == "gh"
-                    and attempt < attempts - 1
-                    and is_transient_gh_failure(result.stderr, result.stdout, result.returncode)
-                ):
-                    time.sleep(2**attempt)
-                    continue
-                break
-            except subprocess.TimeoutExpired as exc:
-                # kill() can race the process exiting and raise OSError
-                # (ProcessLookupError on POSIX, PermissionError on Windows);
-                # swallow it so a timeout still yields a 124 result, never a crash.
-                try:
-                    process.kill()
-                except OSError:
-                    pass
-                # Bounded reap: never let post-kill draining hang the CLI.
-                try:
-                    process.communicate(timeout=_KILL_REAP_TIMEOUT_SECONDS)
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
-                result = subprocess.CompletedProcess(
-                    args=cmd,
-                    returncode=124,
-                    stdout=timeout_stream_text(exc.stdout),
-                    stderr=timeout_stream_text(exc.stderr) + f"\nCommand timed out after {timeout} seconds.",
-                )
-                if cmd and cmd[0] == "gh" and attempt < attempts - 1:
-                    time.sleep(2**attempt)
-                    continue
-                break
+            result, pid = _run_subprocess_attempt(cmd, stdin, timeout, tool_name)
+            if pid is not None:
+                set_current_span_attributes({PROCESS_PID: pid})
+            if _should_retry_gh(result, cmd, attempt, attempts):
+                time.sleep(2**attempt)
+                continue
+            break
         if result is None:
             result = subprocess.CompletedProcess(
                 args=cmd,

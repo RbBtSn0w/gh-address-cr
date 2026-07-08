@@ -154,6 +154,26 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         # The bounded reap passed an explicit timeout rather than blocking forever.
         self.assertEqual(process.communicate.call_args.kwargs.get("timeout"), 5.0)
 
+    def test_spawn_failure_records_exit_code_and_error_on_span(self) -> None:
+        """If Popen fails (e.g. missing executable), the caller span must still
+        carry the Required process.exit.code plus error.type/ERROR status
+        rather than exiting early without them."""
+        with patch(
+            "gh_address_cr.core.command_runner.subprocess.Popen",
+            side_effect=FileNotFoundError("no such file: nope"),
+        ):
+            result = run_traced(
+                self.tracer,
+                "gh-address-cr.cli",
+                lambda: run_cmd(["nope"], retries=1),
+            )
+
+        self.assertEqual(result.returncode, 127)
+        span = self._subprocess_span()
+        self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 127)
+        self.assertEqual(span.attributes[ERROR_TYPE], "127")
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
+
 
 if __name__ == "__main__":
     unittest.main()
