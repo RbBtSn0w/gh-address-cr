@@ -120,7 +120,13 @@ def run_cmd(
                     continue
                 break
             except subprocess.TimeoutExpired as exc:
-                process.kill()
+                # kill() can race the process exiting and raise OSError
+                # (ProcessLookupError on POSIX, PermissionError on Windows);
+                # swallow it so a timeout still yields a 124 result, never a crash.
+                try:
+                    process.kill()
+                except OSError:
+                    pass
                 process.communicate()
                 result = subprocess.CompletedProcess(
                     args=cmd,

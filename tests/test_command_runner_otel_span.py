@@ -95,6 +95,27 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertNotIn(ERROR_TYPE, span.attributes)
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
+    def test_timeout_kill_oserror_still_returns_124_without_crashing(self) -> None:
+        """If process.kill() races the process exit and raises OSError, run_cmd
+        must still return a 124 timed-out result rather than propagating."""
+        timed_out = subprocess.TimeoutExpired(cmd=["sleep", "5"], timeout=0.05)
+        process = MagicMock()
+        process.pid = 999
+        process.communicate.side_effect = [timed_out, ("", "")]
+        process.kill.side_effect = ProcessLookupError("no such process")
+
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            result = run_traced(
+                self.tracer,
+                "gh-address-cr.cli",
+                lambda: run_cmd(["sleep", "5"], retries=1, timeout=0.05),
+            )
+
+        self.assertEqual(result.returncode, 124)
+        span = self._subprocess_span()
+        self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 124)
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
+
 
 if __name__ == "__main__":
     unittest.main()
