@@ -22,6 +22,12 @@ from gh_address_cr.core.telemetry_safety import (
 )
 from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
+# Bounded reap after killing a timed-out subprocess so the cleanup path can
+# never itself hang the CLI (e.g. a process wedged in uninterruptible sleep
+# that does not act on SIGKILL promptly). Unlike stdlib subprocess.run, which
+# reaps unbounded, a user-facing CLI must not deadlock in its own timeout path.
+_KILL_REAP_TIMEOUT_SECONDS = 5.0
+
 
 def is_transient_gh_failure(
     stderr: str | None = None, stdout: str | None = None, returncode: int | None = None
@@ -127,7 +133,11 @@ def run_cmd(
                     process.kill()
                 except OSError:
                     pass
-                process.communicate()
+                # Bounded reap: never let post-kill draining hang the CLI.
+                try:
+                    process.communicate(timeout=_KILL_REAP_TIMEOUT_SECONDS)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
                 result = subprocess.CompletedProcess(
                     args=cmd,
                     returncode=124,

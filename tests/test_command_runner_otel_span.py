@@ -133,6 +133,27 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 124)
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
+    def test_timeout_post_kill_reap_is_bounded_and_returns_124(self) -> None:
+        """If the post-kill communicate() would also hang, the bounded reap
+        (TimeoutExpired) is swallowed and run_cmd still returns a 124 result."""
+        first_timeout = subprocess.TimeoutExpired(cmd=["sleep", "5"], timeout=0.05)
+        reap_timeout = subprocess.TimeoutExpired(cmd=["sleep", "5"], timeout=5.0)
+        process = MagicMock()
+        process.pid = 777
+        # communicate() raises on the initial wait AND on the bounded post-kill reap.
+        process.communicate.side_effect = [first_timeout, reap_timeout]
+
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            result = run_traced(
+                self.tracer,
+                "gh-address-cr.cli",
+                lambda: run_cmd(["sleep", "5"], retries=1, timeout=0.05),
+            )
+
+        self.assertEqual(result.returncode, 124)
+        # The bounded reap passed an explicit timeout rather than blocking forever.
+        self.assertEqual(process.communicate.call_args.kwargs.get("timeout"), 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()
