@@ -35,13 +35,25 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         spans = self.exporter.get_finished_spans()
         return next(span for span in spans if span.name == GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME)
 
+    @staticmethod
+    def _mock_process(*, pid=555, returncode=0, communicate_side_effect=None, stdout="", stderr=""):
+        process = MagicMock()
+        process.pid = pid
+        process.returncode = returncode
+        if communicate_side_effect is not None:
+            process.communicate.side_effect = communicate_side_effect
+        else:
+            process.communicate.return_value = (stdout, stderr)
+        return process
+
     def test_successful_command_records_client_kind_and_pid_without_error_type(self) -> None:
-        run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["true"]))
+        process = self._mock_process(pid=555, returncode=0)
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["true"]))
 
         span = self._subprocess_span()
         self.assertEqual(span.kind, SpanKind.CLIENT)
-        self.assertIn(PROCESS_PID, span.attributes)
-        self.assertIsInstance(span.attributes[PROCESS_PID], int)
+        self.assertEqual(span.attributes[PROCESS_PID], 555)
         self.assertEqual(span.attributes[PROCESS_EXECUTABLE_NAME], "true")
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 0)
         self.assertNotIn(ERROR_TYPE, span.attributes)
@@ -49,7 +61,8 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_nonzero_exit_records_error_type_and_error_status(self) -> None:
-        with patch("gh_address_cr.core.command_runner.is_transient_gh_failure", return_value=False):
+        process = self._mock_process(returncode=1)
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
             run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["false"], retries=1))
 
         span = self._subprocess_span()
@@ -59,11 +72,15 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_timeout_records_timeout_error_type_and_error_status(self) -> None:
-        run_traced(
-            self.tracer,
-            "gh-address-cr.cli",
-            lambda: run_cmd(["sleep", "5"], retries=1, timeout=0.05),
-        )
+        timed_out = subprocess.TimeoutExpired(cmd=["sleep", "5"], timeout=0.05)
+        # communicate() raises TimeoutExpired; the post-kill drain call returns.
+        process = self._mock_process(communicate_side_effect=[timed_out, ("", "")])
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            run_traced(
+                self.tracer,
+                "gh-address-cr.cli",
+                lambda: run_cmd(["sleep", "5"], retries=1, timeout=0.05),
+            )
 
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 124)
