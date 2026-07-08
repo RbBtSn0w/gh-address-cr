@@ -6,6 +6,7 @@ import sys
 from collections.abc import Sequence
 
 from gh_address_cr import __version__
+from gh_address_cr.cli import STATUS_EXIT_CODES
 from gh_address_cr.cli import main as cli_main
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_OPERATION_NAME,
@@ -73,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             lambda: cli_main(argv),
             attributes=attributes,
             context=parent_context,
+            non_error_exit_codes=STATUS_EXIT_CODES,
         )
     finally:
         shutdown_telemetry()

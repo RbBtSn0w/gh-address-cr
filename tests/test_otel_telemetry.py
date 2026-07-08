@@ -227,7 +227,12 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = MagicMock()
         tracer.start_as_current_span.return_value = context_manager
 
-        result = telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(2)))
+        result = telemetry.run_traced(
+            tracer,
+            "gh-address-cr.cli",
+            lambda: (_ for _ in ()).throw(SystemExit(2)),
+            non_error_exit_codes={2, 4, 5, 6},
+        )
 
         self.assertEqual(result, 2)
         span.record_exception.assert_not_called()

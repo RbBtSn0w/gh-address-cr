@@ -119,8 +119,9 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
             PROCESS_EXIT_CODE,
         )
 
-        completed = MagicMock(returncode=0, stdout="{}", stderr="")
-        with patch("gh_address_cr.core.command_runner.subprocess.run", return_value=completed):
+        process = MagicMock(pid=4321, returncode=0)
+        process.communicate.return_value = ("{}", "")
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
             result = telemetry.run_traced(
                 self.tracer,
                 "gh-address-cr.cli",

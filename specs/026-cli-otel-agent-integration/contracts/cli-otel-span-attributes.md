@@ -21,25 +21,35 @@ landable subset; "GATED" = requires human confirmation before build.
 
 ## C-3 Exit outcome (MVP)
 - Every exported span carries the honest `process.exit.code` (int). On a normal
-  return it equals the CLI's return code (including non-zero **status** codes
-  like 6=`WAITING_FOR_EXTERNAL_REVIEW`, 2=needs-action, 5=preflight); when an
-  exception propagates out of `cli_main` it is a **synthetic `1`**.
-- `error.type` is present **iff an exception propagated** (a genuine crash). A
-  non-zero *return* by itself MUST NOT set `error.type` — those are Status-to-
-  Action outcome codes, and marking them errors would inflate failure counts
-  (Principle VIII). `error.type` MUST be absent on every non-crash run
-  (success **or** non-zero status). Span status is ERROR only on a propagated
-  exception. *(Documented deviation from the generic OTel "error iff exit≠0"
-  rule; here an error = a crash.)*
+  return it equals the CLI's return code; when an exception propagates out of
+  `cli_main` it is a **synthetic `1`**.
+- The root span applies the generic OTel CLI-spans rule "error iff
+  `process.exit.code != 0`" **with one bounded, enumerated exemption**: the
+  CLI's own Status-to-Action outcome codes —
+  `STATUS_EXIT_CODES = {2=needs-action, 4=needs-human, 5=blocked/preflight,
+  6=WAITING_FOR_EXTERNAL_REVIEW}` (defined in `cli.py`, injected into
+  `run_traced` via `non_error_exit_codes`) — are **not** errors, because
+  marking these deliberate workflow outcomes as failures would inflate failure
+  counts (Principle VIII).
+- Therefore `error.type` is present **and** span status is ERROR iff either:
+  - an exception propagated (a genuine crash), **or**
+  - the exit code is non-zero **and not** in `STATUS_EXIT_CODES` (e.g.
+    `1`=FAILED/UNKNOWN, or any unrecognized non-zero code) — a genuine failure
+    that returns rather than raises.
+  `error.type` is absent and span status is unset on success (0) and on every
+  exempted status code. *(Narrowed deviation: only the enumerated status
+  vocabulary is exempt from the generic rule; genuine failures — including a
+  non-raising `return 1` — are honestly reported so failure telemetry stays
+  queryable.)*
 - `error.type` values are drawn from an **explicitly enumerated bounded set**
   (all literal strings):
   - `"keyboard_interrupt"` — `KeyboardInterrupt` propagated;
   - `"timeout"` — `TimeoutError` propagated;
-  - `"_OTHER"` — any other propagated exception (the literal string `_OTHER`,
-    the OTel well-known fallback value).
+  - `"_OTHER"` — any other propagated exception **or** a genuine non-zero
+    non-exempt exit (the literal string `_OTHER`, the OTel well-known fallback
+    value).
   Arbitrary/raw exception class names MUST NOT be passed through (cardinality
-  guard, Principle VIII). *(No `"nonzero_exit"` value: a non-zero return is not
-  an error.)*
+  guard, Principle VIII).
 
 ## C-4 Sanitized arguments (MVP)
 - `process.command_args` (string[]) is present and is the output of
@@ -101,6 +111,40 @@ landable subset; "GATED" = requires human confirmation before build.
   `owner`/`repo` string or `vcs.repository.url.full` across a sampled PR run,
   while `command_args` still shows the command + PR number + redacted repo slot.
 
+## C-13 Subprocess caller span — CLI spans "Client (caller)" alignment (MVP)
+- The `gh_address_cr.subprocess` child span (wrapping `gh`/other external
+  invocations) is span kind `CLIENT`, per the OTel CLI spans "Client (caller)
+  spans" convention (distinct from the root span's `INTERNAL` "Execution
+  (callee)" kind).
+- It carries `process.executable.name` (already present), `process.pid` of
+  the spawned child process (sourced from `Popen.pid`, refreshed per retry
+  attempt), and `process.exit.code` of the last attempt.
+- `error.type` is present **iff** the final `process.exit.code != 0`, **and
+  the span status is set to ERROR in exactly the same condition** — this span
+  follows the generic OTel "error iff exit≠0" rule for both `error.type` and
+  span status (the spec: "An Error is defined as when the `process.exit.code`
+  attribute is not 0"), unlike the root span's C-3 deviation, because a
+  non-zero exit from an *external* tool is a genuine operational failure, not
+  one of gh-address-cr's own Status-to-Action outcome codes. `error.type`
+  value is the literal `"timeout"` on a timeout (exit 124), else the
+  stringified exit code (bounded cardinality, consistent with the spec's own
+  `error.type` example of using an HTTP-status-like string).
+- Both `error.type` and span status are set **once, from the final exit
+  code**, after all retries. A transient timeout that later succeeds on retry
+  leaves the span with `exit.code == 0`, **no** `error.type`, and a non-ERROR
+  status (no stale error residue from the timed-out attempt).
+- `process.executable.path` is intentionally **not** set on either this span
+  or the root span: on this project's target platforms the resolved path
+  reliably contains `/Users/<user>/...` or `/home/<user>/...`, which
+  `telemetry_safety._looks_like_unnecessary_absolute_path` already treats as
+  unsafe. Emitting it would leak local usernames. Since the attribute is
+  Recommended (not Required) in the spec, it is omitted rather than sanitized
+  down to a value that duplicates `process.executable.name`.
+- **Enforced**: `tests/test_command_runner_otel_span.py` (in-memory span
+  exporter) asserts CLIENT kind, `process.pid` presence, and `error.type` +
+  span-status (ERROR/non-ERROR) across success, non-zero exit, timeout, and
+  the transient-timeout-then-success (no-residue) case.
+
 ## GATED contracts (NOT built until confirmed)
 - **C-9 (G-2) `--traceparent`**: a global public flag accepting a full W3C
   traceparent string; when valid it is used for correlation with precedence over
@@ -110,10 +154,28 @@ landable subset; "GATED" = requires human confirmation before build.
 - **C-10 (G-3) `gen_ai.tool.call.result`**: low-cardinality structured summary
   fields (e.g. `status`, `reason_code`), truncated; requires CLI-internal
   plumbing. Never raw stdout.
+- **(G-4) `process.executable.path` / install-channel signal**: the raw
+  semconv attribute is **not** implemented on either span (root or
+  subprocess). On this project's target platforms the resolved path reliably
+  contains `/Users/<user>/...` or `/home/<user>/...` (or, for CI-run
+  binaries, may embed `owner/repo` — which C-12 already goes out of its way
+  to hash), so emitting it verbatim would leak identifying context that a
+  `~`-substitution or other partial mask cannot fully close (arbitrary
+  directory-tree segments, e.g. `~/clients/<confidential-project>/...`,
+  remain unenumerable). There is currently no concrete, evidenced debugging
+  need for this signal. If one materializes (e.g. bug reports traceable to a
+  specific install channel), the correct design is a new project-namespaced
+  bounded enum — e.g. `gh_address_cr.install_channel ∈ {pipx, homebrew,
+  venv, source_checkout, system, unknown}` derived locally from
+  `sys.executable`/`__file__` — never the raw path, and never a value stored
+  under the `process.executable.path` key itself (repurposing an official
+  semconv key for a non-literal value would mislead consumers). See
+  `AGENTS.md` § Telemetry for the general "derive a signal, don't sanitize a
+  string" principle this follows.
 
 ## Verification
 `python3 -m unittest discover -s tests` (new files
 `tests/test_cli_otel_execution.py`, `tests/test_cli_otel_context.py`,
 `tests/test_cli_otel_genai.py`, `tests/test_telemetry_safety_command_args.py`,
-`tests/test_otel_semconv_pins.py`) +
+`tests/test_otel_semconv_pins.py`, `tests/test_command_runner_otel_span.py`) +
 smoke `python3 -m gh_address_cr --help`. See [quickstart.md](../quickstart.md).

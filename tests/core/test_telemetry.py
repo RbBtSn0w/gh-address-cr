@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
@@ -2495,9 +2495,26 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(data["pid"], 12345)
         self.assertEqual(data["execution_id"], "exec-id-abc")
 
-    @patch("subprocess.run")
-    def test_run_cmd_timeout(self, mock_run):
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err")
+    @staticmethod
+    def _mock_process(returncode=0, stdout="", stderr="", communicate_side_effect=None, pid=4242):
+        process = MagicMock()
+        process.pid = pid
+        process.returncode = returncode
+        if communicate_side_effect is not None:
+            process.communicate.side_effect = communicate_side_effect
+        else:
+            process.communicate.return_value = (stdout, stderr)
+        return process
+
+    @patch("subprocess.Popen")
+    def test_run_cmd_timeout(self, mock_popen):
+        timed_out_process = self._mock_process(
+            communicate_side_effect=[
+                subprocess.TimeoutExpired(cmd=["sleep", "10"], timeout=120.0, output=b"out", stderr=b"err"),
+                ("", ""),
+            ]
+        )
+        mock_popen.return_value = timed_out_process
 
         from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["sleep", "10"], timeout=120.0)
@@ -2506,56 +2523,55 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(res.stdout, "out")
         self.assertIn("err", res.stderr)
         self.assertIn("Command timed out after 120.0 seconds.", res.stderr)
-        
+        timed_out_process.kill.assert_called_once()
+
         tracker = SessionTelemetry.get_instance()
         self.assertEqual(len(tracker.metrics), 1)
         self.assertEqual(tracker.metrics[0].exit_code, 124)
 
-    @patch("subprocess.run")
-    def test_run_cmd_does_not_apply_default_timeout(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
+    @patch("subprocess.Popen")
+    def test_run_cmd_does_not_apply_default_timeout(self, mock_popen):
+        mock_popen.return_value = self._mock_process(returncode=0, stdout="ok", stderr="")
 
         from gh_address_cr.core.command_runner import run_cmd
         run_cmd(["ls"])
 
-        self.assertIsNone(mock_run.call_args.kwargs["timeout"])
+        self.assertIsNone(mock_popen.return_value.communicate.call_args.kwargs["timeout"])
 
     @patch("time.sleep")
-    @patch("subprocess.run")
-    def test_run_cmd_retries_transient_gh_failure(self, mock_run, mock_sleep):
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="graphql failed"),
-            subprocess.CompletedProcess(args=["gh", "api", "graphql"], returncode=0, stdout="{}", stderr=""),
+    @patch("subprocess.Popen")
+    def test_run_cmd_retries_transient_gh_failure(self, mock_popen, mock_sleep):
+        mock_popen.side_effect = [
+            self._mock_process(returncode=1, stdout="", stderr="graphql failed"),
+            self._mock_process(returncode=0, stdout="{}", stderr=""),
         ]
 
         from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["gh", "api", "graphql"], retries=2)
 
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(mock_run.call_count, 2)
+        self.assertEqual(mock_popen.call_count, 2)
         mock_sleep.assert_called_once_with(1)
 
     @patch("time.sleep")
-    @patch("subprocess.run")
-    def test_run_cmd_does_not_retry_non_transient_gh_failure(self, mock_run, mock_sleep):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["gh", "api", "graphql"], returncode=1, stdout="", stderr="validation failed"
-        )
+    @patch("subprocess.Popen")
+    def test_run_cmd_does_not_retry_non_transient_gh_failure(self, mock_popen, mock_sleep):
+        mock_popen.return_value = self._mock_process(returncode=1, stdout="", stderr="validation failed")
 
         from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["gh", "api", "graphql"], retries=3)
 
         self.assertEqual(res.returncode, 1)
-        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(mock_popen.call_count, 1)
         mock_sleep.assert_not_called()
 
     @patch("sys.stderr")
     @patch("gh_address_cr.core.telemetry.SessionTelemetry.record")
-    @patch("subprocess.run")
-    def test_run_cmd_fail_open(self, mock_run, mock_record, mock_stderr):
-        mock_run.return_value = subprocess.CompletedProcess(args=["ls"], returncode=0, stdout="ok", stderr="")
+    @patch("subprocess.Popen")
+    def test_run_cmd_fail_open(self, mock_popen, mock_record, mock_stderr):
+        mock_popen.return_value = self._mock_process(returncode=0, stdout="ok", stderr="")
         mock_record.side_effect = Exception("Telemetry DB error")
-        
+
         from gh_address_cr.core.command_runner import run_cmd
         res = run_cmd(["ls"])
         self.assertEqual(res.returncode, 0)
