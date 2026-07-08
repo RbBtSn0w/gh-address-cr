@@ -1,3 +1,9 @@
+## [3.5.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.5...v3.5.6) (2026-07-08)
+
+### Bug Fixes
+
+* complete OTel CLI-spans error/status conformance ([#203](https://github.com/RbBtSn0w/gh-address-cr/issues/203)) ([53168a0](https://github.com/RbBtSn0w/gh-address-cr/commit/53168a03c3fb14ff3e86225d6503efa70b4a3540))
+
 ## [3.5.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.4...v3.5.5) (2026-07-07)
 
 ### Bug Fixes
