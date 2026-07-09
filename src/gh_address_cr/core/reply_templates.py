@@ -1,19 +1,5 @@
 from __future__ import annotations
 
-SEVERITY_RISK_NOTES = {
-    "P0": "Blocker path validated for critical system integrity and safety.",
-    "P1": "High-severity path validated with targeted regression checks.",
-    "P2": "Medium-severity path validated and aligned with expected workflow.",
-    "P3": "Low-severity improvement validated for non-breaking behavior.",
-    "P4": "Nit/Suggestion path verified for stylistic or non-functional consistency.",
-}
-
-REVIEW_PRIORITY_RISK_NOTES = {
-    "high": "High-priority reviewer signal addressed with targeted regression evidence.",
-    "medium": "Medium-priority reviewer signal addressed with focused drift and correctness validation.",
-    "low": "Low-priority reviewer signal addressed as a non-breaking cleanup or clarity improvement.",
-}
-
 SEVERITY_SIGNAL_LABELS = {
     "P0": "`P0`",
     "P1": "`P1`",
@@ -22,14 +8,14 @@ SEVERITY_SIGNAL_LABELS = {
     "P4": "`P4`",
 }
 
-DEFAULT_FILE_SUMMARY = "updated per CR scope"
+VALID_REVIEW_PRIORITIES = {"high", "medium", "low"}
 
 
 def _normalize_severity(severity: str | None) -> str | None:
     if severity in (None, ""):
         return None
     normalized = str(severity).strip().upper()
-    if normalized not in SEVERITY_RISK_NOTES:
+    if normalized not in SEVERITY_SIGNAL_LABELS:
         raise SystemExit(f"Invalid severity: {severity} (expected P0/P1/P2/P3/P4)")
     return normalized
 
@@ -45,7 +31,7 @@ def _normalize_review_priority(priority: str | None) -> str | None:
     if priority in (None, ""):
         return None
     normalized = str(priority).strip().lower()
-    if normalized not in REVIEW_PRIORITY_RISK_NOTES:
+    if normalized not in VALID_REVIEW_PRIORITIES:
         raise SystemExit(f"Invalid reviewer priority: {priority} (expected high/medium/low)")
     return normalized
 
@@ -108,7 +94,7 @@ def fix_reply(
     # can still exercise formatting paths.
 
     files = [item.strip() for item in files_csv.split(",") if item.strip()]
-    file_summary = str(summary or DEFAULT_FILE_SUMMARY).strip()
+    file_summary = str(summary).strip() if summary else None
 
     review_signal = _review_signal_label(normalized_severity, normalized_review_priority)
 
@@ -117,7 +103,9 @@ def fix_reply(
     if review_signal:
         lines.extend([f"Review signal: {review_signal}", ""])
 
-    lines.extend([f"- `{path}`: {file_summary}" for path in files] or ["- No file list provided."])
+    lines.extend(
+        [f"- `{path}`: {file_summary}" if file_summary else f"- `{path}`" for path in files] or ["- No file list provided."]
+    )
 
     rationale_lines = _format_rationale(why)
     if len(rationale_lines) == 1 and rationale_lines[0].startswith("- "):
@@ -126,13 +114,10 @@ def fix_reply(
         lines.append("- Why:")
         lines.extend(f"  {line}" for line in rationale_lines)
 
-    if normalized_severity:
-        lines.append(f"- Risk note: {SEVERITY_RISK_NOTES[normalized_severity]}")
-    elif normalized_review_priority:
+    if not normalized_severity and normalized_review_priority:
         priority_note = str(review_priority_note or "").strip()
         if priority_note:
             lines.append(f"- Review note: {priority_note}")
-        lines.append(f"- Risk note: {REVIEW_PRIORITY_RISK_NOTES[normalized_review_priority]}")
 
     lines.append(f"- Validation: `{test_command}` {test_result}")
 
