@@ -1,3 +1,9 @@
+## [3.5.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.7...v3.5.8) (2026-07-09)
+
+### Bug Fixes
+
+* remove unfilled placeholder tokens from defer_reply template ([#211](https://github.com/RbBtSn0w/gh-address-cr/issues/211)) ([10cc029](https://github.com/RbBtSn0w/gh-address-cr/commit/10cc02970f8ff9fc6eaffc8572dd8eb2bd908a81)), closes [#207](https://github.com/RbBtSn0w/gh-address-cr/issues/207)
+
 ## [3.5.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.6...v3.5.7) (2026-07-09)
 
 ### Bug Fixes
