@@ -56,6 +56,14 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertIn("Reviewer-provided priority from the original review comment.", result)
         self.assertIn("Medium-priority reviewer signal", result)
 
+    def test_defer_reply_has_no_unfilled_placeholder_tokens(self):
+        result = defer_reply(["Needs a broader cleanup outside this PR."])
+
+        self.assertNotIn("<issue_or_followup_pr>", result)
+        self.assertNotIn("<exact scope>", result)
+        self.assertNotIn("<low/medium/high", result)
+        self.assertIn("Needs a broader cleanup outside this PR.", result)
+
     def test_fix_reply_usage_uses_supported_cli_surface(self):
         with self.assertRaises(SystemExit) as context:
             fix_reply(None, [])

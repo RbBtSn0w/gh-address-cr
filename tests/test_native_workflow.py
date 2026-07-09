@@ -1014,11 +1014,6 @@ class NativeWorkflowTests(unittest.TestCase):
             "Decision:\n"
             "- Marking as deferred (non-blocking for this PR) because: This needs a broader cleanup outside this PR.\n"
             "\n"
-            "Follow-up plan:\n"
-            "1. Track in `<issue_or_followup_pr>`.\n"
-            "2. Scope: `<exact scope>`.\n"
-            "3. Risk before follow-up: `<low/medium/high + short reason>`.\n"
-            "\n"
             "If you prefer, I can bring this into the current PR instead.\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
