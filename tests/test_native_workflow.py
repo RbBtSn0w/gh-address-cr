@@ -575,7 +575,6 @@ class NativeWorkflowTests(unittest.TestCase):
             "\n"
             "- `src/example.py`: Added the missing input guard.\n"
             "- Why: The input is now checked before use.\n"
-            "- Risk note: High-severity path validated with targeted regression checks.\n"
             "- Validation: `python3 -m unittest tests.test_example` passed\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -813,7 +812,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertNotIn("Reviewer priority:", client.replies[0])
                 self.assertIn("Review signal: `Low Priority`", client.replies[0])
                 self.assertIn("Reviewer-provided priority from github_first_comment", client.replies[0])
-                self.assertIn("Low-priority reviewer signal", client.replies[0])
+                self.assertNotIn("Risk note:", client.replies[0])
 
     def test_publish_github_thread_fix_with_legacy_unbacked_severity_does_not_default_to_p2(self):
         from gh_address_cr.core import publisher
@@ -878,12 +877,7 @@ class NativeWorkflowTests(unittest.TestCase):
             def resolve_thread(self, repo, pr_number, thread_id):
                 return True
 
-        expectations = {
-            "P1": "- Risk note: High-severity path validated with targeted regression checks.",
-            "P2": "- Risk note: Medium-severity path validated and aligned with expected workflow.",
-            "P3": "- Risk note: Low-severity improvement validated for non-breaking behavior.",
-        }
-        for severity, expected_line in expectations.items():
+        for severity in ("P1", "P2", "P3"):
             with self.subTest(severity=severity):
                 repo = "owner/repo"
                 pr_number = "123"
@@ -926,7 +920,7 @@ class NativeWorkflowTests(unittest.TestCase):
                         self.assertIn(f"Review signal: `{severity}`", client.replies[0])
                         self.assertNotIn("Severity:", client.replies[0])
                         self.assertNotIn("Reviewer priority:", client.replies[0])
-                        self.assertIn(expected_line, client.replies[0])
+                        self.assertNotIn("Risk note:", client.replies[0])
 
     def test_publish_github_thread_fix_ignores_reply_markdown_when_fix_reply_exists(self):
         from gh_address_cr.core import publisher

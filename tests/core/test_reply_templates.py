@@ -36,7 +36,7 @@ class TestReplyTemplates(unittest.TestCase):
     def test_fix_reply_p4_rendering(self):
         result = fix_reply("P4", ["sha123", "src/file.py", "pytest", "Passed", "Minor nit."])
         self.assertIn("Review signal: `P4`", result)
-        self.assertIn("Nit/Suggestion path verified", result)
+        self.assertNotIn("Risk note:", result)
 
     def test_reply_templates_do_not_accept_efficiency_summary_parameter(self):
         for renderer in (fix_reply, clarify_reply, defer_reply):
@@ -54,7 +54,14 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertNotIn("Reviewer priority:", result)
         self.assertIn("Review signal: `Medium Priority`", result)
         self.assertIn("Reviewer-provided priority from the original review comment.", result)
-        self.assertIn("Medium-priority reviewer signal", result)
+        self.assertNotIn("Risk note:", result)
+
+    def test_fix_reply_without_summary_omits_placeholder_file_summary(self):
+        result = fix_reply(None, ["sha123", "src/a.py,src/b.py", "pytest", "Passed", "Rationale."])
+
+        self.assertNotIn("updated per CR scope", result)
+        self.assertIn("- `src/a.py`\n", result)
+        self.assertIn("- `src/b.py`\n", result)
 
     def test_defer_reply_has_no_unfilled_placeholder_tokens(self):
         result = defer_reply(["Needs a broader cleanup outside this PR."])
