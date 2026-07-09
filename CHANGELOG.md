@@ -1,3 +1,9 @@
+## [3.5.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.8...v3.5.9) (2026-07-09)
+
+### Bug Fixes
+
+* drop canned boilerplate from reply templates that duplicated real evidence ([#212](https://github.com/RbBtSn0w/gh-address-cr/issues/212)) ([846de4d](https://github.com/RbBtSn0w/gh-address-cr/commit/846de4d865cb5e27959c95429e09860ca9d4472a)), closes [#209](https://github.com/RbBtSn0w/gh-address-cr/issues/209)
+
 ## [3.5.8](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.7...v3.5.8) (2026-07-09)
 
 ### Bug Fixes
