@@ -1,3 +1,9 @@
+## [3.5.7](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.6...v3.5.7) (2026-07-09)
+
+### Bug Fixes
+
+* orthogonalize agent resolve axes, closes [#204](https://github.com/RbBtSn0w/gh-address-cr/issues/204) ([#206](https://github.com/RbBtSn0w/gh-address-cr/issues/206)) ([1c9d07a](https://github.com/RbBtSn0w/gh-address-cr/commit/1c9d07a2959e81013380aa25bb912e31eacb678a))
+
 ## [3.5.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.5...v3.5.6) (2026-07-08)
 
 ### Bug Fixes
