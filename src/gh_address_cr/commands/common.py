@@ -14,6 +14,7 @@ IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--classification",
     "--commit",
     "--concern-label",
+    "--disposition",
     "--file",
     "--files",
     "--format",

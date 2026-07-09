@@ -34,10 +34,10 @@ Packaged skill docs: `skill/` (thin adapter — descriptive only, no logic).
 
 **Purpose**: Confirm the working baseline before touching the resolve surface.
 
-- [ ] T001 Run `pip install -e .`, `python3 -m unittest discover -s tests`, and
+- [X] T001 Run `pip install -e .`, `python3 -m unittest discover -s tests`, and
   `ruff check src tests scripts/build_plugin_payload.py` to confirm a green
   baseline before any change (no file changes; record baseline pass count).
-- [ ] T002 [P] Read current behavior end-to-end: `python3 -m gh_address_cr
+- [X] T002 [P] Read current behavior end-to-end: `python3 -m gh_address_cr
   agent resolve --help` and `python3 -m gh_address_cr submit-action --help`
   output captured as a baseline snapshot (no file changes; used to diff against
   post-change help output for SC-004/SC-006).
@@ -55,7 +55,7 @@ starts before this phase is complete.**
 **⚠️ CRITICAL**: `agent resolve` dispatch changes in US1–US3 all depend on the
 validator and vocabulary constant created here.
 
-- [ ] T003 **Consolidate** the disposition vocabulary onto one true source
+- [X] T003 **Consolidate** the disposition vocabulary onto one true source
   (widened per R-3 correction — `/speckit-analyze` found this set was
   independently defined in **three** places, not one). Keep
   `src/gh_address_cr/agent/roles.py::TERMINAL_RESOLUTIONS =
@@ -70,7 +70,7 @@ validator and vocabulary constant created here.
   likewise. Export the single source for reuse by `commands/agent.py` and
   `commands/submit_action.py` dispatch/validation code (data-model.md Entity 2,
   research.md R-3 correction).
-- [ ] T004 [P] Add new reason codes `RESOLVE_AXIS_CONFLICT`,
+- [X] T004 [P] Add new reason codes `RESOLVE_AXIS_CONFLICT`,
   `RESOLVE_EVIDENCE_INCOHERENT`, `RESOLVE_FLAG_DEPRECATED` as centralized
   constants in `src/gh_address_cr/core/protocol_codes.py` (verified: the
   convention is **mixed**, not inline-only — `commands/agent.py` already
@@ -85,7 +85,7 @@ validator and vocabulary constant created here.
   rollout-policy domain's vocabulary, not the resolve-command deprecation
   mechanism; reusing it would be a false cross-domain coupling, not genuine
   reuse (see research.md R-7).
-- [ ] T005 Implement the axis-coherence validator
+- [X] T005 Implement the axis-coherence validator
   `_validate_resolve_axes(parsed: argparse.Namespace) -> None` in
   `src/gh_address_cr/commands/agent.py`, replacing (not wrapping) **both**
   of the current pairwise-exclusion gates:
@@ -106,12 +106,12 @@ validator and vocabulary constant created here.
   (`--reject`/`--clarify`) → `RESOLVE_EVIDENCE_INCOHERENT`. It MUST NOT reject
   any valid cross-axis combination, explicitly including `item_id` + `--stale`
   + `--reject`/`--clarify` (C-A1, C-A2, C-A3, C-A4).
-- [ ] T006 [P] Scaffold `tests/contract/test_resolve_axes_contract.py` with the
+- [X] T006 [P] Scaffold `tests/contract/test_resolve_axes_contract.py` with the
   enumerated (disposition × selection × condition) product fixture (helper that
   builds argv for each cell) — no assertions yet, just the enumeration and a
   `TODO` marker per cell category (valid cross-axis / same-axis conflict /
   incoherent evidence), to be filled in by US1/US2 tasks.
-- [ ] T007 [P] Scaffold `tests/test_disposition_vocabulary.py` importing
+- [X] T007 [P] Scaffold `tests/test_disposition_vocabulary.py` importing
   `TERMINAL_RESOLUTIONS` and asserting it is non-empty and contains exactly
   `{"fix", "clarify", "defer", "reject"}` (baseline assertion; cross-command
   assertions added in US3).
@@ -138,7 +138,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
 > Write these tests FIRST; confirm they FAIL against current `agent resolve`
 > before implementing.
 
-- [ ] T008 [P] [US1] Contract test: single-item `--disposition reject` on a
+- [X] T008 [P] [US1] Contract test: single-item `--disposition reject` on a
   **fresh** thread resolves that one thread with reply+resolve evidence and no
   mode error, in `tests/contract/test_resolve_axes_contract.py` (fills the
   (single × reject × fresh) cell from T006). Drive it through the **actual
@@ -147,7 +147,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   story fixes lives in the outer `selected_modes` gate (T005), which a
   validator-only unit test would not exercise. (The legacy `--reject` boolean
   form is separately covered by T024's deprecation-alias tests, not here.)
-- [ ] T009 [P] [US1] Contract test: single-item `--disposition clarify` on a
+- [X] T009 [P] [US1] Contract test: single-item `--disposition clarify` on a
   **stale** thread (`item_id` + `--stale`, no `--match-files`) resolves that
   one thread with no mode error, in `tests/contract/test_resolve_axes_contract.py`
   (fills (single × clarify × stale) — the previously-blocked cell, R-1/C-A2).
@@ -158,7 +158,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   before `_validate_resolve_mode` or `_dispatch_agent_resolve` ever run). Use
   the `stale_github_thread_item()` fixture pattern from
   `tests/test_native_workflow.py::StaleThreadClaimabilityTests`.
-- [ ] T010 [P] [US1] Regression test in `tests/test_agent_resolve_guards.py`:
+- [X] T010 [P] [US1] Regression test in `tests/test_agent_resolve_guards.py`:
   `agent resolve <item_id> --disposition reject --why <text>` and
   `agent resolve <item_id> --disposition clarify --stale --why <text>` are
   **accepted** through the full CLI entrypoint (replacing/removing the current
@@ -176,7 +176,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   `MISSING_RESOLVE_ARGS` with a decline-specific message, not a silent
   no-reason submission (a decline requires a reason, Principle III;
   data-model validation rules).
-- [ ] T011 [US1] Automated final-gate **and lease-ownership** test for the
+- [X] T011 [US1] Automated final-gate **and lease-ownership** test for the
   **decline** path (fresh and stale) in `tests/test_native_workflow.py` or
   `tests/contract/test_resolve_axes_contract.py`:
   (a) drive a single-item `reject`/`clarify` resolution through `agent publish`
@@ -198,7 +198,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Add a single-item decline function
+- [X] T012 [US1] Add a single-item decline function
   `decline_item(*, repo, pr_number, item_id, agent_id, resolution, why,
   publish, now) -> dict` in `src/gh_address_cr/core/workflow.py` (near
   `fast_fix_item`/`trivial_fix_item`, ~line 587), implemented by composing the
@@ -212,7 +212,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   required**: raise `MISSING_RESOLVE_ARGS` (decline-specific message) if empty,
   since `record_classification` already requires a non-empty note and a
   decline must carry a reason (U1; Principle III).
-- [ ] T013 [US1] **Restructure `_dispatch_agent_resolve` (~line 598) to route
+- [X] T013 [US1] **Restructure `_dispatch_agent_resolve` (~line 598) to route
   on SELECTION first, disposition/condition second** — this is the actual fix
   for the flagship #204 scenario, found missing by `/speckit-analyze` (U1):
   today's router checks `if parsed.reject or parsed.clarify: return
@@ -232,7 +232,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   `workflow.decline_item(...)` (requiring `--why`, not
   `--commit`/`--files`/`--summary`), while fix/trivial keep routing to
   `fast_fix_item`/`trivial_fix_item` unchanged.
-- [ ] T014 [US1] Remove **both** legacy exclusivity gates identified in T005,
+- [X] T014 [US1] Remove **both** legacy exclusivity gates identified in T005,
   **and explicitly wire the replacement validator into the call site** (closes
   the `/speckit-analyze` U-1(prior) gap — T005 only *defines*
   `_validate_resolve_axes`; this task is what actually calls it):
@@ -253,7 +253,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   disposition a single enum flag, so this reduces to validating
   `--disposition` is a legal choices value plus the legacy-alias-conflict case
   from T017/T020).
-- [ ] T015 [US1] Add the disposition axis as a **single enum flag**
+- [X] T015 [US1] Add the disposition axis as a **single enum flag**
   `--disposition {fix,trivial,reject,clarify}` (default `fix`) to the `agent
   resolve` argparse definition in `src/gh_address_cr/commands/agent.py`
   (~lines 340–376), mirroring `submit_action.py`'s existing `--resolution`
@@ -264,7 +264,7 @@ reaches terminal declined state, with no `ITEM_ID_NOT_ALLOWED_FOR_MODE` /
   *visible* deprecation notice for the legacy form is added later in T028,
   not required to close #204). Also wire `--stale` as an independent boolean
   available alongside `item_id` (not gated behind `--match-files`).
-- [ ] T016 [US1] Run T008–T011 and confirm they pass; run
+- [X] T016 [US1] Run T008–T011 and confirm they pass; run
   `python3 -m unittest discover -s tests` for regressions in
   `fast_fix_item`/`trivial_fix_item`/batch paths untouched by this story.
 
@@ -285,7 +285,7 @@ cell yields exactly one directive reason code.
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] Complete the enumerated product in
+- [X] T017 [P] [US2] Complete the enumerated product in
   `tests/contract/test_resolve_axes_contract.py` (T006 scaffold): every valid
   cross-axis cell (files+`--disposition reject`+stale,
   files+`--disposition fix`+stale, files+`--disposition clarify`+fresh,
@@ -324,11 +324,11 @@ cell yields exactly one directive reason code.
   (emits deprecation notice, T028) — asserts success + notice, **not** an axis
   conflict (reason-flag unification; there is no special `item_id +
   --homogeneous-reason` conflict rule).
-- [ ] T018 [P] [US2] Test in `tests/test_agent_resolve_guards.py` that a fix
+- [X] T018 [P] [US2] Test in `tests/test_agent_resolve_guards.py` that a fix
   disposition missing required evidence still returns the **existing** codes
   unchanged: `MISSING_RESOLVE_ARGS` (single) / `MISSING_FIX_REPLY_COMMIT_HASH`
   (collective) — proving C-A4's "preserved, not renamed" clause.
-- [ ] T019 [P] [US2] Discoverability test: `python3 -m gh_address_cr agent
+- [X] T019 [P] [US2] Discoverability test: `python3 -m gh_address_cr agent
   resolve --help` output (captured via subprocess or argparse
   `format_help()`) contains the three axis parameter names and does **not**
   enumerate mode-preset flags as the primary documented path (SC-006), in
@@ -336,7 +336,7 @@ cell yields exactly one directive reason code.
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] Extend `_validate_resolve_axes` (from T005) in
+- [X] T020 [US2] Extend `_validate_resolve_axes` (from T005) in
   `src/gh_address_cr/commands/agent.py` to cover all same-axis conflicts
   identified in T017: two selections (`item_id` + `--files`/`--input`), and
   disposition resolving to more than one value after legacy-alias
@@ -344,7 +344,7 @@ cell yields exactly one directive reason code.
   boolean disagreeing with an explicit `--disposition` — plus the
   disposition/evidence incoherence check. Replaces any remaining pairwise
   checks from the old `_validate_resolve_mode`.
-- [ ] T021 [US2] Route `selection=files` + `condition=stale` +
+- [X] T021 [US2] Route `selection=files` + `condition=stale` +
   `--disposition reject|clarify` to `workflow_matching.decline_matching_threads`
   with `include_stale=True` (currently only fix+stale is wired via
   `_dispatch_stale_resolution`); add stale support to the decline dispatch path
@@ -367,11 +367,11 @@ cell yields exactly one directive reason code.
   selection exactly as it is for single (T012's `decline_item`). The
   `decline_matching_threads` signature/algorithm is unchanged — only which CLI
   flag feeds its existing param changes.
-- [ ] T022 [US2] Update the `agent resolve` argparse `--help`/epilog text in
+- [X] T022 [US2] Update the `agent resolve` argparse `--help`/epilog text in
   `src/gh_address_cr/commands/agent.py` (~lines 336–344) to describe the three
   axes (disposition, selection, condition) as the primary model, not a list of
   named modes.
-- [ ] T023 [US2] Run T017–T019 and confirm they pass; run
+- [X] T023 [US2] Run T017–T019 and confirm they pass; run
   `python3 -m unittest discover -s tests` for full-suite regression.
 
 **Checkpoint**: The conflict matrix is gone — every valid combination works,
@@ -395,7 +395,7 @@ evidence and emits a visible deprecation notice.
 
 ### Tests for User Story 3
 
-- [ ] T024 [P] [US3] Test in `tests/test_agent_resolve_guards.py`: each
+- [X] T024 [P] [US3] Test in `tests/test_agent_resolve_guards.py`: each
   deprecated flag combination from data-model.md Entity 3 — including the
   disposition booleans **`--trivial`/`--reject`/`--clarify`** (deprecated
   aliases for `--disposition trivial|reject|clarify`, R-4 correction),
@@ -412,7 +412,7 @@ evidence and emits a visible deprecation notice.
   fields/shape and the process exit code are unchanged (deprecation notice
   goes to stderr and does not alter the structured stdout summary), so the
   Status-to-Action contract stays byte-stable for existing consumers.
-- [ ] T025 [P] [US3] Test in `tests/test_disposition_vocabulary.py`, **widened**
+- [X] T025 [P] [US3] Test in `tests/test_disposition_vocabulary.py`, **widened**
   per the T003 consolidation: import the disposition set accepted by `agent
   resolve`'s CLI parser, `submit_action.parse_args`'s `--resolution` choices,
   `agent.roles.TERMINAL_RESOLUTIONS`, `core.agent_protocol_evidence.
@@ -434,20 +434,20 @@ evidence and emits a visible deprecation notice.
   E1): it has no disposition/resolution surface to import from, so this test
   does not — and should not attempt to — cover it; SC-004a documents this as
   excluded by construction.
-- [ ] T026 [P] [US3] Test that `submit-action`'s existing capabilities
+- [X] T026 [P] [US3] Test that `submit-action`'s existing capabilities
   (file-based single-action submission) and `agent evidence add`'s existing
   capabilities (reusable evidence profiles, validation evidence, reply-evidence
   reconciliation) are unchanged after vocabulary alignment — run existing
   `tests/test_submit_action_helper.py` and evidence-add tests unmodified and
   confirm they still pass (C-V3, FR-006c — no capability regression).
-- [ ] T027 [P] [US3] Test that using a deprecated flag **after** a simulated
+- [X] T027 [P] [US3] Test that using a deprecated flag **after** a simulated
   removal window (feature-flag or version check in test) returns
   `RESOLVE_FLAG_DEPRECATED` and fails loudly rather than silently no-op-ing, in
   `tests/test_agent_resolve_guards.py`.
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Add a deprecation-alias layer in
+- [X] T028 [US3] Add a deprecation-alias layer in
   `src/gh_address_cr/commands/agent.py`: when a legacy flag is detected
   — **`--trivial`/`--reject`/`--clarify`** (mapped to `--disposition
   trivial|reject|clarify` — this is what T015's MVP normalization already
@@ -457,7 +457,7 @@ evidence and emits a visible deprecation notice.
   `--match-files`/`--include-stale`/`--homogeneous-reason`/`--concern-label`
   (mapped per data-model.md Entity 3) — emit a visible deprecation line to
   stderr naming the replacement, before continuing to dispatch normally.
-- [ ] T029 [US3] **Change** `submit_action.py`'s `--resolution` choices
+- [X] T029 [US3] **Change** `submit_action.py`'s `--resolution` choices
   (`src/gh_address_cr/commands/submit_action.py` line ~25 — currently the
   hard-coded literal `choices=["fix", "clarify", "defer", "reject"]`,
   verified) to source its choice list from the shared
@@ -465,7 +465,7 @@ evidence and emits a visible deprecation notice.
   `record_classification`, so there is no independent literal to drift (C-V2).
   Found by `/speckit-analyze` A1: this is an edit, not a verification —
   "Confirm" would have been read as a no-op.
-- [ ] T030 [US3] **Whole-`src/` guidance-string sweep** — migrate *every*
+- [X] T030 [US3] **Whole-`src/` guidance-string sweep** — migrate *every*
   runtime-emitted string that recommends a deprecated mode-preset flag or names
   a resolution disposition, to the axis phrasing. This is a **grep-driven
   class task, not a per-file list** (found by repeated `/speckit-analyze`
@@ -512,12 +512,12 @@ evidence and emits a visible deprecation notice.
   Ensure canonical disposition terms are used with no divergent synonyms
   (C-V1/C-V2). Note: `commands/high_level.py` is thus **in scope** — reconciles
   plan.md's Constitution Check (behavior untouched, guidance strings updated).
-- [ ] T031 [US3] Add the removal-window fail-loud path: after the documented
+- [X] T031 [US3] Add the removal-window fail-loud path: after the documented
   deprecation window, legacy flag usage raises `RESOLVE_FLAG_DEPRECATED`
   instead of silently aliasing (implementation gated behind whatever
   version/flag mechanism T027's test expects — keep it simple, e.g. a single
   module-level constant marking the window as closed, defaulting to open).
-- [ ] T032 [US3] Reduce the `agent resolve` argparse `--help` presentation so
+- [X] T032 [US3] Reduce the `agent resolve` argparse `--help` presentation so
   the **primary** documented parameters are exactly the 2 axis-selecting
   flags — `--disposition {fix,trivial,reject,clarify}` and `--stale` (C-A9,
   research R-4) — well under the SC-004 cap of 3; all retired mode-preset
@@ -525,7 +525,7 @@ evidence and emits a visible deprecation notice.
   `--homogeneous-reason`, `--concern-label`, `--include-stale`) remain
   functional (T028) but are documented as deprecated aliases in `--help`, not
   the primary surface.
-- [ ] T033 [US3] Run T024–T027 and confirm they pass; run
+- [X] T033 [US3] Run T024–T027 and confirm they pass; run
   `python3 -m unittest discover -s tests` for full regression across all three
   commands.
 
@@ -540,7 +540,7 @@ deprecation window; `submit-action`/`agent evidence add` share one vocabulary.
 **Purpose**: Documentation, contract-map consistency, and final verification
 across the whole feature.
 
-- [ ] T034 [P] Update `skill/references/status-action-map.md`: **(a) add** the
+- [X] T034 [P] Update `skill/references/status-action-map.md`: **(a) add** the
   new reason codes (`RESOLVE_AXIS_CONFLICT`, `RESOLVE_EVIDENCE_INCOHERENT`,
   `RESOLVE_FLAG_DEPRECATED`) under "Error States", with their directive
   next-action text (C-A7); **(b) revise** (not just add) **every** existing
@@ -558,15 +558,15 @@ across the whole feature.
   `/speckit-analyze` (F1/I2): (a) alone would leave stale preset-flag guidance
   live in the same file as the new codes, and `tests/test_skill_docs.py`
   (T038) pins some of these exact strings, so both parts must land together.
-- [ ] T035 [P] Update `skill/references/agent-protocol.md` (lines ~40–48) to
+- [X] T035 [P] Update `skill/references/agent-protocol.md` (lines ~40–48) to
   present the `agent resolve` command shapes as axis combinations (disposition
   / selection / condition) rather than a list of named modes, and document the
   deprecation mapping table from data-model.md Entity 3.
-- [ ] T036 [P] Update `skill/SKILL.md` (lines ~37–42, ~157) to replace the
+- [X] T036 [P] Update `skill/SKILL.md` (lines ~37–42, ~157) to replace the
   mode-preset example list and the "Use `agent resolve --homogeneous-reason`
   only for..." prose with the axis model description and the closed #204
   single-item-decline-including-stale example.
-- [ ] T037 [P] Update `README.md`'s deprecated-flag guidance — found by
+- [X] T037 [P] Update `README.md`'s deprecated-flag guidance — found by
   `/speckit-analyze` (F1): `README.md` isn't touched by any other Phase 6
   task despite containing multiple live occurrences naming the old mode
   presets as the documented path (known occurrences include
@@ -579,7 +579,7 @@ across the whole feature.
   (`--files ... --disposition reject|clarify`, `--files ... --disposition fix
   --stale`, `--input` alone for batch), consistent with T034–T036's treatment
   of `status-action-map.md`/`agent-protocol.md`/`SKILL.md`.
-- [ ] T038 [P] Update `tests/test_skill_docs.py` assertions that currently pin
+- [X] T038 [P] Update `tests/test_skill_docs.py` assertions that currently pin
   deprecated-preset literal strings (e.g. `"--stale --match-files"`,
   `"--homogeneous-reason"`, `"resolve --trivial"`, `"resolve --batch"`) as the
   canonical documented form, to assert the new axis-based phrasing instead,
@@ -592,26 +592,26 @@ across the whole feature.
   that needs updating, and confirm the full suite (T040) is green afterward —
   a passing `python3 -m unittest tests.test_skill_docs` is the actual
   completion signal for this task, not a specific line count.
-- [ ] T039 Run `quickstart.md` Scenarios 1–6 manually (or via a driving test)
+- [X] T039 Run `quickstart.md` Scenarios 1–6 manually (or via a driving test)
   against a local/fixture PR session and confirm each Success Signal.
-- [ ] T040 Run the full gate: `pip install -e .`, `ruff check src tests
+- [X] T040 Run the full gate: `pip install -e .`, `ruff check src tests
   scripts/build_plugin_payload.py`, `python3 -m unittest discover -s tests`,
   `python3 -m gh_address_cr agent resolve --help`, `python3 -m gh_address_cr
   submit-action --help`, `python3 -m gh_address_cr agent manifest` — all green.
-- [ ] T041 Verify `agent resolve --help`'s **primary, axis-selecting** switch
+- [X] T041 Verify `agent resolve --help`'s **primary, axis-selecting** switch
   count is exactly 2 (`--disposition`, `--stale`) — under the SC-004 cap of
   3 — by diffing against the T002 baseline snapshot; confirm data-carrying
   selectors (`item_id`, `--files`, `--input`) and deprecated aliases are
   present but not counted as primary mode switches (C-A9).
-- [ ] T042 Bump the version and record the changelog entry reflecting the
-  versioned public CLI/agent contract change across `agent resolve`,
-  `agent evidence add`, and `submit-action` (constitution Principle II).
-  Concrete
-  artifacts to update (N2): `pyproject.toml` `version`, `src/gh_address_cr/
-  __init__.py` `__version__` if present, the packaged-skill version/manifest
-  under `skill/` (`SKILL.md` frontmatter / any skill manifest), and the
-  `CHANGELOG.md` entry — verify with `grep -rn "$(old_version)"` that no
-  version string is left un-bumped.
+- [X] T042 **N/A — automated, not hand-edited.** This repo uses
+  `semantic-release` (`release.config.cjs` + `.github/workflows/release.yml`);
+  `pyproject.toml` `version`, `src/gh_address_cr/__init__.py` `__version__`,
+  and `CHANGELOG.md` are all bumped by CI from the conventional-commit type of
+  the merge commit (`fix:`/`feat:`/`BREAKING CHANGE:` footer), not by hand.
+  Manually editing them now would conflict with that automation. The
+  versioned-contract-change intent (constitution Principle II) is satisfied by
+  this PR's eventual conventional-commit message when merged to `main` — no
+  file edits needed here.
 
 ---
 
@@ -721,3 +721,22 @@ sweep) runs last in US3**, after `--disposition` (T015) and the alias machinery
   implementation tasks in each phase).
 - Stop at each phase checkpoint to validate that story independently before
   proceeding.
+
+---
+
+## Phase 7: Convergence
+
+**Purpose**: Close a gap surfaced by `/speckit-converge` that predates
+implementation completion but was outside the original T001–T042 scope.
+
+- [X] T043 Source `agent classify`'s `--classification` argparse choices in
+  `src/gh_address_cr/commands/agent.py` (~line 165) from
+  `agent.roles.TERMINAL_RESOLUTIONS` instead of the independent literal
+  `["fix", "clarify", "defer", "reject"]` per FR-006b (partial). This is the
+  same divergent-synonym-set pattern T003 consolidated for
+  `core/agent_protocol_evidence.py` and `agent/responses.py`, in the same
+  file T003/T015 heavily edited, but the `--classification` call site was
+  missed. Widen `tests/test_disposition_vocabulary.py` with a regression
+  assertion covering this site so it cannot silently re-diverge again. Run
+  `python3 -m unittest discover -s tests` and `ruff check src tests
+  scripts/build_plugin_payload.py` after the change.

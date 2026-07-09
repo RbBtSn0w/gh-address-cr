@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core.io import write_json_atomic
 
 
@@ -22,7 +23,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(description="Submit an action to a blocked loop and resume.")
     parser.add_argument("loop_request", help="Path to the loop-request JSON artifact.")
-    parser.add_argument("--resolution", choices=["fix", "clarify", "defer", "reject"], required=True)
+    parser.add_argument("--resolution", choices=sorted(TERMINAL_RESOLUTIONS), required=True)
     parser.add_argument("--note", required=True)
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--reply-markdown")

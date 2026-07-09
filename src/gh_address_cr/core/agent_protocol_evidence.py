@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TERMINAL_RESOLUTIONS = {"fix", "clarify", "defer", "reject"}
+from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 
 
 def required_evidence_for(item: dict[str, Any], role: str) -> list[str]:

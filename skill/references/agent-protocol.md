@@ -37,15 +37,22 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
+
+`gh-address-cr agent resolve` resolves along three independent axes — **disposition** (`--disposition fix|trivial|reject|clarify`, what to do), **selection** (an `<item_id>`, `--files`/`--file`, or `--input`, which thread(s)), and **condition** (`--stale`, fresh by default or the matching STALE/outdated thread(s)). Any disposition composes with any selection and condition; `--why` carries the reason for a `reject`/`clarify` disposition on any selection:
+
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
-  - Single unified resolution surface. Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix. Classification is recorded internally, so no separate `agent classify` round-trip is required.
-- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --trivial ... [--publish]`
+  - Single unified resolution surface (disposition=fix, selection=item_id). Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix. Classification is recorded internally, so no separate `agent classify` round-trip is required.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition trivial ... [--publish]`
   - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
-- `gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json> [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition reject|clarify --why <text> [--stale] [--publish]`
+  - Decline exactly one thread, fresh or stale, with a reason. No `--commit`/`--files`/`--validation`.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json> [--publish]`
   - Routes explicit per-thread batch evidence (shared files/validation, per-thread summary/why) through the lease and validation contract, plus stale-thread rejection.
-- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --homogeneous-reason <why> [--concern-label <label>] [--severity ... --severity-note <why>] [--publish]`
-  - Homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session (no `<item_id>`; matches by files).
-- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files [--severity ... --severity-note <why>] [--publish]`
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --why <why> [--severity ... --severity-note <why>] [--publish]`
+  - Homogeneous repeated-concern shortcut for matching GitHub-thread items already present in the runtime session (selection=files, no `<item_id>`).
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --disposition reject|clarify --files <paths> --why <why> [--stale] [--publish]`
+  - Decline every matching GitHub-thread item with one shared reply (selection=files).
+- `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale [--severity ... --severity-note <why>] [--publish]`
   - Handles matching `STALE` or outdated GitHub-thread items through evidence, leases, publish, and final-gate. It never marks stale threads resolved directly.
 - `gh-address-cr agent leases <owner/repo> <pr_number>`
   - Inspects active and terminal claims.
@@ -97,6 +104,6 @@ For `--validation`, use `<command>=<result>` when you need a result other than t
 
 ## Batch Notes
 
-`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent resolve --batch` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. Use `agent resolve --batch` only with `--input <batch-response.json>` (it fails with `MISSING_BATCH_INPUT` otherwise); for a homogeneous repeated concern use the non-batch `agent resolve --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --homogeneous-reason <why>` form instead. When `resolve` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
+`BatchActionResponse` is limited to GitHub review-thread `fix` evidence with existing per-item leases; it is not a GitHub publishing shortcut and does not support local findings. Prefer `agent resolve --input <batch-response.json>` when one files/validation set addresses multiple already-synced GitHub threads, and keep per-thread summary/why entries for reviewer-facing replies. Commit evidence is a publish-time hydration input, not a worker-submit prerequisite. `agent resolve --input <batch-response.json>` fails with `MISSING_BATCH_INPUT` if the file is missing; for a homogeneous repeated concern use the non-batch `agent resolve --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --why <why>` form instead. When `resolve` returns `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton instead of hand-writing the JSON shape.
 
 `agent next` emits both `request_path` and `response_skeleton_path`. Prefer filling the skeleton instead of hand-writing `ActionResponse` JSON. Required user-supplied fields are intentionally empty so an unedited skeleton is rejected instead of published.

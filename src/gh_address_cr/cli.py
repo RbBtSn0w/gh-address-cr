@@ -249,7 +249,7 @@ def alias_help(command: str) -> str:
 
     if command == "submit-action":
         return (
-            "usage: gh-address-cr submit-action <loop_request_path> --resolution {fix,clarify,defer} --note <text> ... [resume_cmd...]\n\n"
+            "usage: gh-address-cr submit-action <loop_request_path> --resolution {fix,clarify,defer,reject} --note <text> ... [resume_cmd...]\n\n"
             "High-level manual action entrypoint.\n\n"
             "Use when the loop stops in WAITING_FOR_FIX and asks for a manual resolution.\n"
             "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
@@ -428,7 +428,7 @@ def _evaluate_summary_actions(
     ):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
-        next_action = f"Address the finding by running: `gh-address-cr submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- gh-address-cr {command} {repo} {pr_number}`"
+        next_action = f"Address the finding by running: `gh-address-cr submit-action {artifact_path} --resolution <fix|clarify|defer|reject> --note <note> ... -- gh-address-cr {command} {repo} {pr_number}`"
     elif status == "BLOCKED":
         reason_code = "BLOCKED"
         waiting_on = "manual_intervention"
@@ -823,9 +823,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Runtime commands:\n"
             "  gh-address-cr agent manifest\n"
             "  gh-address-cr agent resolve owner/repo 123 <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>\n"
-            "  gh-address-cr agent resolve owner/repo 123 --batch --input batch-response.json\n"
-            "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>\n"
-            "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files\n"
+            "  gh-address-cr agent resolve owner/repo 123 --input batch-response.json\n"
+            "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --why <why>\n"
+            "  gh-address-cr agent resolve owner/repo 123 --commit <sha> --files <paths> --validation <cmd=passed> --stale\n"
             "  gh-address-cr final-gate owner/repo 123\n"
             "  gh-address-cr command-session --input commands.json\n"
         ),

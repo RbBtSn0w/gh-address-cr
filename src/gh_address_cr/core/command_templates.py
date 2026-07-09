@@ -111,7 +111,7 @@ def resolve_single(repo: str, pr_number: str) -> str:
 
 
 def resolve_batch(repo: str, pr_number: str, *, input_path: str = "batch-response.json") -> str:
-    return shell_command("gh-address-cr", "agent", "resolve", repo, pr_number, "--batch", "--input", input_path)
+    return shell_command("gh-address-cr", "agent", "resolve", repo, pr_number, "--input", input_path)
 
 
 def resolve_homogeneous(repo: str, pr_number: str) -> str:
@@ -127,7 +127,7 @@ def resolve_homogeneous(repo: str, pr_number: str) -> str:
         "<paths>",
         "--validation",
         "<cmd=passed>",
-        "--homogeneous-reason",
+        "--why",
         "<why>",
     )
 
@@ -139,11 +139,11 @@ def resolve_decline(repo: str, pr_number: str, *, resolution: str = "reject") ->
         "resolve",
         repo,
         pr_number,
-        f"--{resolution}",
-        "--match-files",
+        "--disposition",
+        resolution,
         "--files",
         "<paths>",
-        "--homogeneous-reason",
+        "--why",
         "<why>",
     )
 
@@ -162,7 +162,6 @@ def resolve_stale(repo: str, pr_number: str) -> str:
         "--validation",
         "<cmd=passed>",
         "--stale",
-        "--match-files",
     )
 
 
