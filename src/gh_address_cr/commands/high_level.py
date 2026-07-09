@@ -610,7 +610,9 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
             if inline_env:
                 run_env = os.environ.copy()
                 run_env.update(inline_env)
-            result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
+            result = subprocess.run(
+                run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS
+            )
             exit_code = result.returncode
         except Exception as exc:
             error = str(exc)

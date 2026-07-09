@@ -975,6 +975,8 @@ def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]
     if not (path_trivial or text_trivial):
         return False, "Thread does not look like a documentation or typo-only concern."
     return True, "Thread is eligible for documentation or typo fast path."
+
+
 THREAD_ALIAS_RE = re.compile(r"^T(\d+)$")
 
 

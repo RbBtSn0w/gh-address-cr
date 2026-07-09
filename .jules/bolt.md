@@ -1,0 +1,3 @@
+## 2024-07-09 - Avoid dict.setdefault() with Complex Fallback Objects
+**Learning:** In tight loops, particularly those processing high-volume telemetry events, using `dict.setdefault(key, <complex_object>)` (like a dictionary containing a set) incurs massive allocation overhead because the fallback object is eagerly instantiated on every single loop iteration, regardless of whether the key already exists.
+**Action:** When a fallback object requires allocation (like a dict, list, or set), use an explicit `if key not in dict: dict[key] = <complex_object>` block to ensure instantiation only happens when the key is genuinely missing.
