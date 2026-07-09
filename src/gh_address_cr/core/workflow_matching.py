@@ -82,7 +82,7 @@ def _build_fast_fix_context(
         command_name = "agent resolve --stale"
     elif is_decline:
         status_prefix = "DECLINE_ALL"
-        command_name = f"agent resolve --{resolution}"
+        command_name = f"agent resolve --disposition {resolution}"
     else:
         status_prefix = "FAST_FIX_ALL"
         command_name = "agent resolve"

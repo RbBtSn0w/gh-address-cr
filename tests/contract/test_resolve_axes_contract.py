@@ -449,6 +449,12 @@ class ResolveHelpDiscoverabilityTest(unittest.TestCase):
         for token in ("--disposition", "--stale", "--files", "--input", "item_id"):
             self.assertIn(token, help_text)
 
+        # PR #206 CR: --why's help text must not read as reject/clarify-only —
+        # it is also the shared rationale for a homogeneous fix (files selection).
+        options_section = help_text[help_text.index("--why", help_text.index("options:")):]
+        why_description = options_section.split("--agent-id")[0]
+        self.assertIn("homogeneous", why_description.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

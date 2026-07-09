@@ -140,6 +140,10 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "MISSING_HOMOGENEOUS_REASON")
         # Decline-mode validation failures report decline_input, not fast_fix_input (#136 T5).
         self.assertEqual(payload["waiting_on"], "decline_input")
+        # PR #206 CR: the error must teach the axis-form replacement, not the
+        # deprecated `--reject` boolean spelling, even when the caller used it.
+        self.assertIn("--disposition reject", payload["next_action"])
+        self.assertNotIn("agent resolve --reject ", payload["next_action"])
 
     def test_decline_conflicts_with_commit(self):
         self._two_identical_threads()

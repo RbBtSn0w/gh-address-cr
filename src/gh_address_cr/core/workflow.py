@@ -851,7 +851,7 @@ def decline_item(
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="MISSING_RESOLVE_ARGS",
-            waiting_on="fast_fix_input",
+            waiting_on="decline_input",
             exit_code=2,
             message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
             payload={"item_id": item_id},

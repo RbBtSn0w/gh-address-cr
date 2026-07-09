@@ -359,7 +359,11 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--files", help="Selection: files-scope collective, instead of a single item_id.")
     parser.add_argument("--file", action="append", default=[], help="Selection: repeatable single-path form of --files.")
     parser.add_argument("--input", help="Selection: BatchActionResponse JSON for per-thread evidence.")
-    parser.add_argument("--why", help="Reason for a reject/clarify disposition, any selection.")
+    parser.add_argument(
+        "--why",
+        help="Reason for a reject/clarify disposition (any selection), or the shared "
+        "rationale for a homogeneous fix (files selection with a repeated concern).",
+    )
     parser.add_argument("--agent-id", default="agent")
     parser.add_argument("--commit")
     parser.add_argument("--summary")

@@ -107,6 +107,9 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "MISSING_RESOLVE_ARGS")
         self.assertIn("--why", payload["next_action"])
+        # PR #206 CR: this is a decline-specific failure, not a fix-input one —
+        # waiting_on must route recovery to decline_input, not fast_fix_input.
+        self.assertEqual(payload["waiting_on"], "decline_input")
 
     def test_legacy_boolean_spellings_still_work(self):
         # --reject/--clarify booleans remain a valid alias for --disposition
