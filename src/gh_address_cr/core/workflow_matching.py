@@ -82,7 +82,7 @@ def _build_fast_fix_context(
         command_name = "agent resolve --stale"
     elif is_decline:
         status_prefix = "DECLINE_ALL"
-        command_name = f"agent resolve --{resolution}"
+        command_name = f"agent resolve --disposition {resolution}"
     else:
         status_prefix = "FAST_FIX_ALL"
         command_name = "agent resolve"
@@ -110,7 +110,7 @@ def _build_fast_fix_context(
                 reason_code="MISSING_HOMOGENEOUS_REASON",
                 waiting_on=input_waiting_on,
                 exit_code=2,
-                message=f"{command_name} requires --homogeneous-reason for the shared decline reply.",
+                message=f"{command_name} requires --why for the shared decline reply.",
             )
     else:
         if not normalized_validation:
@@ -219,7 +219,7 @@ def _enforce_fast_fix_routing(
     if any(is_stale_or_outdated_github_thread(item) for item in matches):
         next_action = (
             f"Use `gh-address-cr agent resolve {repo} {pr_number} "
-            "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files` "
+            "--commit <sha> --files <paths> --validation <cmd=passed> --stale` "
             "for stale or outdated GitHub review threads."
         )
         raise WorkflowError(
@@ -235,7 +235,7 @@ def _enforce_fast_fix_routing(
         next_action = (
             f"Run `{commands['batch_next']}` to claim the matching GitHub review threads and write a "
             "BatchActionResponse skeleton, then fill per-thread summary/why entries and submit it. "
-            "Rerun `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern."
+            "Rerun `agent resolve --why <why>` only for a homogeneous repeated concern."
         )
         raise WorkflowError(
             status=ctx.rejected_status,
@@ -540,6 +540,7 @@ def decline_matching_threads(
     homogeneous_reason: str | None = None,
     concern_label: str | None = None,
     include_stale: bool = False,
+    stale_only: bool = False,
     publish: bool = False,
     github_client: Any | None = None,
     now: datetime | None = None,
@@ -561,13 +562,13 @@ def decline_matching_threads(
         severity=None,
         homogeneous_reason=homogeneous_reason,
         concern_label=concern_label,
-        stale_only=False,
+        stale_only=stale_only,
         resolution=resolution,
     )
     matches, normalized_file_set = _resolve_fast_fix_matches(
-        repo, pr_number, ctx, include_stale=include_stale, stale_only=False
+        repo, pr_number, ctx, include_stale=include_stale, stale_only=stale_only
     )
-    _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=False)
+    _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=stale_only)
 
     accepted_count, accepted_rows, failed, item_ids = _process_decline_matches(
         repo, pr_number, matches, ctx, agent_id=agent_id, current_time=current_time

@@ -127,8 +127,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "/gh-address-cr agent next <owner/repo> <pr_number>",
             "/gh-address-cr agent submit <owner/repo> <pr_number>",
             "/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale --match-files",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json>",
+            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale",
             "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
             "/gh-address-cr agent publish <owner/repo> <pr_number>",
             "/gh-address-cr agent leases <owner/repo> <pr_number>",
@@ -179,8 +179,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Lean output keeps only", protocol_text)
         self.assertIn("agent resolve", protocol_text)
         self.assertIn("--input <batch-response.json>", protocol_text)
-        self.assertIn("--homogeneous-reason <why>", protocol_text)
-        self.assertIn("--stale --match-files", protocol_text)
+        self.assertIn("--why <why>", protocol_text)
+        self.assertIn("--stale", protocol_text)
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()
@@ -215,10 +215,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "next --batch",
             "submit",
             "resolve <item_id>",
-            "resolve --trivial",
-            "resolve --batch",
-            "resolve --homogeneous-reason",
-            "resolve --stale --match-files",
+            "resolve <item_id> --disposition trivial",
+            "resolve --input <batch-response.json>",
+            "resolve --why <why>",
+            "resolve --stale",
             "evidence add",
             "evidence list",
             "publish",
@@ -239,13 +239,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "session items",
             "agent classify",
             "ActionResponse or BatchActionResponse",
-            "agent submit or agent resolve --batch",
+            "agent submit or agent resolve --input <batch-response.json>",
             "accepted evidence",
             "agent publish (GitHub thread side effects only)",
             "final-gate",
             "completion_summary_line",
             "runtime-owned leases + request_id values",
-            "agent resolve --batch validates lease ownership and request context",
+            "agent resolve --input <batch-response.json> validates lease ownership and request context",
         ):
             with self.subTest(edge=edge):
                 self.assertIn(edge, section)
@@ -600,15 +600,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertIn(f"`{field}`", text)
         self.assertIn("current-login pending review count", text)
         self.assertIn("Use `--lean` or `--summary`", text)
-        self.assertIn("agent resolve --stale --match-files", text)
+        self.assertIn("agent resolve --stale", text)
 
     def test_status_action_map_documents_agent_friction_recovery(self):
         text = (ROOT / "skill" / "references" / "status-action-map.md").read_text(encoding="utf-8")
         self.assertIn("commands", text)
         self.assertIn("gh-address-cr address <owner/repo> <pr_number> --lean", text)
-        self.assertIn("agent resolve --batch", text)
-        self.assertIn("--homogeneous-reason", text)
-        self.assertIn("--stale --match-files", text)
+        self.assertIn("agent resolve --input <batch-response.json>", text)
+        self.assertIn("--why", text)
+        self.assertIn("--stale", text)
         self.assertIn("NO_ACTIVE_PR", text)
         self.assertIn("AMBIGUOUS_ACTIVE_PR", text)
 

@@ -1199,6 +1199,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
         self.assertEqual(payload["reason_code"], "MISSING_FIX_ALL_ITEM_REPLY_EVIDENCE")
+        # PR #206 CR: --input takes a file path, not inline JSON — the
+        # placeholder must read as a filename, not "<BatchActionResponse>".
+        self.assertIn("--input <batch-response.json>", payload["next_action"])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "claimed")
         self.assertEqual(session["leases"][request["lease_id"]]["status"], "active")

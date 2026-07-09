@@ -480,9 +480,9 @@ def _write_simple_address_request(repo: str, pr_number: str, session: dict, *, c
         "batch_response_skeleton": _batch_response_skeleton(claimable_item_ids),
         "instructions": [
             "Resolve each actionable GitHub thread with `agent resolve <item_id> ...`; classification is recorded internally, no separate classify step is required.",
-            "When one set of files/validation evidence addresses multiple threads, run `agent next --batch` to write a BatchActionResponse skeleton, then `agent resolve --batch --input <file>` with per-thread summary/why entries.",
-            "Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, and `agent resolve --stale --match-files` for STALE/outdated threads.",
-            "To decline (not fix) a repeated concern across threads with one shared reply, use `agent resolve --reject|--clarify --homogeneous-reason <why> --match-files`.",
+            "When one set of files/validation evidence addresses multiple threads, run `agent next --batch` to write a BatchActionResponse skeleton, then `agent resolve --input <file>` with per-thread summary/why entries.",
+            "Use `agent resolve --why <why>` only for a homogeneous repeated concern, and `agent resolve --stale` for STALE/outdated threads.",
+            "To decline (not fix) a repeated concern across threads with one shared reply, use `agent resolve --disposition reject|clarify --files <paths> --why <why>`.",
             "After accepted evidence is present, run `agent publish`.",
         ],
         "commands": summary_commands(repo, pr_number),
@@ -961,7 +961,7 @@ class HighLevelReviewRuntime:
                 waiting_on = "human_fix"
                 next_action = (
                     "Address the finding by running: "
-                    f"`gh-address-cr submit-action {request_path} --resolution <fix|clarify|defer> "
+                    f"`gh-address-cr submit-action {request_path} --resolution <fix|clarify|defer|reject> "
                     f"--note <note> -- gh-address-cr {command} {repo} {pr_number}`"
                 )
             _set_loop_state(

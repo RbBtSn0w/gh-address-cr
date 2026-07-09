@@ -108,7 +108,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
         self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
 
-    def test_decline_requires_match_files(self):
+    def test_decline_without_match_files_now_succeeds(self):
+        # spec 029 / T021 (F1): --match-files is deprecated/implied by
+        # --files/--file — a files-scope decline no longer requires it.
         self._two_identical_threads()
 
         result = self.run_runtime_module(
@@ -118,10 +120,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
             "--homogeneous-reason", self.REASON,
         )
 
-        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "DECLINE_ALL_REJECTED")
-        self.assertEqual(payload["reason_code"], "MISSING_MATCH_FILES")
+        self.assertEqual(payload["status"], "DECLINE_ALL_ACCEPTED")
 
     def test_decline_requires_homogeneous_reason(self):
         self._two_identical_threads()
@@ -139,6 +140,10 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "MISSING_HOMOGENEOUS_REASON")
         # Decline-mode validation failures report decline_input, not fast_fix_input (#136 T5).
         self.assertEqual(payload["waiting_on"], "decline_input")
+        # PR #206 CR: the error must teach the axis-form replacement, not the
+        # deprecated `--reject` boolean spelling, even when the caller used it.
+        self.assertIn("--disposition reject", payload["next_action"])
+        self.assertNotIn("agent resolve --reject ", payload["next_action"])
 
     def test_decline_conflicts_with_commit(self):
         self._two_identical_threads()
@@ -154,7 +159,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["reason_code"], "CONFLICTING_RESOLVE_MODE")
+        # spec 029: fix-only evidence + decline disposition is an
+        # evidence/disposition incoherence, not an ad-hoc mode conflict.
+        self.assertEqual(payload["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
 
     def test_reject_and_clarify_mutually_exclusive(self):
         self._two_identical_threads()
@@ -170,18 +177,22 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["reason_code"], "CONFLICTING_RESOLVE_MODE")
+        # spec 029: two dispositions at once is a same-axis conflict.
+        self.assertEqual(payload["reason_code"], "RESOLVE_AXIS_CONFLICT")
 
-    def test_decline_item_id_is_rejected(self):
+    def test_decline_single_item_by_id_is_now_valid(self):
+        # spec 029 / #204: item_id + --reject used to be rejected
+        # (ITEM_ID_NOT_ALLOWED_FOR_MODE); it is now the primary path for
+        # declining exactly one thread.
         self._two_identical_threads()
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
             "github-thread:abc",
             "--reject",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
-        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["reason_code"], "ITEM_ID_NOT_ALLOWED_FOR_MODE")
+        self.assertEqual(payload["item_id"], "github-thread:abc")

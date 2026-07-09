@@ -25,7 +25,7 @@ REQUIRED_ACTION_RESPONSE_FIELDS = (
     "note",
 )
 WORKFLOW_DECISION_SCHEMA_VERSION = "workflow_decision.v1"
-WORKFLOW_DECISIONS = frozenset({"fix", "clarify", "defer", "reject"})
+WORKFLOW_DECISIONS = TERMINAL_RESOLUTIONS
 
 DIRECT_GITHUB_SIDE_EFFECT_KEYS = frozenset(
     {

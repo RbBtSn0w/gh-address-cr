@@ -172,7 +172,8 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
             waiting_on="batch_action_response",
             exit_code=2,
             message=(
-                "agent resolve --batch requires each batch item to supply item-level summary and why. "
+                "agent resolve --input <batch-response.json> requires each batch item to supply "
+                "item-level summary and why. "
                 "Common fix_reply summary/why cannot stand in for per-thread reviewer-answer evidence."
             ),
             payload={"missing_item_indexes": missing},
@@ -200,7 +201,7 @@ def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict
 
     next_action = (
         f"Use `gh-address-cr agent resolve {repo} {pr_number} "
-        "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files` "
+        "--commit <sha> --files <paths> --validation <cmd=passed> --stale` "
         "for stale or outdated GitHub review threads."
     )
     raise WorkflowError(
@@ -825,6 +826,93 @@ def _build_fast_fix_response(
     }
     write_json_atomic(response_path, response)
     return response_path, response
+
+
+def decline_item(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    resolution: str,
+    why: str,
+    publish: bool = False,
+    github_client: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Decline (reject/clarify) a single review-thread item with a reason.
+
+    Composes the same primitives as `fast_fix_item` — `record_classification`
+    -> `issue_action_request` -> `submit_action_response` — so single-item
+    decline inherits identical lease-ownership and final-gate guarantees
+    (spec 029 FR-002/FR-009). No new algorithm.
+    """
+    if resolution not in {"reject", "clarify"}:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id}: decline_item supports only reject or clarify, got {resolution!r}.",
+            payload={"item_id": item_id},
+        )
+    if not why or not why.strip():
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="MISSING_RESOLVE_ARGS",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
+            payload={"item_id": item_id},
+        )
+    classification = agent_protocol.record_classification(
+        repo,
+        pr_number,
+        item_id=item_id,
+        classification=resolution,
+        agent_id=agent_id,
+        note=why,
+    )
+    requested = agent_protocol.issue_action_request(
+        repo,
+        pr_number,
+        role="fixer",
+        agent_id=agent_id,
+        item_id=item_id,
+        now=now,
+    )
+    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+    response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
+    response = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": request["request_id"],
+        "lease_id": request["lease_id"],
+        "agent_id": agent_id,
+        "item_id": item_id,
+        "resolution": resolution,
+        "note": why,
+        "reply_markdown": why,
+    }
+    write_json_atomic(response_path, response)
+    submitted = agent_protocol.submit_action_response(
+        repo,
+        pr_number,
+        response_path=response_path,
+        now=now,
+        publish=publish,
+        github_client=github_client,
+    )
+    return {
+        "status": "DECLINE_COMPLETE" if publish else "DECLINE_ACCEPTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "item_id": item_id,
+        "classification": classification,
+        "request_path": requested["request_path"],
+        "response_path": str(response_path),
+        "submit": submitted,
+        "next_action": submitted["next_action"],
+    }
 
 
 def trivial_fix_item(

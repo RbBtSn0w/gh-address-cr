@@ -94,7 +94,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("review-to-findings", result.stdout)
         self.assertIn("gh-address-cr review", result.stdout)
         self.assertIn("--input batch-response.json", result.stdout)
-        self.assertIn("--homogeneous-reason <why>", result.stdout)
+        self.assertIn("--why <why>", result.stdout)
         self.assertNotIn("superpowers", result.stdout)
         self.assertNotIn("cli.py review", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
@@ -558,26 +558,26 @@ else:
                     f"gh-address-cr agent resolve {self.repo} {self.pr} <item_id> "
                     "--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>"
                 ),
-                "resolve_batch": f"gh-address-cr agent resolve {self.repo} {self.pr} --batch --input batch-response.json",
+                "resolve_batch": f"gh-address-cr agent resolve {self.repo} {self.pr} --input batch-response.json",
                 "resolve_homogeneous": (
                     f"gh-address-cr agent resolve {self.repo} {self.pr} "
-                    "--commit <sha> --files <paths> --validation <cmd=passed> --homogeneous-reason <why>"
+                    "--commit <sha> --files <paths> --validation <cmd=passed> --why <why>"
                 ),
                 "resolve_decline": (
                     f"gh-address-cr agent resolve {self.repo} {self.pr} "
-                    "--reject --match-files --files <paths> --homogeneous-reason <why>"
+                    "--disposition reject --files <paths> --why <why>"
                 ),
                 "resolve_stale": (
                     f"gh-address-cr agent resolve {self.repo} {self.pr} "
-                    "--commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files"
+                    "--commit <sha> --files <paths> --validation <cmd=passed> --stale"
                 ),
                 "publish": f"gh-address-cr agent publish {self.repo} {self.pr}",
                 "final_gate": f"gh-address-cr final-gate {self.repo} {self.pr}",
             },
         )
         self.assertNotIn("scripts/cli.py", json.dumps(request))
-        self.assertIn("--batch --input batch-response.json", request["commands"]["resolve_batch"])
-        self.assertIn("--homogeneous-reason", request["commands"]["resolve_homogeneous"])
+        self.assertIn("--input batch-response.json", request["commands"]["resolve_batch"])
+        self.assertIn("--why", request["commands"]["resolve_homogeneous"])
         self.assertFalse((self.workspace_dir() / "producer-request.md").exists())
 
     def test_cli_threads_lean_omits_verbose_thread_context(self):

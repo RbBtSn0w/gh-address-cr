@@ -207,7 +207,7 @@ Advanced integration commands:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent resolve` (`<item_id>` | `--trivial` | `--batch --input` | `--homogeneous-reason` | `--stale --match-files`)
+- `agent resolve` — (`<item_id>` | `--files`/`--file` | `--input`) x (`--disposition fix|trivial|reject|clarify`) x (`--stale`)
 - `agent evidence`
 - `agent publish`
 - `agent leases`
@@ -226,23 +226,27 @@ reduced coverage is reported in the summary, but it does not change the review
 verdict by itself.
 For GitHub review-thread replies, the single mutating entrypoint is
 `agent resolve`; it records classification internally, so no separate
-`agent classify` round-trip is needed. Shared files/validation evidence is not the
-same as a shared reviewer answer. Use `agent resolve --batch --input <batch-response.json>`
-with per-thread summary/why entries for ordinary multi-thread handling. Commit
-evidence is hydrated by the runtime during publish, so independent worker evidence
-does not need to wait for a final commit hash. Use
-`agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern.
-When `resolve` reports `PER_THREAD_EVIDENCE_REQUIRED`, run
-`agent next --batch --agent-id <id>` to claim eligible GitHub review threads and
-write a fillable `batch-response-skeleton.json` before `agent resolve --batch`.
+`agent classify` round-trip is needed. It resolves along three independent
+axes: disposition (`--disposition fix|trivial|reject|clarify`), selection
+(an `<item_id>`, `--files`/`--file`, or `--input`), and condition (`--stale`).
+Shared files/validation evidence is not the same as a shared reviewer answer.
+Use `agent resolve --input <batch-response.json>` with per-thread summary/why
+entries for ordinary multi-thread handling. Commit evidence is hydrated by the
+runtime during publish, so independent worker evidence does not need to wait
+for a final commit hash. Use `agent resolve --why <why>` only for a
+homogeneous repeated concern. When `resolve` reports
+`PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to
+claim eligible GitHub review threads and write a fillable
+`batch-response-skeleton.json` before `agent resolve --input <batch-response.json>`.
 
 When exactly one PR session is cached, PR-scoped commands such as `address`,
 `review`, `threads`, and `final-gate` may omit `<owner/repo> <pr_number>`.
 No-session and multi-session cases fail loud with
 `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`.
 
-Use `agent resolve --trivial` only for documentation or typo-only GitHub review
-threads, and `agent resolve --stale --match-files` for STALE/outdated threads. The
+Use `agent resolve <item_id> --disposition trivial` only for documentation or
+typo-only GitHub review threads, and `agent resolve --stale` for
+STALE/outdated threads. The
 runtime rejects security-sensitive, API-sensitive, performance, or ambiguous
 comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve, validation,
 and final-gate evidence still applies.
@@ -328,10 +332,11 @@ next --role <role>
 next --batch
 submit
 resolve <item_id>
-resolve --trivial
-resolve --batch
-resolve --homogeneous-reason
-resolve --stale --match-files
+resolve <item_id> --disposition trivial
+resolve --input <batch-response.json>
+resolve --why <why>
+resolve --disposition reject|clarify --why <why>
+resolve --stale
 evidence add
 evidence list
 publish
@@ -346,14 +351,14 @@ producer output
 session items
 agent classify
 ActionResponse or BatchActionResponse
-agent submit or agent resolve --batch
+agent submit or agent resolve --input <batch-response.json>
 accepted evidence
 agent publish (GitHub thread side effects only)
 final-gate
 completion_summary_line
 completion_summary
 runtime-owned leases + request_id values
-agent resolve --batch validates lease ownership and request context
+agent resolve --input <batch-response.json> validates lease ownership and request context
 ```
 
 Stable machine summary fields:
@@ -522,7 +527,7 @@ When machine output is ambiguous, inspect:
 - `artifact_path`
 
 Outdated / `STALE` GitHub threads still count as unresolved until explicitly
-handled. Prefer `agent resolve --stale --match-files`.
+handled. Prefer `agent resolve --stale`.
 
 ## Additional Repository Files
 

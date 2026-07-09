@@ -22,15 +22,15 @@ If `status` is `BLOCKED`:
 - **Command discipline**: If the machine summary includes `commands`, prefer those templates. They are the authoritative low-token route for agent recovery.
 
 If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
-- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent resolve --batch` when one set of files/validation evidence addresses multiple matching GitHub threads; keep per-thread summary/why entries. Commit evidence is hydrated during publish. Use `agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern, then run `agent publish`.
-- **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent resolve <owner/repo> <pr_number> --batch --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
+- **Action**: Inspect the `artifact_path`, `threads`, `claimable_item_ids`, and `batch_response_skeleton`. Use per-thread `agent classify` and `agent next` to claim each actionable thread. Use `agent submit` for independent evidence, or `agent resolve --input <batch-response.json>` when one set of files/validation evidence addresses multiple matching GitHub threads; keep per-thread summary/why entries. Commit evidence is hydrated during publish. Use `agent resolve --why <why>` only for a homogeneous repeated concern, then run `agent publish`.
+- **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
 - **Lean path**: Re-run `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr threads <owner/repo> <pr_number> --lean` when only item IDs, claimability, and evidence presence are needed.
 
 If `reason_code` is `PER_THREAD_EVIDENCE_REQUIRED`:
 - **Action**: Run the returned `commands.batch_next` or `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write `batch-response-skeleton.json`. Fill common files/validation plus per-thread summary/why, then run the returned `resolve_batch` command and publish.
 
 If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKING_GITHUB_ITEMS`:
-- **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent resolve`. Use `gh-address-cr agent resolve --homogeneous-reason <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
+- **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent resolve`. Use `gh-address-cr agent resolve --why <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
 If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 - **Action**: Follow the returned `next_action`. If accepted publish-ready evidence exists, this may still route to `gh-address-cr agent publish <owner/repo> <pr_number>`. If the blocking thread is already terminal and not claimable, the recovery path must instead use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>`, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
@@ -39,7 +39,7 @@ If `reason_code` is `LEASE_LOCKED_ITEM`:
 - **Action**: Do not retry blindly. Inspect `lease_recovery` and run `gh-address-cr agent leases <owner/repo> <pr_number>` to see the authoritative owner, lease status, and safe recovery command before trying item-mode `agent resolve` again.
 
 If a GitHub thread has `state=stale` or `status=STALE`:
-- **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale --match-files`, then publish and rerun final-gate.
+- **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale`, then publish and rerun final-gate.
 
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
@@ -77,3 +77,12 @@ If `status` is `AMBIGUOUS_ACTIVE_PR`:
 
 If `status` is `UNKNOWN`, `FAILED`, or the machine summary is malformed (missing required fields):
 - **Action**: Fail loudly. Do NOT guess the next action. Request human intervention or refer to the audit logs.
+
+If `reason_code` is `RESOLVE_AXIS_CONFLICT`:
+- **Action**: `agent resolve` accepts exactly one selection source (`item_id`, `--files`/`--file`, or `--input`) and exactly one disposition. Drop the extra flag and rerun.
+
+If `reason_code` is `RESOLVE_EVIDENCE_INCOHERENT`:
+- **Action**: A `reject`/`clarify` disposition declines with a reason (`--why`) and does not accept `--commit`/`--validation`. Use `--disposition fix` for code changes, or drop the fix-only evidence.
+
+If `reason_code` is `RESOLVE_FLAG_DEPRECATED`:
+- **Action**: The deprecation window for this legacy `agent resolve` flag has closed. Replace it with its axis-based equivalent (`--disposition fix|trivial|reject|clarify`, `--stale`, `--why`, or plain `--input`) and rerun.
