@@ -310,5 +310,41 @@ class RemovalWindowFailLoudTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class BatchDispositionCoherenceTest(PythonScriptTestCase):
+    """PR #206 CR: --input (batch selection) is fix-only; a non-fix
+    --disposition must fail loudly instead of being silently ignored."""
+
+    def test_input_with_decline_disposition_is_rejected(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--input", "batch-response.json",
+            "--disposition", "reject",
+            "--why", "Style preference only; not a defect.",
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+        self.assertIn("fix-only", payload["next_action"])
+
+
+class DeclineItemResolutionValidationTest(unittest.TestCase):
+    """PR #206 CR: decline_item must fail fast on an unsupported resolution
+    instead of recording classification for a value it doesn't support."""
+
+    def test_unsupported_resolution_is_rejected(self):
+        from gh_address_cr.core import workflow
+
+        with self.assertRaises(WorkflowError) as ctx:
+            workflow.decline_item(
+                "o/r", "1",
+                item_id="github-thread:abc",
+                agent_id="agent",
+                resolution="defer",
+                why="some reason",
+            )
+        self.assertEqual(ctx.exception.reason_code, "UNSUPPORTED_DECLINE_RESOLUTION")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -172,7 +172,7 @@ def _validate_fix_all_input_item_reply_evidence(batch: dict[str, Any]) -> None:
             waiting_on="batch_action_response",
             exit_code=2,
             message=(
-                "agent resolve --input <BatchActionResponse> requires each batch item to supply "
+                "agent resolve --input <batch-response.json> requires each batch item to supply "
                 "item-level summary and why. "
                 "Common fix_reply summary/why cannot stand in for per-thread reviewer-answer evidence."
             ),
@@ -847,6 +847,15 @@ def decline_item(
     decline inherits identical lease-ownership and final-gate guarantees
     (spec 029 FR-002/FR-009). No new algorithm.
     """
+    if resolution not in {"reject", "clarify"}:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id}: decline_item supports only reject or clarify, got {resolution!r}.",
+            payload={"item_id": item_id},
+        )
     if not why or not why.strip():
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,

@@ -601,6 +601,23 @@ def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
                 "for code changes)."
             ),
         )
+    if parsed.input and parsed.disposition in ("reject", "clarify"):
+        # selection=batch (--input) always routes to fast_fix_from_batch_input,
+        # which is fix-only — each item's own resolution lives inside the
+        # BatchActionResponse JSON. A non-fix --disposition here would be
+        # silently ignored rather than honored (PR #206 CR).
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code=protocol_codes.RESOLVE_EVIDENCE_INCOHERENT,
+            waiting_on="resolve_axis",
+            exit_code=2,
+            message=(
+                f"agent resolve --input <batch-response.json> is fix-only; "
+                f"--disposition {parsed.disposition} has no effect on a batch selection. "
+                "Set each item's resolution inside the BatchActionResponse JSON instead, "
+                "or drop --input and use a single item_id / --files selection to decline."
+            ),
+        )
 
 
 def _dispatch_decline_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
@@ -751,7 +768,7 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
                 reason_code="MISSING_BATCH_INPUT",
                 waiting_on="batch_action_response",
                 exit_code=2,
-                message="agent resolve --batch requires --input <BatchActionResponse>.",
+                message="agent resolve requires --input <batch-response.json> for a batch selection.",
             )
         return workflow.fast_fix_from_batch_input(
             parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
