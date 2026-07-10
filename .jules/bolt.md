@@ -1,0 +1,3 @@
+## 2024-07-10 - Avoid `dict.setdefault()` with Complex Default Objects in Tight Loops
+**Learning:** In tight loops processing many objects (like telemetry events), using `dict.setdefault(key, <default_object>)` where the default object is complex (e.g., a new dict or set) incurs significant allocation overhead. This happens because the fallback object is eagerly instantiated on every iteration, even if the key already exists in the dictionary.
+**Action:** Use an explicit `if key not in dict: dict[key] = ...` instead of `dict.setdefault()` when the default value is complex to avoid unnecessary memory allocations and speed up execution in hot paths.
