@@ -1,3 +1,9 @@
+## [3.5.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.9...v3.5.10) (2026-07-16)
+
+### Performance Improvements
+
+* avoid eager telemetry grouping allocations ([#217](https://github.com/RbBtSn0w/gh-address-cr/issues/217)) ([d7b35f2](https://github.com/RbBtSn0w/gh-address-cr/commit/d7b35f26f7fd545681afc77059e0bcfc4fee10e8))
+
 ## [3.5.9](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.8...v3.5.9) (2026-07-09)
 
 ### Bug Fixes
