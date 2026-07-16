@@ -26,6 +26,7 @@ class TelemetryGroupingBenchmarkTest(unittest.TestCase):
             ],
             text=True,
             capture_output=True,
+            timeout=30,
             cwd=ROOT,
         )
 
