@@ -1,3 +1,9 @@
+## [3.5.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.10...v3.5.11) (2026-07-20)
+
+### Bug Fixes
+
+* enhance README and SKILL documentation with canonical modes and structured findings producer details ([8d17bb9](https://github.com/RbBtSn0w/gh-address-cr/commit/8d17bb9dba640058779da39a60987e92100e929b))
+
 ## [3.5.10](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.9...v3.5.10) (2026-07-16)
 
 ### Performance Improvements
