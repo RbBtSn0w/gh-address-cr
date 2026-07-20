@@ -442,10 +442,18 @@ Ready-to-use prompt variants:
 
 - Short generic:
   `Review this PR through gh-address-cr and follow the runtime status map.`
+- Existing GitHub review threads (`address` / `处理评审`):
+  `Use $gh-address-cr address PR #123.`
 - Explicit `$code-review` producer:
-  `Run the external review producer, convert fixed finding blocks if needed, ingest them, then continue gh-address-cr review.`
+  For a full mixed review (`review` / `完整审查`), use
+  `Use $gh-address-cr review PR #123 with $engineering:code-review as the findings producer.`
 - Any external review producer:
   `Any external review producer may satisfy the handoff if it emits findings JSON or fixed finding blocks.`
+
+For the explicit `$engineering:code-review` composition, override its default
+Markdown report and require findings JSON with `title`, `body`, `path`, and
+`line`; use `[]` when no findings exist. Ingest it with
+`findings --input - --sync --source code-review`, then continue `review`.
 
 如果你自己就是外部 review producer，请直接输出 findings JSON 或固定 `finding` blocks。
 

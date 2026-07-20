@@ -62,6 +62,31 @@ $gh-address-cr adapter <PR_URL> <adapter_cmd...>
 $gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
 ```
 
+## Canonical Modes
+
+Use the command word to select the workflow before invoking the runtime:
+
+- `address` / `处理评审`: handle existing GitHub review threads. Run
+  `gh-address-cr address <owner/repo> <pr_number> --lean`; do not start a new
+  local code-review producer. Existing blocking local findings remain runtime
+  truth and must be handled if the status map surfaces them.
+- `review` / `完整审查`: run the full mixed workflow. This mode requires a
+  structured findings producer, then handles both local findings and GitHub
+  review threads before `final-gate`.
+
+Compose a named review skill explicitly instead of selecting one implicitly:
+
+```text
+Use $gh-address-cr review PR #123 with $engineering:code-review as the findings producer.
+```
+
+When a named producer normally returns narrative Markdown, override that output
+for this invocation: require a findings JSON array with `title`, `body`, `path`,
+and `line`; allow supported optional fields; and require `[]` when the review is
+clean. Ingest the exact JSON through `findings --input - --sync --source
+code-review`, then rerun `review`. Reject ordinary Markdown producer output;
+`review-to-findings` accepts fixed `finding` blocks only.
+
 ## Packaging Scope
 
 This file is part of the packaged `gh-address-cr` skill. All paths in this document are relative to the installed skill root.
@@ -142,7 +167,7 @@ is the vendor-neutral way to get the same correlation on any host.
 ## Execution Ladder
 
 1. If the PR number is unknown, run `active-pr`; it only returns OPEN PRs and fails loud for none or many.
-2. Start from the public main entrypoint: `review <owner/repo> <pr_number>`, or `address <owner/repo> <pr_number> --lean` for simple GitHub-thread-only PRs.
+2. Select the canonical mode, then start from the public main entrypoint: `review <owner/repo> <pr_number>` for a full mixed review with a structured producer, or `address <owner/repo> <pr_number> --lean` for existing GitHub threads without starting a new producer.
 3. Inspect the JSON machine summary. Prefer `--lean` or `--summary` on `address`, `threads`, and `review --auto-simple` when thread lists are large.
 4. Consult `references/status-action-map.md` and branch strictly on `status`, `reason_code`, `waiting_on`, `next_action`, and `commands`.
 5. Start from the runtime dispatcher:

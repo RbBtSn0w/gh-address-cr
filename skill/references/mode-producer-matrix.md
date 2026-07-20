@@ -2,6 +2,36 @@
 
 `gh-address-cr` is the PR session control plane. This matrix defines which execution path should run for each `mode + producer` combination.
 
+## Canonical user modes
+
+- `address` / `处理评审`: route to the remote-only workflow. Do not start a new
+  local review producer. If the runtime reports existing blocking local
+  findings, follow the status-action map instead of ignoring them.
+- `review` / `完整审查`: route to the mixed workflow. Require a structured
+  findings producer before treating the producer handoff as complete.
+
+Named producer skills are explicitly composed, never selected by default:
+
+```text
+Use $gh-address-cr review PR #123 with $engineering:code-review as the findings producer.
+```
+
+For that invocation, require `$engineering:code-review` to emit only a JSON
+array. Every finding requires `title`, `body`, `path`, and `line`; supported
+optional fields include `category`, `confidence`, `head_sha`, and explicit
+P0-P4 `severity`. A clean review emits `[]`, not empty output. Ingest the result
+without an ad-hoc workspace file:
+
+```text
+$engineering:code-review <PR_URL> [structured findings JSON output]
+  | gh-address-cr findings <owner/repo> <pr_number> --input - --sync --source code-review
+gh-address-cr review <owner/repo> <pr_number>
+```
+
+The pipe above expresses the data flow; a host may pass the producer's JSON to
+stdin directly. Narrative Markdown is invalid input. Use `review-to-findings`
+only when a producer emits the documented fixed `finding` block format.
+
 ## Supported combinations
 
 ### `loop`
