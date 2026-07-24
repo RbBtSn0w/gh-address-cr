@@ -2,6 +2,12 @@
 
 When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
 
+## Contents
+
+- Automatic feedback on skill exceptions
+- Feedback command fields
+- Examples
+
 By default, feedback issues are filed to `RbBtSn0w/gh-address-cr`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
 
 Use feedback issues for skill-level problems:

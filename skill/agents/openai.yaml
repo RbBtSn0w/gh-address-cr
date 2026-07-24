@@ -1,30 +1,4 @@
-version: 1
 interface:
-  display_name: GH Address CR
-  short_description: Operate the gh-address-cr runtime through a thin adapter.
-  default_prompt: |
-    Use `SKILL.md` as the source of truth.
-    1. The `gh-address-cr` runtime CLI is the only execution surface. Stateful work belongs to the external `gh-address-cr` runtime.
-    2. Start with `gh-address-cr review <owner/repo> <pr_number>` for `review` / `完整审查`, the full mixed workflow with structured findings intake. Start with `gh-address-cr address <owner/repo> <pr_number> --lean` for `address` / `处理评审`, existing GitHub-thread handling without a new local review producer.
-    2a. Use a review producer only when the user explicitly names or supplies one. For `with $engineering:code-review as the findings producer`, require a findings JSON array (`title`, `body`, `path`, `line`; `[]` when clean), ingest it through `gh-address-cr findings ... --input - --sync --source code-review`, and then rerun `review`. Do not ingest its default narrative Markdown and do not select it automatically.
-    3. For multi-agent work, inspect `gh-address-cr agent manifest`, claim with `agent next`, fill `response_skeleton_path`, submit evidence with `agent submit` or GitHub-thread batch evidence with `agent resolve --input <batch-response.json>`, reuse evidence with `agent evidence add` when appropriate, inspect with `agent leases`, and recover stale claims with `agent reclaim`.
-    4. GitHub review comment reply tasks are not complete when a reply is drafted. Submit the `ActionResponse` with `gh-address-cr agent submit` or the `BatchActionResponse` with `gh-address-cr agent resolve --input <batch-response.json>`, preserving per-thread summary/why, then run `gh-address-cr agent publish`.
-    4a. Use `agent resolve --why <why>` only for a homogeneous repeated concern; when mixed reviewer questions return `PER_THREAD_EVIDENCE_REQUIRED`, run `agent next --batch --agent-id <id>` to create the batch leases and skeleton before `agent resolve --input <batch-response.json>`.
-    5. AI agents may classify, fix, clarify, defer, reject, or verify. They must not post GitHub replies or resolve threads directly.
-    6. GitHub review threads require both reply and resolve, with durable reply evidence from the current authenticated login.
-    7. Local findings require valid terminal notes and validation evidence.
-    8. Before any completion statement, run `gh-address-cr final-gate ...` and report the gate evidence directly from that run. Add `--require-checks` or `--require-required-checks` when PR checks are part of the requested completion proof. Include the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`, plus `Verified: 0 Unresolved Threads found`, `Verified: 0 Pending Reviews found`, session blocking item count, telemetry coverage label, efficiency report path, and the audit summary path + sha256. The compact line contains telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary. Use the machine-readable count lines only when extra run-scoped diagnostics are needed. Briefly explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present; do not treat telemetry degradation as review-resolution failure by itself.
-    9. If low-level resolve helpers are used, do not attempt resolve-only handling unless reply evidence already exists or the same action posts a fresh reply.
-    10. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `gh-address-cr submit-feedback` before giving up. Feedback goes to `RbBtSn0w/gh-address-cr` by default. Do not file feedback issues for normal PR findings, codebase bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
-    11. Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues. Prefer safe technical diagnostics such as failing command, exit code, status, reason_code, waiting_on, run_id, and skill version.
-    12. Always provide `--using-repo` and `--using-pr` for PR-scoped feedback so the issue body records where the problem came from. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred. When those fields are present, feedback can auto-collect the latest local machine summary, session metrics, audit summary hash, and cached PR head SHA. Repeated feedback is deduplicated by fingerprint.
-    13. **Severity & Tone Rubric (P0-P4)**:
-        - **P0 (Blocker)**: Critical system-wide crash, data loss, or severe security flaw. Reply MUST be deeply technical and demonstrate extreme urgency.
-        - **P1 (Critical)**: Major logic error in core path or significant performance regression. Reply MUST provide at least two paragraphs of technical rationale.
-        - **P2 (Major)**: Functional bug in standard path. Reply MUST be detailed and refer to specific logic branches.
-        - **P3 (Minor)**: UX nits, missing tests for low-risk logic, sub-optimal but functional code. Reply SHOULD be concise and professional.
-        - **P4 (Nit)**: Style, typos, or non-functional suggestions. Reply SHOULD be very brief and polite.
-        - **Deep Comprehension**: ALL replies MUST explicitly reference variable names, logic branches, or domain terms from the reviewer's comment. Avoid boilerplate like "Fixed as requested."
-    14. Record measured timing in `--validation` values whenever known, using `@<n>ms` or `@<n>s`, so final-gate telemetry can report real duration and slowest-operation evidence. Do not include raw tokens, raw prompts, usernames, machine identifiers, or unnecessary absolute local paths in any artifact or issue.
-    15. Do not format execution timestamps or efficiency metrics inside individual GitHub review-thread replies. The deterministic control plane runtime records runtime telemetry and emits the Agent Efficiency Summary through final-gate, audit summaries, structured reports, and the agent's completion summary.
-    16. Use `agent resolve <item_id> --disposition trivial` only for documentation or typo-only GitHub threads, and return to the normal classify/next/submit path when the runtime rejects the shortcut. Treat `agent orchestrate` as an optional advanced surface rather than the default path.
+  display_name: "GH Address CR"
+  short_description: "Resolve GitHub PR review feedback safely"
+  default_prompt: "Use $gh-address-cr to handle this pull request through the runtime CLI and verify completion with final-gate."

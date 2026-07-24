@@ -125,7 +125,8 @@ export GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test
 
 The CLI entrypoint initializes tracing before dispatch and calls
 `shutdown_telemetry()` in a `finally` block. It attempts to flush spans for up
-to 200 ms, then returns fail-open if the gateway remains unavailable.
+to 2.2 seconds, including a 2-second exporter timeout, then returns fail-open
+if the gateway remains unavailable.
 For a custom operation:
 
 ```python

@@ -1,7 +1,10 @@
 import json
+import re
 import unittest
 
-from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
+from gh_address_cr.commands.agent import build_agent_manifest
+from gh_address_cr.commands.high_level import _parse_native_high_level_args
+from gh_address_cr.core.reply_templates import fix_reply
 from tests.helpers import ROOT
 
 SKILL_MD = ROOT / "skill" / "SKILL.md"
@@ -18,18 +21,14 @@ AGENTS_MD = ROOT / "AGENTS.md"
 CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
 HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
-LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
-OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
 OTEL_TRACING_CONTRACT_MD = README_MD
 AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
 COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
 FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
 STATUS_ACTION_MAP_MD = ROOT / "skill" / "references" / "status-action-map.md"
-OTEL_WORKER_MJS = ROOT / "skill" / "references" / "otel-worker-better-stack" / "worker.mjs"
-OTEL_WORKER_WRANGLER = ROOT / "skill" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
 OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
+RUNTIME_REQUIREMENTS_JSON = ROOT / "skill" / "runtime-requirements.json"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
-REPLY_TEMPLATES_DIR = ROOT / "skill" / "assets" / "reply-templates"
 
 
 def load_documentation_contracts():
@@ -50,6 +49,84 @@ def cli_topology_section():
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
+    def test_skill_frontmatter_uses_supported_keys_only(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        frontmatter = text.split("---", 2)[1]
+        keys = {
+            match.group(1)
+            for line in frontmatter.splitlines()
+            if (match := re.match(r"^([a-z][a-z0-9_-]*):", line))
+        }
+
+        self.assertEqual(keys, {"name", "description"})
+
+    def test_openai_metadata_is_a_thin_generated_interface(self):
+        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertEqual(
+            text,
+            'interface:\n'
+            '  display_name: "GH Address CR"\n'
+            '  short_description: "Resolve GitHub PR review feedback safely"\n'
+            '  default_prompt: "Use $gh-address-cr to handle this pull request through the runtime CLI and verify completion with final-gate."\n',
+        )
+
+    def test_skill_cli_examples_use_runtime_command_spelling(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertNotIn("/gh-address-cr", text)
+        self.assertNotRegex(text, r"(?m)^\$gh-address-cr ")
+        self.assertIn("Use $gh-address-cr review", text)
+
+    def test_dispatch_matrix_matches_current_cli_intake_contract(self):
+        text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
+        expected_commands = (
+            "gh-address-cr address <owner/repo> <pr_number> --lean",
+            "gh-address-cr findings <owner/repo> <pr_number> --input - --sync --source <producer>",
+            "gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>",
+            "gh-address-cr review <owner/repo> <pr_number> --input <path>|-",
+            "gh-address-cr review-to-findings <owner/repo> <pr_number> --input - --output -",
+        )
+        for command in expected_commands:
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+
+        self.assertNotIn(" --repo ", text)
+        self.assertNotIn(" --pr ", text)
+        self.assertNotIn("adapter --repo", text)
+        self.assertNotIn("adapter <owner/repo> <pr_number> --source", text)
+        self.assertIn("`finding` code fences", text)
+
+    def test_documented_intake_shapes_parse_as_current_cli_arguments(self):
+        cases = (
+            ("address", ["owner/repo", "123", "--lean"], None),
+            (
+                "findings",
+                ["owner/repo", "123", "--input", "-", "--sync", "--source", "producer"],
+                None,
+            ),
+            ("adapter", ["owner/repo", "123", "python3", "review.py"], ["python3", "review.py"]),
+            ("review", ["owner/repo", "123", "--input", "-"], None),
+        )
+        for command, argv, adapter_cmd in cases:
+            with self.subTest(command=command):
+                parsed = _parse_native_high_level_args(command, argv)
+                self.assertEqual((parsed.repo, parsed.pr_number), ("owner/repo", "123"))
+                if adapter_cmd is not None:
+                    self.assertEqual(parsed.adapter_cmd, adapter_cmd)
+
+    def test_skill_root_commands_are_exposed_by_runtime_manifest(self):
+        manifest_commands = set(build_agent_manifest()["public_commands"])
+        skill_text = read_repo_docs(SKILL_MD, *sorted((ROOT / "skill" / "references").glob("*.md")))
+        documented_commands = set(re.findall(r"`gh-address-cr ([a-z][a-z0-9-]*)(?:\s|`)", skill_text))
+        documented_commands.update(
+            re.findall(r"(?m)^(?:[/\\$])?gh-address-cr ([a-z][a-z0-9-]*)", skill_text)
+        )
+
+        self.assertEqual(documented_commands - manifest_commands, set())
+
+    def test_skill_runtime_floor_covers_resolve_axis_contract(self):
+        requirements = json.loads(RUNTIME_REQUIREMENTS_JSON.read_text(encoding="utf-8"))
+        self.assertEqual(requirements["minimum_runtime_version"], "3.5.7")
+
     def test_process_otel_has_versioned_contract_and_architecture_ownership(self):
         contract = OTEL_TRACING_CONTRACT_MD.read_text(encoding="utf-8")
         architecture = ARCHITECTURE_MD.read_text(encoding="utf-8")
@@ -80,7 +157,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("This file is part of the packaged `gh-address-cr` skill.", text)
         self.assertIn("All paths in this document are relative to the installed skill root.", text)
-        self.assertIn("outside the packaged skill payload", text)
+        self.assertIn("outside the packaged skill", text)
 
     def test_skill_is_concise_first_read_entrypoint(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -102,41 +179,27 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_examples_use_review_as_main_entrypoint_without_required_input(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]", text)
-        self.assertIn("/gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]", text)
-        self.assertIn("/gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]", text)
-        self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
-        self.assertIn("$gh-address-cr review <PR_URL>", text)
-        self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
-        self.assertIn("$gh-address-cr findings <PR_URL> --input - --sync --source <producer>", text)
-        self.assertNotIn("$gh-address-cr findings <PR_URL> --input - --sync\n", text)
+        self.assertIn("gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertIn("gh-address-cr address <owner/repo> <pr_number> --lean", text)
+        self.assertNotIn("gh-address-cr review <owner/repo> <pr_number> --input", text)
+        self.assertIn("Use $gh-address-cr review PR #123", text)
+        self.assertIn("references/mode-producer-matrix.md", text)
         self.assertIn("If `review` returns `BLOCKED`, inspect the loop request artifact,", text)
-        self.assertIn("then rerun the same `review` command.", text)
-        self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
+        self.assertIn("then rerun the same", text)
+        self.assertIn("`review` command.", text)
+        self.assertIn("Do not treat `STALE` or outdated threads as clean.", text)
 
     def test_skill_first_read_covers_runtime_agent_command_surface(self):
-        text = SKILL_MD.read_text(encoding="utf-8")
-        for command in (
-            "/gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-",
-            "/gh-address-cr doctor [<owner/repo> [<pr_number>]]",
-            "/gh-address-cr final-gate <owner/repo> <pr_number>",
-            "/gh-address-cr submit-action <action-request.json>",
-            "/gh-address-cr submit-feedback --category <category>",
-            "/gh-address-cr agent manifest",
-            "/gh-address-cr agent classify <owner/repo> <pr_number> <item_id>",
-            "/gh-address-cr agent next <owner/repo> <pr_number>",
-            "/gh-address-cr agent submit <owner/repo> <pr_number>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json>",
-            "/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale",
-            "/gh-address-cr agent evidence add <owner/repo> <pr_number>",
-            "/gh-address-cr agent publish <owner/repo> <pr_number>",
-            "/gh-address-cr agent leases <owner/repo> <pr_number>",
-            "/gh-address-cr agent reclaim <owner/repo> <pr_number>",
-            "/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit|autopilot>",
-        ):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        self.assertIn("gh-address-cr --help", skill_text)
+        self.assertIn("gh-address-cr agent manifest", skill_text)
+        self.assertIn("gh-address-cr agent resolve", skill_text)
+        self.assertIn("gh-address-cr agent publish", skill_text)
+        self.assertIn("references/agent-protocol.md", skill_text)
+        for command in ("agent classify", "agent next", "agent submit", "agent evidence add", "agent leases", "agent reclaim"):
             with self.subTest(command=command):
-                self.assertIn(command, text)
+                self.assertIn(command, protocol_text)
 
     def test_skill_guides_cr_reply_comment_tasks_through_runtime_submission(self):
         skill_text = SKILL_MD.read_text(encoding="utf-8")
@@ -154,8 +217,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("does not accept arbitrary Markdown", text)
-        self.assertIn("fixed `finding` block format", text)
-        self.assertIn("This converter rejects plain narrative Markdown review output.", text)
+        self.assertIn("fenced\n`finding` blocks", text)
+        self.assertIn("rejects plain narrative Markdown review output", text)
 
     def test_skill_documents_machine_summary_fields(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -260,7 +323,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         for term in (
             "handling_boundary",
             "lease_recovery",
-            "TELEMETRY_OVERHEAD_EXCEEDED",
             "logic_validation_signals",
         ):
             with self.subTest(term=term):
@@ -270,13 +332,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
-        self.assertIn("references/otel-worker-better-stack.md", text)
         self.assertIn("references/agent-protocol.md", text)
         self.assertIn("references/completion-contract.md", text)
         self.assertIn("references/feedback.md", text)
         self.assertIn("references/status-action-map.md", text)
         self.assertIn("public main entrypoint", text)
-        self.assertIn("reference surface", text)
+        self.assertIn("Reference Surface", text)
         self.assertNotIn("## Prompt Patterns", text)
         self.assertNotIn("README.md", text)
 
@@ -290,10 +351,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_uses_runtime_cli_as_sole_execution_surface(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("Runtime public entrypoint: `gh-address-cr`", text)
+        self.assertIn("Runtime entrypoints: `gh-address-cr` and `python3 -m gh_address_cr`", text)
         self.assertNotIn("scripts/cli.py", text)
         self.assertNotIn("Compatibility shim", text)
-        self.assertIn("Start from the runtime dispatcher:\n  - `gh-address-cr review", text)
+        self.assertIn("Use the runtime help and manifest as the authoritative command inventory", text)
 
     def test_skill_completion_contract_does_not_require_current_run_summary(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -322,17 +383,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("thin adapter", text.lower())
         self.assertIn("adapter check-runtime", text)
-
-    def test_openai_hint_identifies_as_thin_adapter(self):
-        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
-        self.assertIn("thin adapter", text.lower())
-        self.assertNotIn("direct side effect", text.lower())
-
-    def test_openai_hint_uses_runtime_cli_as_sole_execution_surface(self):
-        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
-        self.assertIn("Start with `gh-address-cr review <owner/repo> <pr_number>`", text)
-        self.assertIn("run `gh-address-cr final-gate ...`", text)
-        self.assertNotIn("scripts/cli.py", text)
 
     def test_openai_hint_does_not_require_natural_language_current_run_counts(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
@@ -367,16 +417,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("expected automatic step", skill_text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
-        matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         skill_text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
-        self.assertIn("`summary`", matrix_text)
-        self.assertIn("`commit_hash`", matrix_text)
-        self.assertIn("`files`", matrix_text)
-        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
         self.assertIn("for GitHub thread `fix`: `fix_reply`", workflow_text)
         self.assertIn("`summary`", workflow_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", workflow_text)
@@ -391,66 +435,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("Published fix replies should surface that signal as `Reviewer priority:`", skill_text)
         self.assertNotIn("shown in published fix replies as `Reviewer priority:`", protocol_text)
 
-    def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
-        fix_cases = {
-            "fixed.md": (
-                None,
-                [
-                    "<commit_hash>",
-                    "<file_path_1>,<file_path_2>",
-                    "<test_command>",
-                    "`<pass/fail + key output>`",
-                    "`<technical reasoning tied to the comment>`",
-                ],
-                "`<brief fix summary>`",
-            ),
-            "fixed-p1.md": (
-                "P1",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<targeted_test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<root cause and correction>`",
-                ],
-                "`<critical-path fix>`",
-            ),
-            "fixed-p2.md": (
-                "P2",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<behavioral correction>`",
-                ],
-                "`<fix summary>`",
-            ),
-            "fixed-p3.md": (
-                "P3",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<clarity/consistency improvement>`",
-                ],
-                "`<small/non-breaking improvement>`",
-            ),
-        }
-        for filename, (severity, payload, summary) in fix_cases.items():
-            with self.subTest(filename=filename):
-                self.assertEqual((REPLY_TEMPLATES_DIR / filename).read_text(encoding="utf-8"), fix_reply(severity, payload, summary=summary))
-
-        self.assertEqual(
-            (REPLY_TEMPLATES_DIR / "clarify.md").read_text(encoding="utf-8"),
-            clarify_reply(["`<detailed explanation of why the current logic is correct or answers the question>`"]),
-        )
-        self.assertEqual(
-            (REPLY_TEMPLATES_DIR / "defer.md").read_text(encoding="utf-8"),
-            defer_reply(["`<reason>`"]),
-        )
-
     def test_fixed_reply_template_stays_evidence_focused_without_generic_offer(self):
         rendered = fix_reply(
             "P2",
@@ -460,17 +444,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
         self.assertNotIn("If you want", rendered)
         self.assertNotIn("I can also", rendered)
-
-    def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
-        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
-        self.assertIn("run `gh-address-cr submit-feedback`", text)
-        self.assertIn("`RbBtSn0w/gh-address-cr`", text)
-        self.assertIn("contradictory instructions", text)
-        self.assertIn("missing automation", text)
-        self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", text)
-        self.assertIn("expected wait states", text)
-        self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
-        self.assertIn("Always provide `--using-repo` and `--using-pr`", text)
 
     def test_repo_issue_template_documents_ai_agent_feedback_fields(self):
         text = AGENT_FEEDBACK_ISSUE_TEMPLATE.read_text(encoding="utf-8")
@@ -485,7 +458,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
 
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
-        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD):
+        for path in (MODE_PRODUCER_MATRIX_MD,):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("skill/scripts/", text, msg=str(path))
             self.assertNotIn("skill/references/", text, msg=str(path))
@@ -494,20 +467,17 @@ class SkillDocumentationContractTest(unittest.TestCase):
         hint_text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertNotIn("skill/scripts/", hint_text)
         self.assertNotIn("skill/references/", hint_text)
-        self.assertIn("gh-address-cr review", hint_text)
+        self.assertIn("$gh-address-cr", hint_text)
 
     def test_referenced_skill_owned_docs_exist(self):
         for path in (
             MODE_PRODUCER_MATRIX_MD,
-            LOCAL_REVIEW_ADAPTER_MD,
             AGENT_PROTOCOL_MD,
             COMPLETION_CONTRACT_MD,
             FEEDBACK_MD,
             STATUS_ACTION_MAP_MD,
             OPENAI_HINT_YAML,
         ):
-            self.assertTrue(path.exists(), msg=str(path))
-        for path in (OTEL_WORKER_BETTER_STACK_MD, OTEL_WORKER_MJS, OTEL_WORKER_WRANGLER):
             self.assertTrue(path.exists(), msg=str(path))
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
@@ -564,7 +534,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("DISABLE_TELEMETRY=1", readme_text)
         self.assertIn("DO_NOT_TRACK=1", readme_text)
         self.assertNotIn("replace-with-worker-shared-secret", readme_text)
-        self.assertIn("references/otel-worker-better-stack.md", skill_text)
+        self.assertIn("exported by the runtime through its configured Honeycomb", skill_text)
+        self.assertIn("fail-open", skill_text)
+        self.assertIn("DISABLE_TELEMETRY=1", skill_text)
+        self.assertIn("DO_NOT_TRACK=1", skill_text)
 
     def test_readme_matches_adapter_public_semantics(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
@@ -656,7 +629,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
             SKILL_MD,
             COMPLETION_CONTRACT_MD,
             FEEDBACK_MD,
-            LOCAL_REVIEW_ADAPTER_MD,
             MODE_PRODUCER_MATRIX_MD,
             STATUS_ACTION_MAP_MD,
         )
@@ -741,7 +713,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("partial", skill_text)
         self.assertIn("runtime-only", skill_text)
         self.assertIn("unavailable", skill_text)
-        self.assertIn("runtime telemetry", skill_text)
+        self.assertIn("Telemetry degradation", skill_text)
         self.assertIn("Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`", protocol_text)
         self.assertNotIn("telemetry summary", readme_text)
         self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)

@@ -1,243 +1,146 @@
 ---
 name: gh-address-cr
 description: Use when a GitHub Pull Request has unresolved review threads, pending reviews, stale/outdated threads, local findings ingestion, or needs mandatory final-gate proof in one PR-scoped session.
-argument-hint: "<active-pr|review|address|threads|findings|adapter|doctor|agent|final-gate|command-session|submit-feedback> ..."
 ---
 
 # gh-address-cr
 
-Use this skill as the thin adapter for the `gh-address-cr` runtime CLI. The runtime owns session state, intake routing, GitHub side effects, leases, reply/resolve publication, and the final gate.
+Use this skill as the thin adapter and behavioral policy layer for the
+`gh-address-cr` runtime CLI.
+The runtime owns session state, intake routing, leases, GitHub side effects,
+reply evidence, and completion truth.
 
 ## Primary Commands
 
-```text
-/gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]
-/gh-address-cr review <owner/repo> <pr_number> [--auto-simple]
-/gh-address-cr address <owner/repo> <pr_number> [--lean|--summary]
-/gh-address-cr threads <owner/repo> <pr_number> [--lean|--summary]
-/gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
-/gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
-/gh-address-cr review-to-findings <owner/repo> <pr_number> --input <finding-blocks.md>|-
-/gh-address-cr doctor [<owner/repo> [<pr_number>]]
-/gh-address-cr final-gate <owner/repo> <pr_number>
-/gh-address-cr command-session --input <commands.json>|-
-/gh-address-cr submit-action <action-request.json> --resolution <fix|clarify|defer|reject> ...
-/gh-address-cr submit-feedback --category <category> --title <title> --summary <summary> ...
-/gh-address-cr version
-```
-
-Agent protocol commands:
+Use the runtime help and manifest as the authoritative command inventory:
 
 ```text
-/gh-address-cr agent manifest
-/gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>
-/gh-address-cr agent next <owner/repo> <pr_number> --role <role> --agent-id <id>
-/gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>
-/gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
-/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>
-/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition trivial --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>
-/gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition reject|clarify --why <text> [--stale]
-/gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json>
-/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --why <why>
-/gh-address-cr agent resolve <owner/repo> <pr_number> --disposition reject|clarify --files <paths> --why <why>
-/gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> --stale
-/gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>
-/gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>
-/gh-address-cr agent publish <owner/repo> <pr_number>
-/gh-address-cr agent leases <owner/repo> <pr_number>
-/gh-address-cr agent reclaim <owner/repo> <pr_number>
-/gh-address-cr agent orchestrate <start|step|status|stop|resume|submit|autopilot> ...
+gh-address-cr --help
+gh-address-cr agent manifest
 ```
 
-Examples:
+Start from one of two canonical modes:
 
 ```text
-$gh-address-cr review <PR_URL>
-$gh-address-cr address <PR_URL> --lean
-$gh-address-cr review --auto-simple <PR_URL>
-$gh-address-cr threads <PR_URL> --lean
-$gh-address-cr findings <PR_URL> --input findings.json
-$gh-address-cr findings <PR_URL> --input - --sync --source <producer>
-$gh-address-cr adapter <PR_URL> <adapter_cmd...>
-$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
+gh-address-cr review <owner/repo> <pr_number>
+gh-address-cr address <owner/repo> <pr_number> --lean
 ```
 
-## Canonical Modes
+- `review` / `完整审查`: ingest explicit structured findings and handle them
+  together with GitHub review threads.
+- `address` / `处理评审`: handle existing GitHub review threads without
+  starting a new review producer.
 
-Use the command word to select the workflow before invoking the runtime:
+If the PR number is unknown, run
+`gh-address-cr active-pr [--repo <owner/repo>] [--head <branch>]`.
 
-- `address` / `处理评审`: handle existing GitHub review threads. Run
-  `gh-address-cr address <owner/repo> <pr_number> --lean`; do not start a new
-  local code-review producer. Existing blocking local findings remain runtime
-  truth and must be handled if the status map surfaces them.
-- `review` / `完整审查`: run the full mixed workflow. This mode requires a
-  structured findings producer, then handles both local findings and GitHub
-  review threads before `final-gate`.
-
-Compose a named review skill explicitly instead of selecting one implicitly:
+Compose a review producer only when the user explicitly names or supplies one:
 
 ```text
 Use $gh-address-cr review PR #123 with $engineering:code-review as the findings producer.
 ```
 
-When a named producer normally returns narrative Markdown, override that output
-for this invocation: require a findings JSON array with `title`, `body`, `path`,
-and `line`; allow supported optional fields; and require `[]` when the review is
-clean. Ingest the exact JSON through `findings --input - --sync --source
-code-review`, then rerun `review`. Reject ordinary Markdown producer output;
-`review-to-findings` accepts fixed `finding` blocks only.
+Require a JSON array with `title`, `body`, `path`, and `line`; use `[]` when
+clean. Do not ingest narrative Markdown. Read
+`references/mode-producer-matrix.md` for the exact intake command.
 
-## Packaging Scope
+## Packaging And Runtime Boundary
 
 This file is part of the packaged `gh-address-cr` skill. All paths in this document are relative to the installed skill root.
+Repository tests, CI, and release metadata are outside the packaged skill
+payload.
 
-- `references/...` means skill-owned reference docs.
-- `agents/openai.yaml` is an assistant-specific hint file inside the skill.
+- Runtime entrypoints: `gh-address-cr` and `python3 -m gh_address_cr`
+- Runtime version: inspect `gh-address-cr version` and compare it with
+  `runtime-requirements.json`
+- Protocol compatibility: inspect `gh-address-cr adapter check-runtime`
 
-A surrounding source repository may also contain repo-level tests, CI, and release metadata, but those are outside the packaged skill payload.
-
-## Runtime Boundary
-
-The packaged skill must not be treated as the implementation owner for workflow state.
-
-- Runtime public entrypoint: `gh-address-cr`
-- Module entrypoint: `python3 -m gh_address_cr`
-- Compatibility check: `gh-address-cr adapter check-runtime`
-
-If the runtime is missing, execution must fail loudly before session mutation. Do not copy or reimplement runtime state-machine logic inside the skill payload.
-
-## Telemetry Coverage
-
-To make `final-gate` produce a meaningful telemetry summary line during a normal
-run, carry measured timing on every `--validation`. Add a `@<n>ms` (or
-`@<n>s`) suffix to each command result so the runtime records real duration.
-Bare `cmd=passed` records zero duration and emits a
-`TELEMETRY_TIMING_UNAVAILABLE` diagnostic with an empty `duration`/`slowest`
-line.
-
-```text
-gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> \
-  --files <paths> --summary "..." --why "..." \
-  --validation "typecheck=passed@1800ms" --validation "unit-tests=passed@4200ms"
-
-gh-address-cr final-gate <owner/repo> <pr_number>
-```
-
-Completion evidence from `final-gate` must report the telemetry coverage label:
-`complete`, `partial`, `runtime-only`, or `unavailable`. Final user-facing
-completion responses must include the exact `completion_summary_line` from
-`final-gate --machine` or the first bracketed line from
-`PR Completion Summary Guidance`; that line contains telemetry coverage,
-confidence, source scope, observed duration, slowest operation, and issue
-summary. This is runtime telemetry for the surviving core path. Telemetry degradation is a coverage/reporting fact, not
-review-resolution evidence.
-
-When recording validation evidence via `agent resolve ... --validation <cmd=result>`, include the measured runtime as a suffix so efficiency reports can analyze duration: `--validation "ruff check=passed@1500ms"` (also accepts `@<n>s`). Omitting the suffix is allowed but records the command with zero duration, and the efficiency report will label timing as unavailable via a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic instead of presenting misleading `0ms` slowest-operation rows.
-
-Telemetry degradation is visible but does not block core PR completion by
-itself: `final-gate` reports coverage, diagnostics, and overhead budget
-findings while preserving review-state pass/fail authority. If diagnostics
-include `TELEMETRY_OVERHEAD_EXCEEDED`, report the impact in the completion
-summary instead of retrying the review workflow. `runtime-only` coverage is an
-advisory local-loop condition when host telemetry was not imported; mention it
-briefly instead of escalating it as a gate blocker. Briefly explain abnormal
-coverage, diagnostics, success-rate drops, or inefficiency flags in the final
-response instead of hiding them behind artifact paths.
-
-When exactly one cached PR session exists, PR-scoped commands may omit `<owner/repo> <pr_number>`. If the runtime reports `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target explicitly instead of guessing.
-
-### Session Correlation
-
-Each `gh-address-cr` invocation emits one OpenTelemetry span carrying the
-sanitized command, exit outcome, and (when identifiable) the GitHub PR being
-worked on. To let an observability backend group every invocation from the
-current agent session together, export a stable, per-session identifier as
-`GH_ADDRESS_CR_CONVERSATION_ID` before invoking any `gh-address-cr` command,
-and keep the same value for every invocation within that session:
-
-```text
-export GH_ADDRESS_CR_CONVERSATION_ID="<a stable id unique to this session>"
-```
-
-This is optional and additive: omitting it does not change command behavior,
-output, or exit codes. Some hosts (Claude Code) are already detected
-automatically with no action needed; setting `GH_ADDRESS_CR_CONVERSATION_ID`
-is the vendor-neutral way to get the same correlation on any host.
+If the runtime or required version is unavailable, fail before session
+mutation. Do not copy runtime state-machine logic into the skill.
 
 ## Execution Ladder
 
-1. If the PR number is unknown, run `active-pr`; it only returns OPEN PRs and fails loud for none or many.
-2. Select the canonical mode, then start from the public main entrypoint: `review <owner/repo> <pr_number>` for a full mixed review with a structured producer, or `address <owner/repo> <pr_number> --lean` for existing GitHub threads without starting a new producer.
-3. Inspect the JSON machine summary. Prefer `--lean` or `--summary` on `address`, `threads`, and `review --auto-simple` when thread lists are large.
-4. Consult `references/status-action-map.md` and branch strictly on `status`, `reason_code`, `waiting_on`, `next_action`, and `commands`.
-5. Start from the runtime dispatcher:
-  - `gh-address-cr review <owner/repo> <pr_number>`
-  - `gh-address-cr address <owner/repo> <pr_number> --lean`
-  - `gh-address-cr threads <owner/repo> <pr_number> --lean`
-  - `gh-address-cr findings <owner/repo> <pr_number> --input <path>|- [--sync --source <producer>]`
-  - `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>`
-  - `gh-address-cr agent manifest`
+1. Run the selected public main entrypoint.
+2. Read only the machine summary fields `status`, `reason_code`, `waiting_on`,
+   `next_action`, `commands`, and `counts`.
+3. Prefer the returned `commands` templates over reconstructing commands.
+4. Follow `references/status-action-map.md` until the runtime accepts evidence.
+5. Submit decisions through `gh-address-cr agent resolve`; publish accepted
+   GitHub-thread evidence through `gh-address-cr agent publish`.
+6. Run `gh-address-cr final-gate <owner/repo> <pr_number>` last.
 
-If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same `review` command.
+If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`,
+`clarify`, `defer`, or `reject` through runtime evidence, then rerun the same
+`review` command.
 
-GitHub review comment reply tasks must be submitted to the runtime before they can be published. The single mutating entrypoint is `gh-address-cr agent resolve`; it records classification internally, so no separate `agent classify` step is needed on this path. It resolves along three independent axes: **disposition** (`--disposition fix|trivial|reject|clarify`, what to do), **selection** (an `<item_id>`, `--files`/`--file`, or `--input`, which thread(s)), and **condition** (`--stale`, fresh by default or the matching STALE/outdated thread(s)) — any disposition composes with any selection and condition. For one thread, run `agent resolve <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms>`. To **decline** exactly one thread — fresh or stale — with a reason, run `agent resolve <item_id> --disposition reject|clarify --why <text> [--stale]` (no commit/validation needed). When one set of files/validation evidence addresses multiple threads, run `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write a fillable batch skeleton, then `agent resolve --input <batch-response.json>` keeping per-thread summary/why entries. Use `agent resolve --why <why>` only for a homogeneous repeated concern, `agent resolve <item_id> --disposition trivial` only for documentation or typo-only threads (else `TRIVIAL_THREAD_NOT_ELIGIBLE`), and `agent resolve --stale` for STALE/outdated threads. To decline the same repeated concern across many threads with one shared reply, use `agent resolve --disposition reject|clarify --files <paths> --why <why>` (no commit/validation); the same body-identity gate blocks declining threads that raise distinct concerns. Then run `gh-address-cr agent publish <owner/repo> <pr_number>` so the runtime hydrates commit evidence, records reply evidence, and resolves the thread safely. `agent publish` is the single canonical publish path; each `agent resolve` form also accepts `--publish` to publish accepted evidence immediately and reports `published` in its result. The granular `agent classify` / `agent next` / `agent submit` commands remain available as the low-level protocol that `resolve` is built on.
+GitHub review comment reply tasks are incomplete until the runtime accepts the
+response and publishes both reply and resolve side effects. Use
+`references/agent-protocol.md` for item, batch, stale, decline, evidence, and
+lease-recovery command shapes.
 
-If `final-gate` reports `FINAL_GATE_MISSING_REPLY_EVIDENCE` for a thread that is already terminal and no longer claimable, do not loop on `agent publish`. Use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>` to reconcile durable reply evidence, then rerun `final-gate`.
+When exactly one cached PR session exists, PR-scoped commands may omit the
+target. For `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target
+explicitly instead of guessing.
 
-If item-mode `agent resolve <item_id> ...` reports `LEASE_LOCKED_ITEM`, inspect `lease_recovery` and run `gh-address-cr agent leases <owner/repo> <pr_number>` before retrying. The blocking condition is active lease ownership, not “no work”.
+## Completion And Telemetry
 
-If a blocked command reports `GH_PERMISSION_MISMATCH`, treat it as wrapper/runtime grant drift. Inspect `diagnostics.source_scope`, sync the wrapper-visible GitHub permissions with the active runner grants, then rerun the same command.
+Record measured timing on every `--validation` when known:
 
-When resolving, record each `--validation` with its measured timing suffix
-(`@<n>ms`/`@<n>s`) so efficiency reporting has real duration. Run
-`final-gate` last and surface its exact `completion_summary_line`; see the
-telemetry guidance above.
+```text
+gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> \
+  --commit <sha> --files <paths> --summary "..." --why "..." \
+  --validation "unit-tests=passed@4200ms"
+gh-address-cr final-gate <owner/repo> <pr_number>
+```
 
-Prefer `workflow_decision.v1` JSON for structured triage handoff when available. Required fields are `schema_version`, `request_id`, `item_id`, `decision`, and `reason`; Markdown decision blocks remain compatibility prose, not the preferred machine contract.
+Completion requires a freshly passing final gate. Include its exact
+`completion_summary_line` in the final response. Coverage is `complete`,
+`partial`, `runtime-only`, or `unavailable`. Telemetry degradation is
+diagnostic, not review-resolution failure; explain abnormal diagnostics. Read
+`references/completion-contract.md` before claiming completion.
 
-Use `command-session --input -` to reduce repeated process startup for multiple runtime operations. Treat each returned operation result independently; a failed step does not prove later steps were skipped.
+For cross-invocation correlation, keep one stable session identifier:
 
-`agent orchestrate` is an optional advanced surface. Use it only when a
-workflow truly needs orchestration state; the default supported path remains
-single-agent `review` / `address` / `agent resolve` / `agent publish` /
-`final-gate`.
+```text
+export GH_ADDRESS_CR_CONVERSATION_ID="<stable-session-id>"
+```
 
-If an external producer result is already available, `findings --input <path>|- --source <producer> [--sync]` may satisfy the same PR session handoff as `incoming-findings.json`. A successful ingest records the producer result in session state; `[]` is an explicit empty result, while empty stdin is not.
+Process telemetry is exported by the runtime through its configured Honeycomb
+relay. It is fail-open and can be disabled with `DISABLE_TELEMETRY=1` or
+`DO_NOT_TRACK=1`.
+Never include raw prompts, tokens, usernames, machine identifiers, or
+unnecessary absolute paths.
 
 ## Common Mistakes
 
-- Do not infer state from human prose or logs. Use only structured machine fields and the status-action map.
-- Do not post GitHub replies or resolve review threads directly. The runtime records evidence and performs deterministic side effects.
-- Do not treat `STALE` or outdated GitHub threads as clean. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
-- Do not invent severity. Only explicit `P0`, `P1`, `P2`, `P3`, or `P4` evidence from the producer payload or the original GitHub review-thread comment should become session severity. Leave unknown severity unknown; reviewer `high/medium/low priority` text is raw priority evidence, not a P-scale mapping. Published fix replies should surface exactly one canonical `Review signal:` line for either trusted P-scale severity or raw reviewer priority, and omit the line when neither signal is present.
-- Do not override first-scene severity silently. If `agent resolve` (any mode) or `agent evidence add` passes `--severity` that differs from first-scene evidence, also pass `--severity-note <why>`.
-- Do not claim completion before `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed and the final response includes the exact `completion_summary_line` or first bracketed line from `PR Completion Summary Guidance`.
-- Do not record `--validation` without a measured timing suffix when the real duration is known. Bare `cmd=passed` yields a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic and an empty `duration`/`slowest` line; use `cmd=passed@<n>ms` (or `@<n>s`).
-- Do not create ad-hoc findings files in the project workspace when `findings --input -` can consume producer output through stdin.
-- Do not use this skill as the review engine itself; it manages intake, state, processing discipline, and gating.
-- Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
+- Do not infer state from prose or logs; follow machine fields and returned
+  commands.
+- Do not post GitHub replies or resolve threads directly.
+- Do not treat `STALE` or outdated threads as clean.
+- Do not invent P0-P4 severity. Preserve explicit producer or reviewer
+  evidence, and provide `--severity-note` for an intentional override.
+- Do not omit measured validation timing when it is known.
+- Do not create workspace findings files when `findings --input -` is enough.
+- Do not treat `agents/openai.yaml` as a behavioral contract.
 
-## Required Facts
-
-`review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format. This converter rejects plain narrative Markdown review output.
-
-For GitHub review threads, reply and resolve are both mandatory. A GitHub thread is not terminally clean unless reply evidence exists with a concrete reply URL from the current authenticated GitHub login.
-
-`producer=code-review` must emit findings JSON before session handling starts. Local findings become terminal only with a note and required evidence.
-
-Source-scoped `findings` ingestion is a session handoff edge. After it succeeds, rerun `review <owner/repo> <pr_number>` to continue GitHub thread handling and final-gate work.
+`review-to-findings` does not accept arbitrary Markdown. It only accepts fenced
+`finding` blocks, and rejects plain narrative Markdown review output. Local
+findings require terminal notes and validation evidence.
+GitHub review threads require durable reply evidence from the current
+authenticated login.
 
 ## Reference Surface
 
-The reference surface is intentionally split so this file stays a first-read entrypoint.
+Read only the reference required by the current runtime state:
 
-- State machine index: `references/status-action-map.md`
-- Agent protocol details: `references/agent-protocol.md`
-- Completion contract: `references/completion-contract.md`
-- Feedback issue workflow: `references/feedback.md` — filing a `tooling-bug` feedback is an expected automatic step when a command crashes or returns an `_ERROR` reason_code (not for normal `*_REJECTED`/`WAITING_*`/input rejections)
-- Dispatch details: `references/mode-producer-matrix.md`
-- Review triage checklist: `references/cr-triage-checklist.md`
-- Evidence ledger expectations: `references/evidence-ledger.md`
-- OTel trace export and opt-out controls: `references/otel-worker-better-stack.md`
-
-Low-level implementation details are inside the `gh-address-cr` runtime package, not the public agent surface.
+- For blocked or waiting states: `references/status-action-map.md`
+- For resolve, batch, evidence, or lease details:
+  `references/agent-protocol.md`
+- Before reporting completion: `references/completion-contract.md`
+- For producer or input routing: `references/mode-producer-matrix.md`
+- Before deciding `fix`, `clarify`, `defer`, or `reject`:
+  `references/cr-triage-checklist.md`
+- To understand runtime-owned side-effect evidence:
+  `references/evidence-ledger.md`
+- When the skill itself blocks progress: `references/feedback.md`; filing a
+  qualifying `tooling-bug` is an expected automatic step.

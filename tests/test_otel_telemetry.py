@@ -9,12 +9,36 @@ import tempfile
 import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+
+class _DelayedOTLPHandler(BaseHTTPRequestHandler):
+    response_completed = threading.Event()
+    client_disconnected = threading.Event()
+    response_delay_seconds = 0.35
+
+    def do_POST(self) -> None:
+        content_length = int(self.headers.get("Content-Length", "0"))
+        self.rfile.read(content_length)
+        time.sleep(self.response_delay_seconds)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-protobuf")
+            self.end_headers()
+            self.wfile.flush()
+            self.response_completed.set()
+        except (BrokenPipeError, ConnectionResetError):
+            self.client_disconnected.set()
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
 
 
 class OpenTelemetryInitializationTests(unittest.TestCase):
@@ -42,6 +66,17 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             tracer = telemetry.initialize_telemetry()
 
         self.assertEqual(type(tracer).__name__, "NoOpTracer")
+
+    def test_cli_harness_uses_supported_telemetry_opt_out(self) -> None:
+        from tests.helpers import PythonScriptTestCase
+
+        harness = PythonScriptTestCase(methodName="runTest")
+        harness.setUp()
+        try:
+            self.assertEqual(harness.env["DISABLE_TELEMETRY"], "1")
+            self.assertNotIn("GH_ADDRESS_CR_DISABLE_OTLP_EXPORT", harness.env)
+        finally:
+            harness.tearDown()
 
     def test_initialization_configures_product_resource_and_gateway(self) -> None:
         from gh_address_cr import telemetry
@@ -131,6 +166,41 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
 
         provider.shutdown.assert_called_once_with()
 
+    def test_exporter_accepts_relay_response_exceeding_legacy_budget(self) -> None:
+        from gh_address_cr import telemetry
+
+        _DelayedOTLPHandler.response_completed.clear()
+        _DelayedOTLPHandler.client_disconnected.clear()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _DelayedOTLPHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        endpoint = f"http://127.0.0.1:{server.server_port}/v1/traces"
+
+        try:
+            in_memory_exporter = InMemorySpanExporter()
+            provider = TracerProvider()
+            provider.add_span_processor(SimpleSpanProcessor(in_memory_exporter))
+            with provider.get_tracer("delayed-relay-test").start_as_current_span("test"):
+                pass
+
+            export_session = requests.Session()
+            export_session.trust_env = False
+            exporter = telemetry.OTLPSpanExporter(
+                endpoint=endpoint,
+                headers=dict(telemetry._SAFE_EXPORT_HEADERS),
+                timeout=telemetry.EXPORT_TIMEOUT_SECONDS,
+                session=export_session,
+            )
+            result = exporter.export(in_memory_exporter.get_finished_spans())
+
+            self.assertEqual(result, SpanExportResult.SUCCESS)
+            self.assertTrue(_DelayedOTLPHandler.response_completed.wait(timeout=1))
+            self.assertFalse(_DelayedOTLPHandler.client_disconnected.is_set())
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1)
+
     def test_shutdown_returns_within_fail_open_budget_when_provider_blocks(self) -> None:
         from gh_address_cr import telemetry
 
@@ -149,6 +219,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             patch.object(telemetry, "TracerProvider", return_value=provider),
             patch.object(telemetry, "OTLPSpanExporter"),
             patch.object(telemetry, "BatchSpanProcessor"),
+            patch("gh_address_cr.otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05),
         ):
             telemetry.initialize_telemetry()
             started_at = time.monotonic()
@@ -158,6 +229,14 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertTrue(shutdown_started.wait(timeout=0.1))
         self.assertLess(elapsed, 0.5)
         release_shutdown.set()
+
+    def test_shutdown_budget_covers_export_timeout(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        self.assertGreater(
+            otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS,
+            otel_tracing.EXPORT_TIMEOUT_SECONDS,
+        )
 
     def test_initialization_keeps_exporter_failures_off_stderr(self) -> None:
         from gh_address_cr import telemetry

@@ -42,7 +42,7 @@ class PythonScriptTestCase(unittest.TestCase):
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
-        self.env["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
+        self.env["DISABLE_TELEMETRY"] = "1"
         self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
         self.env["PYTHONPATH"] = str(SRC_ROOT)
 

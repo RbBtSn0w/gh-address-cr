@@ -44,7 +44,7 @@ CLI-flag change, no packaged-skill behavior change:
 **Testing**: `unittest` (`python3 -m unittest discover -s tests`); new files under `tests/`
 **Target Platform**: Local-first CLI invoked by humans, CI, and AI agents (Claude Code confirmed to export session env; others via override env)
 **Project Type**: Single-project CLI + packaged skill payload under `skill/`
-**Performance Goals**: No hot-path latency; attribute assembly O(argv); one `hashlib` digest per PR-scoped invocation; telemetry stays fail-open with the existing bounded export (0.15s export / 0.2s shutdown)
+**Performance Goals**: Attribute assembly O(argv); one `hashlib` digest per PR-scoped invocation; telemetry stays fail-open with a bounded export (2.0s export / 2.2s shutdown) sized to cover the observed relay latency
 **Constraints**: Single span (FR-009); no CLI exit-code/behavior change; every attribute passes the public-safe sanitation boundary; **no plain private owner/repo/URL leaves the process** (Clarifications)
 **Scale/Scope**: One span per invocation; argv is small; env read is O(registry)
 
