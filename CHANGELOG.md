@@ -1,3 +1,9 @@
+## [3.5.12](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.11...v3.5.12) (2026-07-24)
+
+### Bug Fixes
+
+* stabilize Honeycomb telemetry and trim skill payload ([#218](https://github.com/RbBtSn0w/gh-address-cr/issues/218)) ([fcf21ac](https://github.com/RbBtSn0w/gh-address-cr/commit/fcf21ac8f2774cb34431e2cc77688ec17e877397))
+
 ## [3.5.11](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.10...v3.5.11) (2026-07-20)
 
 ### Bug Fixes
