@@ -13,11 +13,14 @@ Review producers only emit structured findings.
 
 | Input | Command |
 | --- | --- |
-| GitHub review threads | `gh-address-cr address --repo <owner/repo> --pr <number>` |
-| Structured findings JSON | `gh-address-cr findings --repo <owner/repo> --pr <number> --input - --sync --source <producer>` |
-| Executable producer | `gh-address-cr adapter --repo <owner/repo> --pr <number> --source <producer> -- <command...>` |
-| Fixed `Finding:` blocks | `gh-address-cr review-to-findings` followed by `gh-address-cr findings` |
-| GitHub threads plus structured findings | `gh-address-cr review --repo <owner/repo> --pr <number> --input <path>` |
+| GitHub review threads | `gh-address-cr address <owner/repo> <pr_number> --lean` |
+| Structured findings JSON | `gh-address-cr findings <owner/repo> <pr_number> --input - --sync --source <producer>` |
+| Executable producer | `gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>` |
+| `finding` code fences | `gh-address-cr review-to-findings <owner/repo> <pr_number> --input - --output -`, then pipe its JSON to `findings` |
+| GitHub threads plus structured findings | `gh-address-cr review <owner/repo> <pr_number> --input <path>` |
+
+`review` also accepts stdin as
+`gh-address-cr review <owner/repo> <pr_number> --input <path>|-`.
 
 Do not invent alternate modes or hidden producer fallbacks. A requested
 producer must be invoked explicitly and must fail fast when unavailable.

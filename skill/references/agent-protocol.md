@@ -2,6 +2,15 @@
 
 Use the runtime as the coordinator. AI agents must not post GitHub replies or resolve GitHub review threads directly.
 
+## Contents
+
+- Machine Summary Contract
+- Commands
+- Telemetry Coverage
+- Workflow Decision JSON
+- Evidence Rules
+- Batch Notes
+
 ## Machine Summary Contract
 
 High-level commands emit structured JSON by default. Agents must consume these fields and must not parse human prose to determine system state:

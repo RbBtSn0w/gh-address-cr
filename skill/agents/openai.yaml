@@ -1,14 +1,4 @@
-version: 1
 interface:
-  display_name: GH Address CR
-  short_description: Operate the gh-address-cr runtime through a thin adapter.
-  default_prompt: |
-    Use `SKILL.md` as the source of truth.
-    1. The `gh-address-cr` runtime CLI is the only execution surface. Stateful work belongs to the external `gh-address-cr` runtime.
-    2. Start with `gh-address-cr review <owner/repo> <pr_number>` for `review` / `完整审查`, the full mixed workflow with structured findings intake. Start with `gh-address-cr address <owner/repo> <pr_number> --lean` for `address` / `处理评审`, existing GitHub-thread handling without a new local review producer.
-    3. Invoke review producers only when explicitly named. Require a structured findings JSON array, ingest it through `gh-address-cr findings`, and never silently ingest narrative Markdown.
-    4. Use `gh-address-cr agent manifest` and its structured protocols for decisions. AI agents must not post GitHub replies or resolve threads directly; use `agent resolve` and `agent publish`.
-    5. Before completion, run `gh-address-cr final-gate ...` and include its exact `completion_summary_line`. Add a checks requirement only when checks are part of the requested proof. Telemetry degradation is diagnostic, not review-resolution failure.
-    6. Record measured timing in `--validation` values when known. Do not include usernames, emails, tokens, machine names, or absolute local paths in artifacts or feedback.
-    7. If skill usage is blocked by contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures, run `gh-address-cr submit-feedback` against `RbBtSn0w/gh-address-cr`. Do not file feedback for normal findings or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`. Always provide `--using-repo` and `--using-pr` for PR-scoped feedback.
-    8. Treat `agent orchestrate` as optional rather than the default path.
+  display_name: "GH Address CR"
+  short_description: "Resolve GitHub PR review feedback safely"
+  default_prompt: "Use $gh-address-cr to handle this pull request through the runtime CLI and verify completion with final-gate."
