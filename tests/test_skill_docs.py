@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from gh_address_cr.core.reply_templates import clarify_reply, defer_reply, fix_reply
+from gh_address_cr.core.reply_templates import fix_reply
 from tests.helpers import ROOT
 
 SKILL_MD = ROOT / "skill" / "SKILL.md"
@@ -18,18 +18,13 @@ AGENTS_MD = ROOT / "AGENTS.md"
 CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
 HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
-LOCAL_REVIEW_ADAPTER_MD = ROOT / "skill" / "references" / "local-review-adapter.md"
-OTEL_WORKER_BETTER_STACK_MD = ROOT / "skill" / "references" / "otel-worker-better-stack.md"
 OTEL_TRACING_CONTRACT_MD = README_MD
 AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
 COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
 FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
 STATUS_ACTION_MAP_MD = ROOT / "skill" / "references" / "status-action-map.md"
-OTEL_WORKER_MJS = ROOT / "skill" / "references" / "otel-worker-better-stack" / "worker.mjs"
-OTEL_WORKER_WRANGLER = ROOT / "skill" / "references" / "otel-worker-better-stack" / "wrangler.example.jsonc"
 OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
-REPLY_TEMPLATES_DIR = ROOT / "skill" / "assets" / "reply-templates"
 
 
 def load_documentation_contracts():
@@ -260,7 +255,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         for term in (
             "handling_boundary",
             "lease_recovery",
-            "TELEMETRY_OVERHEAD_EXCEEDED",
             "logic_validation_signals",
         ):
             with self.subTest(term=term):
@@ -270,7 +264,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
-        self.assertIn("references/otel-worker-better-stack.md", text)
         self.assertIn("references/agent-protocol.md", text)
         self.assertIn("references/completion-contract.md", text)
         self.assertIn("references/feedback.md", text)
@@ -367,16 +360,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("expected automatic step", skill_text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
-        matrix_text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
         workflow_text = WORKFLOWS_MD.read_text(encoding="utf-8")
         protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
         skill_text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertIn("for GitHub thread `fix`: `fix_reply`", matrix_text)
-        self.assertIn("`summary`", matrix_text)
-        self.assertIn("`commit_hash`", matrix_text)
-        self.assertIn("`files`", matrix_text)
-        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", matrix_text)
         self.assertIn("for GitHub thread `fix`: `fix_reply`", workflow_text)
         self.assertIn("`summary`", workflow_text)
         self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", workflow_text)
@@ -390,66 +377,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Review signal:", protocol_text)
         self.assertNotIn("Published fix replies should surface that signal as `Reviewer priority:`", skill_text)
         self.assertNotIn("shown in published fix replies as `Reviewer priority:`", protocol_text)
-
-    def test_skill_reply_template_assets_match_runtime_renderer_contract(self):
-        fix_cases = {
-            "fixed.md": (
-                None,
-                [
-                    "<commit_hash>",
-                    "<file_path_1>,<file_path_2>",
-                    "<test_command>",
-                    "`<pass/fail + key output>`",
-                    "`<technical reasoning tied to the comment>`",
-                ],
-                "`<brief fix summary>`",
-            ),
-            "fixed-p1.md": (
-                "P1",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<targeted_test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<root cause and correction>`",
-                ],
-                "`<critical-path fix>`",
-            ),
-            "fixed-p2.md": (
-                "P2",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<behavioral correction>`",
-                ],
-                "`<fix summary>`",
-            ),
-            "fixed-p3.md": (
-                "P3",
-                [
-                    "<commit_hash>",
-                    "<file_path>",
-                    "<test_command>",
-                    "`<pass/fail + key signal>`",
-                    "`<clarity/consistency improvement>`",
-                ],
-                "`<small/non-breaking improvement>`",
-            ),
-        }
-        for filename, (severity, payload, summary) in fix_cases.items():
-            with self.subTest(filename=filename):
-                self.assertEqual((REPLY_TEMPLATES_DIR / filename).read_text(encoding="utf-8"), fix_reply(severity, payload, summary=summary))
-
-        self.assertEqual(
-            (REPLY_TEMPLATES_DIR / "clarify.md").read_text(encoding="utf-8"),
-            clarify_reply(["`<detailed explanation of why the current logic is correct or answers the question>`"]),
-        )
-        self.assertEqual(
-            (REPLY_TEMPLATES_DIR / "defer.md").read_text(encoding="utf-8"),
-            defer_reply(["`<reason>`"]),
-        )
 
     def test_fixed_reply_template_stays_evidence_focused_without_generic_offer(self):
         rendered = fix_reply(
@@ -485,7 +412,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
 
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
-        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD):
+        for path in (MODE_PRODUCER_MATRIX_MD,):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("skill/scripts/", text, msg=str(path))
             self.assertNotIn("skill/references/", text, msg=str(path))
@@ -499,15 +426,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_referenced_skill_owned_docs_exist(self):
         for path in (
             MODE_PRODUCER_MATRIX_MD,
-            LOCAL_REVIEW_ADAPTER_MD,
             AGENT_PROTOCOL_MD,
             COMPLETION_CONTRACT_MD,
             FEEDBACK_MD,
             STATUS_ACTION_MAP_MD,
             OPENAI_HINT_YAML,
         ):
-            self.assertTrue(path.exists(), msg=str(path))
-        for path in (OTEL_WORKER_BETTER_STACK_MD, OTEL_WORKER_MJS, OTEL_WORKER_WRANGLER):
             self.assertTrue(path.exists(), msg=str(path))
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
@@ -564,7 +488,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("DISABLE_TELEMETRY=1", readme_text)
         self.assertIn("DO_NOT_TRACK=1", readme_text)
         self.assertNotIn("replace-with-worker-shared-secret", readme_text)
-        self.assertIn("references/otel-worker-better-stack.md", skill_text)
+        self.assertIn("exported by the runtime through its configured Honeycomb relay", skill_text)
+        self.assertIn("fail-open", skill_text)
+        self.assertIn("DISABLE_TELEMETRY=1", skill_text)
+        self.assertIn("DO_NOT_TRACK=1", skill_text)
 
     def test_readme_matches_adapter_public_semantics(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
@@ -656,7 +583,6 @@ class SkillDocumentationContractTest(unittest.TestCase):
             SKILL_MD,
             COMPLETION_CONTRACT_MD,
             FEEDBACK_MD,
-            LOCAL_REVIEW_ADAPTER_MD,
             MODE_PRODUCER_MATRIX_MD,
             STATUS_ACTION_MAP_MD,
         )
@@ -741,7 +667,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("partial", skill_text)
         self.assertIn("runtime-only", skill_text)
         self.assertIn("unavailable", skill_text)
-        self.assertIn("runtime telemetry", skill_text)
+        self.assertIn("Telemetry degradation", skill_text)
         self.assertIn("Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`", protocol_text)
         self.assertNotIn("telemetry summary", readme_text)
         self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)

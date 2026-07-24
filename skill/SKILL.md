@@ -108,12 +108,8 @@ If the runtime is missing, execution must fail loudly before session mutation. D
 
 ## Telemetry Coverage
 
-To make `final-gate` produce a meaningful telemetry summary line during a normal
-run, carry measured timing on every `--validation`. Add a `@<n>ms` (or
-`@<n>s`) suffix to each command result so the runtime records real duration.
-Bare `cmd=passed` records zero duration and emits a
-`TELEMETRY_TIMING_UNAVAILABLE` diagnostic with an empty `duration`/`slowest`
-line.
+Record measured timing on every `--validation` when known by adding an
+`@<n>ms` or `@<n>s` suffix:
 
 ```text
 gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> \
@@ -123,26 +119,11 @@ gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> \
 gh-address-cr final-gate <owner/repo> <pr_number>
 ```
 
-Completion evidence from `final-gate` must report the telemetry coverage label:
-`complete`, `partial`, `runtime-only`, or `unavailable`. Final user-facing
-completion responses must include the exact `completion_summary_line` from
-`final-gate --machine` or the first bracketed line from
-`PR Completion Summary Guidance`; that line contains telemetry coverage,
-confidence, source scope, observed duration, slowest operation, and issue
-summary. This is runtime telemetry for the surviving core path. Telemetry degradation is a coverage/reporting fact, not
-review-resolution evidence.
-
-When recording validation evidence via `agent resolve ... --validation <cmd=result>`, include the measured runtime as a suffix so efficiency reports can analyze duration: `--validation "ruff check=passed@1500ms"` (also accepts `@<n>s`). Omitting the suffix is allowed but records the command with zero duration, and the efficiency report will label timing as unavailable via a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic instead of presenting misleading `0ms` slowest-operation rows.
-
-Telemetry degradation is visible but does not block core PR completion by
-itself: `final-gate` reports coverage, diagnostics, and overhead budget
-findings while preserving review-state pass/fail authority. If diagnostics
-include `TELEMETRY_OVERHEAD_EXCEEDED`, report the impact in the completion
-summary instead of retrying the review workflow. `runtime-only` coverage is an
-advisory local-loop condition when host telemetry was not imported; mention it
-briefly instead of escalating it as a gate blocker. Briefly explain abnormal
-coverage, diagnostics, success-rate drops, or inefficiency flags in the final
-response instead of hiding them behind artifact paths.
+`final-gate` reports `complete`, `partial`, `runtime-only`, or `unavailable`
+coverage. Include its exact `completion_summary_line` in the final response and
+briefly explain abnormal coverage or diagnostics. Telemetry degradation remains
+visible but does not change review-resolution truth. See
+`references/completion-contract.md` for the complete evidence contract.
 
 When exactly one cached PR session exists, PR-scoped commands may omit `<owner/repo> <pr_number>`. If the runtime reports `NO_ACTIVE_PR_SCOPE` or `AMBIGUOUS_PR_SCOPE`, pass the target explicitly instead of guessing.
 
@@ -238,6 +219,8 @@ The reference surface is intentionally split so this file stays a first-read ent
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
 - Evidence ledger expectations: `references/evidence-ledger.md`
-- OTel trace export and opt-out controls: `references/otel-worker-better-stack.md`
+
+Process telemetry is exported by the runtime through its configured Honeycomb relay. It is
+fail-open and can be disabled with `DISABLE_TELEMETRY=1` or `DO_NOT_TRACK=1`.
 
 Low-level implementation details are inside the `gh-address-cr` runtime package, not the public agent surface.
