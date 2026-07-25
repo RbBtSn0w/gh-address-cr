@@ -639,8 +639,8 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
                 except OSError:
                     pass
                 try:
-                    process.communicate()
-                except OSError:
+                    process.communicate(timeout=5.0)
+                except (subprocess.TimeoutExpired, OSError):
                     pass
                 raise
             result = subprocess.CompletedProcess(
