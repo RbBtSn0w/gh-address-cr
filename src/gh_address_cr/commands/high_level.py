@@ -634,8 +634,14 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
             try:
                 stdout, stderr = process.communicate(timeout=ADAPTER_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                try:
+                    process.communicate()
+                except OSError:
+                    pass
                 raise
             result = subprocess.CompletedProcess(
                 args=run_argv,
@@ -646,6 +652,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
             exit_code = result.returncode
         except subprocess.TimeoutExpired as exc:
             error_type = "timeout"
+            exit_code = 124
             error = str(exc)
         except Exception as exc:
             error = str(exc)

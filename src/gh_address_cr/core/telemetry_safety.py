@@ -461,7 +461,7 @@ def sanitize_cli_argv(
     command_argv: list[str] | None = None,
     includes_executable: bool = True,
 ) -> tuple[list[str], dict[str, str]]:
-    """Sanitize CLI arguments and redact plain PR owner/repo when applicable."""
+    """Sanitize CLI arguments while retaining only the executable and command token."""
     effective_command_argv = list(command_argv) if command_argv is not None else list(argv)
     command, _repo, _pr_number, vcs_attrs = detect_cli_vcs_scope(effective_command_argv)
     sanitized: list[str] = []

@@ -2816,6 +2816,30 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 
+    @patch("subprocess.Popen")
+    def test_run_adapter_command_timeout_cleanup_is_best_effort(self, mock_popen):
+        from gh_address_cr.commands.high_level import _run_adapter_command
+
+        process = mock_popen.return_value
+        process.pid = 4321
+        process.kill.side_effect = ProcessLookupError("process already exited")
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=["adapter"], timeout=300.0),
+            OSError("pipe already closed"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry_file = Path(tmp) / "telemetry.jsonl"
+            tracker = SessionTelemetry.get_instance()
+            tracker.configure_file(telemetry_file)
+
+            stdout, error = _run_adapter_command(["adapter"])
+
+            self.assertIsNone(stdout)
+            self.assertIn("timed out", error or "")
+            self.assertEqual(len(tracker.metrics), 1)
+            self.assertEqual(tracker.metrics[0].exit_code, 124)
+
     def test_custom_telemetry_adapter_registration(self):
         from gh_address_cr.core.telemetry import (
             ExternalTelemetryEvent,
