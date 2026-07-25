@@ -89,7 +89,7 @@ A zero unresolved-thread count alone is not sufficient.
 
 ## OpenTelemetry traces
 
-`otel-tracing.v1` is the versioned public behavior and architecture boundary
+`otel-tracing.v2` is the versioned public behavior and architecture boundary
 for process tracing.
 
 - Process-level observability owner: the CLI process
@@ -100,11 +100,17 @@ for process tracing.
 - Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
 - Recovery and replay: tracing is fail-open and must not block command completion
 
-The installed CLI exports one process-level OTLP/HTTP trace to:
+The installed CLI exports one process-level OTLP/HTTP trace to the production
+Gateway by default:
 
 ```text
 https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
+
+For controlled environment canaries, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` may
+target the exact HTTPS development or staging Gateway origin. The client adds
+the anonymous admission profile only for these three allowlisted origins; it
+does not add it to arbitrary custom collectors.
 
 The service name is `gh-address-cr`. The client contains no API key; the
 Cloudflare Worker as the security relay injects backend credentials. To disable
@@ -116,12 +122,9 @@ export DISABLE_TELEMETRY=1
 export DO_NOT_TRACK=1
 ```
 
-Tests use a separate service name to avoid polluting production telemetry:
-
-```bash
-export GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test
-# service.name = gh-address-cr-test
-```
+Tests use the same stable service identity. As a distributable CLI,
+`gh-address-cr` does not claim a hosted `deployment.environment.name`;
+gateway-owned admission and destination configuration provide isolation.
 
 The CLI entrypoint initializes tracing before dispatch and calls
 `shutdown_telemetry()` in a `finally` block. It attempts to flush spans for up
@@ -163,8 +166,9 @@ tool calls without extra instrumentation:
 - `error.type` — present only when an exception actually propagated (a crash),
   drawn from a bounded set: `keyboard_interrupt`, `timeout`, `_OTHER`
 - `process.command_args`, `gen_ai.tool.call.arguments` — sanitized argv via
-  `safe_command_args(...)`; tokens, credentials, and PR `owner/repo` slots are
-  replaced with `"[redacted]"` in place (position-preserving), never dropped
+  `sanitize_cli_argv(...)`; only the executable/command skeleton stays literal,
+  while every option and value slot is replaced with `"[redacted]"` in place
+  (position-preserving), never dropped
 - `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` — GenAI tool
   vocabulary for the invoked command
 - `gen_ai.conversation.id` (+ `.source`), `gen_ai.agent.name` — passive
@@ -182,6 +186,19 @@ tool calls without extra instrumentation:
   emission, and nested command-session or subprocess milestones. These events
   keep the single-span contract intact while making the Honeycomb timeline
   easier to read.
+
+Subprocess arguments are never exported. Child process spans and their
+start/end events carry only the executable identity, a bounded operation
+category, attempts, duration, exit outcome, and bounded error classification.
+They never carry GraphQL, URLs, repository names, thread identifiers, reply
+bodies, local paths, standard streams, or hashes of those values.
+
+Endpoint precedence follows the standard OTLP variables:
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then
+`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the documented
+application default. Requests to the approved gateway carry
+`otel-gateway-profile: anonymous-client-v1`; custom Collector endpoints do not
+inherit that header.
 
 A malformed or missing `TRACEPARENT` never blocks or changes the CLI's exit
 code; a well-formed one makes the span a child of that remote context. See

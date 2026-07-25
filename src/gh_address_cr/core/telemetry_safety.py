@@ -44,6 +44,10 @@ _PR_SCOPED_COMMANDS = frozenset(
         "command-session",
     }
 )
+_PUBLIC_TELEMETRY_COMMANDS = _PR_SCOPED_COMMANDS | {
+    "doctor",
+    "submit-feedback",
+}
 
 UNSAFE_METADATA_KEYS = {
     "token",
@@ -350,6 +354,40 @@ def command_label(cmd: list[str]) -> str:
     return shlex.join(label_tokens)
 
 
+_KNOWN_SUBPROCESS_EXECUTABLES = frozenset(
+    {
+        "bash",
+        "python",
+        "python3",
+        "sh",
+        "tuist",
+        "xcodebuild",
+        "zsh",
+    }
+)
+
+
+def subprocess_operation(cmd: list[str]) -> str:
+    """Return a bounded operation category without retaining subprocess argv."""
+    effective = _strip_inline_env_assignments(cmd)
+    if not effective:
+        return "subprocess.other"
+    executable = os.path.basename(effective[0])
+    if executable == "gh":
+        if len(effective) >= 3 and effective[1:3] == ["api", "graphql"]:
+            return "github.graphql"
+        if len(effective) >= 2 and effective[1] == "api":
+            return "github.rest"
+        if len(effective) >= 2 and effective[1] == "auth":
+            return "github.auth"
+        return "github.cli"
+    if executable == "git":
+        return "git"
+    if executable in _KNOWN_SUBPROCESS_EXECUTABLES:
+        return executable
+    return "subprocess.other"
+
+
 def _strip_inline_env_assignments(cmd: list[str]) -> list[str]:
     index = 0
     while index < len(cmd) and is_inline_env_assignment(cmd[index]):
@@ -417,14 +455,30 @@ def detect_cli_vcs_scope(argv: list[str] | None) -> tuple[str, str | None, str |
     return command, repo, pr_number, vcs_attrs
 
 
-def sanitize_cli_argv(argv: list[str], *, command_argv: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
-    """Sanitize CLI arguments and redact plain PR owner/repo when applicable."""
+def sanitize_cli_argv(
+    argv: list[str],
+    *,
+    command_argv: list[str] | None = None,
+    includes_executable: bool = True,
+) -> tuple[list[str], dict[str, str]]:
+    """Sanitize CLI arguments while retaining only the executable and command token."""
     effective_command_argv = list(command_argv) if command_argv is not None else list(argv)
-    command, repo, _pr_number, vcs_attrs = detect_cli_vcs_scope(effective_command_argv)
-    sanitized = safe_command_args(list(argv))
-    if vcs_attrs and repo is not None:
-        sanitized = ["[redacted]" if arg == repo else arg for arg in sanitized]
-    _ = command
+    command, _repo, _pr_number, vcs_attrs = detect_cli_vcs_scope(effective_command_argv)
+    sanitized: list[str] = []
+    command_retained = False
+    for index, arg in enumerate(argv):
+        if index == 0 and includes_executable:
+            first = os.path.basename(arg) or "gh-address-cr"
+            if first.startswith("-"):
+                sanitized.append("[redacted]")
+            else:
+                sanitized.append(first)
+                command_retained = first == command
+        elif not command_retained and command != "gh-address-cr" and arg == command:
+            sanitized.append(command)
+            command_retained = True
+        else:
+            sanitized.append("[redacted]")
     return sanitized, vcs_attrs
 
 
@@ -476,7 +530,7 @@ def derive_tool_name(argv: list[str] | None) -> str:
     if not argv:
         return "gh-address-cr"
     first = argv[0]
-    if first.startswith("-") or first in ("help", "version"):
+    if first not in _PUBLIC_TELEMETRY_COMMANDS:
         return "gh-address-cr"
     return first
 

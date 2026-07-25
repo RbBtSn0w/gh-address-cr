@@ -53,12 +53,15 @@ landable subset; "GATED" = requires human confirmation before build.
 
 ## C-4 Sanitized arguments (MVP)
 - `process.command_args` (string[]) is present and is the output of
-  `safe_command_args(...)` over the **argv the CLI actually processed** —
+  `sanitize_cli_argv(...)` over the **argv the CLI actually processed** —
   `[sys.argv[0]] + (argv if argv is not None else sys.argv[1:])` — not raw
   `sys.argv` (deterministic under `main([...])` tests; see data-model Entity 2).
-- No span attribute contains a raw token/credential/username/unnecessary absolute
-  path. Test includes at least one invocation with deliberately sensitive input
-  and asserts redaction to `"[redacted]"`.
+- Only the executable basename and bounded command name remain literal. Every
+  option and value slot is `"[redacted]"`, including the PR number; typed
+  `vcs.*` attributes remain the sole PR attribution surface.
+- No span attribute contains a raw token/credential/username/unnecessary
+  absolute path. Test includes deliberately sensitive input and asserts
+  redaction to `"[redacted]"`.
 - Redaction preserves argument **position** (redacted placeholder, not removal).
 
 ## C-5 GenAI tool vocabulary (MVP)
@@ -109,7 +112,8 @@ landable subset; "GATED" = requires human confirmation before build.
   position-preserving), so the plain owner/repo appears in **no** attribute.
 - **Enforced (privacy)**: a test asserts no span attribute contains the plain
   `owner`/`repo` string or `vcs.repository.url.full` across a sampled PR run,
-  while `command_args` still shows the command + PR number + redacted repo slot.
+  while `command_args` shows only the executable/command skeleton and redacted
+  value slots.
 
 ## C-13 Subprocess caller span — CLI spans "Client (caller)" alignment (MVP)
 - The `gh_address_cr.subprocess` child span (wrapping `gh`/other external
@@ -126,9 +130,8 @@ landable subset; "GATED" = requires human confirmation before build.
   attribute is not 0"), unlike the root span's C-3 deviation, because a
   non-zero exit from an *external* tool is a genuine operational failure, not
   one of gh-address-cr's own Status-to-Action outcome codes. `error.type`
-  value is the literal `"timeout"` on a timeout (exit 124), else the
-  stringified exit code (bounded cardinality, consistent with the spec's own
-  `error.type` example of using an HTTP-status-like string).
+  uses bounded literals from the `otel-tracing.v2` taxonomy (including
+  `"timeout"`), never a stringified exit code.
 - Both `error.type` and span status are set **once, from the final exit
   code**, after all retries. A transient timeout that later succeeds on retry
   leaves the span with `exit.code == 0`, **no** `error.type`, and a non-ERROR
@@ -140,6 +143,18 @@ landable subset; "GATED" = requires human confirmation before build.
   unsafe. Emitting it would leak local usernames. Since the attribute is
   Recommended (not Required) in the spec, it is omitted rather than sanitized
   down to a value that duplicates `process.executable.name`.
+- **`otel-tracing.v2` privacy boundary**: subprocess spans and their start/end
+  events MUST NOT carry `process.command_args`,
+  `gh_address_cr.subprocess.command_args`, raw stdin/stdout/stderr, or any
+  alternate/hash representation of argv. They carry the bounded
+  `gh_address_cr.subprocess.operation` taxonomy plus
+  `attempts_configured`/`attempts_used`.
+- Failed subprocess spans carry bounded literal `error.type`, `error.category`,
+  and `error.expected` values from the `otel-tracing.v2` taxonomy;
+  retry-then-success spans carry none of these fields.
+- Every span Resource carries stable service name, namespace, and version.
+  This distributable CLI omits `deployment.environment.name`; gateway
+  destinations are operator-owned and never selected from the OTLP body.
 - **Enforced**: `tests/test_command_runner_otel_span.py` (in-memory span
   exporter) asserts CLIENT kind, `process.pid` presence, and `error.type` +
   span-status (ERROR/non-ERROR) across success, non-zero exit, timeout, and

@@ -40,8 +40,10 @@ Cloudflare Worker at
 is `gh-address-cr`. The client contains no API key or backend credential.
 Ambient OTLP headers, credential providers, proxy credentials, and `.netrc`
 credentials are not inherited by the gateway exporter.
-When `GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test` is set, traces use the isolated
-service name `gh-address-cr-test` instead of the production dataset name.
+The distributable client always uses the stable service name `gh-address-cr`.
+It does not map host-local environment hints such as
+`GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT` into a hosted deployment environment or
+environment-suffixed service name.
 
 Set either `DISABLE_TELEMETRY=1` or `DO_NOT_TRACK=1` to disable initialization
 and network export. Exported CLI spans contain fixed service/version/entrypoint

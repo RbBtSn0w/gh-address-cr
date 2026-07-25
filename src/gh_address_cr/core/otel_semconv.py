@@ -40,10 +40,14 @@ GH_ADDRESS_CR_ADAPTER_SPAN_NAME = "gh_address_cr.adapter"
 GH_ADDRESS_CR_CLI_INIT_SPAN_NAME = "gh_address_cr.cli.init"
 GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME = "gh_address_cr.command_session.operation"
 GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME = "gh_address_cr.subprocess"
+ERROR_CATEGORY = "error.category"
+ERROR_EXPECTED = "error.expected"
 
 __all__ = [
     # Error attributes
     "ERROR_TYPE",
+    "ERROR_CATEGORY",
+    "ERROR_EXPECTED",
     # GenAI attributes
     "GEN_AI_OPERATION_NAME",
     "GEN_AI_TOOL_NAME",

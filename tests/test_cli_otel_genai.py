@@ -149,10 +149,11 @@ class TestCliOtelGenai(unittest.TestCase):
             self.assertNotIn("secret-widgets", value_str)
             self.assertNotIn("github.com", value_str)
 
-        # command_args still carries the command + PR number + redacted repo slot
+        # command_args carries only the executable/command skeleton and redacted
+        # value slots; the PR identity lives in bounded, typed vcs attributes.
         cmd_args = list(attributes[PROCESS_COMMAND_ARGS])
         self.assertIn("review", cmd_args)
-        self.assertIn("123", cmd_args)
+        self.assertEqual(cmd_args, ["gh-address-cr", "review", "[redacted]", "[redacted]"])
         self.assertIn("[redacted]", cmd_args)
         # tool.call.arguments still equals command_args (shared sanitized value)
         self.assertEqual(cmd_args, json.loads(attributes[GEN_AI_TOOL_CALL_ARGUMENTS]))

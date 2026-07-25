@@ -7,9 +7,10 @@ import time
 from pathlib import Path
 
 from gh_address_cr.core.otel_semconv import (
+    ERROR_CATEGORY,
+    ERROR_EXPECTED,
     ERROR_TYPE,
     GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
-    PROCESS_COMMAND_ARGS,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_EXIT_CODE,
     PROCESS_PID,
@@ -17,7 +18,7 @@ from gh_address_cr.core.otel_semconv import (
 from gh_address_cr.core.telemetry_safety import (
     classify_workflow_span_layer,
     command_label,
-    safe_command_args,
+    subprocess_operation,
     workflow_step_span_attributes,
 )
 from gh_address_cr.github.transient_failures import is_transient_github_failure_text
@@ -141,7 +142,7 @@ def run_cmd(
     start_time = time.time()
     result: subprocess.CompletedProcess[str] | None = None
     tool_name = command_label(cmd) or "subprocess"
-    safe_args = safe_command_args(list(cmd))
+    operation = subprocess_operation(cmd)
     layer = classify_workflow_span_layer(
         has_independent_duration=True,
         has_independent_count=True,
@@ -151,10 +152,9 @@ def run_cmd(
     add_current_span_event(
         "gh_address_cr.subprocess.start",
         {
-            "gh_address_cr.command.name": tool_name,
-            "gh_address_cr.subprocess.command_label": tool_name,
-            "gh_address_cr.subprocess.command_args": safe_args,
-            "gh_address_cr.subprocess.retries": attempts,
+            "gh_address_cr.command.name": operation,
+            "gh_address_cr.subprocess.operation": operation,
+            "gh_address_cr.subprocess.attempts_configured": attempts,
         },
     )
     with start_child_span(
@@ -162,11 +162,10 @@ def run_cmd(
         kind=SpanKind.CLIENT,
         attributes={
             **workflow_step_span_attributes(step_name="subprocess", step_kind=layer),
-            "gh_address_cr.command.name": tool_name,
-            "gh_address_cr.subprocess.command_label": tool_name,
-            "gh_address_cr.subprocess.retries": attempts,
+            "gh_address_cr.command.name": operation,
+            "gh_address_cr.subprocess.operation": operation,
+            "gh_address_cr.subprocess.attempts_configured": attempts,
             PROCESS_EXECUTABLE_NAME: os.path.basename(cmd[0]) if cmd else "subprocess",
-            PROCESS_COMMAND_ARGS: safe_args,
         },
     ) as span:
         for attempt in range(attempts):
@@ -196,7 +195,10 @@ def run_cmd(
         # span status to ERROR. Set both once, from the final exit code, so a
         # transient timeout that later succeeds on retry leaves neither behind.
         if exit_code != 0:
-            span_attributes[ERROR_TYPE] = "timeout" if exit_code == 124 else str(exit_code)
+            error_type, error_category, error_expected = _classify_subprocess_error(result)
+            span_attributes[ERROR_TYPE] = error_type
+            span_attributes[ERROR_CATEGORY] = error_category
+            span_attributes[ERROR_EXPECTED] = error_expected
         set_current_span_attributes(span_attributes)
         if exit_code != 0:
             span.set_status(Status(StatusCode.ERROR))
@@ -205,9 +207,8 @@ def run_cmd(
     add_current_span_event(
         "gh_address_cr.subprocess.end",
         {
-            "gh_address_cr.command.name": tool_name,
-            "gh_address_cr.subprocess.command_label": tool_name,
-            "gh_address_cr.subprocess.command_args": safe_args,
+            "gh_address_cr.command.name": operation,
+            "gh_address_cr.subprocess.operation": operation,
             "gh_address_cr.subprocess.attempts_used": attempt + 1,
             "gh_address_cr.subprocess.exit_code": exit_code,
         },
@@ -215,7 +216,7 @@ def run_cmd(
 
     try:
         SessionTelemetry.get_instance().record(
-            command=tool_name,
+            command=operation,
             start_time=start_time,
             end_time=end_time,
             exit_code=exit_code,
@@ -225,3 +226,24 @@ def run_cmd(
             sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
 
     return result
+
+
+def _classify_subprocess_error(result: subprocess.CompletedProcess[str]) -> tuple[str, str, bool]:
+    """Map process failures to a bounded, privacy-safe classification."""
+    exit_code = result.returncode
+    diagnostic = f"{result.stderr}\n{result.stdout}".lower()
+    if exit_code == 124:
+        return "timeout", "timeout", False
+    if exit_code == 127:
+        if diagnostic.startswith("failed to execute"):
+            return "not_found", "dependency", False
+        return "_OTHER", "dependency", False
+    if "rate limit" in diagnostic or "rate_limit" in diagnostic or "http 429" in diagnostic:
+        return "rate_limited", "rate_limit", False
+    if "not logged in" in diagnostic or "authentication" in diagnostic or "bad credentials" in diagnostic:
+        return "authentication_failed", "dependency", False
+    if "permission denied" in diagnostic or "forbidden" in diagnostic or "http 403" in diagnostic:
+        return "permission_denied", "dependency", False
+    if "invalid response" in diagnostic or "invalid json" in diagnostic:
+        return "invalid_response", "dependency", False
+    return "_OTHER", "dependency", False

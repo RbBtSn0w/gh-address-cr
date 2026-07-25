@@ -8,12 +8,6 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 ```
 
-Optional test-isolation environment:
-
-```bash
-export GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT=test
-```
-
 ## Scenario 1: Root span contract still holds
 
 Goal: verify the feature preserves one root invocation span per CLI invocation.

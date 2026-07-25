@@ -9,29 +9,52 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from opentelemetry.context import Context
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.resources import (
+    SERVICE_NAME,
+    SERVICE_NAMESPACE,
+    SERVICE_VERSION,
+    TELEMETRY_SDK_LANGUAGE,
+    TELEMETRY_SDK_NAME,
+    TELEMETRY_SDK_VERSION,
+    Resource,
+)
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+from opentelemetry.sdk.version import __version__ as otel_sdk_version
 from opentelemetry.trace import NoOpTracer, Span, SpanKind, Status, StatusCode, Tracer, get_current_span
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from gh_address_cr import __version__
 from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
     PROCESS_EXIT_CODE,
 )
 
 SERVICE_NAME_VALUE = "gh-address-cr"
+SERVICE_NAMESPACE_VALUE = "com.hamiltonsnow"
+# Retained as a compatibility symbol. A distributable client does not map this
+# host-local hint into service identity or deployment environment attributes.
 TELEMETRY_ENVIRONMENT_VARIABLE = "GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT"
 OTLP_TRACES_ENDPOINT = "https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces"
+GATEWAY_ORIGINS = {
+    "https://telemetry-gateway-development.hamiltonsnow.workers.dev",
+    "https://telemetry-gateway-staging.hamiltonsnow.workers.dev",
+    "https://telemetry-gateway.hamiltonsnow.workers.dev",
+}
 _INSTRUMENTATION_NAME = "gh_address_cr"
 EXPORT_TIMEOUT_SECONDS = 2.0
 EXPORT_TIMEOUT_MILLIS = EXPORT_TIMEOUT_SECONDS * 1000
 SHUTDOWN_JOIN_TIMEOUT_SECONDS = 2.2
-_SAFE_EXPORT_HEADERS = {"X-GH-Address-CR-Telemetry": "1"}
+_SAFE_EXPORT_HEADERS = {"otel-gateway-profile": "anonymous-client-v1"}
+MAX_QUEUE_SIZE = 128
+MAX_EXPORT_BATCH_SIZE = 32
 _OTEL_EXPORT_LOGGERS = (
     "opentelemetry.exporter.otlp.proto.http.trace_exporter",
     "opentelemetry.sdk._shared_internal",
@@ -66,24 +89,71 @@ def initialize_telemetry() -> Tracer:
     _silence_exporter_diagnostics()
     export_session = requests.Session()
     export_session.trust_env = False
+    endpoint = _traces_endpoint(os.environ)
     exporter = OTLPSpanExporter(
-        endpoint=OTLP_TRACES_ENDPOINT,
-        headers=dict(_SAFE_EXPORT_HEADERS),
+        endpoint=endpoint,
+        headers=_gateway_headers(endpoint),
         timeout=EXPORT_TIMEOUT_SECONDS,
+        compression=Compression.Gzip,
         session=export_session,
     )
-    provider = TracerProvider(resource=Resource.create({SERVICE_NAME: _service_name()}))
-    provider.add_span_processor(BatchSpanProcessor(exporter, export_timeout_millis=EXPORT_TIMEOUT_MILLIS))
+    provider = TracerProvider(
+        resource=Resource(
+            {
+                SERVICE_NAME: SERVICE_NAME_VALUE,
+                SERVICE_NAMESPACE: SERVICE_NAMESPACE_VALUE,
+                SERVICE_VERSION: __version__,
+                TELEMETRY_SDK_LANGUAGE: "python",
+                TELEMETRY_SDK_NAME: "opentelemetry",
+                TELEMETRY_SDK_VERSION: otel_sdk_version,
+            }
+        ),
+        sampler=ALWAYS_ON,
+    )
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            exporter,
+            max_queue_size=MAX_QUEUE_SIZE,
+            max_export_batch_size=MAX_EXPORT_BATCH_SIZE,
+            export_timeout_millis=EXPORT_TIMEOUT_MILLIS,
+        )
+    )
 
     _trace_provider = provider
     _tracer = provider.get_tracer(_INSTRUMENTATION_NAME)
     return _tracer
 
 
-def _service_name() -> str:
-    if os.environ.get(TELEMETRY_ENVIRONMENT_VARIABLE) == "test":
-        return f"{SERVICE_NAME_VALUE}-test"
-    return SERVICE_NAME_VALUE
+def _traces_endpoint(environ: Mapping[str, str]) -> str:
+    signal_endpoint = environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
+    if signal_endpoint:
+        return signal_endpoint
+    base_endpoint = environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if base_endpoint:
+        parsed = urlsplit(base_endpoint)
+        path = parsed.path.rstrip("/")
+        if not path.endswith("/v1/traces"):
+            path = f"{path}/v1/traces" if path else "/v1/traces"
+        return urlunsplit(parsed._replace(path=path))
+    return OTLP_TRACES_ENDPOINT
+
+
+def _gateway_headers(endpoint: str) -> dict[str, str]:
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint)
+        return (
+            dict(_SAFE_EXPORT_HEADERS)
+            if (
+                parsed.scheme.lower() == "https"
+                and f"https://{parsed.hostname}" in GATEWAY_ORIGINS
+                and (parsed.port or 443) == 443
+            )
+            else {}
+        )
+    except ValueError:
+        return {}
 
 
 def _silence_exporter_diagnostics() -> None:

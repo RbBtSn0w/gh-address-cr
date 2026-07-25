@@ -992,7 +992,11 @@ def _command_span_name(args: argparse.Namespace) -> str:
 
 
 def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
-    sanitized_args, vcs_attrs = sanitize_cli_argv(effective_argv, command_argv=effective_argv)
+    sanitized_args, vcs_attrs = sanitize_cli_argv(
+        effective_argv,
+        command_argv=effective_argv,
+        includes_executable=False,
+    )
     command_path = _command_span_name(args)
     attributes: dict[str, str | bool | int | float] = {
         "gh_address_cr.span.kind": "command",

@@ -132,7 +132,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         architecture = ARCHITECTURE_MD.read_text(encoding="utf-8")
 
         for phrase in (
-            "otel-tracing.v1",
+            "otel-tracing.v2",
             "Process-level observability owner",
             "External inputs",
             "Span projection",
@@ -145,6 +145,25 @@ class SkillDocumentationContractTest(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, contract)
         self.assertIn("separate from PR-scoped workflow telemetry", architecture)
+        self.assertIn("Subprocess arguments are never exported", contract)
+        self.assertIn("does not claim a hosted `deployment.environment.name`", contract)
+
+    def test_gateway_profile_contract_is_reviewable_without_secrets(self):
+        profile = (ROOT / "specs" / "030-otel-gateway-hardening" / "contracts" / "ingest-profile.md")
+        text = profile.read_text(encoding="utf-8")
+
+        for phrase in (
+            "anonymous-client-v1",
+            "trustClass: anonymous",
+            "allowedSignals: [traces]",
+            "maxBodyBytes",
+            "Staging acceptance",
+            "Production switch gate",
+            "Rollback",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        self.assertNotIn("x-honeycomb-team", text)
 
     def test_handoff_module_documents_non_event_sourced_metadata_boundary(self):
         text = HANDOFF_PY.read_text(encoding="utf-8")

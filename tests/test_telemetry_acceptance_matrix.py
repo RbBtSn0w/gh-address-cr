@@ -29,8 +29,9 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
         from gh_address_cr import telemetry
         from gh_address_cr.commands.high_level import _run_adapter_command
 
-        completed = MagicMock(returncode=0, stdout='{"findings":[]}', stderr="")
-        with patch("gh_address_cr.commands.high_level.subprocess.run", return_value=completed):
+        process = MagicMock(pid=4321, returncode=0)
+        process.communicate.return_value = ('{"findings":[]}', "")
+        with patch("gh_address_cr.commands.high_level.subprocess.Popen", return_value=process):
             result = telemetry.run_traced(
                 self.tracer,
                 "gh-address-cr.cli",
@@ -44,8 +45,12 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
         root_span = next(span for span in spans if span.name == "gh-address-cr.cli")
         adapter_span = next(span for span in spans if span.name == "gh_address_cr.adapter")
         self.assertEqual(adapter_span.parent.span_id, root_span.context.span_id)
+        self.assertEqual(adapter_span.kind.name, "CLIENT")
         self.assertEqual(adapter_span.attributes["gh_address_cr.adapter.command_label"], "python3")
         self.assertEqual(adapter_span.attributes["gh_address_cr.adapter.exit_code"], 0)
+        self.assertEqual(adapter_span.attributes["process.executable.name"], "python3")
+        self.assertEqual(adapter_span.attributes["process.pid"], 4321)
+        self.assertEqual(adapter_span.attributes["process.exit.code"], 0)
 
     def test_high_level_phases_remain_events_on_root_span(self) -> None:
         from gh_address_cr import telemetry
@@ -135,13 +140,84 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
         root_span = next(span for span in spans if span.name == "gh-address-cr.cli")
         subprocess_span = next(span for span in spans if span.name == GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME)
         self.assertEqual(subprocess_span.parent.span_id, root_span.context.span_id)
-        self.assertEqual(subprocess_span.attributes["gh_address_cr.subprocess.command_label"], "gh api")
-        self.assertEqual(list(subprocess_span.attributes[PROCESS_COMMAND_ARGS]), ["gh", "api", "graphql"])
+        self.assertEqual(subprocess_span.attributes["gh_address_cr.subprocess.operation"], "github.graphql")
+        self.assertNotIn("gh_address_cr.subprocess.command_label", subprocess_span.attributes)
+        self.assertNotIn(PROCESS_COMMAND_ARGS, subprocess_span.attributes)
         self.assertEqual(subprocess_span.attributes[PROCESS_EXIT_CODE], 0)
         start_event = next(event for event in root_span.events if event.name == "gh_address_cr.subprocess.start")
-        self.assertEqual(list(start_event.attributes["gh_address_cr.subprocess.command_args"]), ["gh", "api", "graphql"])
+        self.assertEqual(start_event.attributes["gh_address_cr.subprocess.operation"], "github.graphql")
+        self.assertNotIn("gh_address_cr.subprocess.command_args", start_event.attributes)
         end_event = next(event for event in root_span.events if event.name == "gh_address_cr.subprocess.end")
+        self.assertEqual(end_event.attributes["gh_address_cr.subprocess.operation"], "github.graphql")
+        self.assertNotIn("gh_address_cr.subprocess.command_args", end_event.attributes)
         self.assertEqual(end_event.attributes["gh_address_cr.subprocess.exit_code"], 0)
+
+    def test_subprocess_telemetry_never_exports_argv_or_sensitive_business_content(self) -> None:
+        from gh_address_cr import telemetry
+        from gh_address_cr.core.command_runner import run_cmd
+        from gh_address_cr.core.otel_semconv import PROCESS_COMMAND_ARGS
+
+        sensitive_values = (
+            "query($owner:String!){repository(owner:$owner){name}}",
+            "RbBtSn0w/Apple-iDocs",
+            "PRRT_sensitive_thread",
+            "Addressed in commit abc123",
+            "/Users/snow/private/source.py",
+            "ghp_sensitive_token",
+        )
+        command = ["private-tool", *sensitive_values]
+        process = MagicMock(pid=4321, returncode=0)
+        process.communicate.return_value = ("{}", "")
+        session_telemetry = MagicMock()
+        with (
+            patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process),
+            patch(
+                "gh_address_cr.core.telemetry.SessionTelemetry.get_instance",
+                return_value=session_telemetry,
+            ),
+        ):
+            telemetry.run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(command))
+
+        subprocess_span = next(span for span in self.exporter.get_finished_spans() if span.name == "gh_address_cr.subprocess")
+        self.assertNotIn(PROCESS_COMMAND_ARGS, subprocess_span.attributes)
+        serialized = json.dumps(
+            {
+                "attributes": dict(subprocess_span.attributes),
+                "events": [
+                    {"name": event.name, "attributes": dict(event.attributes)} for event in subprocess_span.events
+                ],
+            }
+        )
+        for sensitive in sensitive_values:
+            self.assertNotIn(sensitive, serialized)
+        session_telemetry.record.assert_called_once()
+        self.assertEqual(
+            session_telemetry.record.call_args.kwargs["command"],
+            "subprocess.other",
+        )
+
+    def test_adapter_command_attribution_uses_the_same_bounded_taxonomy(self) -> None:
+        from gh_address_cr import telemetry
+        from gh_address_cr.commands.high_level import _run_adapter_command
+
+        process = MagicMock(pid=4321, returncode=0)
+        process.communicate.return_value = ('{"findings":[]}', "")
+        with patch("gh_address_cr.commands.high_level.subprocess.Popen", return_value=process):
+            telemetry.run_traced(
+                self.tracer,
+                "gh-address-cr.cli",
+                lambda: _run_adapter_command(["private-tool", "private argument"]),
+            )
+
+        adapter_span = next(
+            span
+            for span in self.exporter.get_finished_spans()
+            if span.name == "gh_address_cr.adapter"
+        )
+        self.assertEqual(
+            adapter_span.attributes["gh_address_cr.adapter.command_label"],
+            "subprocess.other",
+        )
 
     def test_high_level_preflight_emits_cli_init_child_span_before_runtime_handle(self) -> None:
         from gh_address_cr import telemetry
@@ -168,7 +244,10 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
         init_span = next(span for span in spans if span.name == GH_ADDRESS_CR_CLI_INIT_SPAN_NAME)
         self.assertEqual(init_span.parent.span_id, root_span.context.span_id)
         self.assertEqual(init_span.attributes["gh_address_cr.command.name"], "review")
-        self.assertEqual(list(init_span.attributes[PROCESS_COMMAND_ARGS]), ["review", "[redacted]", "123"])
+        self.assertEqual(
+            list(init_span.attributes[PROCESS_COMMAND_ARGS]),
+            ["review", "[redacted]", "[redacted]"],
+        )
         self.assertEqual(init_span.attributes["gh_address_cr.cli.init.exit_code"], 0)
 
 
