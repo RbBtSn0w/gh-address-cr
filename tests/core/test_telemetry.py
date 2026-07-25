@@ -2785,14 +2785,17 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(tracker.metrics[0].exit_code, 1)
             self.assertAlmostEqual(tracker.metrics[0].duration, 2.0)
 
-    @patch("subprocess.run")
-    def test_run_adapter_command_records_telemetry(self, mock_run):
+    @patch("subprocess.Popen")
+    def test_run_adapter_command_records_telemetry(self, mock_popen):
         import tempfile
         from pathlib import Path
 
         from gh_address_cr.commands.high_level import _run_adapter_command
 
-        mock_run.return_value = subprocess.CompletedProcess(args=["my-adapter"], returncode=0, stdout="findings JSON", stderr="")
+        process = mock_popen.return_value
+        process.pid = 4321
+        process.returncode = 0
+        process.communicate.return_value = ("findings JSON", "")
 
         with tempfile.TemporaryDirectory() as tmp:
             telemetry_file = Path(tmp) / "telemetry.jsonl"
@@ -2803,13 +2806,13 @@ class TestTelemetry(unittest.TestCase):
 
             self.assertEqual(stdout, "findings JSON")
             self.assertIsNone(error)
-            mock_run.assert_called_once()
-            self.assertEqual(mock_run.call_args.args[0], ["my-adapter", "--fast"])
-            self.assertEqual(mock_run.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
-            self.assertEqual(mock_run.call_args.kwargs["timeout"], 300.0)
+            mock_popen.assert_called_once()
+            self.assertEqual(mock_popen.call_args.args[0], ["my-adapter", "--fast"])
+            self.assertEqual(mock_popen.call_args.kwargs["env"]["GH_TOKEN"], "ghp_secret")
+            process.communicate.assert_called_once_with(timeout=300.0)
             
             self.assertEqual(len(tracker.metrics), 1)
-            self.assertEqual(tracker.metrics[0].command, "my-adapter")
+            self.assertEqual(tracker.metrics[0].command, "subprocess.other")
             self.assertEqual(tracker.metrics[0].exit_code, 0)
             self.assertNotIn("ghp_secret", tracker.metrics[0].command)
 

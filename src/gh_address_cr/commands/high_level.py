@@ -570,23 +570,37 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         return None, "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>."
     import time
 
-    from gh_address_cr.core.otel_semconv import GH_ADDRESS_CR_ADAPTER_SPAN_NAME
+    from opentelemetry.trace import SpanKind, Status, StatusCode
+
+    from gh_address_cr.core.otel_semconv import (
+        ERROR_CATEGORY,
+        ERROR_EXPECTED,
+        ERROR_TYPE,
+        GH_ADDRESS_CR_ADAPTER_SPAN_NAME,
+        PROCESS_EXECUTABLE_NAME,
+        PROCESS_EXIT_CODE,
+        PROCESS_PID,
+    )
     from gh_address_cr.core.telemetry import SessionTelemetry
     from gh_address_cr.core.telemetry_safety import (
         classify_workflow_span_layer,
-        command_label,
+        subprocess_operation,
         workflow_step_span_attributes,
     )
     from gh_address_cr.core.telemetry_safety import (
         split_inline_env_assignments as _split_inline_env_assignments,
     )
-    from gh_address_cr.otel_tracing import start_child_span
+    from gh_address_cr.otel_tracing import set_current_span_attributes, start_child_span
 
     start_time = time.time()
     result = None
     error: str | None = None
+    error_type = "_OTHER"
     exit_code = 1
-    adapter_label = command_label(argv) or "adapter"
+    adapter_label = subprocess_operation(argv)
+    run_argv, inline_env = _split_inline_env_assignments(argv)
+    if not run_argv:
+        return None, "adapter requires an executable after inline environment assignments."
     layer = classify_workflow_span_layer(
         has_independent_duration=True,
         has_independent_count=True,
@@ -597,32 +611,61 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
         **workflow_step_span_attributes(step_name="adapter", step_kind=layer),
         "gh_address_cr.adapter.command_label": adapter_label,
         "gh_address_cr.adapter.timeout_seconds": ADAPTER_TIMEOUT_SECONDS,
+        PROCESS_EXECUTABLE_NAME: os.path.basename(run_argv[0]),
     }
     with start_child_span(
         GH_ADDRESS_CR_ADAPTER_SPAN_NAME,
+        kind=SpanKind.CLIENT,
         attributes=span_attributes,
-    ):
+    ) as span:
         try:
-            run_argv, inline_env = _split_inline_env_assignments(argv)
-            if not run_argv:
-                return None, "adapter requires an executable after inline environment assignments."
             run_env = None
             if inline_env:
                 run_env = os.environ.copy()
                 run_env.update(inline_env)
-            result = subprocess.run(run_argv, text=True, capture_output=True, env=run_env, timeout=ADAPTER_TIMEOUT_SECONDS)
+            process = subprocess.Popen(
+                run_argv,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=run_env,
+            )
+            set_current_span_attributes({PROCESS_PID: process.pid})
+            try:
+                stdout, stderr = process.communicate(timeout=ADAPTER_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+            result = subprocess.CompletedProcess(
+                args=run_argv,
+                returncode=process.returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
             exit_code = result.returncode
+        except subprocess.TimeoutExpired as exc:
+            error_type = "timeout"
+            error = str(exc)
         except Exception as exc:
             error = str(exc)
         finally:
-            from gh_address_cr.otel_tracing import set_current_span_attributes
-
             set_current_span_attributes(
                 {
                     "gh_address_cr.adapter.command_label": adapter_label,
                     "gh_address_cr.adapter.exit_code": exit_code,
+                    PROCESS_EXIT_CODE: exit_code,
                 }
             )
+            if exit_code != 0:
+                set_current_span_attributes(
+                    {
+                        ERROR_TYPE: error_type,
+                        ERROR_CATEGORY: "timeout" if error_type == "timeout" else "dependency",
+                        ERROR_EXPECTED: False,
+                    }
+                )
+                span.set_status(Status(StatusCode.ERROR))
             try:
                 SessionTelemetry.get_instance().record(
                     command=adapter_label,

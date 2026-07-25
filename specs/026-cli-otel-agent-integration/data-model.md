@@ -15,11 +15,11 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `process.pid` | int | Required | `os.getpid()` | |
 | `process.exit.code` | int | Required | honest `cli_main` return (incl. non-zero **status** codes 2/5/6); synthetic `1` on propagated exception | Always present, incl. exception path (R-006, U1). |
 | `error.type` | string | Conditional (**exception only**) | enumerated literals: `"keyboard_interrupt"` (KeyboardInterrupt), `"timeout"` (TimeoutError), else `"_OTHER"` | Set **only on a propagated exception (crash)**, never on a non-zero status return (Principle VIII, F1); no raw class names (A2). |
-| `process.command_args` | string[] | Recommended | `safe_command_args([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | Sanitized (R-001). Never raw. Argv source pinned for test determinism (see Entity 2). |
+| `process.command_args` | string[] | Recommended | `sanitize_cli_argv([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | Only executable/command skeleton remains literal; every option/value slot is redacted in place. Never raw. |
 | `process.parent_pid` | int | Opt-In | `os.getppid()` | Fallback breadcrumb only (R-003); **replaces** spec's `system.process.parent_id` (G-5). |
 | `gen_ai.operation.name` | string | Added | constant `"execute_tool"` | |
 | `gen_ai.tool.name` | string | Added | parsed top-level command (e.g. `review`), else `"gh-address-cr"` | Matches public command surface. |
-| `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the **same** `safe_command_args` value (no system-only flags exist in v1) | Reuses R-001 output (FR-007). |
+| `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the **same** `sanitize_cli_argv` value | Reuses the command-args privacy boundary (FR-007). |
 | `gen_ai.tool.call.result` | — | **OMITTED v1** | — | Not capturable at span boundary (R-005, G-3). |
 | `gen_ai.conversation.id` | string | Added (Tier 2) | designed entry point `GH_ADDRESS_CR_CONVERSATION_ID` → else passive fallback `CLAUDE_CODE_SESSION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
 | `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
@@ -108,11 +108,11 @@ Pure function `map_vcs_attributes(command, repo, pr_number, session) -> dict[str
   - `vcs.change.state` = session-provided state **only if already present**;
     otherwise omitted.
 - MUST NOT emit plain `owner` or `vcs.repository.url.full`.
-- **Command-args scrub (privacy)**: for a PR-scoped invocation, `__main__`
-  redacts the plain `owner/repo` positional token in the sanitized argv to
-  `"[redacted]"` before setting `process.command_args` / `gen_ai.tool.call.arguments`,
-  so the plain owner/repo reaches no span attribute. (Done in `__main__`, not in
-  `safe_command_args`, so the generic sanitizer's contract is unchanged.)
+- **Command-args scrub (privacy)**: `sanitize_cli_argv` retains only the
+  executable basename and bounded command name. Every option and value,
+  including `owner/repo` and PR number, becomes `"[redacted]"` before setting
+  `process.command_args` / `gen_ai.tool.call.arguments`; typed `vcs.*`
+  attributes provide PR attribution.
 
 ## State transitions
 None. One span per process; attributes are set at start (identity, args, parent

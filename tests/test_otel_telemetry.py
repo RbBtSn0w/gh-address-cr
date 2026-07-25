@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -79,7 +80,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             harness.tearDown()
 
     def test_initialization_configures_product_resource_and_gateway(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import __version__, telemetry
 
         provider = MagicMock()
         tracer = MagicMock()
@@ -96,19 +97,29 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertIs(result, tracer)
         resource = provider_type.call_args.kwargs["resource"]
         self.assertEqual(resource.attributes["service.name"], "gh-address-cr")
+        self.assertEqual(resource.attributes["service.namespace"], "com.hamiltonsnow")
+        self.assertEqual(resource.attributes["service.version"], __version__)
+        self.assertEqual(resource.attributes["telemetry.sdk.language"], "python")
+        self.assertEqual(resource.attributes["telemetry.sdk.name"], "opentelemetry")
+        self.assertIn("telemetry.sdk.version", resource.attributes)
+        self.assertNotIn("service.instance.id", resource.attributes)
+        self.assertNotIn("deployment.environment.name", resource.attributes)
         exporter_type.assert_called_once()
         exporter_arguments = exporter_type.call_args.kwargs
         self.assertEqual(exporter_arguments["endpoint"], telemetry.OTLP_TRACES_ENDPOINT)
         self.assertEqual(exporter_arguments["timeout"], telemetry.EXPORT_TIMEOUT_SECONDS)
         self.assertEqual(exporter_arguments["headers"], telemetry._SAFE_EXPORT_HEADERS)
+        self.assertEqual(exporter_arguments["compression"], Compression.Gzip)
         self.assertFalse(exporter_arguments["session"].trust_env)
         processor_type.assert_called_once_with(
             exporter_type.return_value,
+            max_queue_size=128,
+            max_export_batch_size=32,
             export_timeout_millis=telemetry.EXPORT_TIMEOUT_MILLIS,
         )
         provider.add_span_processor.assert_called_once_with(processor_type.return_value)
 
-    def test_test_environment_uses_isolated_service_name(self) -> None:
+    def test_distributable_client_does_not_claim_a_hosted_deployment_environment(self) -> None:
         from gh_address_cr import telemetry
 
         provider = MagicMock()
@@ -122,7 +133,110 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             telemetry.initialize_telemetry()
 
         resource = provider_type.call_args.kwargs["resource"]
-        self.assertEqual(resource.attributes["service.name"], "gh-address-cr-test")
+        self.assertEqual(resource.attributes["service.name"], "gh-address-cr")
+        self.assertNotIn("deployment.environment.name", resource.attributes)
+
+    def test_resource_ignores_ambient_attributes_and_instance_identity(self) -> None:
+        from gh_address_cr import telemetry
+
+        provider = MagicMock()
+        provider.get_tracer.return_value = MagicMock()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OTEL_RESOURCE_ATTRIBUTES":
+                        "deployment.environment.name=production,user.name=private",
+                    "OTEL_SERVICE_NAME": "spoofed-service",
+                },
+                clear=True,
+            ),
+            patch.object(telemetry, "TracerProvider", return_value=provider) as provider_type,
+            patch.object(telemetry, "OTLPSpanExporter"),
+            patch.object(telemetry, "BatchSpanProcessor"),
+        ):
+            telemetry.initialize_telemetry()
+
+        resource = provider_type.call_args.kwargs["resource"]
+        self.assertEqual(resource.attributes["service.name"], "gh-address-cr")
+        self.assertNotIn("deployment.environment.name", resource.attributes)
+        self.assertNotIn("user.name", resource.attributes)
+        self.assertNotIn("service.instance.id", resource.attributes)
+
+    def test_endpoint_precedence_prefers_signal_then_base_then_default(self) -> None:
+        from gh_address_cr import telemetry
+
+        cases = [
+            (
+                {
+                    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://traces.example/custom",
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://base.example/root",
+                },
+                "https://traces.example/custom",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://base.example/root/"},
+                "https://base.example/root/v1/traces",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://base.example/v1/traces/"},
+                "https://base.example/v1/traces",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://base.example/root?tenant=one"},
+                "https://base.example/root/v1/traces?tenant=one",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev"},
+                telemetry.OTLP_TRACES_ENDPOINT,
+                telemetry._SAFE_EXPORT_HEADERS,
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway-development.hamiltonsnow.workers.dev"},
+                "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces",
+                telemetry._SAFE_EXPORT_HEADERS,
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway-staging.hamiltonsnow.workers.dev"},
+                "https://telemetry-gateway-staging.hamiltonsnow.workers.dev/v1/traces",
+                telemetry._SAFE_EXPORT_HEADERS,
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://telemetry-gateway.hamiltonsnow.workers.dev"},
+                "http://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev:8443"},
+                "https://telemetry-gateway.hamiltonsnow.workers.dev:8443/v1/traces",
+                {},
+            ),
+            (
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev:443"},
+                "https://telemetry-gateway.hamiltonsnow.workers.dev:443/v1/traces",
+                telemetry._SAFE_EXPORT_HEADERS,
+            ),
+            ({}, telemetry.OTLP_TRACES_ENDPOINT, telemetry._SAFE_EXPORT_HEADERS),
+        ]
+        for environment, expected, expected_headers in cases:
+            with self.subTest(environment=environment):
+                provider = MagicMock()
+                provider.get_tracer.return_value = MagicMock()
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(telemetry, "TracerProvider", return_value=provider),
+                    patch.object(telemetry, "OTLPSpanExporter") as exporter_type,
+                    patch.object(telemetry, "BatchSpanProcessor"),
+                ):
+                    telemetry.initialize_telemetry()
+                    telemetry._reset_telemetry_for_tests()
+
+                self.assertEqual(exporter_type.call_args.kwargs["endpoint"], expected)
+                self.assertEqual(exporter_type.call_args.kwargs["headers"], expected_headers)
 
     def test_initialization_does_not_inherit_ambient_otlp_credentials(self) -> None:
         from gh_address_cr import telemetry
@@ -146,7 +260,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         request_headers = {key.lower(): value for key, value in exporter._session.headers.items()}
         self.assertNotIn("authorization", request_headers)
         self.assertNotIn("x-api-key", request_headers)
-        self.assertEqual(request_headers["x-gh-address-cr-telemetry"], "1")
+        self.assertEqual(request_headers["otel-gateway-profile"], "anonymous-client-v1")
         self.assertFalse(exporter._session.trust_env)
 
     def test_shutdown_flushes_provider_once(self) -> None:

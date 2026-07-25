@@ -11,6 +11,8 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.core.otel_semconv import (
+    ERROR_CATEGORY,
+    ERROR_EXPECTED,
     ERROR_TYPE,
     GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
     PROCESS_EXECUTABLE_NAME,
@@ -67,7 +69,9 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
 
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 1)
-        self.assertEqual(span.attributes[ERROR_TYPE], "1")
+        self.assertEqual(span.attributes[ERROR_TYPE], "_OTHER")
+        self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
+        self.assertFalse(span.attributes[ERROR_EXPECTED])
         # Per CLI spans semconv, exit.code != 0 => span status ERROR.
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
@@ -85,6 +89,8 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 124)
         self.assertEqual(span.attributes[ERROR_TYPE], "timeout")
+        self.assertEqual(span.attributes[ERROR_CATEGORY], "timeout")
+        self.assertFalse(span.attributes[ERROR_EXPECTED])
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_transient_timeout_then_success_leaves_no_error_residue(self) -> None:
@@ -110,7 +116,47 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 0)
         self.assertNotIn(ERROR_TYPE, span.attributes)
+        self.assertNotIn(ERROR_CATEGORY, span.attributes)
+        self.assertNotIn(ERROR_EXPECTED, span.attributes)
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
+
+    def test_rate_limit_failure_records_low_cardinality_error_classification(self) -> None:
+        process = self._mock_process(returncode=1, stderr="HTTP 429: API rate limit exceeded")
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["gh", "api", "graphql"], retries=1))
+
+        span = self._subprocess_span()
+        self.assertEqual(span.attributes[ERROR_TYPE], "rate_limited")
+        self.assertEqual(span.attributes[ERROR_CATEGORY], "rate_limit")
+        self.assertFalse(span.attributes[ERROR_EXPECTED])
+
+    def test_dependency_failures_use_bounded_error_taxonomy(self) -> None:
+        cases = [
+            ("authentication failed: bad credentials", "authentication_failed"),
+            ("HTTP 403 forbidden", "permission_denied"),
+            ("invalid JSON response", "invalid_response"),
+        ]
+        for stderr, expected_type in cases:
+            with self.subTest(stderr=stderr):
+                self.exporter.clear()
+                process = self._mock_process(returncode=1, stderr=stderr)
+                with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+                    run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["gh", "api"], retries=1))
+
+                span = self._subprocess_span()
+                self.assertEqual(span.attributes[ERROR_TYPE], expected_type)
+                self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
+                self.assertFalse(span.attributes[ERROR_EXPECTED])
+
+    def test_exit_code_two_is_not_assumed_to_be_an_expected_user_error(self) -> None:
+        process = self._mock_process(returncode=2, stderr="tool failed")
+        with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+            run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["git", "status"], retries=1))
+
+        span = self._subprocess_span()
+        self.assertEqual(span.attributes[ERROR_TYPE], "_OTHER")
+        self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
+        self.assertFalse(span.attributes[ERROR_EXPECTED])
 
     def test_timeout_kill_oserror_still_returns_124_without_crashing(self) -> None:
         """If process.kill() races the process exit and raises OSError, run_cmd
@@ -171,7 +217,9 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertEqual(result.returncode, 127)
         span = self._subprocess_span()
         self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 127)
-        self.assertEqual(span.attributes[ERROR_TYPE], "127")
+        self.assertEqual(span.attributes[ERROR_TYPE], "not_found")
+        self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
+        self.assertFalse(span.attributes[ERROR_EXPECTED])
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
 
