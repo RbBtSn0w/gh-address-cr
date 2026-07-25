@@ -235,7 +235,9 @@ def _classify_subprocess_error(result: subprocess.CompletedProcess[str]) -> tupl
     if exit_code == 124:
         return "timeout", "timeout", False
     if exit_code == 127:
-        return "not_found", "dependency", False
+        if diagnostic.startswith("failed to execute"):
+            return "not_found", "dependency", False
+        return "_OTHER", "dependency", False
     if "rate limit" in diagnostic or "rate_limit" in diagnostic or "http 429" in diagnostic:
         return "rate_limited", "rate_limit", False
     if "not logged in" in diagnostic or "authentication" in diagnostic or "bad credentials" in diagnostic:
