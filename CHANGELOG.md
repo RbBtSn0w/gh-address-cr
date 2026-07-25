@@ -1,3 +1,9 @@
+## [3.6.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.12...v3.6.0) (2026-07-25)
+
+### Features
+
+* harden OTel gateway client integration ([#219](https://github.com/RbBtSn0w/gh-address-cr/issues/219)) ([4c0cfb0](https://github.com/RbBtSn0w/gh-address-cr/commit/4c0cfb0896e9b57a4ae52583e1bd7083341011a2))
+
 ## [3.5.12](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.11...v3.5.12) (2026-07-24)
 
 ### Bug Fixes
