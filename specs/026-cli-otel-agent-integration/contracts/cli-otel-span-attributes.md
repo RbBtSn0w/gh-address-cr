@@ -130,9 +130,8 @@ landable subset; "GATED" = requires human confirmation before build.
   attribute is not 0"), unlike the root span's C-3 deviation, because a
   non-zero exit from an *external* tool is a genuine operational failure, not
   one of gh-address-cr's own Status-to-Action outcome codes. `error.type`
-  value is the literal `"timeout"` on a timeout (exit 124), else the
-  stringified exit code (bounded cardinality, consistent with the spec's own
-  `error.type` example of using an HTTP-status-like string).
+  uses bounded literals from the `otel-tracing.v2` taxonomy (including
+  `"timeout"`), never a stringified exit code.
 - Both `error.type` and span status are set **once, from the final exit
   code**, after all retries. A transient timeout that later succeeds on retry
   leaves the span with `exit.code == 0`, **no** `error.type`, and a non-ERROR
@@ -150,8 +149,9 @@ landable subset; "GATED" = requires human confirmation before build.
   alternate/hash representation of argv. They carry the bounded
   `gh_address_cr.subprocess.operation` taxonomy plus
   `attempts_configured`/`attempts_used`.
-- Failed subprocess spans carry bounded `error.type`, `error.category`, and
-  `error.expected`; retry-then-success spans carry none of these fields.
+- Failed subprocess spans carry bounded literal `error.type`, `error.category`,
+  and `error.expected` values from the `otel-tracing.v2` taxonomy;
+  retry-then-success spans carry none of these fields.
 - Every span Resource carries stable service name, namespace, and version.
   This distributable CLI omits `deployment.environment.name`; gateway
   destinations are operator-owned and never selected from the OTLP body.

@@ -15,11 +15,11 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `process.pid` | int | Required | `os.getpid()` | |
 | `process.exit.code` | int | Required | honest `cli_main` return (incl. non-zero **status** codes 2/5/6); synthetic `1` on propagated exception | Always present, incl. exception path (R-006, U1). |
 | `error.type` | string | Conditional (**exception only**) | enumerated literals: `"keyboard_interrupt"` (KeyboardInterrupt), `"timeout"` (TimeoutError), else `"_OTHER"` | Set **only on a propagated exception (crash)**, never on a non-zero status return (Principle VIII, F1); no raw class names (A2). |
-| `process.command_args` | string[] | Recommended | `sanitize_cli_argv([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | Only executable/command skeleton remains literal; every option/value slot is redacted in place. Never raw. |
+| `process.command_args` | string[] | Recommended | First element of `sanitize_cli_argv([sys.argv[0]] + (argv if argv is not None else sys.argv[1:]))` | The sanitizer returns `(sanitized_argv, vcs_attrs)`; use the sanitized argv list at index `[0]`. Only executable/command skeleton remains literal; every option/value slot is redacted in place. Never raw. |
 | `process.parent_pid` | int | Opt-In | `os.getppid()` | Fallback breadcrumb only (R-003); **replaces** spec's `system.process.parent_id` (G-5). |
 | `gen_ai.operation.name` | string | Added | constant `"execute_tool"` | |
 | `gen_ai.tool.name` | string | Added | parsed top-level command (e.g. `review`), else `"gh-address-cr"` | Matches public command surface. |
-| `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the **same** `sanitize_cli_argv` value | Reuses the command-args privacy boundary (FR-007). |
+| `gen_ai.tool.call.arguments` | string (JSON) | Added | JSON of the same sanitized argv list returned at index `[0]` by `sanitize_cli_argv` | Reuses the command-args privacy boundary (FR-007). |
 | `gen_ai.tool.call.result` | — | **OMITTED v1** | — | Not capturable at span boundary (R-005, G-3). |
 | `gen_ai.conversation.id` | string | Added (Tier 2) | designed entry point `GH_ADDRESS_CR_CONVERSATION_ID` → else passive fallback `CLAUDE_CODE_SESSION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
 | `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
