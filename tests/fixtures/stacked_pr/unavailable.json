@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "type": "FIELD_NOT_FOUND",
+      "message": "Field 'stack' doesn't exist on type 'PullRequest'"
+    }
+  ]
+}

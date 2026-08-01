@@ -74,6 +74,23 @@ UNSAFE_METADATA_KEY_MARKERS = (
 TOKEN_MARKERS = ("ghp_", "github_pat_", "xoxb-", "token=")
 
 
+def stack_telemetry_attributes(context: Any) -> dict[str, str]:
+    """Return bounded stack dimensions without revision or repository identifiers."""
+    availability = str(getattr(context, "availability", "unavailable"))
+    attributes = {"gh_address_cr.stack.availability": availability}
+    if availability != "present":
+        return attributes
+    size = int(getattr(context, "reported_size", 0) or 0)
+    position = int(getattr(context, "selected_position", 0) or 0)
+    attributes["gh_address_cr.stack.size_bucket"] = (
+        "1" if size <= 1 else "2-3" if size <= 3 else "4-7" if size <= 7 else "8+"
+    )
+    attributes["gh_address_cr.stack.position_bucket"] = (
+        "bottom" if position <= 1 else "top" if position >= size else "middle"
+    )
+    return attributes
+
+
 def _safe_metadata(metadata: object) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")

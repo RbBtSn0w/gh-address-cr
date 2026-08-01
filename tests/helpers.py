@@ -15,6 +15,7 @@ RUNTIME_PACKAGE_DIR = SRC_ROOT / "gh_address_cr"
 IMPLEMENTATIONS_DIR = RUNTIME_PACKAGE_DIR / "commands"
 SCRIPTS_DIR = IMPLEMENTATIONS_DIR
 CORE_DIR = RUNTIME_PACKAGE_DIR / "core"
+STACKED_PR_FIXTURE_DIR = ROOT / "tests" / "fixtures" / "stacked_pr"
 
 CLI_PY = RUNTIME_PACKAGE_DIR / "cli.py"
 REVIEW_TO_FINDINGS_PY = IMPLEMENTATIONS_DIR / "review_to_findings.py"
@@ -26,6 +27,58 @@ def load_workflow_gap_fixture(name: str) -> Any:
     payload = json.loads(WORKFLOW_GAP_FIXTURE.read_text(encoding="utf-8"))
     value = payload[name]
     return dict(value) if isinstance(value, dict) else value
+
+
+def load_stacked_pr_fixture(name: str) -> Any:
+    return json.loads((STACKED_PR_FIXTURE_DIR / name).read_text(encoding="utf-8"))
+
+
+def stack_member(
+    position: int,
+    pr_number: int | str,
+    *,
+    base: str,
+    head: str,
+    head_oid: str | None = None,
+    state: str = "OPEN",
+    is_draft: bool = False,
+    merge_queue_state: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "position": position,
+        "pr_number": str(pr_number),
+        "state": state,
+        "is_draft": is_draft,
+        "base_ref_name": base,
+        "head_ref_name": head,
+        "head_oid": head_oid or f"{position}" * 40,
+        "merge_queue_state": merge_queue_state,
+    }
+
+
+def stack_observation(
+    *,
+    selected_pr_number: int | str = 102,
+    members: list[dict[str, Any]] | None = None,
+    availability: str = "present",
+) -> dict[str, Any]:
+    resolved_members = members or [
+        stack_member(1, 101, base="main", head="feature/base"),
+        stack_member(2, 102, base="feature/base", head="feature/middle"),
+        stack_member(3, 103, base="feature/middle", head="feature/top"),
+    ]
+    return {
+        "schema_version": "stack_observation.v1",
+        "availability": availability,
+        "repo": "octo/example",
+        "selected_pr_number": str(selected_pr_number),
+        "observed_at": "2026-08-01T12:00:00Z",
+        "stack_node_id": "STACK_7" if availability == "present" else None,
+        "stack_number": 7 if availability == "present" else None,
+        "trunk_ref_name": "main" if availability == "present" else None,
+        "reported_size": len(resolved_members) if availability == "present" else None,
+        "members": resolved_members if availability == "present" else [],
+    }
 
 
 

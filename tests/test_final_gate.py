@@ -1,9 +1,124 @@
+import contextlib
+import io
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from gh_address_cr.core import gate
 
 
 class FinalGateTestCase(unittest.TestCase):
+    def test_stack_gate_missing_snapshot_preserves_input_error_semantics(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+
+        stdout = io.StringIO()
+        with (
+            patch(
+                "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                side_effect=FileNotFoundError("Snapshot file not found: missing.json"),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = handle_final_gate(
+                "octo/example",
+                "102",
+                ["--stack", "--machine", "--snapshot", "missing.json", "--no-auto-clean"],
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["reason_code"], "FINAL_GATE_INPUT_MISSING")
+
+    def test_stack_member_runtime_failure_uses_evaluation_error_semantics(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+
+        stdout = io.StringIO()
+        with (
+            patch(
+                "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                side_effect=RuntimeError("GitHub member facts unavailable"),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = handle_final_gate(
+                "octo/example",
+                "102",
+                ["--stack", "--machine", "--no-auto-clean"],
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(payload["reason_code"], "FINAL_GATE_EVALUATION_FAILED")
+
+    def test_passing_stack_gate_honors_auto_clean_and_no_auto_clean(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import SessionManager
+        from gh_address_cr.core.stack_gate import StackGateResult
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        result = StackGateResult(
+            repo="octo/example",
+            selected_pr_number="102",
+            stack_context=context,
+            covered_pr_numbers=("101", "102"),
+            member_outcomes=(),
+            check_requirement="required",
+        )
+        for auto_clean in (True, False):
+            with self.subTest(auto_clean=auto_clean), tempfile.TemporaryDirectory() as tmp:
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                        clear=False,
+                    ),
+                    patch(
+                        "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                        return_value=result,
+                    ),
+                    contextlib.redirect_stdout(stdout := io.StringIO()),
+                ):
+                    manager = SessionManager("octo/example", "102")
+                    manager.save(manager.create(status="WAITING_FOR_GATE"))
+                    workspace = manager.workspace_path
+                    exit_code = handle_final_gate(
+                        "octo/example",
+                        "102",
+                        ["--stack", "--machine", "--auto-clean" if auto_clean else "--no-auto-clean"],
+                    )
+
+                    self.assertEqual(exit_code, 0)
+                    self.assertEqual(workspace.exists(), not auto_clean)
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(payload["check_requirement"], "required")
+                    self.assertEqual(payload["stack_gate"]["check_requirement"], "required")
+                    artifact = Path(payload["artifact_path"])
+                    self.assertTrue(artifact.is_file())
+                    persisted = json.loads((artifact.parent / "stack-gate-result.json").read_text(encoding="utf-8"))
+                    self.assertEqual(persisted["check_requirement"], "required")
+                    if auto_clean:
+                        archived = list((Path(tmp) / "archive" / "octo__example" / "pr-102").glob("*"))
+                        self.assertEqual(len(archived), 1)
+                        self.assertTrue((archived[0] / "stack-audit-summary.md").is_file())
+
+    def test_parser_accepts_explicit_stack_scope_with_existing_check_policy(self):
+        from gh_address_cr.commands.final_gate import _parse_final_gate_args
+
+        parsed, error = _parse_final_gate_args(
+            "octo/example",
+            "77",
+            ["--stack", "--machine", "--require-checks"],
+        )
+
+        self.assertIsNone(error)
+        self.assertTrue(parsed.stack)
+        self.assertTrue(parsed.require_checks)
+
     def evaluate(
         self,
         session,

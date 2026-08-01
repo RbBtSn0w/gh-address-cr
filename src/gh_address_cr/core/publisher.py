@@ -17,6 +17,7 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
+from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
@@ -303,6 +304,7 @@ def publish_github_thread_responses(
             "pr_number": str(pr_number),
             "published_count": 0,
         }
+    _verify_publish_revision_bindings(repo, str(pr_number), session, publish_items, client)
     publisher_login = _publisher_login(client, fallback=agent_id)
 
     plans = _build_publish_plans(session, ledger, publish_items, repo, pr_number, agent_id)
@@ -330,6 +332,60 @@ def publish_github_thread_responses(
         "published_count": len(published),
         "published_items": published,
     }
+
+
+def _verify_publish_revision_bindings(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    publish_items: list[tuple[str, dict[str, Any]]],
+    client: Any,
+) -> None:
+    item_bindings = [
+        (item_id, response.get("revision_binding"))
+        for item_id, item in publish_items
+        if isinstance((response := item.get("accepted_response")), dict)
+    ]
+    try:
+        current = client.get_stack_context(repo, pr_number)
+    except Exception as exc:
+        raise WorkflowError(
+            status=protocol_codes.PUBLISH_BLOCKED,
+            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="Publish blocked because stacked-PR context could not be refreshed.",
+        ) from exc
+    if not isinstance(current, StackContext):
+        reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
+    else:
+        session_store.cache_pull_request_context(session, current.to_dict())
+        if current.availability == "invalid":
+            reason = protocol_codes.STACK_CONTEXT_INVALID
+        else:
+            bound_items = [(item_id, binding) for item_id, binding in item_bindings if isinstance(binding, dict)]
+            compared_items = item_bindings if current.availability == "present" else bound_items
+            reason = next(
+                (
+                    mismatch
+                    for _item_id, binding in compared_items
+                    if (mismatch := compare_revision_binding(binding, current)) is not None
+                ),
+                None,
+            )
+    if reason is not None:
+        waiting_on = (
+            "validation_evidence"
+            if reason == protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE
+            else "stack_refresh"
+        )
+        raise WorkflowError(
+            status=protocol_codes.PUBLISH_BLOCKED,
+            reason_code=reason,
+            waiting_on=waiting_on,
+            exit_code=5,
+            message=f"Publish blocked before GitHub side effects: {reason}",
+        )
 
 
 def _configure_publish_telemetry(repo: str, pr_number: str) -> None:

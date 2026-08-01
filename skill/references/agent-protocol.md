@@ -2,6 +2,12 @@
 
 Use the runtime as the coordinator. AI agents must not post GitHub replies or resolve GitHub review threads directly.
 
+For a stacked PR, `ActionRequest.repository_context` may add versioned
+`stack_context` and `revision_binding` objects. They are runtime-owned and part
+of the immutable request hash. Workers act only on the selected PR and never
+manage the stack. Submit and publish refresh GitHub context and reject stale
+head or topology evidence before side effects.
+
 ## Contents
 
 - Machine Summary Contract

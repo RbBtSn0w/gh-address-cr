@@ -2,6 +2,12 @@
 
 `gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
 
+`completion_scope: "pull_request"` proves only the selected layer. Use
+`gh-address-cr final-gate <owner/repo> <pr_number> --stack` for a bottom-up
+`completion_scope: "stack_segment"` proof. Only its reported
+`covered_pr_numbers` are covered; a closing topology change returns
+`STACK_CONTEXT_STALE` and suppresses the completion claim.
+
 Never output "done", "all resolved", "completed", or equivalent unless:
 
 - `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed

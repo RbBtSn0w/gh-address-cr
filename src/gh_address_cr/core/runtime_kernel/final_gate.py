@@ -318,13 +318,39 @@ def project_final_gate(
 
 
 def evaluate_final_gate_policy(projection: FinalGateProjection) -> FinalGatePolicyDecision:
-    failure_codes = tuple(code for code, count_key, _ in FAILURE_ORDER if projection.counts[count_key] > 0)
+    failure_codes_list: list[str] = []
+    revision_signal_types = {
+        str(signal.get("signal_type") or "") for signal in projection.blocking_logic_validation_signals
+    }
+    for code, count_key, _ in FAILURE_ORDER:
+        if projection.counts[count_key] <= 0:
+            continue
+        if code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
+            if "stale_revision_evidence" in revision_signal_types:
+                failure_codes_list.append(protocol_codes.FINAL_GATE_STALE_REVISION_EVIDENCE)
+            if "unbound_revision_evidence" in revision_signal_types:
+                failure_codes_list.append(protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE)
+            if any(
+                str(signal.get("signal_type") or "")
+                not in {"stale_revision_evidence", "unbound_revision_evidence"}
+                for signal in projection.blocking_logic_validation_signals
+            ):
+                failure_codes_list.append(code)
+            continue
+        failure_codes_list.append(code)
+    failure_codes = tuple(failure_codes_list)
     reason_code = failure_codes[0] if failure_codes else None
     waiting_on = None
     if reason_code:
         waiting_on = next(
             (candidate_waiting_on for code, _, candidate_waiting_on in FAILURE_ORDER if code == reason_code),
-            "final_gate",
+            "validation_evidence"
+            if reason_code
+            in {
+                protocol_codes.FINAL_GATE_STALE_REVISION_EVIDENCE,
+                protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE,
+            }
+            else "final_gate",
         )
     return FinalGatePolicyDecision(
         failure_codes=failure_codes,

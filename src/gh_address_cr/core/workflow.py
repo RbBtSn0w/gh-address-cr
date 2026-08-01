@@ -455,6 +455,7 @@ def record_validation_evidence(
     why: str | None = None,
     agent_id: str = "agent",
     now: datetime | None = None,
+    github_client: Any | None = None,
 ) -> dict[str, Any]:
     """Ingest validation evidence for a thread resolved out-of-band.
 
@@ -523,6 +524,12 @@ def record_validation_evidence(
         resolved_item_id = thread_ref if thread_ref.startswith("github-thread:") else f"github-thread:{thread_ref}"
 
     session = session_store.load_session(repo, pr_number)
+    revision_binding = _current_stacked_revision_binding(
+        repo,
+        pr_number,
+        session,
+        github_client=github_client,
+    )
     item = _items(session).get(resolved_item_id)
     if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
         raise WorkflowError(
@@ -561,10 +568,13 @@ def record_validation_evidence(
             "validation_commands": normalized_validation,
             "idempotency_key": idempotency_key,
             "source": "manual_reconcile",
+            **({"revision_binding": revision_binding} if revision_binding is not None else {}),
         },
         timestamp=timestamp,
     )
     item["validation_evidence"] = normalized_validation
+    if revision_binding is not None:
+        item["revision_binding"] = revision_binding
     fix_reply = {"commit_hash": normalized_commit, "files": normalized_files}
     if summary and summary.strip():
         fix_reply["summary"] = summary.strip()
@@ -582,7 +592,46 @@ def record_validation_evidence(
         "files": normalized_files,
         "validation_commands": normalized_validation,
         "evidence_record_id": record.record_id,
+        **({"revision_binding": revision_binding} if revision_binding is not None else {}),
     }
+
+
+def _current_stacked_revision_binding(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    github_client: Any | None,
+) -> dict[str, Any] | None:
+    cached = session_store.cached_stack_context(session)
+    if not isinstance(cached, dict) or cached.get("availability") != "present":
+        return None
+    if github_client is None:
+        from gh_address_cr.github.client import GitHubClient
+
+        github_client = GitHubClient()
+    from gh_address_cr.core.runtime_kernel.stack import StackContext, revision_binding_for_context
+
+    try:
+        current = github_client.get_stack_context(repo, str(pr_number))
+    except Exception as exc:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="Validation evidence was not recorded because stack context could not be refreshed.",
+        ) from exc
+    if not isinstance(current, StackContext) or current.availability != "present":
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="Validation evidence was not recorded because current stack context is unavailable.",
+        )
+    session_store.cache_pull_request_context(session, current.to_dict())
+    return revision_binding_for_context(current)
 
 
 def fast_fix_item(
@@ -624,6 +673,7 @@ def fast_fix_item(
         why=why,
         review_priority_evidence=requested_priority_evidence,
         now=now,
+        github_client=github_client,
     )
     response_path, response = _build_fast_fix_response(
         repo,
@@ -757,6 +807,7 @@ def _prepare_fast_fix_request(
     why: str,
     review_priority_evidence: dict[str, Any] | None,
     now: datetime | None,
+    github_client: Any | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     classification = agent_protocol.record_classification(
         repo,
@@ -773,6 +824,7 @@ def _prepare_fast_fix_request(
         agent_id=agent_id,
         item_id=item_id,
         now=now,
+        github_client=github_client,
     )
     if review_priority_evidence:
         session = session_store.load_session(repo, pr_number)
@@ -880,6 +932,7 @@ def decline_item(
         agent_id=agent_id,
         item_id=item_id,
         now=now,
+        github_client=github_client,
     )
     request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
     response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"

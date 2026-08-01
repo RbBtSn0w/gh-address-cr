@@ -34,8 +34,10 @@ from gh_address_cr.core.agent_protocol import (
     _load_response_json_object,
     _prepare_action_response_submission,
     _raise_response_rejected,
+    _refresh_stack_context_for_request,
     _required_evidence_for,
     _response_skeleton_for_request,
+    _verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_github_thread_item, is_stale_github_thread_item
@@ -44,6 +46,7 @@ from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.leases import LeaseConflictError, claim_lease, expire_leases
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.paths import SessionPaths
+from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
 from gh_address_cr.core.utils import coerce_now as _coerce_now
 from gh_address_cr.core.utils import get_session_items as _items
 from gh_address_cr.core.utils import get_session_ledger as _ledger
@@ -120,8 +123,12 @@ def _build_fixer_action_request(
         "item": request_item,
         "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
         "required_evidence": _required_evidence_for(item, "fixer"),
-        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
+        "repository_context": repository_context_for_stack(
+            repo,
+            pr_number,
+            session_store.cached_stack_context(session),
+        ),
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
         "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
     }
     handling_boundary = _handling_boundary_summary_or_none(item, role="fixer")
@@ -394,6 +401,7 @@ def issue_batch_action_request(
     if not target_items:
         session_store.save_session(repo, pr_number, session)
         raise _no_eligible_item_error()
+    _refresh_stack_context_for_request(repo, str(pr_number), session)
 
     leased_items: list[dict[str, Any]] = []
     newly_leased_items: list[tuple[str, dict[str, Any]]] = []
@@ -474,7 +482,12 @@ def issue_batch_action_request(
 
 
 def submit_batch_action_response(
-    repo: str, pr_number: str, *, batch_path: str | Path, now: datetime | None = None
+    repo: str,
+    pr_number: str,
+    *,
+    batch_path: str | Path,
+    now: datetime | None = None,
+    github_client: Any | None = None,
 ) -> dict[str, Any]:
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
@@ -516,6 +529,18 @@ def submit_batch_action_response(
                 now=now,
                 rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
             )
+            binding = _verify_request_revision_binding(
+                repo,
+                pr_number,
+                session,
+                prepared,
+                response,
+                github_client=github_client,
+                ledger=ledger,
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
+            )
+            if binding is not None:
+                response["_runtime_revision_binding"] = binding
             item_id = str(prepared["item_id"])
             if item_id in seen_items:
                 _raise_response_rejected(

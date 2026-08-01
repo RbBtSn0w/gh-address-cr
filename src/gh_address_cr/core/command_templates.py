@@ -209,6 +209,20 @@ def final_gate(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "final-gate", repo, pr_number)
 
 
+def final_gate_stack(repo: str, pr_number: str) -> str:
+    return shell_command("gh-address-cr", "final-gate", repo, pr_number, "--stack")
+
+
+def stack_member_recovery(repo: str, pr_number: str, reason_code: str | None) -> str:
+    if reason_code in {"STACK_MEMBER_SESSION_MISSING", "STACK_MEMBER_SESSION_INVALID"}:
+        return review_auto_simple(repo, pr_number)
+    if reason_code == "STACK_MEMBER_BLOCKED":
+        return final_gate(repo, pr_number)
+    if reason_code in {"STACK_CONTEXT_STALE", "STACK_CONTEXT_INVALID", "STACK_CONTEXT_UNAVAILABLE"}:
+        return address(repo, pr_number)
+    return "Inspect the named member state in GitHub, then rerun " + final_gate_stack(repo, pr_number)
+
+
 def common_summary_commands(repo: str, pr_number: str) -> dict[str, str]:
     return {
         "address": address(repo, pr_number),

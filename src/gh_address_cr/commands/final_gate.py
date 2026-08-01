@@ -21,8 +21,10 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core import stack_gate as core_stack_gate
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.github.client import GitHubClient
 
 
 def _parse_final_gate_args(
@@ -41,6 +43,7 @@ def _parse_final_gate_args(
     parser.set_defaults(auto_clean=True)
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("--snapshot", default="")
+    parser.add_argument("--stack", action="store_true", help="Evaluate the bottom-up stack segment through this PR.")
     checks_group = parser.add_mutually_exclusive_group()
     checks_group.add_argument("--require-checks", action="store_true", help="Require all PR checks to be green.")
     checks_group.add_argument(
@@ -58,7 +61,7 @@ def _parse_final_gate_args(
 
 def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
-    result: core_gate.GateResult,
+    result: core_gate.GateResult | core_stack_gate.StackGateResult,
     summary_path: Path,
     telemetry_report: EfficiencyReportPayload | None,
 ) -> tuple[Path, EfficiencyReportPayload | None]:
@@ -118,10 +121,99 @@ def _emit_machine_summary(
     sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
 
 
+def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: bool) -> int:
+    try:
+        stack_result = core_stack_gate.run_stack_gate(
+            parsed.repo,
+            parsed.pr_number,
+            github_client=GitHubClient(),
+            snapshot_path=parsed.snapshot or None,
+            require_checks=parsed.require_checks,
+            require_required_checks=parsed.require_required_checks,
+        )
+    except FileNotFoundError as exc:
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "FINAL_GATE_INPUT_MISSING",
+                str(exc),
+                2,
+            )
+        else:
+            print(str(exc), file=sys.stderr)
+        return 2
+    except core_stack_gate.StackContextDiscoveryError as exc:
+        message = f"Stack final gate failed to evaluate: {exc}"
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "STACK_CONTEXT_UNAVAILABLE",
+                message,
+                5,
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 5
+    except Exception as exc:
+        message = f"Stack final gate failed to evaluate: {exc}"
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "FINAL_GATE_EVALUATION_FAILED",
+                message,
+                5,
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 5
+    stack_payload = stack_result.to_machine_summary()
+    stack_artifact, stack_telemetry = write_stack_final_gate_artifacts(
+        parsed.repo,
+        parsed.pr_number,
+        parsed.audit_id,
+        stack_result,
+    )
+    stack_artifact, stack_telemetry = _archive_and_clean_workspace_if_passed(
+        parsed,
+        stack_result,
+        stack_artifact,
+        stack_telemetry,
+    )
+    stack_payload["artifact_path"] = str(stack_artifact)
+    stack_payload["telemetry"] = {
+        "coverage_label": stack_telemetry["coverage_label"],
+        "report_artifact": stack_telemetry.get("report_artifact"),
+        "total_events": stack_telemetry.get("total_events"),
+        "success_rate": stack_telemetry.get("success_rate"),
+        "diagnostics": stack_telemetry.get("diagnostics", []),
+    }
+    if stack_result.passed:
+        stack_payload["completion_summary_line"] = build_stack_completion_summary_line(
+            stack_result,
+            stack_telemetry,
+        )
+    if machine_requested:
+        sys.stdout.write(json.dumps(stack_payload, indent=2, sort_keys=True) + "\n")
+    elif stack_result.passed:
+        covered = ", ".join(f"#{number}" for number in stack_result.covered_pr_numbers)
+        print(f"Stack segment PASSED: {covered}")
+        print(build_stack_completion_summary_line(stack_result, stack_telemetry))
+    else:
+        print(
+            f"Stack segment FAILED: {stack_result.reason_code}"
+            + (f" at PR #{stack_result.first_blocked_pr_number}" if stack_result.first_blocked_pr_number else ""),
+            file=sys.stderr,
+        )
+    return stack_result.exit_code
+
+
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
     if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
         print(
-            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]"
+            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--stack] [--no-auto-clean] [--require-checks|--require-required-checks]"
         )
         return 0
 
@@ -131,6 +223,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     assert parsed is not None
 
     machine_requested = bool(parsed.machine)
+
+    if parsed.stack:
+        return _handle_stack_final_gate(parsed, machine_requested=machine_requested)
 
     try:
         result = core_gate.Gatekeeper().run(
@@ -170,6 +265,51 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return result.exit_code
 
     return 0
+
+
+def build_stack_completion_summary_line(
+    result: core_stack_gate.StackGateResult,
+    telemetry_report: EfficiencyReportPayload,
+) -> str:
+    coverage = telemetry_report.get("coverage_label") or "unavailable"
+    total_events = _safe_int(telemetry_report.get("total_events"), default=0)
+    success_rate = _safe_float(telemetry_report.get("success_rate"), default=0.0)
+    return (
+        f"[gh-address-cr stack: PASSED | scope: stack segment through PR #{result.selected_pr_number} | "
+        f"members: {len(result.covered_pr_numbers)} | telemetry: {coverage} "
+        f"({total_events} events, {success_rate:.1f}%)]"
+    )
+
+
+def write_stack_final_gate_artifacts(
+    repo: str,
+    pr_number: str,
+    audit_id: str,
+    result: core_stack_gate.StackGateResult,
+) -> tuple[Path, EfficiencyReportPayload]:
+    paths = core_paths.SessionPaths(repo, pr_number)
+    paths.workspace_dir.mkdir(parents=True, exist_ok=True)
+    artifact = paths.workspace_dir / "stack-audit-summary.md"
+    telemetry_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    lines = [
+        "# Stack Audit Summary",
+        "",
+        f"- repo: {repo}",
+        f"- selected_pr: {pr_number}",
+        f"- run_id: {audit_id or 'default'}",
+        "- completion_scope: stack_segment",
+        f"- status: {'passed' if result.passed else 'failed'}",
+        f"- reason_code: {result.reason_code or 'PASSED'}",
+        f"- covered_pr_numbers: {', '.join(result.covered_pr_numbers)}",
+        f"- check_requirement: {result.check_requirement or 'none'}",
+        f"- telemetry_coverage_label: {telemetry_report['coverage_label']}",
+        f"- efficiency_report_path: {telemetry_report.get('report_artifact') or 'unavailable'}",
+    ]
+    if result.passed:
+        lines.extend(["", "## Stack Completion Summary", build_stack_completion_summary_line(result, telemetry_report)])
+    write_json_atomic(paths.workspace_dir / "stack-gate-result.json", result.to_machine_summary())
+    artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return artifact, telemetry_report
 
 
 def emit_final_gate_machine_error(repo: str, pr_number: str, reason_code: str, message: str, exit_code: int) -> None:

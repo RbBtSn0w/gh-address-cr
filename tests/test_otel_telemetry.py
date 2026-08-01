@@ -565,5 +565,23 @@ class TracedExecutionTests(unittest.TestCase):
         shutdown.assert_called_once_with()
 
 
+class StackTelemetryTests(unittest.TestCase):
+    def test_stack_attributes_are_bounded_and_exclude_identifiers(self):
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.telemetry_safety import stack_telemetry_attributes
+        from tests.helpers import stack_observation
+
+        attributes = stack_telemetry_attributes(
+            project_stack_context(stack_observation(selected_pr_number="102"))
+        )
+
+        self.assertEqual(attributes["gh_address_cr.stack.availability"], "present")
+        self.assertEqual(attributes["gh_address_cr.stack.size_bucket"], "2-3")
+        self.assertEqual(attributes["gh_address_cr.stack.position_bucket"], "middle")
+        serialized = str(attributes)
+        for forbidden in ("feature/", "head_oid", "fingerprint", "members", "octo/example"):
+            self.assertNotIn(forbidden, serialized)
+
+
 if __name__ == "__main__":
     unittest.main()

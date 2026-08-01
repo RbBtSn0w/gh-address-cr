@@ -114,6 +114,31 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     write_json_atomic(path, payload)
 
 
+def cache_pull_request_context(session: dict[str, Any], stack_context: dict[str, Any]) -> None:
+    """Cache a labelled GitHub observation without making it session truth."""
+    metadata = session.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        session["metadata"] = metadata
+    metadata["pull_request_context"] = {
+        "authority": "github_observation",
+        "authoritative": False,
+        "stack_context": dict(stack_context),
+        "refreshed_at": str(stack_context.get("observed_at") or ""),
+    }
+
+
+def cached_stack_context(session: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = session.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    observed = metadata.get("pull_request_context")
+    if not isinstance(observed, dict) or observed.get("authoritative") is not False:
+        return None
+    context = observed.get("stack_context")
+    return dict(context) if isinstance(context, dict) else None
+
+
 def _coerce_lease_datetimes(payload: dict[str, Any]) -> None:
     leases = payload.get("leases")
     if not isinstance(leases, dict):

@@ -38,6 +38,37 @@ def passing_session():
 
 
 class FinalGateKernelTests(unittest.TestCase):
+    def test_stale_stacked_revision_has_specific_gate_reason(self):
+        from gh_address_cr.core.logic_validation import generate_logic_validation_signals
+        from gh_address_cr.core.runtime_kernel.final_gate import (
+            build_final_gate_facts,
+            evaluate_final_gate_policy,
+            project_final_gate,
+        )
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context, revision_binding_for_context
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        session = passing_session()
+        session["pr_number"] = "102"
+        session["metadata"] = {
+            "pull_request_context": {
+                "authority": "github_observation",
+                "authoritative": False,
+                "stack_context": context.to_dict(),
+            }
+        }
+        binding = revision_binding_for_context(context)
+        binding["head_oid"] = "f" * 40
+        for item in session["items"].values():
+            item["revision_binding"] = binding
+        signals = [signal.to_dict() for signal in generate_logic_validation_signals(session)]
+        facts = build_final_gate_facts(session, logic_validation_signals=signals)
+        decision = evaluate_final_gate_policy(project_final_gate(facts))
+
+        self.assertIn("FINAL_GATE_STALE_REVISION_EVIDENCE", decision.failure_codes)
+        self.assertNotIn("FINAL_GATE_LOGIC_VALIDATION_BLOCKING", decision.failure_codes)
+
     def test_projection_and_policy_pass_for_clean_facts(self):
         from gh_address_cr.core.runtime_kernel.final_gate import (
             COUNT_KEYS,

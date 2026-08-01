@@ -69,6 +69,12 @@ mutation. Do not copy runtime state-machine logic into the skill.
    GitHub-thread evidence through `gh-address-cr agent publish`.
 6. Run `gh-address-cr final-gate <owner/repo> <pr_number>` last.
 
+For a GitHub stacked PR, each command still owns only the selected PR layer.
+Work bottom-up and use `gh-address-cr final-gate <owner/repo> <pr_number>
+--stack` only for explicit aggregate proof through the selected member. Leave
+stack creation, checkout, rebase, push, modification, queueing, merge, and
+unstack operations to GitHub's `gh stack` tooling.
+
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`,
 `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same
 `review` command.
@@ -116,6 +122,8 @@ unnecessary absolute paths.
 - Do not infer state from prose or logs; follow machine fields and returned
   commands.
 - Do not post GitHub replies or resolve threads directly.
+- Do not create, rebase, push, modify, queue, merge, or unstack a PR stack from
+  an ActionRequest. Refresh and revalidate when its revision binding is stale.
 - Do not treat `STALE` or outdated threads as clean.
 - Do not invent P0-P4 severity. Preserve explicit producer or reviewer
   evidence, and provide `--severity-note` for an intentional override.

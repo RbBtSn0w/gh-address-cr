@@ -738,3 +738,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Clarify, defer, and reject responses require `reply_markdown`.", protocol_text)
         self.assertNotIn("Clarify, defer, and reject responses require `reply_markdown` and validation evidence.", protocol_text)
         self.assertNotIn("GH_ADDRESS_CR_HOST_TELEMETRY_INPUT", openai_text)
+
+    def test_stacked_pr_layer_and_management_boundaries_are_published(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+
+        self.assertIn("selected PR layer", skill_text)
+        self.assertIn("GitHub's `gh stack`", skill_text)
+        self.assertIn("revision_binding", protocol_text)
+        self.assertIn("completion_scope: \"stack_segment\"", completion_text)
+        self.assertIn("FINAL_GATE_STALE_REVISION_EVIDENCE", status_text)

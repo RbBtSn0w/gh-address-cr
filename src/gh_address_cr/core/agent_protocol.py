@@ -37,6 +37,13 @@ from gh_address_cr.core.leases import (
     submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
+from gh_address_cr.core.runtime_kernel.stack import (
+    STACK_MANAGEMENT_ACTIONS,
+    StackContext,
+    compare_revision_binding,
+    repository_context_for_stack,
+    unavailable_stack_context,
+)
 from gh_address_cr.core.severity import first_scene_item_severity
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
@@ -71,8 +78,26 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.validation_evidence import validation_result_is_success
 from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.evidence.ledger import EvidenceLedger
+from gh_address_cr.github.client import GitHubClient
 
 MUTATING_ROLES = {"fixer"}
+
+
+def _refresh_stack_context_for_request(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    github_client: Any | None = None,
+) -> StackContext:
+    """Refresh the non-authoritative GitHub observation used to bind a new request."""
+    client = github_client or GitHubClient()
+    try:
+        stack_context = client.get_stack_context(repo, str(pr_number))
+    except Exception:
+        stack_context = unavailable_stack_context(repo, str(pr_number))
+    session_store.cache_pull_request_context(session, stack_context.to_dict())
+    return stack_context
 
 
 def record_classification(
@@ -163,6 +188,7 @@ def issue_action_request(
     agent_id: str,
     item_id: str | None = None,
     now: datetime | None = None,
+    github_client: Any | None = None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
@@ -247,6 +273,12 @@ def issue_action_request(
     )
     request_item = dict(item)
     request_item["state"] = "claimed"
+    stack_context = _refresh_stack_context_for_request(
+        repo,
+        str(pr_number),
+        session,
+        github_client=github_client,
+    )
     request = {
         "schema_version": PROTOCOL_VERSION,
         "request_id": request_id,
@@ -256,8 +288,12 @@ def issue_action_request(
         "item": request_item,
         "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
         "required_evidence": _required_evidence_for(item, role),
-        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
+        "repository_context": repository_context_for_stack(
+            repo,
+            pr_number,
+            stack_context.to_dict(),
+        ),
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
         "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
     }
     handling_boundary = _handling_boundary_summary_or_none(item, role=role)
@@ -391,6 +427,18 @@ def submit_action_response(
         if publish:
             _validate_publish_shortcut_target(session, response)
         prepared = _prepare_action_response_submission(session, ledger, response, now=now)
+        binding = _verify_request_revision_binding(
+            repo,
+            pr_number,
+            session,
+            prepared,
+            response,
+            github_client=github_client,
+            ledger=ledger,
+            rejected_status=protocol_codes.ACTION_REJECTED,
+        )
+        if binding is not None:
+            response["_runtime_revision_binding"] = binding
         record = _accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
         session_store.save_session(repo, pr_number, session)
@@ -420,6 +468,63 @@ def submit_action_response(
     payload["publish"] = published
     payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
+
+
+def _request_revision_binding(lease: dict[str, Any]) -> dict[str, Any] | None:
+    request_path = str(_get(lease, "request_path") or "")
+    if not request_path:
+        return None
+    try:
+        request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    repository_context = request.get("repository_context") if isinstance(request, dict) else None
+    binding = repository_context.get("revision_binding") if isinstance(repository_context, dict) else None
+    return dict(binding) if isinstance(binding, dict) else None
+
+
+def _verify_request_revision_binding(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    prepared: dict[str, Any],
+    response: dict[str, Any],
+    *,
+    github_client: Any | None,
+    ledger: EvidenceLedger,
+    rejected_status: str,
+) -> dict[str, Any] | None:
+    """Refresh a stacked request binding before accepting any response evidence."""
+    binding = _request_revision_binding(prepared["lease"])
+    if binding is None:
+        return None
+    if str(binding.get("pr_number") or "") != str(pr_number):
+        reason = protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
+    else:
+        if github_client is None:
+            from gh_address_cr.github.client import GitHubClient
+
+            github_client = GitHubClient()
+        try:
+            current = github_client.get_stack_context(repo, str(pr_number))
+        except Exception:
+            current = None
+        if not isinstance(current, StackContext):
+            reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
+        else:
+            session_store.cache_pull_request_context(session, current.to_dict())
+            reason = compare_revision_binding(binding, current)
+    if reason is None:
+        return binding
+    _record_response_rejected(session, ledger, response, reason, item_id=str(prepared["item_id"]))
+    raise WorkflowError(
+        status=rejected_status,
+        reason_code=reason,
+        waiting_on="stack_refresh",
+        exit_code=5,
+        message=f"ActionResponse rejected: {reason}",
+        payload={"item_id": prepared["item_id"], "lease_id": prepared["lease_id"]},
+    )
 
 
 def _load_response_json_object(
@@ -1371,6 +1476,8 @@ def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> No
             "reply_markdown": response.get("reply_markdown"),
             "fix_reply": response.get("fix_reply"),
         }
+        if response.get("_runtime_revision_binding"):
+            item["accepted_response"]["revision_binding"] = response["_runtime_revision_binding"]
         if response.get("evidence_ref"):
             item["accepted_response"]["evidence_ref"] = response["evidence_ref"]
         return
@@ -1381,6 +1488,8 @@ def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> No
     item["handled_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     item["resolution_note"] = response["note"]
     item["validation_evidence"] = response.get("validation_commands", [])
+    if response.get("_runtime_revision_binding"):
+        item["revision_binding"] = response["_runtime_revision_binding"]
     item["claimed_by"] = None
     item["claimed_at"] = None
     item["lease_expires_at"] = None

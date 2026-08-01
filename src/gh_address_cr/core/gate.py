@@ -31,7 +31,7 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     thread_identifier,
     thread_is_resolved,
 )
-from gh_address_cr.core.session import SessionError, SessionManager
+from gh_address_cr.core.session import SessionError, SessionManager, cached_stack_context
 from gh_address_cr.core.severity import (
     apply_severity_evidence,
     extract_review_priority_evidence,
@@ -58,6 +58,7 @@ class GateResult:
     logic_validation_signals: list[dict[str, Any]] | None = None
     reply_evidence_blockers: list[dict[str, Any]] | None = None
     historical_reply_items: list[dict[str, Any]] | None = None
+    stack_context: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -74,6 +75,11 @@ class GateResult:
         for code, _, waiting_on in FAILURE_ORDER:
             if code == self.reason_code:
                 return waiting_on
+        if self.reason_code in {
+            "FINAL_GATE_STALE_REVISION_EVIDENCE",
+            "FINAL_GATE_UNBOUND_REVISION_EVIDENCE",
+        }:
+            return "validation_evidence"
         return "final_gate"
 
     @property
@@ -103,6 +109,9 @@ class GateResult:
             # Authoritative completion proof (pending reviews + checks evaluated),
             # distinct from the inline pre-gate emitted by review/address/threads.
             "gate_scope": "final",
+            "completion_scope": "pull_request",
+            "stack_context": dict(self.stack_context or {}),
+            "stack_merge_readiness": "not_evaluated",
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
             "commands": _final_gate_commands(self.repo, self.pr_number),
@@ -124,12 +133,35 @@ class Gatekeeper:
         snapshot_path: str | Path | None = None,
         require_checks: bool = False,
         require_required_checks: bool = False,
+        observed_stack_context: Any | None = None,
+        require_existing_session: bool = False,
     ) -> GateResult:
         manager = SessionManager(repo, str(pr_number))
         try:
             session = manager.load()
         except SessionError:
+            if require_existing_session:
+                raise
             session = manager.create(status="WAITING_FOR_GATE")
+        if observed_stack_context is not None:
+            observed_stack = observed_stack_context
+        else:
+            observed_stack = None
+            get_stack_context = getattr(self.github_client, "get_stack_context", None)
+            if callable(get_stack_context):
+                try:
+                    observed_stack = get_stack_context(repo, str(pr_number))
+                except Exception:
+                    observed_stack = None
+        if observed_stack is not None:
+            try:
+                serialized_stack = observed_stack.to_dict()
+            except (AttributeError, TypeError, ValueError):
+                serialized_stack = None
+            if serialized_stack is not None:
+                from gh_address_cr.core.session import cache_pull_request_context
+
+                cache_pull_request_context(session, serialized_stack)
         current_login = self.github_client.viewer_login()
         remote_threads = (
             _load_thread_snapshot(snapshot_path)
@@ -202,6 +234,7 @@ def evaluate_final_gate(
         logic_validation_signals=logic_validation_signals,
         reply_evidence_blockers=list(projection.missing_reply_items),
         historical_reply_items=list(projection.historical_reply_items),
+        stack_context=cached_stack_context(dict(session)),
     )
 
 

@@ -2,6 +2,22 @@
 
 This document maps the `gh-address-cr` runtime `status` fields to the next safe action. As a thin adapter, the skill must follow this map without redefining the state machine.
 
+## Stacked PR Context and Evidence
+
+- `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub preview
+  capability or inspect the bounded diagnostic, then refresh the selected PR.
+- `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
+  refresh the affected layer, and rerun validation; never publish old evidence.
+- `FINAL_GATE_STALE_REVISION_EVIDENCE` /
+  `FINAL_GATE_UNBOUND_REVISION_EVIDENCE`: record fresh validation bound to the
+  current stacked-member revision.
+- `STACK_MEMBER_SESSION_MISSING` / `STACK_MEMBER_SESSION_INVALID`: run
+  `review` or `address` for the named member and repair its PR-scoped session.
+- `STACK_MEMBER_DRAFT` / `STACK_MEMBER_CLOSED` / `STACK_MEMBER_QUEUED`: change
+  or wait for that GitHub-owned state outside `gh-address-cr`.
+- `STACK_MEMBER_BLOCKED`: follow the nested member's `layer_reason_code` and
+  `layer_waiting_on`, then rerun `final-gate --stack` bottom-up.
+
 ## Active Work
 
 If `status` is `WAITING_FOR_ACTION`:

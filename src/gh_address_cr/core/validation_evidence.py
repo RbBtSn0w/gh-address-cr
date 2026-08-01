@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
+
 # A validation result counts as success only when it starts with one of these.
 # An absent/empty result defaults to "passed", matching the agent CLI default
 # (`<command>` with no `=result` suffix is treated as passed).
@@ -19,6 +21,16 @@ VALIDATION_SUCCESS_PREFIXES = ("passed", "pass", "success", "succeeded", "ok")
 KNOWN_VALIDATION_RESULT_TOKENS = frozenset(
     {"passed", "pass", "success", "succeeded", "ok", "failed", "fail", "failure", "error", "skipped"}
 )
+
+
+def revision_evidence_status(binding: Any, current_context: StackContext) -> str:
+    """Classify stacked-member evidence without performing IO."""
+    reason = compare_revision_binding(binding, current_context)
+    if reason is None:
+        return "current"
+    if reason == "FINAL_GATE_UNBOUND_REVISION_EVIDENCE":
+        return "unbound"
+    return "stale"
 
 
 def validation_result_is_success(result: Any) -> bool:

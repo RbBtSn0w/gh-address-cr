@@ -19,6 +19,7 @@ from gh_address_cr.core.leases import (
 from gh_address_cr.core.session import SessionManager
 from gh_address_cr.orchestrator.harness import handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import ExpiredLeaseError, LeaseConflictError, OrchestrationSession
+from tests.test_native_workflow import UnstackedGitHubClient
 
 
 class TestLeaseScheduling(unittest.TestCase):
@@ -78,6 +79,11 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         self.repo = "owner/repo"
         self.pr = "123"
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.stack_client_patch = patch(
+            "gh_address_cr.core.agent_protocol.GitHubClient",
+            return_value=UnstackedGitHubClient(),
+        )
+        self.stack_client_patch.start()
         self.env_patch = patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": self.temp_dir.name}, clear=False)
         self.env_patch.start()
 
@@ -122,6 +128,7 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         )
 
     def tearDown(self):
+        self.stack_client_patch.stop()
         self.env_patch.stop()
         self.temp_dir.cleanup()
 

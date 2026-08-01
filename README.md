@@ -75,6 +75,17 @@ gh-address-cr agent publish owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```
 
+GitHub stacked pull requests are supported as an additive public-preview
+workflow. Normal commands remain scoped to the selected PR layer and report
+`stack_context`; use `final-gate owner/repo 123 --stack` only for a fresh
+bottom-up gate through that PR. `gh-address-cr` does not create, checkout,
+rebase, push, modify, queue, merge, or unstack a stack; use GitHub's `gh stack`
+workflow for stack management.
+
+Stacked-member requests and validation evidence are bound to the current head
+revision and stack topology. A head update or reorder invalidates that evidence
+before reply/resolve side effects, so refresh and revalidate the owning layer.
+
 Completion means the latest final gate reports:
 
 - zero unresolved review threads
@@ -573,6 +584,19 @@ python3 -m gh_address_cr agent manifest
 python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
+
+An authorized disposable GitHub stack can be provisioned, exercised, verified,
+and explicitly cleaned with the manifest-scoped E2E harness:
+
+```bash
+python3 scripts/e2e_stacked_pr_sandbox.py provision --manifest /var/tmp/gh-address-cr-stack-e2e.json
+python3 scripts/e2e_stacked_pr_sandbox.py exercise --manifest /var/tmp/gh-address-cr-stack-e2e.json
+python3 scripts/e2e_stacked_pr_sandbox.py cleanup --manifest /var/tmp/gh-address-cr-stack-e2e.json
+```
+
+The default target is the repository's designated demo sandbox. Other targets
+must contain a sandbox marker or be explicitly authorized with
+`--allow-non-sandbox`.
 
 Package smoke:
 

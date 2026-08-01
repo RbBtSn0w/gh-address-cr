@@ -1,0 +1,17 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 101,
+        "state": "OPEN",
+        "isDraft": false,
+        "baseRefName": "main",
+        "headRefName": "feature/standalone",
+        "headRefOid": "1111111111111111111111111111111111111111",
+        "mergeQueueEntry": null,
+        "stackEntry": null,
+        "stack": null
+      }
+    }
+  }
+}
