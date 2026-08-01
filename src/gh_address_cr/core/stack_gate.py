@@ -26,6 +26,7 @@ class StackGateResult:
     check_requirement: str | None = None
     reason_code: str | None = None
     first_blocked_pr_number: str | None = None
+    first_blocked_item_kind: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -37,6 +38,19 @@ class StackGateResult:
 
     @property
     def waiting_on(self) -> str | None:
+        if self.reason_code == protocol_codes.STACK_MEMBER_BLOCKED:
+            blocked_outcome = next(
+                (
+                    outcome
+                    for outcome in self.member_outcomes
+                    if outcome.get("pr_number") == self.first_blocked_pr_number
+                ),
+                None,
+            )
+            if blocked_outcome:
+                nested_waiting_on = str(blocked_outcome.get("layer_waiting_on") or "").strip()
+                if nested_waiting_on:
+                    return nested_waiting_on
         return {
             protocol_codes.STACK_CONTEXT_UNAVAILABLE: "stack_context",
             protocol_codes.STACK_CONTEXT_INVALID: "stack_context",
@@ -55,6 +69,26 @@ class StackGateResult:
             for key, value in (outcome.get("counts") or {}).items():
                 counts[str(key)] = counts.get(str(key), 0) + int(value)
         recovery_pr = self.first_blocked_pr_number or self.selected_pr_number
+        blocked_outcome = next(
+            (outcome for outcome in self.member_outcomes if outcome.get("pr_number") == self.first_blocked_pr_number),
+            None,
+        )
+        layer_reason_code = blocked_outcome.get("layer_reason_code") if blocked_outcome else None
+        recovery_command = command_templates.stack_member_recovery(
+            self.repo,
+            recovery_pr,
+            self.reason_code,
+            layer_reason_code=layer_reason_code,
+            layer_item_kind=self.first_blocked_item_kind,
+        )
+        recovery_action = (
+            str(blocked_outcome.get("layer_next_action") or recovery_command)
+            if blocked_outcome
+            else recovery_command
+        )
+        stack_merge_readiness = "ready" if self.passed else "blocked"
+        if self.stack_context.availability in {"unavailable", "invalid"}:
+            stack_merge_readiness = "unknown"
         return {
             "schema_version": "stack_gate_result.v1",
             "status": "PASSED" if self.passed else "FAILED",
@@ -63,7 +97,7 @@ class StackGateResult:
             "gate_scope": "final",
             "completion_scope": "stack_segment",
             "check_requirement": self.check_requirement,
-            "stack_merge_readiness": "ready" if self.passed else "blocked",
+            "stack_merge_readiness": stack_merge_readiness,
             "stack_context": self.stack_context.to_dict(),
             "stack_gate": {
                 "selected_pr_number": self.selected_pr_number,
@@ -80,15 +114,11 @@ class StackGateResult:
             "next_action": (
                 "The selected stack segment is ready."
                 if self.passed
-                else command_templates.stack_member_recovery(self.repo, recovery_pr, self.reason_code)
+                else recovery_action
             ),
             "commands": {
                 "final_gate_stack": command_templates.final_gate_stack(self.repo, self.selected_pr_number),
-                "member_recovery": command_templates.stack_member_recovery(
-                    self.repo,
-                    recovery_pr,
-                    self.reason_code,
-                ),
+                "member_recovery": recovery_command,
             },
         }
 
@@ -119,6 +149,7 @@ def evaluate_stack_gate(
     outcomes: list[dict[str, Any]] = []
     reason: str | None = None
     first_blocked: str | None = None
+    first_blocked_item_kind: str | None = None
     for member in segment.included_members:
         member_reason = _member_preflight_reason(member, session_exists)
         layer: GateResult | None = None
@@ -138,11 +169,13 @@ def evaluate_stack_gate(
             "layer_reason_code": layer.reason_code if layer is not None else None,
             "layer_waiting_on": layer.waiting_on if layer is not None else None,
             "counts": dict(layer.counts) if layer is not None else {},
+            "layer_next_action": layer.to_machine_summary()["next_action"] if layer is not None else None,
         }
         outcomes.append(outcome)
         if reason is None and member_reason is not None:
             reason = member_reason
             first_blocked = member.pr_number
+            first_blocked_item_kind = _layer_blocking_item_kind(layer)
 
     final_context = closing_context() if callable(closing_context) else closing_context
     if (
@@ -152,6 +185,7 @@ def evaluate_stack_gate(
     ):
         reason = protocol_codes.STACK_CONTEXT_STALE
         first_blocked = None
+        first_blocked_item_kind = None
 
     return StackGateResult(
         repo,
@@ -162,7 +196,32 @@ def evaluate_stack_gate(
         check_requirement=check_requirement,
         reason_code=reason,
         first_blocked_pr_number=first_blocked,
+        first_blocked_item_kind=first_blocked_item_kind,
     )
+
+
+def _layer_blocking_item_kind(layer: GateResult | None) -> str | None:
+    if layer is None:
+        return None
+    expected_signal_types = {
+        "FINAL_GATE_MISSING_VALIDATION_EVIDENCE": {"missing_required_evidence"},
+        "FINAL_GATE_STALE_REVISION_EVIDENCE": {"stale_revision_evidence"},
+        "FINAL_GATE_UNBOUND_REVISION_EVIDENCE": {"unbound_revision_evidence"},
+    }.get(layer.reason_code)
+    if expected_signal_types is None:
+        return None
+    signal = next(
+        (
+            row
+            for row in (layer.logic_validation_signals or [])
+            if row.get("gate_effect") == "blocking"
+            and row.get("signal_type") in expected_signal_types
+        ),
+        None,
+    )
+    if signal is None:
+        return None
+    return str(signal.get("item_kind") or "").strip() or None
 
 
 def run_stack_gate(
@@ -211,6 +270,7 @@ def run_stack_gate(
         "gh_address_cr.stack.gate.evaluated",
         result.stack_context,
         outcome="passed" if result.passed else "blocked",
+        reason_code=result.reason_code or "PASSED",
     )
     return result
 
@@ -227,7 +287,13 @@ def _member_preflight_reason(member: Any, session_exists: Callable[[str], bool])
     return None
 
 
-def _emit_stack_event(name: str, context: StackContext, *, outcome: str | None = None) -> None:
+def _emit_stack_event(
+    name: str,
+    context: StackContext,
+    *,
+    outcome: str | None = None,
+    reason_code: str | None = None,
+) -> None:
     try:
         from gh_address_cr.core.telemetry_safety import stack_telemetry_attributes
         from gh_address_cr.otel_tracing import add_current_span_event
@@ -235,6 +301,8 @@ def _emit_stack_event(name: str, context: StackContext, *, outcome: str | None =
         attributes = stack_telemetry_attributes(context)
         if outcome:
             attributes["gh_address_cr.stack.outcome"] = outcome
+        if reason_code:
+            attributes["gh_address_cr.stack.reason_code"] = reason_code
         add_current_span_event(name, attributes)
     except Exception:
         return

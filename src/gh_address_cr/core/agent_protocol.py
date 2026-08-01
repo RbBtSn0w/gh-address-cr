@@ -91,12 +91,29 @@ def _refresh_stack_context_for_request(
     github_client: Any | None = None,
 ) -> StackContext:
     """Refresh the non-authoritative GitHub observation used to bind a new request."""
+    was_known_stacked = session_store.has_observed_stack_membership(session)
     client = github_client or GitHubClient()
     try:
         stack_context = client.get_stack_context(repo, str(pr_number))
     except Exception:
         stack_context = unavailable_stack_context(repo, str(pr_number))
     session_store.cache_pull_request_context(session, stack_context.to_dict())
+    if stack_context.availability == "invalid":
+        raise WorkflowError(
+            status="REQUEST_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_INVALID,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="ActionRequest was not issued because current stack context is invalid.",
+        )
+    if stack_context.availability == "unavailable" and was_known_stacked:
+        raise WorkflowError(
+            status="REQUEST_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="ActionRequest was not issued because known stacked-PR context could not be refreshed.",
+        )
     return stack_context
 
 
@@ -436,6 +453,7 @@ def submit_action_response(
             github_client=github_client,
             ledger=ledger,
             rejected_status=protocol_codes.ACTION_REJECTED,
+            now=now,
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
@@ -470,7 +488,7 @@ def submit_action_response(
     return payload
 
 
-def _request_revision_binding(lease: dict[str, Any]) -> dict[str, Any] | None:
+def _request_repository_context(lease: dict[str, Any]) -> dict[str, Any] | None:
     request_path = str(_get(lease, "request_path") or "")
     if not request_path:
         return None
@@ -479,8 +497,7 @@ def _request_revision_binding(lease: dict[str, Any]) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     repository_context = request.get("repository_context") if isinstance(request, dict) else None
-    binding = repository_context.get("revision_binding") if isinstance(repository_context, dict) else None
-    return dict(binding) if isinstance(binding, dict) else None
+    return dict(repository_context) if isinstance(repository_context, dict) else None
 
 
 def _verify_request_revision_binding(
@@ -493,13 +510,25 @@ def _verify_request_revision_binding(
     github_client: Any | None,
     ledger: EvidenceLedger,
     rejected_status: str,
+    now: datetime,
 ) -> dict[str, Any] | None:
     """Refresh a stacked request binding before accepting any response evidence."""
-    binding = _request_revision_binding(prepared["lease"])
-    if binding is None:
-        return None
-    if str(binding.get("pr_number") or "") != str(pr_number):
+    request_context = _request_repository_context(prepared["lease"])
+    binding_payload = request_context.get("revision_binding") if isinstance(request_context, dict) else None
+    binding = dict(binding_payload) if isinstance(binding_payload, dict) else None
+    request_stack_context = request_context.get("stack_context") if isinstance(request_context, dict) else None
+    request_stack_availability = (
+        str(request_stack_context.get("availability") or "") if isinstance(request_stack_context, dict) else ""
+    )
+    was_known_stacked = session_store.has_observed_stack_membership(session)
+    if binding is not None and str(binding.get("pr_number") or "") != str(pr_number):
         reason = protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
+    elif binding is None and request_stack_availability == "invalid":
+        reason = protocol_codes.STACK_CONTEXT_INVALID
+    elif binding is None and request_stack_availability not in {"present", "unavailable"}:
+        if not was_known_stacked:
+            return None
+        reason = protocol_codes.STALE_REQUEST_CONTEXT
     else:
         if github_client is None:
             from gh_address_cr.github.client import GitHubClient
@@ -510,13 +539,26 @@ def _verify_request_revision_binding(
         except Exception:
             current = None
         if not isinstance(current, StackContext):
-            reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
+            reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE if binding is not None or was_known_stacked else None
         else:
             session_store.cache_pull_request_context(session, current.to_dict())
-            reason = compare_revision_binding(binding, current)
+            if binding is not None:
+                reason = compare_revision_binding(binding, current)
+            elif request_stack_availability == "present":
+                reason = protocol_codes.STALE_REQUEST_CONTEXT
+            elif current.availability == "present":
+                reason = protocol_codes.STALE_REQUEST_CONTEXT
+            elif current.availability == "invalid":
+                reason = protocol_codes.STACK_CONTEXT_INVALID
+            elif current.availability == "unavailable" and was_known_stacked:
+                reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
+            else:
+                reason = None
     if reason is None:
         return binding
     _record_response_rejected(session, ledger, response, reason, item_id=str(prepared["item_id"]))
+    if reason in {protocol_codes.STALE_REQUEST_CONTEXT, protocol_codes.STACK_ACTION_CONTEXT_MISMATCH}:
+        _release_irrecoverable_request_lease(session, prepared, now=now)
     raise WorkflowError(
         status=rejected_status,
         reason_code=reason,
@@ -525,6 +567,27 @@ def _verify_request_revision_binding(
         message=f"ActionResponse rejected: {reason}",
         payload={"item_id": prepared["item_id"], "lease_id": prepared["lease_id"]},
     )
+
+
+def _release_irrecoverable_request_lease(
+    session: dict[str, Any],
+    prepared: dict[str, Any],
+    *,
+    now: datetime,
+) -> None:
+    lease = prepared["lease"]
+    lease_id = str(prepared["lease_id"])
+    if str(_get(lease, "status") or "") in {"active", "submitted"}:
+        release_lease(session, lease_id, now=now, reason="stale_request_context")
+    item = prepared["item"]
+    active_lease_id = str(item.get("active_lease_id") or "")
+    if active_lease_id and active_lease_id != lease_id:
+        return
+    _return_item_to_claimable_state(item)
+    item["claimed_by"] = None
+    item["claimed_at"] = None
+    item["lease_expires_at"] = None
+    item.pop("active_lease_id", None)
 
 
 def _load_response_json_object(

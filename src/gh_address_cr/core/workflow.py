@@ -89,6 +89,9 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS)
     + r")(?![A-Za-z0-9])"
 )
+TERMINAL_LOCAL_VALIDATION_STATES = frozenset(
+    {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
+)
 
 
 def runtime_compatibility() -> dict[str, Any]:
@@ -457,7 +460,7 @@ def record_validation_evidence(
     now: datetime | None = None,
     github_client: Any | None = None,
 ) -> dict[str, Any]:
-    """Ingest validation evidence for a thread resolved out-of-band.
+    """Ingest validation evidence for a terminal review item.
 
     Symmetric to :func:`record_reply_evidence`. When a GitHub review thread is
     resolved outside the runtime (manual ``Resolve``, reviewer dismiss, or
@@ -469,7 +472,7 @@ def record_validation_evidence(
     the fix path would have written so the gate can reconcile it.
 
     Guarded so it cannot become a backdoor around normal resolution:
-    - only ``github_thread`` items already in a terminal state are eligible;
+    - only terminal ``github_thread`` or ``local_finding`` items are eligible;
     - ``--commit``/``--files``/``--validation`` are all required; and
     - the validation result must be success-like (a failing verdict like
       ``cmd=failed`` is rejected, matching #117).
@@ -524,32 +527,45 @@ def record_validation_evidence(
         resolved_item_id = thread_ref if thread_ref.startswith("github-thread:") else f"github-thread:{thread_ref}"
 
     session = session_store.load_session(repo, pr_number)
+    item = _items(session).get(resolved_item_id)
+    item_kind = str(item.get("item_kind") or "") if isinstance(item, dict) else ""
+    if not isinstance(item, dict) or item_kind not in {"github_thread", "local_finding"}:
+        reason_code = (
+            "UNKNOWN_GITHUB_THREAD"
+            if resolved_item_id.startswith("github-thread:")
+            else "UNKNOWN_VALIDATION_ITEM"
+        )
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code=reason_code,
+            waiting_on="validation_evidence",
+            exit_code=4,
+            message=f"No validation-eligible item `{resolved_item_id}` exists in the session.",
+        )
+    item_state = (
+        normalized_thread_state(item)
+        if item_kind == "github_thread"
+        else str(item.get("state") or "").strip().lower()
+    )
+    terminal_states = GITHUB_THREAD_TERMINAL_STATES if item_kind == "github_thread" else TERMINAL_LOCAL_VALIDATION_STATES
+    if item_state not in terminal_states:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code="THREAD_NOT_TERMINAL" if item_kind == "github_thread" else "ITEM_NOT_TERMINAL",
+            waiting_on="validation_evidence",
+            exit_code=4,
+            message=(
+                "Validation evidence reconcile is only for terminal review items; "
+                f"`{resolved_item_id}` is not terminal. Use `agent resolve` for claimable items."
+            ),
+        )
+
     revision_binding = _current_stacked_revision_binding(
         repo,
         pr_number,
         session,
         github_client=github_client,
     )
-    item = _items(session).get(resolved_item_id)
-    if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
-        raise WorkflowError(
-            status="VALIDATION_EVIDENCE_REJECTED",
-            reason_code="UNKNOWN_GITHUB_THREAD",
-            waiting_on="validation_evidence",
-            exit_code=4,
-            message=f"No github_thread item `{resolved_item_id}` exists in the session.",
-        )
-    if normalized_thread_state(item) not in GITHUB_THREAD_TERMINAL_STATES:
-        raise WorkflowError(
-            status="VALIDATION_EVIDENCE_REJECTED",
-            reason_code="THREAD_NOT_TERMINAL",
-            waiting_on="validation_evidence",
-            exit_code=4,
-            message=(
-                "Validation evidence reconcile is only for threads already resolved out-of-band; "
-                f"`{resolved_item_id}` is not terminal. Use `agent resolve` for claimable threads."
-            ),
-        )
 
     timestamp = _format_timestamp(_coerce_now(now))
     payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
@@ -562,7 +578,7 @@ def record_validation_evidence(
         role="fixer",
         event_type="validation_evidence_recorded",
         payload={
-            "thread_id": payload_thread_id,
+            **({"thread_id": payload_thread_id} if item_kind == "github_thread" else {}),
             "commit_hash": normalized_commit,
             "files": normalized_files,
             "validation_commands": normalized_validation,
@@ -587,7 +603,8 @@ def record_validation_evidence(
         "repo": repo,
         "pr_number": str(pr_number),
         "item_id": resolved_item_id,
-        "thread_id": payload_thread_id,
+        "item_kind": item_kind,
+        **({"thread_id": payload_thread_id} if item_kind == "github_thread" else {}),
         "commit_hash": normalized_commit,
         "files": normalized_files,
         "validation_commands": normalized_validation,
@@ -603,9 +620,7 @@ def _current_stacked_revision_binding(
     *,
     github_client: Any | None,
 ) -> dict[str, Any] | None:
-    cached = session_store.cached_stack_context(session)
-    if not isinstance(cached, dict) or cached.get("availability") != "present":
-        return None
+    was_known_stacked = session_store.has_observed_stack_membership(session)
     if github_client is None:
         from gh_address_cr.github.client import GitHubClient
 
@@ -615,6 +630,8 @@ def _current_stacked_revision_binding(
     try:
         current = github_client.get_stack_context(repo, str(pr_number))
     except Exception as exc:
+        if not was_known_stacked:
+            return None
         raise WorkflowError(
             status="VALIDATION_EVIDENCE_REJECTED",
             reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
@@ -622,7 +639,9 @@ def _current_stacked_revision_binding(
             exit_code=5,
             message="Validation evidence was not recorded because stack context could not be refreshed.",
         ) from exc
-    if not isinstance(current, StackContext) or current.availability != "present":
+    if not isinstance(current, StackContext):
+        if not was_known_stacked:
+            return None
         raise WorkflowError(
             status="VALIDATION_EVIDENCE_REJECTED",
             reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
@@ -631,6 +650,24 @@ def _current_stacked_revision_binding(
             message="Validation evidence was not recorded because current stack context is unavailable.",
         )
     session_store.cache_pull_request_context(session, current.to_dict())
+    if current.availability == "invalid":
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_INVALID,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="Validation evidence was not recorded because current stack context is invalid.",
+        )
+    if current.availability == "unavailable" and was_known_stacked:
+        raise WorkflowError(
+            status="VALIDATION_EVIDENCE_REJECTED",
+            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            waiting_on="stack_refresh",
+            exit_code=5,
+            message="Validation evidence was not recorded because current stack context is unavailable.",
+        )
+    if current.availability != "present":
+        return None
     return revision_binding_for_context(current)
 
 

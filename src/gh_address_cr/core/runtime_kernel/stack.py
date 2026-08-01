@@ -177,6 +177,8 @@ def project_stack_context(payload: Mapping[str, Any]) -> StackContext:
             selected_pr = PullRequestMemberFact.from_dict(payload["selected_pr"])
         except (KeyError, TypeError, ValueError) as exc:
             return _invalid_context(repo, selected_pr_number, observed_at, str(exc))
+        if selected_pr.pr_number != selected_pr_number:
+            return _invalid_context(repo, selected_pr_number, observed_at, "selected_member_mismatch")
         return StackContext(
             availability="absent",
             repo=repo,
@@ -337,6 +339,12 @@ def compare_revision_binding(binding: Mapping[str, Any] | None, current: StackCo
         return protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE
     if str(binding.get("pr_number") or "") != current.selected_pr_number:
         return protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
+    if current.availability == "invalid":
+        return protocol_codes.STACK_CONTEXT_INVALID
+    if current.availability == "unavailable":
+        return protocol_codes.STACK_CONTEXT_UNAVAILABLE
+    if current.availability == "absent":
+        return protocol_codes.STALE_REQUEST_CONTEXT
     expected = revision_binding_for_context(current)
     if expected is None:
         return protocol_codes.STACK_CONTEXT_UNAVAILABLE
@@ -385,6 +393,8 @@ def _stack_invariant_failure(
         return "stack_requires_two_members"
     if [member.position for member in members] != list(range(1, len(members) + 1)):
         return "positions_not_contiguous"
+    if len({member.pr_number for member in members}) != len(members):
+        return "duplicate_member_pr_number"
     if sum(member.pr_number == selected_pr_number for member in members) != 1:
         return "selected_member_missing_or_duplicate"
     first_unmerged = next((index for index, member in enumerate(members) if member.state != "MERGED"), len(members))

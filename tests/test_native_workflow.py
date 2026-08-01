@@ -132,6 +132,13 @@ class NativeWorkflowTests(unittest.TestCase):
                 request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
                 self.assertEqual(request["repository_context"]["revision_binding"]["pr_number"], pr_number)
                 self.assertEqual(request["repository_context"]["stack_context"]["availability"], "present")
+                self.assertEqual(
+                    request["repository_context"]["stack_context"]["selected_pr"]["head_ref_name"],
+                    "feature/middle",
+                )
+                self.assertIn("checkout_stack", request["forbidden_actions"])
+                self.assertIn("rebase_stack", request["forbidden_actions"])
+                self.assertIn("push_stack", request["forbidden_actions"])
                 client.get_stack_context.assert_called_once_with(repo, pr_number)
 
     def test_batch_action_requests_share_one_refreshed_stack_context(self):
@@ -167,7 +174,451 @@ class NativeWorkflowTests(unittest.TestCase):
                 lease = session["leases"][requested["leased_items"][0]["lease_id"]]
                 request = json.loads(Path(lease["request_path"]).read_text(encoding="utf-8"))
                 self.assertEqual(request["repository_context"]["revision_binding"]["pr_number"], pr_number)
+                self.assertEqual(
+                    request["repository_context"]["stack_context"]["selected_pr"]["head_ref_name"],
+                    "feature/middle",
+                )
+                self.assertIn("checkout_stack", request["forbidden_actions"])
+                self.assertIn("rebase_stack", request["forbidden_actions"])
+                self.assertIn("push_stack", request["forbidden_actions"])
                 client.get_stack_context.assert_called_once_with(repo, pr_number)
+
+    def test_stale_batch_context_releases_every_batch_lease(self):
+        from gh_address_cr.core import agent_batch
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.session import SessionManager
+        from tests.helpers import stack_observation
+
+        class CurrentStackClient:
+            def get_stack_context(self, repo, pr_number):
+                changed = stack_observation(selected_pr_number=pr_number)
+                changed["members"][1]["head_oid"] = "f" * 40
+                return project_stack_context(changed)
+
+        repo = "octo/example"
+        pr_number = "102"
+        items = {}
+        for suffix in ("one", "two"):
+            item = {
+                **open_item(f"github-thread:{suffix}"),
+                "item_kind": "github_thread",
+                "source": "github",
+                "thread_id": suffix,
+                "classification_evidence": {
+                    "event_type": "classification_recorded",
+                    "classification": "fix",
+                    "record_id": f"classification-{suffix}",
+                },
+            }
+            items[item["item_id"]] = item
+
+        initial_client = Mock()
+        initial_client.get_stack_context.return_value = project_stack_context(
+            stack_observation(selected_pr_number=pr_number)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
+                patch("gh_address_cr.core.agent_protocol.GitHubClient", return_value=initial_client),
+            ):
+                manager = SessionManager(repo, pr_number)
+                session = manager.create(status="WAITING_FOR_GATE")
+                session["items"] = items
+                manager.save(session)
+                issued = agent_batch.issue_batch_action_request(repo, pr_number, agent_id="fixer-1")
+                session = manager.load()
+                requests = [
+                    json.loads(Path(session["leases"][row["lease_id"]]["request_path"]).read_text(encoding="utf-8"))
+                    for row in issued["leased_items"]
+                ]
+                response_path = Path(tmp) / "stale-batch.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "common": {
+                                "files": ["src/example.py"],
+                                "validation_commands": [{"command": "unit", "result": "passed"}],
+                                "fix_reply": {"commit_hash": "abc1234"},
+                            },
+                            "items": [
+                                {
+                                    "request_id": request["request_id"],
+                                    "lease_id": request["lease_id"],
+                                    "item_id": request["item"]["item_id"],
+                                    "summary": f"Fixed {request['item']['item_id']}.",
+                                    "why": "The guarded path now handles the review concern.",
+                                }
+                                for request in requests
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaises(WorkflowError) as caught:
+                    agent_batch.submit_batch_action_response(
+                        repo,
+                        pr_number,
+                        batch_path=response_path,
+                        github_client=CurrentStackClient(),
+                    )
+
+                self.assertEqual(caught.exception.reason_code, "STALE_REQUEST_CONTEXT")
+                persisted = manager.load()
+                for request in requests:
+                    self.assertEqual(persisted["leases"][request["lease_id"]]["status"], "released")
+                    item = persisted["items"][request["item"]["item_id"]]
+                    self.assertEqual(item["state"], "open")
+                    self.assertNotIn("active_lease_id", item)
+
+    def test_batch_submit_uses_one_coherent_stack_observation(self):
+        from gh_address_cr.core import agent_batch
+        from gh_address_cr.core.session import SessionManager
+        from tests.helpers import stack_observation
+
+        repo = "octo/example"
+        pr_number = "102"
+        original = project_stack_context(stack_observation(selected_pr_number=pr_number))
+
+        class MutatingAfterFirstReadClient:
+            calls = 0
+
+            def get_stack_context(self, repo, pr_number):
+                self.calls += 1
+                if self.calls == 1:
+                    return original
+                changed = stack_observation(selected_pr_number=pr_number)
+                changed["members"][1]["head_oid"] = "f" * 40
+                return project_stack_context(changed)
+
+        items = {}
+        for suffix in ("one", "two"):
+            item = {
+                **open_item(f"github-thread:{suffix}"),
+                "item_kind": "github_thread",
+                "source": "github",
+                "thread_id": suffix,
+                "classification_evidence": {
+                    "event_type": "classification_recorded",
+                    "classification": "fix",
+                    "record_id": f"classification-{suffix}",
+                },
+            }
+            items[item["item_id"]] = item
+
+        initial_client = Mock()
+        initial_client.get_stack_context.return_value = original
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
+                patch("gh_address_cr.core.agent_protocol.GitHubClient", return_value=initial_client),
+            ):
+                manager = SessionManager(repo, pr_number)
+                session = manager.create(status="WAITING_FOR_GATE")
+                session["items"] = items
+                manager.save(session)
+                issued = agent_batch.issue_batch_action_request(repo, pr_number, agent_id="fixer-1")
+                session = manager.load()
+                requests = [
+                    json.loads(Path(session["leases"][row["lease_id"]]["request_path"]).read_text(encoding="utf-8"))
+                    for row in issued["leased_items"]
+                ]
+                response_path = Path(tmp) / "coherent-batch.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "common": {
+                                "files": ["src/example.py"],
+                                "validation_commands": [{"command": "unit", "result": "passed"}],
+                                "fix_reply": {"commit_hash": "abc1234"},
+                            },
+                            "items": [
+                                {
+                                    "request_id": request["request_id"],
+                                    "lease_id": request["lease_id"],
+                                    "item_id": request["item"]["item_id"],
+                                    "summary": f"Fixed {request['item']['item_id']}.",
+                                    "why": "The guarded path now handles the review concern.",
+                                }
+                                for request in requests
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                current_client = MutatingAfterFirstReadClient()
+
+                accepted = agent_batch.submit_batch_action_response(
+                    repo,
+                    pr_number,
+                    batch_path=response_path,
+                    github_client=current_client,
+                )
+
+                self.assertEqual(accepted["status"], "BATCH_ACTION_ACCEPTED")
+                self.assertEqual(accepted["accepted_count"], 2)
+                self.assertEqual(current_client.calls, 1)
+
+
+    def test_unbound_request_is_rejected_when_submit_discovers_current_stack(self):
+        from gh_address_cr.core.errors import WorkflowError
+        from tests.helpers import stack_observation
+
+        class UnavailableClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(
+                    {
+                        "schema_version": "stack_observation.v1",
+                        "availability": "unavailable",
+                        "repo": repo,
+                        "selected_pr_number": str(pr_number),
+                        "observed_at": "2026-08-01T12:00:00Z",
+                        "members": [],
+                    }
+                )
+
+        class StackedClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(stack_observation(selected_pr_number=pr_number))
+
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, open_item())
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="local:1",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect.",
+                )
+                requested = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                    github_client=UnavailableClient(),
+                )
+                request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+                self.assertNotIn("revision_binding", request["repository_context"])
+                response_path = Path(tmp) / "unbound-stack-response.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "note": "Fixed the requested item.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [{"command": "unit", "result": "passed"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaises(WorkflowError) as caught:
+                    agent_protocol.submit_action_response(
+                        repo,
+                        pr_number,
+                        response_path=response_path,
+                        github_client=StackedClient(),
+                    )
+
+                self.assertEqual(caught.exception.reason_code, "STALE_REQUEST_CONTEXT")
+                session = manager.load()
+                self.assertEqual(session["leases"][request["lease_id"]]["status"], "released")
+                self.assertEqual(session["items"]["local:1"]["state"], "open")
+                self.assertNotIn("active_lease_id", session["items"]["local:1"])
+
+                refreshed = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                    github_client=StackedClient(),
+                )
+                self.assertEqual(refreshed["status"], "ACTION_REQUESTED")
+                self.assertNotEqual(refreshed["lease_id"], request["lease_id"])
+
+    def test_unstacked_unbound_submit_does_not_construct_github_client(self):
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, open_item())
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="local:1",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect.",
+                )
+                requested = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                    github_client=UnstackedGitHubClient(),
+                )
+                request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+                self.assertEqual(request["repository_context"]["stack_context"]["availability"], "absent")
+                self.assertNotIn("revision_binding", request["repository_context"])
+                response_path = Path(tmp) / "unstacked-response.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "note": "Fixed the requested item.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [{"command": "unit", "result": "passed"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch(
+                    "gh_address_cr.github.client.GitHubClient",
+                    side_effect=AssertionError("ordinary unbound submit must not construct a GitHub client"),
+                ):
+                    accepted = agent_protocol.submit_action_response(
+                        repo,
+                        pr_number,
+                        response_path=response_path,
+                    )
+
+                self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
+
+    def test_legacy_present_request_without_binding_is_rejected_after_unstacking(self):
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.models import ActionRequest
+        from tests.helpers import stack_observation
+
+        class StackedClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(stack_observation(selected_pr_number=pr_number))
+
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, open_item())
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="local:1",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect.",
+                )
+                requested = agent_protocol.issue_action_request(
+                    repo,
+                    pr_number,
+                    role="fixer",
+                    agent_id="fixer-1",
+                    github_client=StackedClient(),
+                )
+                request_path = Path(requested["request_path"])
+                request = json.loads(request_path.read_text(encoding="utf-8"))
+                request["repository_context"].pop("revision_binding")
+                request_path.write_text(json.dumps(request), encoding="utf-8")
+                legacy_session = manager.load()
+                legacy_session["leases"][request["lease_id"]]["request_hash"] = ActionRequest.from_dict(
+                    request
+                ).stable_hash()
+                manager.save(legacy_session)
+                response_path = Path(tmp) / "legacy-unbound-response.json"
+                response_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "request_id": request["request_id"],
+                            "lease_id": request["lease_id"],
+                            "agent_id": "fixer-1",
+                            "resolution": "fix",
+                            "note": "Fixed the requested item.",
+                            "files": ["src/example.py"],
+                            "validation_commands": [{"command": "unit", "result": "passed"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaises(WorkflowError) as caught:
+                    agent_protocol.submit_action_response(
+                        repo,
+                        pr_number,
+                        response_path=response_path,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(caught.exception.reason_code, "STALE_REQUEST_CONTEXT")
+                session = manager.load()
+                self.assertEqual(session["leases"][request["lease_id"]]["status"], "released")
+                self.assertEqual(session["items"]["local:1"]["state"], "open")
+
+    def test_known_stack_blocks_new_request_when_refresh_is_unavailable(self):
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.session import cache_pull_request_context
+        from tests.helpers import stack_observation
+
+        class UnavailableClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(
+                    {
+                        "schema_version": "stack_observation.v1",
+                        "availability": "unavailable",
+                        "repo": repo,
+                        "selected_pr_number": str(pr_number),
+                        "observed_at": "2026-08-01T12:01:00Z",
+                        "members": [],
+                    }
+                )
+
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, open_item())
+                session = manager.load()
+                cache_pull_request_context(
+                    session,
+                    project_stack_context(stack_observation(selected_pr_number=pr_number)).to_dict(),
+                )
+                manager.save(session)
+                agent_protocol.record_classification(
+                    repo,
+                    pr_number,
+                    item_id="local:1",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect.",
+                )
+
+                with self.assertRaises(WorkflowError) as caught:
+                    agent_protocol.issue_action_request(
+                        repo,
+                        pr_number,
+                        role="fixer",
+                        agent_id="fixer-1",
+                        github_client=UnavailableClient(),
+                    )
+
+                self.assertEqual(caught.exception.reason_code, "STACK_CONTEXT_UNAVAILABLE")
 
     def test_record_classification_releases_active_triage_lease_for_fixer(self):
         from gh_address_cr.core import agent_protocol

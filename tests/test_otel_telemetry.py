@@ -566,6 +566,28 @@ class TracedExecutionTests(unittest.TestCase):
 
 
 class StackTelemetryTests(unittest.TestCase):
+    def test_stack_gate_event_includes_bounded_outcome_and_reason(self):
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.stack_gate import _emit_stack_event
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        with patch("gh_address_cr.otel_tracing.add_current_span_event") as emit:
+            _emit_stack_event(
+                "gh_address_cr.stack.gate.evaluated",
+                context,
+                outcome="blocked",
+                reason_code="STACK_MEMBER_BLOCKED",
+            )
+
+        name, attributes = emit.call_args.args
+        self.assertEqual(name, "gh_address_cr.stack.gate.evaluated")
+        self.assertEqual(attributes["gh_address_cr.stack.outcome"], "blocked")
+        self.assertEqual(attributes["gh_address_cr.stack.reason_code"], "STACK_MEMBER_BLOCKED")
+        serialized = str(attributes)
+        for forbidden in ("feature/", "head_oid", "fingerprint", "members", "octo/example"):
+            self.assertNotIn(forbidden, serialized)
+
     def test_stack_attributes_are_bounded_and_exclude_identifiers(self):
         from gh_address_cr.core.runtime_kernel.stack import project_stack_context
         from gh_address_cr.core.telemetry_safety import stack_telemetry_attributes

@@ -39,6 +39,7 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].signal_type, "missing_required_evidence")
         self.assertEqual(signals[0].gate_effect, "blocking")
+        self.assertEqual(signals[0].to_dict().get("item_kind"), "local_finding")
 
     def test_terminal_github_thread_missing_validation_generates_blocking_signal(self):
         session = {

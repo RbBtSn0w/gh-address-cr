@@ -45,6 +45,11 @@ python3 -m unittest tests.contract.test_stacked_pr_contract.RevisionBindingContr
 | Explicit wrong PR/head | Any | `STACK_ACTION_CONTEXT_MISMATCH` |
 | Old unbound evidence on stacked member | Same | Fresh validation required |
 
+For lower-layer feedback, confirm the request exposes that member's PR and
+`head_ref_name`. Do not implement the fix on a checked-out upper member. Branch
+checkout, cascading rebase, and push require a separate authorized Stack
+workflow; discard the old request and revalidate rewritten members afterward.
+
 ## Phase 3 — Layer vs Stack Gate (US3)
 
 ```bash
@@ -154,7 +159,9 @@ python3 scripts/e2e_stacked_pr_sandbox.py exercise \
   --manifest /var/tmp/gh-address-cr-stack-e2e.json
 ```
 
-Cleanup is explicit and manifest-scoped:
+Cleanup is explicit and manifest-scoped. The harness validates the local fixture
+namespace and current live stack, PR, branch, revision, and synthetic comment
+identity before it sends unstack, close, or branch-delete requests:
 
 ```bash
 python3 scripts/e2e_stacked_pr_sandbox.py cleanup \

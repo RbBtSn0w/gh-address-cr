@@ -4,8 +4,9 @@
 
 - Editable install: passed with pyenv Python 3.14.4.
 - Ruff: `ruff check src tests scripts/build_plugin_payload.py` passed.
-- Unit suite: `python3 -m unittest discover -s tests` passed, 963 tests after
-  review-regression coverage was added.
+- Unit suite: `python3 -m unittest discover -s tests` passed, 1007 tests after
+  the iterative Mode A review closures and responsibility-boundary hardening
+  were added.
 - CLI smoke: root help passed; `final-gate --help` exposes `--stack`.
 - Agent manifest: passed with `status=MANIFEST_READY`.
 - Plugin payload: build and `--check` passed.
@@ -91,6 +92,113 @@ A final direct `final-gate ... 4 --stack --machine --no-auto-clean` invocation
 also passed with all aggregate counts at zero, 74 runtime events at 100%, and
 artifact SHA-256
 `df84d44330dd6cd249370a355132f8125315c77a04ee3c5d1592bd8fb4ca352a`.
+
+## Second review-regression closure
+
+The follow-up review identified four additional recovery and compatibility
+regressions. Nine focused RED/GREEN tests plus the full 981-test suite now
+prove:
+
+- ordinary unstacked, unbound submissions preserve the local path and do not
+  construct a GitHub client or perform a submit-time stack read;
+- an unbound request issued during unavailable context is rejected when submit
+  discovers current stack membership, its unusable lease is released, its item
+  becomes claimable, and a fresh request can be issued immediately;
+- a legacy request that records present stack context without a revision
+  binding remains unverifiable and is rejected even after the PR is unstacked;
+- generated logic-validation signals carry `item_kind`, while terminal local
+  and GitHub items both recover stale, unbound, or missing validation through
+  item-scoped `agent evidence add` against the current member revision;
+- aggregate stack recovery preserves item-scoped evidence commands and routes
+  still-blocking local items through normal `review`, not `--auto-simple`; and
+- `FINAL_GATE_MISSING_REPLY_EVIDENCE` maps to `evidence add --reply-url`
+  instead of a no-op publish attempt.
+
+The editable install initially encountered HTTP 403 from the configured PyPI
+mirror while resolving `setuptools>=77`. After installing that build dependency
+from the official PyPI index, `pip install --no-build-isolation -e .` passed;
+ruff, CLI help, agent manifest, plugin payload build/check, and
+`git diff --check` also passed.
+
+The retained sandbox was exercised once more after this closure. The first
+attempt reached the layer gate but hit a transient GitHub `/user` TLS handshake
+timeout. A direct API probe reproduced the timeout, a bounded connectivity
+probe then passed, and the single retry completed without fixture mutation:
+all three `address` calls were already `PASSED`, PRs `#2`, `#3`, and `#4`
+passed their layer gates, and stack `#5` passed with exact coverage `[2, 3, 4]`,
+119 runtime events, and 100% aggregate runtime coverage:
+
+```text
+[gh-address-cr stack: PASSED | scope: stack segment through PR #4 | members: 3 | telemetry: runtime-only (119 events, 100.0%)]
+```
+
+A final direct `final-gate ... 4 --stack --machine --no-auto-clean` invocation
+then passed with every aggregate count at zero, 125 runtime events at 100%, and
+stack-audit artifact SHA-256
+`227df6692f9f184cc345c2f36f1d881786e1749abb273cced6f93ccb04d553ad`.
+
+## Responsibility-boundary audit
+
+A full CLI/runtime/skill audit after the lower-layer feedback scenario added
+executable coverage for the remaining ownership and handoff boundaries:
+
+- layer `final-gate` replaces stale cached topology with explicit unavailable
+  context and reports `stack_merge_readiness=unknown` when discovery fails;
+- manual validation evidence discovers a current stacked member even when a
+  legacy session has no cached context, then binds the owning revision;
+- a known stacked member cannot publish unbound evidence while context refresh
+  is unavailable;
+- later unavailable observations retain a non-authoritative safety hint so
+  known stack membership cannot silently degrade into ordinary-PR handling;
+- submit refreshes even an initially unbound request and rejects it if current
+  stack membership is then discovered;
+- stacked `ActionRequest` validation requires every stack-management operation
+  to remain forbidden, while emitted single and batch requests expose the
+  owning PR head branch;
+- member-blocked stack gates return the nested layer's executable recovery
+  action instead of merely repeating the failing gate;
+- stale or unbound layer gates return a targeted revision-validation command;
+- explicit stack discovery failures retain `completion_scope=stack_segment`,
+  report `waiting_on=stack_context`, and expose deterministic retry commands;
+- pagination rejects stack or selected-member identity changes between pages;
+  and
+- the packaged skill now defines the lower-layer owning-branch handoff, separate
+  authorization for checkout/rebase/push, and post-propagation request refresh.
+
+The retained sandbox was verified and exercised again after this audit. PRs
+`#2`, `#3`, and `#4` passed their layer gates with 94, 91, and 98 runtime events;
+stack `#5` passed with exact coverage `[2, 3, 4]`, 104 runtime events, and 100%
+runtime coverage:
+
+```text
+[gh-address-cr stack: PASSED | scope: stack segment through PR #4 | members: 3 | telemetry: runtime-only (104 events, 100.0%)]
+```
+
+## Iterative Mode A closure
+
+The final post-fix review loop completed with no remaining finding after
+focused RED/GREEN coverage closed the following additional gaps:
+
+- malformed or duplicate topology cannot silently change the selected member
+  or covered segment;
+- single and batch stale requests release all unusable leases, while ordinary
+  unbound submissions retain the offline-compatible path;
+- terminal local findings and GitHub threads share item-scoped validation
+  recovery without routing local items through a thread-only producer;
+- aggregate member failures preserve the nested `layer_waiting_on` state and
+  human failure output retains counts, telemetry, recovery, artifact paths, and
+  hashes while stale topology still suppresses completion guidance;
+- stack telemetry and audit metadata remain bounded and include the requested
+  check policy; and
+- the reusable sandbox exercises `--require-required-checks` and rejects a
+  passing payload unless the selected member and exact covered range match the
+  fixture manifest.
+
+Local completion evidence for this closure is 307 stacked-PR focused tests and
+the full 1007-test suite, plus ruff, CLI help/manifest, plugin payload, and diff
+hygiene checks. The retained live sandbox results above predate the final
+required-check harness enforcement; no new remote mutation or live acceptance
+claim was made during this final local Mode A pass.
 
 ## Acceptance boundary
 

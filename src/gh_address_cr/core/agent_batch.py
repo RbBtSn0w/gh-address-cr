@@ -35,6 +35,7 @@ from gh_address_cr.core.agent_protocol import (
     _prepare_action_response_submission,
     _raise_response_rejected,
     _refresh_stack_context_for_request,
+    _release_irrecoverable_request_lease,
     _required_evidence_for,
     _response_skeleton_for_request,
     _verify_request_revision_binding,
@@ -53,6 +54,31 @@ from gh_address_cr.core.utils import get_session_ledger as _ledger
 from gh_address_cr.core.utils import normalize_string_list as _normalize_string_list
 from gh_address_cr.core.utils import return_expired_items_to_open as _return_expired_items_to_open
 from gh_address_cr.core.utils import return_item_to_claimable_state as _return_item_to_claimable_state
+
+
+class _CoherentStackContextClient:
+    """Lazily reuse one stack observation for an atomic batch submission."""
+
+    def __init__(self, delegate: Any | None):
+        self.delegate = delegate
+        self._attempted = False
+        self._context: Any | None = None
+        self._error: Exception | None = None
+
+    def get_stack_context(self, repo: str, pr_number: str) -> Any:
+        if not self._attempted:
+            self._attempted = True
+            if self.delegate is None:
+                from gh_address_cr.github.client import GitHubClient
+
+                self.delegate = GitHubClient()
+            try:
+                self._context = self.delegate.get_stack_context(repo, pr_number)
+            except Exception as exc:
+                self._error = exc
+        if self._error is not None:
+            raise self._error
+        return self._context
 
 
 def _select_batch_target_items(
@@ -494,6 +520,7 @@ def submit_batch_action_response(
     session_paths = SessionPaths(repo, pr_number)
     ledger = _ledger(session)
     prepared_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    stack_context_client = _CoherentStackContextClient(github_client)
     seen_leases: set[str] = set()
     seen_items: set[str] = set()
 
@@ -529,18 +556,6 @@ def submit_batch_action_response(
                 now=now,
                 rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
             )
-            binding = _verify_request_revision_binding(
-                repo,
-                pr_number,
-                session,
-                prepared,
-                response,
-                github_client=github_client,
-                ledger=ledger,
-                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
-            )
-            if binding is not None:
-                response["_runtime_revision_binding"] = binding
             item_id = str(prepared["item_id"])
             if item_id in seen_items:
                 _raise_response_rejected(
@@ -609,6 +624,21 @@ def submit_batch_action_response(
                 )
             prepared_rows.append((response, prepared))
 
+        for response, prepared in prepared_rows:
+            binding = _verify_request_revision_binding(
+                repo,
+                pr_number,
+                session,
+                prepared,
+                response,
+                github_client=stack_context_client,
+                ledger=ledger,
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
+                now=now,
+            )
+            if binding is not None:
+                response["_runtime_revision_binding"] = binding
+
         telemetry_seen: set[tuple[str, str, str, str, str, str]] = set()
         accepted = [
             _batch_acceptance_payload(
@@ -627,6 +657,12 @@ def submit_batch_action_response(
             for response, prepared in prepared_rows
         ]
     except WorkflowError as exc:
+        if exc.reason_code in {
+            protocol_codes.STALE_REQUEST_CONTEXT,
+            protocol_codes.STACK_ACTION_CONTEXT_MISMATCH,
+        }:
+            for _, prepared in prepared_rows:
+                _release_irrecoverable_request_lease(session, prepared, now=now)
         _augment_batch_recovery_error(exc, session_paths, batch_path=batch_path, agent_id=_batch_agent_id(batch))
         session_store.save_session(repo, pr_number, session)
         raise

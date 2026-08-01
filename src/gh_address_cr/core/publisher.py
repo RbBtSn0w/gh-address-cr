@@ -341,6 +341,7 @@ def _verify_publish_revision_bindings(
     publish_items: list[tuple[str, dict[str, Any]]],
     client: Any,
 ) -> None:
+    was_known_stacked = session_store.has_observed_stack_membership(session)
     item_bindings = [
         (item_id, response.get("revision_binding"))
         for item_id, item in publish_items
@@ -362,6 +363,8 @@ def _verify_publish_revision_bindings(
         session_store.cache_pull_request_context(session, current.to_dict())
         if current.availability == "invalid":
             reason = protocol_codes.STACK_CONTEXT_INVALID
+        elif current.availability == "unavailable" and was_known_stacked:
+            reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
         else:
             bound_items = [(item_id, binding) for item_id, binding in item_bindings if isinstance(binding, dict)]
             compared_items = item_bindings if current.availability == "present" else bound_items

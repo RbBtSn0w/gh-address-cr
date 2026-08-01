@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from gh_address_cr.core import command_templates
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_TERMINAL_STATES,
     is_stale_or_outdated_github_thread,
@@ -31,6 +31,7 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     thread_identifier,
     thread_is_resolved,
 )
+from gh_address_cr.core.runtime_kernel.stack import unavailable_stack_context
 from gh_address_cr.core.session import SessionError, SessionManager, cached_stack_context
 from gh_address_cr.core.severity import (
     apply_severity_evidence,
@@ -87,6 +88,7 @@ class GateResult:
         return PASS_EXIT_CODE if self.passed else FAIL_EXIT_CODE
 
     def to_machine_summary(self) -> dict[str, Any]:
+        stack_availability = str((self.stack_context or {}).get("availability") or "")
         return {
             "status": "PASSED" if self.passed else "FAILED",
             "repo": self.repo,
@@ -111,7 +113,9 @@ class GateResult:
             "gate_scope": "final",
             "completion_scope": "pull_request",
             "stack_context": dict(self.stack_context or {}),
-            "stack_merge_readiness": "not_evaluated",
+            "stack_merge_readiness": (
+                "unknown" if stack_availability in {"unavailable", "invalid"} else "not_evaluated"
+            ),
             "failure_codes": list(self.failure_codes),
             "check_requirement": self.check_requirement,
             "commands": _final_gate_commands(self.repo, self.pr_number),
@@ -152,7 +156,7 @@ class Gatekeeper:
                 try:
                     observed_stack = get_stack_context(repo, str(pr_number))
                 except Exception:
-                    observed_stack = None
+                    observed_stack = unavailable_stack_context(repo, str(pr_number))
         if observed_stack is not None:
             try:
                 serialized_stack = observed_stack.to_dict()
@@ -419,18 +423,46 @@ def _logic_validation_next_action(
 ) -> str | None:
     if not logic_validation_signals:
         return None
-    blocking = [signal for signal in logic_validation_signals if signal.get("gate_effect") == "blocking"]
-    if len(blocking) != 1:
+    blocking = [
+        signal
+        for signal in logic_validation_signals
+        if signal.get("gate_effect") == "blocking"
+        and signal.get("signal_type") == "missing_required_evidence"
+    ]
+    if not blocking:
         return None
-    signal = blocking[0]
-    if signal.get("signal_type") != "missing_required_evidence":
+    item_ids = [str(signal.get("item_id") or "").strip() for signal in blocking]
+    if any(not item_id for item_id in item_ids):
         return None
-    item_id = str(signal.get("item_id") or "").strip()
-    if not item_id.startswith("github-thread:"):
-        return None
+    reconcile_commands = [
+        f"`{command_templates.evidence_add_validation(repo, pr_number, item_id=item_id)}`"
+        for item_id in item_ids
+    ]
+    final_gate = command_templates.final_gate(repo, pr_number)
+    return (
+        f"Record terminal-item validation evidence with {', '.join(reconcile_commands)}, "
+        f"then rerun `{final_gate}`."
+    )
+
+
+def _revision_validation_next_action(
+    repo: str,
+    pr_number: str,
+    logic_validation_signals: list[dict[str, Any]] | None,
+) -> str:
+    signal = next(
+        (
+            row
+            for row in (logic_validation_signals or [])
+            if row.get("signal_type") in {"stale_revision_evidence", "unbound_revision_evidence"}
+            and row.get("gate_effect") == "blocking"
+        ),
+        {},
+    )
+    item_id = str(signal.get("item_id") or "<item_id>")
     reconcile = command_templates.evidence_add_validation(repo, pr_number, item_id=item_id)
-    final_gate = f"`gh-address-cr final-gate {repo} {pr_number}`"
-    return f"Record terminal-thread validation evidence with `{reconcile}`, then rerun {final_gate}."
+    final_gate = command_templates.final_gate(repo, pr_number)
+    return f"Record fresh revision-bound validation with `{reconcile}`, then rerun `{final_gate}`."
 
 
 def _next_action_with_pr(
@@ -468,7 +500,15 @@ def _next_action_with_pr(
     if reason_code == FINAL_GATE_BLOCKING_LOCAL_ITEMS:
         return f"Run `gh-address-cr review {repo} {pr_number}` or close/defer local items, then rerun {final_gate}."
     if reason_code == FINAL_GATE_MISSING_VALIDATION_EVIDENCE:
+        targeted = _logic_validation_next_action(repo, pr_number, logic_validation_signals)
+        if targeted is not None:
+            return targeted
         return f"Run `gh-address-cr agent evidence add {repo} {pr_number} ...`, then rerun {final_gate}."
+    if reason_code in {
+        protocol_codes.FINAL_GATE_STALE_REVISION_EVIDENCE,
+        protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE,
+    }:
+        return _revision_validation_next_action(repo, pr_number, logic_validation_signals)
     if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
         return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
     if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:

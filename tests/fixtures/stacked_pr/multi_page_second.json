@@ -2,7 +2,19 @@
   "data": {
     "repository": {
       "pullRequest": {
+        "number": 102,
+        "state": "OPEN",
+        "isDraft": false,
+        "baseRefName": "feature/base",
+        "headRefName": "feature/middle",
+        "headRefOid": "2222222222222222222222222222222222222222",
+        "mergeQueueEntry": null,
+        "stackEntry": {"position": 2},
         "stack": {
+          "id": "STACK_7",
+          "number": 7,
+          "baseRefName": "main",
+          "size": 3,
           "entries": {
             "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": [

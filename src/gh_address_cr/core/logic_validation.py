@@ -35,6 +35,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "state_contradiction",
                     "high",
                     "Item claims publish readiness while runtime state is not terminal.",
@@ -48,6 +49,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "missing_required_evidence",
                     "high",
                     "Terminal work item is missing validation evidence.",
@@ -64,6 +66,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
                 signals.append(
                     _signal(
                         item_id,
+                        item_kind,
                         signal_type,
                         "high",
                         "Validation evidence does not prove the current stacked-member revision.",
@@ -77,6 +80,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "low_confidence_advisory",
                     "low",
                     "Item carries a low-confidence logic validation marker.",
@@ -191,6 +195,7 @@ def _is_low_confidence(item: Mapping[str, Any]) -> bool:
 
 def _signal(
     item_id: str,
+    item_kind: str,
     signal_type: str,
     confidence: str,
     explanation: str,
@@ -200,6 +205,7 @@ def _signal(
     return LogicValidationSignal(
         signal_id=f"logic:{signal_type}:{item_id}",
         item_id=item_id,
+        item_kind=item_kind,
         signal_type=signal_type,
         confidence=confidence,
         explanation=explanation,

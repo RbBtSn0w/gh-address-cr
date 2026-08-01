@@ -5,6 +5,7 @@ from typing import Any, Callable
 from gh_address_cr.agent.manifests import ManifestValidationError, ensure_manifest_eligible
 from gh_address_cr.agent.roles import GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS, AgentRole, is_ai_agent_role, parse_role
 from gh_address_cr.core.models import ActionRequest, CapabilityManifest, EvidenceRecord, WorkItem
+from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS
 
 
 class RequestValidationError(ValueError):
@@ -100,13 +101,7 @@ def validate_action_request(payload: ActionRequest | dict[str, Any]) -> ActionRe
     if "fix" in payload["allowed_actions"] and not payload.get("lease_id"):
         raise RequestValidationError("missing_lease_id", "Mutating ActionRequest must include a lease_id.")
     if is_ai_agent_role(role):
-        forbidden = set(payload.get("forbidden_actions") or ())
-        missing_forbidden = set(GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS) - forbidden
-        if missing_forbidden:
-            raise RequestValidationError(
-                "missing_forbidden_github_actions",
-                "AI-agent requests must forbid direct GitHub reply and resolve operations.",
-            )
+        _validate_ai_forbidden_actions(payload)
     resume_command = payload.get("resume_command") or ""
     if "skill/scripts/cli.py" in resume_command or "gh-address-cr/scripts/cli.py" in resume_command:
         raise RequestValidationError(
@@ -160,6 +155,8 @@ def build_action_request(
             "missing_classification_evidence", "Fixer requests require classification evidence.", evidence=evidence
         )
     forbidden_actions = list(GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS) if is_ai_agent_role(role) else []
+    if is_ai_agent_role(role) and _has_present_stack_context(repository_context):
+        forbidden_actions.extend(STACK_MANAGEMENT_ACTIONS)
     request = ActionRequest(
         schema_version="1.0",
         request_id=request_id,
@@ -174,3 +171,29 @@ def build_action_request(
         forbidden_actions=tuple(forbidden_actions),
     )
     return validate_action_request(request)
+
+
+def _has_present_stack_context(repository_context: Any) -> bool:
+    if not isinstance(repository_context, dict):
+        return False
+    if isinstance(repository_context.get("revision_binding"), dict):
+        return True
+    stack_context = repository_context.get("stack_context")
+    return isinstance(stack_context, dict) and stack_context.get("availability") == "present"
+
+
+def _validate_ai_forbidden_actions(payload: dict[str, Any]) -> None:
+    forbidden = set(payload.get("forbidden_actions") or ())
+    missing_forbidden = set(GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS) - forbidden
+    if missing_forbidden:
+        raise RequestValidationError(
+            "missing_forbidden_github_actions",
+            "AI-agent requests must forbid direct GitHub reply and resolve operations.",
+        )
+    if _has_present_stack_context(payload.get("repository_context")):
+        missing_stack_forbidden = set(STACK_MANAGEMENT_ACTIONS) - forbidden
+        if missing_stack_forbidden:
+            raise RequestValidationError(
+                "missing_forbidden_stack_actions",
+                "Stacked-PR requests must forbid stack-management operations.",
+            )

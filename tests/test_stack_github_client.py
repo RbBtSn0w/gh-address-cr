@@ -52,10 +52,54 @@ class StackGitHubClientTests(unittest.TestCase):
         self.assertEqual([member.position for member in context.members], [1, 2, 3])
         self.assertIn("after=cursor-1", runner.calls[1])
 
+    def test_stack_pagination_rejects_changed_stack_metadata(self):
+        first = load_stacked_pr_fixture("multi_page_first.json")
+        second = load_stacked_pr_fixture("multi_page_second.json")
+        second["data"]["repository"]["pullRequest"]["stack"]["number"] = 8
+        payloads = [first, second]
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payloads.pop(0)), "")
+
+        context = GitHubClient(runner=run).get_stack_context("octo/example", "102")
+
+        self.assertEqual(context.availability, "invalid")
+        self.assertEqual(context.invalid_invariant, "pagination_stack_changed")
+
+    def test_stack_rejects_selected_entry_position_mismatch(self):
+        payload = load_stacked_pr_fixture("three_layer.json")
+        payload["data"]["repository"]["pullRequest"]["stackEntry"]["position"] = 3
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        context = GitHubClient(runner=run).get_stack_context("octo/example", "102")
+
+        self.assertEqual(context.availability, "invalid")
+        self.assertEqual(context.invalid_invariant, "selected_position_mismatch")
+
     def test_preview_schema_absence_returns_unavailable_context(self):
         runner = fixture_runner("unavailable.json")
 
         context = GitHubClient(runner=runner).get_stack_context("octo/example", "101")
+
+        self.assertEqual(context.availability, "unavailable")
+        self.assertEqual(context.diagnostic_code, "STACK_CONTEXT_UNAVAILABLE")
+
+    def test_stack_entry_schema_absence_returns_unavailable_context(self):
+        payload = {
+            "errors": [
+                {
+                    "type": "FIELD_NOT_FOUND",
+                    "message": "Field 'stackEntry' doesn't exist on type 'PullRequest'",
+                }
+            ]
+        }
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        context = GitHubClient(runner=run).get_stack_context("octo/example", "101")
 
         self.assertEqual(context.availability, "unavailable")
         self.assertEqual(context.diagnostic_code, "STACK_CONTEXT_UNAVAILABLE")

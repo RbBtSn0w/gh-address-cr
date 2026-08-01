@@ -51,6 +51,13 @@ contains only the selected PR and availability is `absent`.
 
 Existing member final-gate codes remain nested in
 `member_outcomes[].layer_reason_code` and are not renamed.
+`FINAL_GATE_MISSING_REPLY_EVIDENCE` maps member recovery to
+`agent evidence add --reply-url`; it does not route a terminal out-of-band
+resolution through `agent publish` when no publish-ready item exists.
+Revision-evidence recovery also follows the blocking signal's `item_kind`:
+terminal GitHub threads and local findings use item-scoped `agent evidence
+add`. `FINAL_GATE_BLOCKING_LOCAL_ITEMS` uses the normal member `review`
+workflow and never routes through thread-only `--auto-simple` handling.
 
 ## Freshness, Exit, and Completion Rules
 

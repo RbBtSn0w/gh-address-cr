@@ -8,6 +8,16 @@ of the immutable request hash. Workers act only on the selected PR and never
 manage the stack. Submit and publish refresh GitHub context and reject stale
 head or topology evidence before side effects.
 
+If a request was issued while stack context was unavailable, submit refreshes
+again. Discovery of current stack membership rejects that unbound request as
+`STALE_REQUEST_CONTEXT`; a previously observed stack member also stops new
+request issuance while its current context remains unavailable.
+
+The selected member's `head_ref_name` is the owning branch for the requested
+change. If the active checkout is another member, stop the worker action and
+follow `stacked-pr-workflow.md`; do not reinterpret an upper-branch commit as
+evidence for the lower PR.
+
 ## Contents
 
 - Machine Summary Contract
@@ -52,6 +62,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Validates an `ActionResponse`, lease ownership, and required evidence.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --name <profile> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>]`
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>`
+  - Reconciles current validation for an already-terminal GitHub thread or local finding. On a stacked member, the runtime discovers and attaches the current revision binding after validating the item kind and state.
 
 `gh-address-cr agent resolve` resolves along three independent axes — **disposition** (`--disposition fix|trivial|reject|clarify`, what to do), **selection** (an `<item_id>`, `--files`/`--file`, or `--input`, which thread(s)), and **condition** (`--stale`, fresh by default or the matching STALE/outdated thread(s)). Any disposition composes with any selection and condition; `--why` carries the reason for a `reject`/`clarify` disposition on any selection:
 

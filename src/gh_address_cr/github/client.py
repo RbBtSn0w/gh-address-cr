@@ -122,9 +122,14 @@ class GitHubClient:
                 if not isinstance(raw_stack, dict):
                     return _invalid_stack_context(repo, pr_number, observed_at, "stack_not_object")
                 stack_payload = raw_stack
-            current_stack = pr_payload.get("stack")
-            if not isinstance(current_stack, dict):
-                return _invalid_stack_context(repo, pr_number, observed_at, "stack_missing_during_pagination")
+            current_stack, page_invariant = _validated_stack_page(
+                pr_payload,
+                initial_stack=stack_payload,
+                initial_selected_pr=selected_pr,
+            )
+            if page_invariant:
+                return _invalid_stack_context(repo, pr_number, observed_at, page_invariant)
+            assert current_stack is not None
             entries = current_stack.get("entries")
             if not isinstance(entries, dict):
                 return _invalid_stack_context(repo, pr_number, observed_at, "entries_not_object")
@@ -142,19 +147,13 @@ class GitHubClient:
             cursor = next_cursor
 
         assert stack_payload is not None
-        return project_stack_context(
-            {
-                "schema_version": "stack_observation.v1",
-                "availability": "present",
-                "repo": repo,
-                "selected_pr_number": str(pr_number),
-                "observed_at": observed_at,
-                "stack_node_id": stack_payload.get("id"),
-                "stack_number": stack_payload.get("number"),
-                "trunk_ref_name": stack_payload.get("baseRefName"),
-                "reported_size": stack_payload.get("size"),
-                "members": member_rows,
-            }
+        return _project_complete_stack_context(
+            repo,
+            str(pr_number),
+            observed_at,
+            stack_payload=stack_payload,
+            selected_pr=selected_pr,
+            member_rows=member_rows,
         )
 
     def list_threads(self, repo: str, pr_number: str) -> list[dict[str, Any]]:
@@ -509,6 +508,92 @@ def _stack_member_from_pull_request(payload: dict[str, Any], *, position: Any) -
     }
 
 
+def _stack_page_identity(payload: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        payload.get("id"),
+        payload.get("number"),
+        payload.get("baseRefName"),
+        payload.get("size"),
+    )
+
+
+def _validated_stack_page(
+    pr_payload: dict[str, Any],
+    *,
+    initial_stack: dict[str, Any] | None,
+    initial_selected_pr: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    current_stack = pr_payload.get("stack")
+    if not isinstance(current_stack, dict):
+        return None, "stack_missing_during_pagination"
+    if initial_stack is not None and _stack_page_identity(current_stack) != _stack_page_identity(initial_stack):
+        return None, "pagination_stack_changed"
+    if initial_selected_pr is not None and _selected_pr_page_identity(pr_payload) != _selected_pr_page_identity(
+        initial_selected_pr
+    ):
+        return None, "pagination_stack_changed"
+    return current_stack, None
+
+
+def _selected_pr_page_identity(payload: dict[str, Any]) -> tuple[Any, ...]:
+    stack_entry = payload.get("stackEntry")
+    queue_entry = payload.get("mergeQueueEntry")
+    return (
+        payload.get("number"),
+        payload.get("state"),
+        payload.get("isDraft"),
+        payload.get("baseRefName"),
+        payload.get("headRefName"),
+        payload.get("headRefOid"),
+        stack_entry.get("position") if isinstance(stack_entry, dict) else None,
+        queue_entry.get("state") if isinstance(queue_entry, dict) else None,
+    )
+
+
+def _selected_stack_entry_invariant(
+    selected_pr: dict[str, Any], member_rows: list[dict[str, Any]], pr_number: str
+) -> str | None:
+    selected_entry = selected_pr.get("stackEntry")
+    selected_position = selected_entry.get("position") if isinstance(selected_entry, dict) else None
+    if not isinstance(selected_position, int) or isinstance(selected_position, bool) or selected_position < 1:
+        return "selected_stack_entry_invalid"
+    selected_member = next(
+        (row for row in member_rows if str(row.get("pr_number") or "") == str(pr_number)),
+        None,
+    )
+    if selected_member is not None and selected_member.get("position") != selected_position:
+        return "selected_position_mismatch"
+    return None
+
+
+def _project_complete_stack_context(
+    repo: str,
+    pr_number: str,
+    observed_at: str,
+    *,
+    stack_payload: dict[str, Any],
+    selected_pr: dict[str, Any],
+    member_rows: list[dict[str, Any]],
+) -> StackContext:
+    selected_invariant = _selected_stack_entry_invariant(selected_pr, member_rows, pr_number)
+    if selected_invariant:
+        return _invalid_stack_context(repo, pr_number, observed_at, selected_invariant)
+    return project_stack_context(
+        {
+            "schema_version": "stack_observation.v1",
+            "availability": "present",
+            "repo": repo,
+            "selected_pr_number": pr_number,
+            "observed_at": observed_at,
+            "stack_node_id": stack_payload.get("id"),
+            "stack_number": stack_payload.get("number"),
+            "trunk_ref_name": stack_payload.get("baseRefName"),
+            "reported_size": stack_payload.get("size"),
+            "members": member_rows,
+        }
+    )
+
+
 def _invalid_stack_context(repo: str, pr_number: str, observed_at: str, invariant: str) -> StackContext:
     return project_stack_context(
         {
@@ -525,11 +610,16 @@ def _invalid_stack_context(repo: str, pr_number: str, observed_at: str, invarian
 
 def _is_stack_capability_error(detail: str) -> bool:
     normalized = detail.lower()
-    return (
-        "field 'stack' doesn't exist" in normalized
-        or 'field "stack" doesn\'t exist' in normalized
-        or "cannot query field 'stack'" in normalized
-        or 'cannot query field "stack"' in normalized
+    preview_fields = ("stack", "stackentry", "entries")
+    return any(
+        marker in normalized
+        for field in preview_fields
+        for marker in (
+            f"field '{field}' doesn't exist",
+            f'field "{field}" doesn\'t exist',
+            f"cannot query field '{field}'",
+            f'cannot query field "{field}"',
+        )
     )
 
 

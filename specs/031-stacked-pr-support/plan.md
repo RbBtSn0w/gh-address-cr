@@ -91,6 +91,10 @@ selected member and loads each member's existing PR-scoped session
 - No persisted authoritative stack aggregate exists. Cached observation metadata
   is labelled non-authoritative and refreshed before claim, submit/resolve,
   publish, and gate decisions.
+- The cache retains only a non-authoritative `stack_membership_observed` safety
+  hint when a later refresh is unavailable. It cannot prove current topology;
+  it only prevents unbound requests, evidence, or publication from silently
+  degrading a previously observed stack member into an ordinary PR.
 
 ### External Facts and Event Inputs
 
@@ -153,6 +157,23 @@ selected member and loads each member's existing PR-scoped session
 - Agent tests prove context changes invalidate requests before submit/publish.
 - Live proof is reported at three levels: schema capability, isolated stack
   discovery, and isolated mutation/freshness acceptance.
+
+### Mode A Repair Preflight
+
+- A batch submission is one immutable action transaction: all response rows are
+  validated first, one lazily acquired GitHub stack observation is reused for
+  every row, and a stale/cross-layer rejection releases every lease in that
+  rejected batch back to the authoritative session queue.
+- Terminal `github_thread` and `local_finding` items share the runtime-owned
+  item validation-evidence boundary. The CLI validates item kind/state before
+  network discovery, attaches the current revision binding, and never treats a
+  producer artifact as current-revision proof.
+- The E2E manifest remains non-authoritative. Local namespace validation plus
+  live stack, pull-request, branch, revision, and synthetic-comment identity
+  must all pass before cleanup or exercise may issue a GitHub mutation.
+- Contract, workflow, and mocked GitHub tests replay stale batch transactions,
+  local item reconciliation, malformed topology, forged manifests, and
+  unrelated-thread selection without making external writes.
 
 ## Project Structure
 

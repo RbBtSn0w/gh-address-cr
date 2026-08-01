@@ -26,6 +26,7 @@ AGENT_PROTOCOL_MD = ROOT / "skill" / "references" / "agent-protocol.md"
 COMPLETION_CONTRACT_MD = ROOT / "skill" / "references" / "completion-contract.md"
 FEEDBACK_MD = ROOT / "skill" / "references" / "feedback.md"
 STATUS_ACTION_MAP_MD = ROOT / "skill" / "references" / "status-action-map.md"
+STACKED_PR_WORKFLOW_MD = ROOT / "skill" / "references" / "stacked-pr-workflow.md"
 OPENAI_HINT_YAML = ROOT / "skill" / "agents" / "openai.yaml"
 RUNTIME_REQUIREMENTS_JSON = ROOT / "skill" / "runtime-requirements.json"
 AGENT_FEEDBACK_ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-agent-feedback.md"
@@ -748,5 +749,14 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("selected PR layer", skill_text)
         self.assertIn("GitHub's `gh stack`", skill_text)
         self.assertIn("revision_binding", protocol_text)
+        self.assertIn("already-terminal GitHub thread or local finding", protocol_text)
+        self.assertIn("item-scoped `agent evidence add`", status_text)
         self.assertIn("completion_scope: \"stack_segment\"", completion_text)
         self.assertIn("FINAL_GATE_STALE_REVISION_EVIDENCE", status_text)
+        self.assertTrue(STACKED_PR_WORKFLOW_MD.is_file())
+        workflow_text = STACKED_PR_WORKFLOW_MD.read_text(encoding="utf-8")
+        normalized_workflow = " ".join(workflow_text.split())
+        self.assertIn("owning branch", normalized_workflow)
+        self.assertIn("Do not implement a lower-layer fix on an upper branch", normalized_workflow)
+        self.assertIn("separately authorized stack-management workflow", normalized_workflow)
+        self.assertIn("Discard the old ActionRequest", normalized_workflow)

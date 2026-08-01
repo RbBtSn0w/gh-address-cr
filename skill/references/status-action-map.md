@@ -8,15 +8,29 @@ This document maps the `gh-address-cr` runtime `status` fields to the next safe 
   capability or inspect the bounded diagnostic, then refresh the selected PR.
 - `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
   refresh the affected layer, and rerun validation; never publish old evidence.
+  Runtime-rejected stale or cross-layer requests release their unusable lease,
+  so request fresh work instead of waiting for lease expiry.
+  If an authorized cascading rebase or push caused the change, complete that
+  external handoff first, then request fresh PR-scoped work.
+- `STACK_ACTION_CONTEXT_MISMATCH`: stop the worker action. Do not move the fix
+  or evidence to the currently checked-out upper member; refresh and request
+  work from the PR and owning branch named by the current runtime context.
 - `FINAL_GATE_STALE_REVISION_EVIDENCE` /
   `FINAL_GATE_UNBOUND_REVISION_EVIDENCE`: record fresh validation bound to the
-  current stacked-member revision.
+  current stacked-member revision. Terminal GitHub threads and local findings
+  use the returned item-scoped `agent evidence add` command; rerun the named
+  validation command against the current layer before recording that evidence.
 - `STACK_MEMBER_SESSION_MISSING` / `STACK_MEMBER_SESSION_INVALID`: run
   `review` or `address` for the named member and repair its PR-scoped session.
 - `STACK_MEMBER_DRAFT` / `STACK_MEMBER_CLOSED` / `STACK_MEMBER_QUEUED`: change
   or wait for that GitHub-owned state outside `gh-address-cr`.
 - `STACK_MEMBER_BLOCKED`: follow the nested member's `layer_reason_code` and
-  `layer_waiting_on`, then rerun `final-gate --stack` bottom-up.
+  `layer_waiting_on`, then rerun `final-gate --stack` bottom-up. Missing reply
+  evidence uses the returned `evidence add --reply-url` member recovery, not a
+  no-op publish attempt. Revision-evidence recovery preserves `item_kind` at
+  this aggregate layer too: terminal GitHub threads and local findings use
+  item-scoped `agent evidence add`. Blocking local items use normal `review`,
+  not thread-only `--auto-simple` handling.
 
 ## Active Work
 

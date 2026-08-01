@@ -82,9 +82,17 @@ bottom-up gate through that PR. `gh-address-cr` does not create, checkout,
 rebase, push, modify, queue, merge, or unstack a stack; use GitHub's `gh stack`
 workflow for stack management.
 
+Feedback is fixed on the owning member branch, never on whichever upper branch
+happens to be checked out. A separately authorized stack-management workflow
+may then cascade the change upward; after it pushes rewritten members, discard
+old ActionRequests and obtain fresh revision-bound evidence before publishing.
+
 Stacked-member requests and validation evidence are bound to the current head
 revision and stack topology. A head update or reorder invalidates that evidence
 before reply/resolve side effects, so refresh and revalidate the owning layer.
+For an already-terminal GitHub thread or local finding, record that fresh proof
+with `agent evidence add --item-id <item_id> --commit <sha> --files <paths>
+--validation <cmd=passed>`; the runtime attaches the current stack binding.
 
 Completion means the latest final gate reports:
 

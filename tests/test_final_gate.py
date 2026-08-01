@@ -11,6 +11,74 @@ from gh_address_cr.core import gate
 
 
 class FinalGateTestCase(unittest.TestCase):
+    def test_local_stale_revision_recovery_records_item_evidence(self):
+        result = gate.GateResult(
+            repo="octo/example",
+            pr_number="102",
+            counts={},
+            failure_codes=["FINAL_GATE_STALE_REVISION_EVIDENCE"],
+            logic_validation_signals=[
+                {
+                    "item_id": "local:stale-finding",
+                    "item_kind": "local_finding",
+                    "signal_type": "stale_revision_evidence",
+                    "gate_effect": "blocking",
+                }
+            ],
+        )
+
+        summary = result.to_machine_summary()
+
+        self.assertIn("agent evidence add octo/example 102 --item-id local:stale-finding", summary["next_action"])
+        self.assertNotIn("gh-address-cr findings", summary["next_action"])
+
+    def test_local_missing_validation_recovery_records_item_evidence(self):
+        result = gate.GateResult(
+            repo="octo/example",
+            pr_number="102",
+            counts={},
+            failure_codes=["FINAL_GATE_MISSING_VALIDATION_EVIDENCE"],
+            logic_validation_signals=[
+                {
+                    "item_id": "local:missing-validation",
+                    "item_kind": "local_finding",
+                    "signal_type": "missing_required_evidence",
+                    "gate_effect": "blocking",
+                }
+            ],
+        )
+
+        summary = result.to_machine_summary()
+
+        self.assertIn(
+            "agent evidence add octo/example 102 --item-id local:missing-validation",
+            summary["next_action"],
+        )
+        self.assertNotIn("gh-address-cr findings", summary["next_action"])
+
+    def test_stale_revision_failure_returns_targeted_validation_recovery(self):
+        result = gate.GateResult(
+            repo="octo/example",
+            pr_number="102",
+            counts={},
+            failure_codes=["FINAL_GATE_STALE_REVISION_EVIDENCE"],
+            logic_validation_signals=[
+                {
+                    "item_id": "github-thread:THREAD_STALE",
+                    "signal_type": "stale_revision_evidence",
+                    "gate_effect": "blocking",
+                }
+            ],
+        )
+
+        summary = result.to_machine_summary()
+
+        self.assertEqual(summary["waiting_on"], "validation_evidence")
+        self.assertIn(
+            "gh-address-cr agent evidence add octo/example 102 --item-id github-thread:THREAD_STALE",
+            summary["next_action"],
+        )
+
     def test_stack_gate_missing_snapshot_preserves_input_error_semantics(self):
         from gh_address_cr.commands.final_gate import handle_final_gate
 
@@ -52,6 +120,31 @@ class FinalGateTestCase(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 5)
         self.assertEqual(payload["reason_code"], "FINAL_GATE_EVALUATION_FAILED")
+
+    def test_stack_discovery_failure_reports_stack_context_recovery_scope(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core.stack_gate import StackContextDiscoveryError
+
+        stdout = io.StringIO()
+        with (
+            patch(
+                "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                side_effect=StackContextDiscoveryError("Opening stack context could not be read."),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = handle_final_gate(
+                "octo/example",
+                "102",
+                ["--stack", "--machine", "--no-auto-clean"],
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(payload["reason_code"], "STACK_CONTEXT_UNAVAILABLE")
+        self.assertEqual(payload["waiting_on"], "stack_context")
+        self.assertEqual(payload["completion_scope"], "stack_segment")
+        self.assertEqual(payload["stack_merge_readiness"], "unknown")
 
     def test_passing_stack_gate_honors_auto_clean_and_no_auto_clean(self):
         from gh_address_cr.commands.final_gate import handle_final_gate
@@ -97,6 +190,18 @@ class FinalGateTestCase(unittest.TestCase):
                     payload = json.loads(stdout.getvalue())
                     self.assertEqual(payload["check_requirement"], "required")
                     self.assertEqual(payload["stack_gate"]["check_requirement"], "required")
+                    self.assertEqual(payload["completion_summary"]["line"], payload["completion_summary_line"])
+                    self.assertIn("scope: stack segment through PR #102", payload["completion_summary_line"])
+                    self.assertIn("threads: 0", payload["completion_summary_line"])
+                    self.assertIn("reviews: 0", payload["completion_summary_line"])
+                    self.assertIn("duration:", payload["completion_summary_line"])
+                    self.assertIn("slowest:", payload["completion_summary_line"])
+                    self.assertIn("issues:", payload["completion_summary_line"])
+                    self.assertIn("sources", payload["telemetry"])
+                    self.assertIn("total_observed_duration_ms", payload["telemetry"])
+                    self.assertIn("inefficiency_flags", payload["telemetry"])
+                    self.assertIn("Audit Summary:", payload["completion_summary_guidance"])
+                    self.assertIn("sha256:", payload["completion_summary_guidance"])
                     artifact = Path(payload["artifact_path"])
                     self.assertTrue(artifact.is_file())
                     persisted = json.loads((artifact.parent / "stack-gate-result.json").read_text(encoding="utf-8"))
@@ -105,6 +210,181 @@ class FinalGateTestCase(unittest.TestCase):
                         archived = list((Path(tmp) / "archive" / "octo__example" / "pr-102").glob("*"))
                         self.assertEqual(len(archived), 1)
                         self.assertTrue((archived[0] / "stack-audit-summary.md").is_file())
+
+    def test_stack_audit_summary_omits_public_member_list(self):
+        from gh_address_cr.commands.final_gate import write_stack_final_gate_artifacts
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.stack_gate import StackGateResult
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        result = StackGateResult(
+            repo="octo/example",
+            selected_pr_number="102",
+            stack_context=context,
+            covered_pr_numbers=("101", "102"),
+            member_outcomes=(),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                os.environ,
+                {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                clear=False,
+            ):
+                artifact, _ = write_stack_final_gate_artifacts(
+                    "octo/example",
+                    "102",
+                    "privacy-test",
+                    result,
+                )
+
+                text = artifact.read_text(encoding="utf-8")
+
+        self.assertIn("covered_member_count: 2", text)
+        self.assertNotIn("covered_pr_numbers", text)
+        self.assertNotIn("101, 102", text)
+        self.assertNotIn("topology_fingerprint", text)
+        self.assertNotIn(tmp, text)
+        self.assertNotIn("efficiency_report_path", text)
+
+    def test_human_stack_gate_emits_full_completion_evidence(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.stack_gate import StackGateResult
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        result = StackGateResult(
+            repo="octo/example",
+            selected_pr_number="102",
+            stack_context=context,
+            covered_pr_numbers=("101", "102"),
+            member_outcomes=(),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                    clear=False,
+                ),
+                patch(
+                    "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                    return_value=result,
+                ),
+                contextlib.redirect_stdout(stdout := io.StringIO()),
+            ):
+                exit_code = handle_final_gate(
+                    "octo/example",
+                    "102",
+                    ["--stack", "--no-auto-clean"],
+                )
+
+        output = stdout.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Verified: 0 Unresolved Threads found", output)
+        self.assertIn("Verified: 0 Pending Reviews found", output)
+        self.assertIn("Session blocking items: 0", output)
+        self.assertIn("Efficiency report path:", output)
+        self.assertIn("Audit summary sha256:", output)
+        self.assertIn("PR Completion Summary Guidance", output)
+
+    def test_human_stack_gate_failure_keeps_diagnostics_artifacts_and_recovery(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core import protocol_codes
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.stack_gate import StackGateResult
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        result = StackGateResult(
+            repo="octo/example",
+            selected_pr_number="102",
+            stack_context=context,
+            covered_pr_numbers=("101", "102"),
+            member_outcomes=(
+                {
+                    "pr_number": "101",
+                    "status": "FAILED",
+                    "reason_code": protocol_codes.STACK_MEMBER_SESSION_MISSING,
+                    "counts": {"blocking_items_count": 1},
+                },
+            ),
+            reason_code=protocol_codes.STACK_MEMBER_SESSION_MISSING,
+            first_blocked_pr_number="101",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                    clear=False,
+                ),
+                patch(
+                    "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                    return_value=result,
+                ),
+                contextlib.redirect_stdout(stdout := io.StringIO()),
+                contextlib.redirect_stderr(stderr := io.StringIO()),
+            ):
+                exit_code = handle_final_gate(
+                    "octo/example",
+                    "102",
+                    ["--stack", "--no-auto-clean"],
+                )
+
+        output = stdout.getvalue()
+        self.assertEqual(exit_code, 5)
+        self.assertIn("Stack segment BLOCKED: #101, #102", output)
+        self.assertIn("blocking_items_count=1", output)
+        self.assertIn("reason_code=STACK_MEMBER_SESSION_MISSING", output)
+        self.assertIn("Efficiency report path:", output)
+        self.assertIn("Audit summary sha256:", output)
+        self.assertIn("Next action: gh-address-cr review --auto-simple octo/example 101 --lean", output)
+        self.assertIn("Do not send completion summary", output)
+        self.assertIn("Stack gate FAILED", stderr.getvalue())
+
+    def test_human_stale_stack_gate_suppresses_completion_summary(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core import protocol_codes
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.stack_gate import StackGateResult
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        result = StackGateResult(
+            repo="octo/example",
+            selected_pr_number="102",
+            stack_context=context,
+            covered_pr_numbers=("101", "102"),
+            member_outcomes=(),
+            reason_code=protocol_codes.STACK_CONTEXT_STALE,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                    clear=False,
+                ),
+                patch(
+                    "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                    return_value=result,
+                ),
+                contextlib.redirect_stdout(stdout := io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                exit_code = handle_final_gate(
+                    "octo/example",
+                    "102",
+                    ["--stack", "--no-auto-clean"],
+                )
+
+        output = stdout.getvalue()
+        self.assertEqual(exit_code, 5)
+        self.assertIn("Stack context changed during evaluation", output)
+        self.assertNotIn("PR Completion Summary Guidance", output)
+        self.assertNotIn("[gh-address-cr stack:", output)
 
     def test_parser_accepts_explicit_stack_scope_with_existing_check_policy(self):
         from gh_address_cr.commands.final_gate import _parse_final_gate_args

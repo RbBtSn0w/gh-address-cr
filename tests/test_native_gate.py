@@ -35,6 +35,32 @@ class FakeGitHubClient:
 
 
 class NativeGateTests(unittest.TestCase):
+    def test_multiple_local_validation_blockers_have_item_evidence_recovery(self):
+        from gh_address_cr.core.gate import FINAL_GATE_MISSING_VALIDATION_EVIDENCE, GateResult
+
+        signals = [
+            {
+                "item_id": item_id,
+                "item_kind": "local_finding",
+                "signal_type": "missing_required_evidence",
+                "gate_effect": "blocking",
+            }
+            for item_id in ("local:first", "local:second")
+        ]
+        result = GateResult(
+            repo="octo/example",
+            pr_number="102",
+            counts={},
+            failure_codes=[FINAL_GATE_MISSING_VALIDATION_EVIDENCE],
+            logic_validation_signals=signals,
+        )
+
+        next_action = result.to_machine_summary()["next_action"]
+
+        self.assertIn("agent evidence add octo/example 102 --item-id local:first", next_action)
+        self.assertIn("agent evidence add octo/example 102 --item-id local:second", next_action)
+        self.assertNotIn("gh-address-cr findings", next_action)
+
     def write_session(self, repo: str, pr_number: str, items: dict):
         from gh_address_cr.core.session import SessionManager
 
@@ -84,6 +110,40 @@ class NativeGateTests(unittest.TestCase):
 
                 self.assertTrue(result.passed)
                 self.assertEqual(result.counts["unresolved_remote_threads_count"], 0)
+
+    def test_gatekeeper_stack_lookup_failure_replaces_stale_cache_with_unknown_readiness(self):
+        from gh_address_cr.core.gate import Gatekeeper
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import cache_pull_request_context
+        from tests.helpers import stack_observation
+
+        class UnavailableStackClient(FakeGitHubClient):
+            def get_stack_context(self, repo, pr_number):
+                raise RuntimeError("preview endpoint temporarily unavailable")
+
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, {})
+                session = manager.load()
+                cache_pull_request_context(
+                    session,
+                    project_stack_context(stack_observation(selected_pr_number=pr_number)).to_dict(),
+                )
+                manager.save(session)
+
+                result = Gatekeeper(github_client=UnavailableStackClient()).run(repo, pr_number)
+                summary = result.to_machine_summary()
+
+                self.assertTrue(result.passed)
+                self.assertEqual(summary["stack_context"]["availability"], "unavailable")
+                self.assertEqual(summary["stack_merge_readiness"], "unknown")
+                persisted = manager.load()["metadata"]["pull_request_context"]["stack_context"]
+                self.assertEqual(persisted["availability"], "unavailable")
+                self.assertTrue(
+                    manager.load()["metadata"]["pull_request_context"]["stack_membership_observed"]
+                )
 
     def test_gatekeeper_fails_resolved_thread_without_reply_evidence(self):
         from gh_address_cr.core.gate import FINAL_GATE_MISSING_REPLY_EVIDENCE, Gatekeeper

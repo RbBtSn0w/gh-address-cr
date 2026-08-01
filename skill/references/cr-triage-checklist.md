@@ -19,6 +19,13 @@ Use this checklist before deciding to fix a review item.
 - Can this be fixed locally in the current PR?
 - Does the suggestion require a new contract, new public behavior, or broader refactor?
 - Would fixing it here enlarge the PR beyond its intended purpose?
+- For a stacked PR, does
+  `ActionRequest.repository_context.stack_context.selected_pr` identify this
+  PR and its owning branch? The branch currently checked out is not evidence of
+  ownership.
+- If the change belongs to another stack member, stop this worker action and
+  classify the current item with an explicit rationale. Do not move the fix or
+  its commit evidence across layers.
 
 ## 4. Choose A Decision
 

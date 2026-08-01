@@ -24,6 +24,99 @@ STACK_REASON_CODES = (
 
 
 class RevisionBindingContractTests(unittest.TestCase):
+    def test_bound_request_becomes_stale_when_pr_leaves_stack(self):
+        from gh_address_cr.core.runtime_kernel.stack import (
+            compare_revision_binding,
+            project_stack_context,
+            revision_binding_for_context,
+        )
+
+        original = project_stack_context(stack_observation(selected_pr_number="102"))
+        binding = revision_binding_for_context(original)
+        absent = stack_observation(selected_pr_number="102")
+        absent.update(
+            {
+                "availability": "absent",
+                "selected_pr": absent["members"][1],
+                "members": [],
+            }
+        )
+
+        self.assertEqual(
+            compare_revision_binding(binding, project_stack_context(absent)),
+            "STALE_REQUEST_CONTEXT",
+        )
+
+    def test_absent_observation_clears_prior_stack_safety_hint(self):
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import cache_pull_request_context, has_observed_stack_membership
+
+        session = {"metadata": {}}
+        cache_pull_request_context(
+            session,
+            project_stack_context(stack_observation(selected_pr_number="102")).to_dict(),
+        )
+        absent = stack_observation(selected_pr_number="102")
+        absent.update(
+            {
+                "availability": "absent",
+                "selected_pr": absent["members"][1],
+                "members": [],
+            }
+        )
+        cache_pull_request_context(session, project_stack_context(absent).to_dict())
+
+        self.assertFalse(has_observed_stack_membership(session))
+
+    def test_known_stacked_unbound_publish_blocks_when_refresh_is_unavailable(self):
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.publisher import _verify_publish_revision_bindings
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import cache_pull_request_context
+
+        cached = project_stack_context(stack_observation(selected_pr_number="102")).to_dict()
+
+        class Client:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(
+                    {
+                        "schema_version": "stack_observation.v1",
+                        "availability": "unavailable",
+                        "repo": repo,
+                        "selected_pr_number": pr_number,
+                        "observed_at": "2026-08-01T12:01:00Z",
+                        "members": [],
+                    }
+                )
+
+        session = {"metadata": {}}
+        cache_pull_request_context(session, cached)
+        cache_pull_request_context(
+            session,
+            project_stack_context(
+                {
+                    "schema_version": "stack_observation.v1",
+                    "availability": "unavailable",
+                    "repo": "octo/example",
+                    "selected_pr_number": "102",
+                    "observed_at": "2026-08-01T12:00:30Z",
+                    "members": [],
+                }
+            ).to_dict(),
+        )
+        item = {"accepted_response": {"validation_commands": [{"command": "unit", "result": "passed"}]}}
+
+        with self.assertRaises(WorkflowError) as caught:
+            _verify_publish_revision_bindings(
+                "octo/example",
+                "102",
+                session,
+                [("github-thread:abc", item)],
+                Client(),
+            )
+
+        self.assertEqual(caught.exception.reason_code, "STACK_CONTEXT_UNAVAILABLE")
+
     def test_publish_preflight_rejects_invalid_current_context_before_side_effects(self):
         from gh_address_cr.core.errors import WorkflowError
         from gh_address_cr.core.publisher import _verify_publish_revision_bindings
@@ -193,6 +286,34 @@ class StackReasonCodeContractTests(unittest.TestCase):
 
 
 class StackContextContractTests(unittest.TestCase):
+    def test_present_context_rejects_duplicate_member_pr_number(self):
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+
+        observation = stack_observation(selected_pr_number="103")
+        observation["members"][1]["pr_number"] = "101"
+
+        context = project_stack_context(observation)
+
+        self.assertEqual(context.availability, "invalid")
+        self.assertEqual(context.invalid_invariant, "duplicate_member_pr_number")
+
+    def test_absent_context_rejects_selected_member_mismatch(self):
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+
+        observation = stack_observation(selected_pr_number="102")
+        observation.update(
+            {
+                "availability": "absent",
+                "selected_pr": observation["members"][2],
+                "members": [],
+            }
+        )
+
+        context = project_stack_context(observation)
+
+        self.assertEqual(context.availability, "invalid")
+        self.assertEqual(context.invalid_invariant, "selected_member_mismatch")
+
     def test_present_context_serializes_versioned_additive_machine_shape(self):
         from gh_address_cr.core.runtime_kernel.stack import project_stack_context
 

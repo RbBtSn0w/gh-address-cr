@@ -75,6 +75,12 @@ Work bottom-up and use `gh-address-cr final-gate <owner/repo> <pr_number>
 stack creation, checkout, rebase, push, modification, queueing, merge, and
 unstack operations to GitHub's `gh stack` tooling.
 
+If feedback arrives on a lower member while development is on an upper member,
+do not apply the fix to the upper branch. Read the owning PR and head branch
+from `ActionRequest.repository_context.stack_context.selected_pr`, then use the
+authorized handoff in `references/stacked-pr-workflow.md`. The review worker
+must stop rather than switching branches or propagating the stack itself.
+
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`,
 `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same
 `review` command.
@@ -144,6 +150,8 @@ Read only the reference required by the current runtime state:
 - For blocked or waiting states: `references/status-action-map.md`
 - For resolve, batch, evidence, or lease details:
   `references/agent-protocol.md`
+- For lower-layer ownership and the authorized branch-management handoff:
+  `references/stacked-pr-workflow.md`
 - Before reporting completion: `references/completion-contract.md`
 - For producer or input routing: `references/mode-producer-matrix.md`
 - Before deciding `fix`, `clarify`, `defer`, or `reject`:
