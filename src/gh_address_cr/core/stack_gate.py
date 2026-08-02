@@ -81,7 +81,6 @@ class StackGateResult:
             recovery_pr,
             self.reason_code,
             layer_reason_code=layer_reason_code,
-            layer_item_kind=self.first_blocked_item_kind,
         )
         recovery_action = (
             str(blocked_outcome.get("layer_next_action") or recovery_command)

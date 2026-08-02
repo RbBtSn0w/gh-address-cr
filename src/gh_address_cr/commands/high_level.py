@@ -322,11 +322,7 @@ def _native_summary(
 ) -> dict[str, Any]:
     raw_metrics = session.get("metrics")
     metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
-    stack_context = session_store.cached_stack_context(session) or {
-        "schema_version": "stack_context.v1",
-        "availability": "unavailable",
-        "diagnostic": {"reason_code": "STACK_CONTEXT_UNAVAILABLE"},
-    }
+    stack_context = session_store.cached_stack_context(session) or unavailable_stack_context(repo, pr_number).to_dict()
     stack_availability = str(stack_context.get("availability") or "unavailable")
     summary = {
         "status": status,

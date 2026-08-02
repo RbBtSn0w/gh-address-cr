@@ -236,7 +236,6 @@ def stack_member_recovery(
     reason_code: str | None,
     *,
     layer_reason_code: str | None = None,
-    layer_item_kind: str | None = None,
 ) -> str:
     if reason_code in {"STACK_MEMBER_SESSION_MISSING", "STACK_MEMBER_SESSION_INVALID"}:
         return review_auto_simple(repo, pr_number)
