@@ -1,3 +1,9 @@
+## [3.7.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.6.0...v3.7.0) (2026-08-02)
+
+### Features
+
+* add stacked PR support ([#220](https://github.com/RbBtSn0w/gh-address-cr/issues/220)) ([a88af79](https://github.com/RbBtSn0w/gh-address-cr/commit/a88af790a0a274559cea83b5114eb35d634e78e2))
+
 ## [3.6.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.5.12...v3.6.0) (2026-07-25)
 
 ### Features
