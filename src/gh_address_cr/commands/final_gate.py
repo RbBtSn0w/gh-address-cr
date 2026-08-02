@@ -193,12 +193,13 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         parsed.audit_id,
         stack_result,
     )
-    stack_artifact, stack_telemetry = _archive_and_clean_workspace_if_passed(
+    stack_artifact, archived_stack_telemetry = _archive_and_clean_workspace_if_passed(
         parsed,
         stack_result,
         stack_artifact,
         stack_telemetry,
     )
+    stack_telemetry = archived_stack_telemetry or stack_telemetry
     stack_payload["artifact_path"] = str(stack_artifact)
     stack_payload["telemetry"] = {
         "coverage_label": stack_telemetry["coverage_label"],

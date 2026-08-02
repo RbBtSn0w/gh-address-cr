@@ -51,6 +51,8 @@ class StackGateResult:
                 nested_waiting_on = str(blocked_outcome.get("layer_waiting_on") or "").strip()
                 if nested_waiting_on:
                     return nested_waiting_on
+        if self.reason_code is None:
+            return None
         return {
             protocol_codes.STACK_CONTEXT_UNAVAILABLE: "stack_context",
             protocol_codes.STACK_CONTEXT_INVALID: "stack_context",
@@ -202,6 +204,8 @@ def evaluate_stack_gate(
 
 def _layer_blocking_item_kind(layer: GateResult | None) -> str | None:
     if layer is None:
+        return None
+    if layer.reason_code is None:
         return None
     expected_signal_types = {
         "FINAL_GATE_MISSING_VALIDATION_EVIDENCE": {"missing_required_evidence"},

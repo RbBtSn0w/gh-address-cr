@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
-from gh_address_cr.core.runtime_kernel.stack import stack_context_from_serialized
+from gh_address_cr.core.runtime_kernel.stack import StackContext, stack_context_from_serialized
 from gh_address_cr.core.validation_evidence import revision_evidence_status, validation_evidence_has_success
 
 TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
@@ -91,7 +91,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
     return signals
 
 
-def _current_stack_context(session: Mapping[str, Any]):
+def _current_stack_context(session: Mapping[str, Any]) -> StackContext | None:
     metadata = session.get("metadata")
     observed = metadata.get("pull_request_context") if isinstance(metadata, Mapping) else None
     payload = observed.get("stack_context") if isinstance(observed, Mapping) else None

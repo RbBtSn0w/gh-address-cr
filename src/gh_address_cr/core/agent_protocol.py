@@ -521,6 +521,7 @@ def _verify_request_revision_binding(
         str(request_stack_context.get("availability") or "") if isinstance(request_stack_context, dict) else ""
     )
     was_known_stacked = session_store.has_observed_stack_membership(session)
+    reason: str | None
     if binding is not None and str(binding.get("pr_number") or "") != str(pr_number):
         reason = protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
     elif binding is None and request_stack_availability == "invalid":

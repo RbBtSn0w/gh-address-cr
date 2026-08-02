@@ -357,7 +357,8 @@ def compare_revision_binding(binding: Mapping[str, Any] | None, current: StackCo
 def stack_context_from_serialized(payload: Mapping[str, Any], *, repo: str, pr_number: str) -> StackContext:
     availability = str(payload.get("availability") or "invalid")
     selected = payload.get("selected_pr")
-    stack = payload.get("stack") if isinstance(payload.get("stack"), Mapping) else {}
+    stack_payload = payload.get("stack")
+    stack: Mapping[str, Any] = stack_payload if isinstance(stack_payload, Mapping) else {}
     observation: JsonDict = {
         "schema_version": STACK_OBSERVATION_SCHEMA_VERSION,
         "availability": availability,

@@ -357,6 +357,7 @@ def _verify_publish_revision_bindings(
             exit_code=5,
             message="Publish blocked because stacked-PR context could not be refreshed.",
         ) from exc
+    reason: str | None
     if not isinstance(current, StackContext):
         reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
     else:
