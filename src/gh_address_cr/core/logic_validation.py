@@ -4,7 +4,8 @@ from typing import Any, Mapping
 
 from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
-from gh_address_cr.core.validation_evidence import validation_evidence_has_success
+from gh_address_cr.core.runtime_kernel.stack import StackContext, stack_context_from_serialized
+from gh_address_cr.core.validation_evidence import revision_evidence_status, validation_evidence_has_success
 
 TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
@@ -20,6 +21,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
         iterable = items
 
     signals: list[LogicValidationSignal] = []
+    stack_context = _current_stack_context(session)
     for item in iterable:
         if not isinstance(item, Mapping):
             continue
@@ -33,6 +35,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "state_contradiction",
                     "high",
                     "Item claims publish readiness while runtime state is not terminal.",
@@ -46,6 +49,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "missing_required_evidence",
                     "high",
                     "Terminal work item is missing validation evidence.",
@@ -55,10 +59,28 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             )
             continue
 
+        if stack_context is not None and _requires_validation_evidence(item, item_kind, state):
+            evidence_status = revision_evidence_status(_revision_binding(item), stack_context)
+            if evidence_status != "current":
+                signal_type = f"{evidence_status}_revision_evidence"
+                signals.append(
+                    _signal(
+                        item_id,
+                        item_kind,
+                        signal_type,
+                        "high",
+                        "Validation evidence does not prove the current stacked-member revision.",
+                        "Refresh the stack and rerun validation for this PR layer.",
+                        "blocking",
+                    )
+                )
+                continue
+
         if _is_low_confidence(item):
             signals.append(
                 _signal(
                     item_id,
+                    item_kind,
                     "low_confidence_advisory",
                     "low",
                     "Item carries a low-confidence logic validation marker.",
@@ -67,6 +89,26 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
                 )
             )
     return signals
+
+
+def _current_stack_context(session: Mapping[str, Any]) -> StackContext | None:
+    metadata = session.get("metadata")
+    observed = metadata.get("pull_request_context") if isinstance(metadata, Mapping) else None
+    payload = observed.get("stack_context") if isinstance(observed, Mapping) else None
+    if not isinstance(payload, Mapping) or payload.get("availability") != "present":
+        return None
+    return stack_context_from_serialized(
+        payload,
+        repo=str(session.get("repo") or ""),
+        pr_number=str(session.get("pr_number") or ""),
+    )
+
+
+def _revision_binding(item: Mapping[str, Any]) -> Any:
+    accepted = item.get("accepted_response")
+    if isinstance(accepted, Mapping) and isinstance(accepted.get("revision_binding"), Mapping):
+        return accepted["revision_binding"]
+    return item.get("revision_binding")
 
 
 def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
@@ -153,6 +195,7 @@ def _is_low_confidence(item: Mapping[str, Any]) -> bool:
 
 def _signal(
     item_id: str,
+    item_kind: str,
     signal_type: str,
     confidence: str,
     explanation: str,
@@ -162,6 +205,7 @@ def _signal(
     return LogicValidationSignal(
         signal_id=f"logic:{signal_type}:{item_id}",
         item_id=item_id,
+        item_kind=item_kind,
         signal_type=signal_type,
         confidence=confidence,
         explanation=explanation,

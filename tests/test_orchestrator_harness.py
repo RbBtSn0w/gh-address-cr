@@ -11,6 +11,7 @@ from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.session import SessionManager, load_session, session_file
 from gh_address_cr.orchestrator.harness import _version_tuple, handle_agent_orchestrate
 from gh_address_cr.orchestrator.session import load_orchestration_session
+from tests.test_native_workflow import UnstackedGitHubClient
 
 
 class TestOrchestratorHarness(unittest.TestCase):
@@ -20,8 +21,14 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.env_patch = patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": self.temp_dir.name}, clear=False)
         self.env_patch.start()
+        self.stack_client_patch = patch(
+            "gh_address_cr.core.agent_protocol.GitHubClient",
+            return_value=UnstackedGitHubClient(),
+        )
+        self.stack_client_patch.start()
 
     def tearDown(self):
+        self.stack_client_patch.stop()
         self.env_patch.stop()
         self.temp_dir.cleanup()
 

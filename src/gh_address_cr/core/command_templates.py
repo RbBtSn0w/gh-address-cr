@@ -25,8 +25,25 @@ def address(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "address", repo, pr_number, "--lean")
 
 
+def review(repo: str, pr_number: str) -> str:
+    return shell_command("gh-address-cr", "review", repo, pr_number)
+
+
 def review_auto_simple(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "review", "--auto-simple", repo, pr_number, "--lean")
+
+
+def findings_refresh(repo: str, pr_number: str) -> str:
+    return shell_command(
+        "gh-address-cr",
+        "findings",
+        repo,
+        pr_number,
+        "--input",
+        "<findings.json>",
+        "--source",
+        "<source>",
+    )
 
 
 def threads(repo: str, pr_number: str) -> str:
@@ -207,6 +224,41 @@ def publish(repo: str, pr_number: str) -> str:
 
 def final_gate(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "final-gate", repo, pr_number)
+
+
+def final_gate_stack(repo: str, pr_number: str) -> str:
+    return shell_command("gh-address-cr", "final-gate", repo, pr_number, "--stack")
+
+
+def stack_member_recovery(
+    repo: str,
+    pr_number: str,
+    reason_code: str | None,
+    *,
+    layer_reason_code: str | None = None,
+) -> str:
+    if reason_code in {"STACK_MEMBER_SESSION_MISSING", "STACK_MEMBER_SESSION_INVALID"}:
+        return review_auto_simple(repo, pr_number)
+    if reason_code == "STACK_MEMBER_BLOCKED":
+        if layer_reason_code in {
+            "FINAL_GATE_UNRESOLVED_REMOTE_THREADS",
+            "FINAL_GATE_BLOCKING_GITHUB_ITEMS",
+        }:
+            return address(repo, pr_number)
+        if layer_reason_code == "FINAL_GATE_MISSING_REPLY_EVIDENCE":
+            return evidence_add_reply(repo, pr_number)
+        if layer_reason_code in {
+            "FINAL_GATE_MISSING_VALIDATION_EVIDENCE",
+            "FINAL_GATE_STALE_REVISION_EVIDENCE",
+            "FINAL_GATE_UNBOUND_REVISION_EVIDENCE",
+        }:
+            return evidence_add_validation(repo, pr_number)
+        if layer_reason_code == "FINAL_GATE_BLOCKING_LOCAL_ITEMS":
+            return review(repo, pr_number)
+        return final_gate(repo, pr_number)
+    if reason_code in {"STACK_CONTEXT_STALE", "STACK_CONTEXT_INVALID", "STACK_CONTEXT_UNAVAILABLE"}:
+        return address(repo, pr_number)
+    return "Inspect the named member state in GitHub, then rerun " + final_gate_stack(repo, pr_number)
 
 
 def common_summary_commands(repo: str, pr_number: str) -> dict[str, str]:

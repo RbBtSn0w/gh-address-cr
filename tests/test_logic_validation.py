@@ -5,6 +5,23 @@ from gh_address_cr.core.logic_validation import generate_logic_validation_signal
 
 
 class LogicValidationSignalTest(unittest.TestCase):
+    def test_stacked_validation_requires_current_revision_binding(self):
+        from gh_address_cr.core.runtime_kernel.stack import (
+            project_stack_context,
+            revision_binding_for_context,
+        )
+        from gh_address_cr.core.validation_evidence import revision_evidence_status
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        binding = revision_binding_for_context(context)
+
+        self.assertEqual(revision_evidence_status(binding, context), "current")
+        self.assertEqual(revision_evidence_status(None, context), "unbound")
+        stale = dict(binding)
+        stale["head_oid"] = "f" * 40
+        self.assertEqual(revision_evidence_status(stale, context), "stale")
+
     def test_missing_required_evidence_generates_blocking_signal(self):
         session = {
             "items": {
@@ -22,6 +39,7 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].signal_type, "missing_required_evidence")
         self.assertEqual(signals[0].gate_effect, "blocking")
+        self.assertEqual(signals[0].to_dict().get("item_kind"), "local_finding")
 
     def test_terminal_github_thread_missing_validation_generates_blocking_signal(self):
         session = {

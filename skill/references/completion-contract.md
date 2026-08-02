@@ -2,6 +2,12 @@
 
 `gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
 
+`completion_scope: "pull_request"` proves only the selected layer. Use
+`gh-address-cr final-gate <owner/repo> <pr_number> --stack` for a bottom-up
+`completion_scope: "stack_segment"` proof. Only its reported
+`covered_pr_numbers` are covered; a closing topology change returns
+`STACK_CONTEXT_STALE` and suppresses the completion claim.
+
 Never output "done", "all resolved", "completed", or equivalent unless:
 
 - `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed
@@ -33,7 +39,13 @@ For local development loops, `runtime-only` is advisory rather than abnormal by 
 
 If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
 
-Final-gate machine output may include `logic_validation_signals`. Signals with `gate_effect=blocking` are completion blockers and must be fixed or explained through runtime evidence before claiming completion. Signals with `gate_effect=advisory` are non-blocking diagnostics; mention their implication when relevant, but do not treat them as a second review producer or as permission to bypass evidence, publish, or final-gate.
+Final-gate machine output may include `logic_validation_signals`. Each generated
+signal identifies its `item_kind` so runtime recovery can distinguish local
+findings from GitHub threads. Signals with `gate_effect=blocking` are completion
+blockers and must be fixed or explained through runtime evidence before claiming
+completion. Signals with `gate_effect=advisory` are non-blocking diagnostics;
+mention their implication when relevant, but do not treat them as a second
+review producer or as permission to bypass evidence, publish, or final-gate.
 
 For run-scoped diagnostics that must keep artifacts available after the gate, use:
 

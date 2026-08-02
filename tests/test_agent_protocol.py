@@ -133,6 +133,81 @@ class ActionProtocolTestCase(unittest.TestCase):
 
 
 class ActionRequestSchemaTests(ActionProtocolTestCase):
+    def test_stacked_request_context_binds_revision(self):
+        from gh_address_cr.core.runtime_kernel.stack import repository_context_for_stack
+        from tests.helpers import stack_observation
+
+        context = repository_context_for_stack(
+            "octo/example",
+            "102",
+            stack_observation(selected_pr_number="102"),
+        )
+
+        self.assertEqual(context["stack_context"]["schema_version"], "stack_context.v1")
+        self.assertEqual(context["revision_binding"]["schema_version"], "revision_binding.v1")
+        self.assertEqual(context["revision_binding"]["pr_number"], "102")
+        self.assertTrue(context["revision_binding"]["head_oid"])
+        self.assertTrue(context["revision_binding"]["topology_fingerprint"].startswith("sha256:"))
+
+    def test_stack_management_actions_are_explicitly_forbidden(self):
+        from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS
+
+        self.assertEqual(
+            STACK_MANAGEMENT_ACTIONS,
+            (
+                "create_stack",
+                "checkout_stack",
+                "rebase_stack",
+                "push_stack",
+                "modify_stack",
+                "unstack",
+                "queue_stack",
+                "merge_stack",
+            ),
+        )
+
+    def test_stacked_action_request_requires_stack_management_forbidden_actions(self):
+        from gh_address_cr.agent.requests import RequestValidationError, validate_action_request
+        from gh_address_cr.core.runtime_kernel.stack import repository_context_for_stack
+        from tests.helpers import stack_observation
+
+        payload = self.request_payload(
+            repository_context=repository_context_for_stack(
+                "octo/example",
+                "102",
+                stack_observation(selected_pr_number="102"),
+            )
+        )
+
+        with self.assertRaises(RequestValidationError) as caught:
+            validate_action_request(payload)
+
+        self.assertEqual(caught.exception.code, "missing_forbidden_stack_actions")
+
+    def test_revision_bound_action_request_requires_stack_management_forbidden_actions(self):
+        from gh_address_cr.agent.requests import RequestValidationError, validate_action_request
+
+        payload = self.request_payload(
+            repository_context={
+                "repo": "octo/example",
+                "pr_number": "102",
+                "revision_binding": {
+                    "schema_version": "revision_binding.v1",
+                    "pr_number": "102",
+                    "head_oid": "2" * 40,
+                    "stack_number": 7,
+                    "stack_position": 2,
+                    "topology_fingerprint": "sha256:fixture",
+                    "captured_at": "2026-08-01T12:00:00Z",
+                },
+            }
+        )
+
+        with self.assertRaises(RequestValidationError) as caught:
+            validate_action_request(payload)
+
+        self.assertEqual(caught.exception.code, "missing_forbidden_stack_actions")
+
     def test_action_request_rejects_missing_required_fields(self):
         required_fields = {
             "request_id",

@@ -401,6 +401,7 @@ class LogicValidationSignal:
     confidence: str
     explanation: str
     recommended_action: str
+    item_kind: str | None = None
     gate_effect: str = "advisory"
 
     @classmethod
@@ -412,6 +413,7 @@ class LogicValidationSignal:
             confidence=str(payload["confidence"]),
             explanation=str(payload["explanation"]),
             recommended_action=str(payload["recommended_action"]),
+            item_kind=str(payload["item_kind"]) if payload.get("item_kind") else None,
             gate_effect=_validated_string(
                 payload.get("gate_effect", "advisory"),
                 field_name="gate_effect",
@@ -420,7 +422,7 @@ class LogicValidationSignal:
         )
 
     def to_dict(self) -> JsonDict:
-        return {
+        payload = {
             "signal_id": self.signal_id,
             "item_id": self.item_id,
             "signal_type": self.signal_type,
@@ -429,6 +431,9 @@ class LogicValidationSignal:
             "recommended_action": self.recommended_action,
             "gate_effect": self.gate_effect,
         }
+        if self.item_kind is not None:
+            payload["item_kind"] = self.item_kind
+        return payload
 
 
 @dataclass(frozen=True)

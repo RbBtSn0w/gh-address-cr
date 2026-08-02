@@ -4,12 +4,14 @@ import io
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from gh_address_cr.core.runtime_kernel.stack import project_stack_context
 from tests.helpers import (
     CLI_PY,
     REVIEW_TO_FINDINGS_PY,
     PythonScriptTestCase,
+    stack_observation,
 )
 
 
@@ -79,6 +81,97 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         )
         gh.chmod(0o755)
         return gh
+
+    def test_address_machine_summary_and_session_include_stack_context(self):
+        from gh_address_cr.commands.high_level import HighLevelReviewRuntime
+
+        context = project_stack_context(stack_observation(selected_pr_number=102))
+        client = Mock()
+        client.get_stack_context.return_value = context
+        client.list_threads.return_value = []
+        stdout = io.StringIO()
+
+        with (
+            patch("gh_address_cr.commands.high_level.GitHubClient", return_value=client),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = HighLevelReviewRuntime().handle(
+                "address",
+                [self.repo, "102"],
+                human=False,
+                lean=True,
+            )
+
+        self.assertEqual(exit_code, 0)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["completion_scope"], "pull_request")
+        self.assertEqual(summary["stack_merge_readiness"], "not_evaluated")
+        self.assertEqual(summary["stack_context"]["availability"], "present")
+        self.assertEqual(summary["stack_context"]["stack"]["selected_position"], 2)
+        session = json.loads((self.state_dir / "octo__example" / "pr-102" / "session.json").read_text())
+        observed = session["metadata"]["pull_request_context"]
+        self.assertFalse(observed["authoritative"])
+        self.assertEqual(observed["authority"], "github_observation")
+        self.assertEqual(observed["stack_context"]["availability"], "present")
+
+    def test_address_unavailable_stack_context_remains_explicit_and_non_blocking(self):
+        from gh_address_cr.commands.high_level import HighLevelReviewRuntime
+
+        context = project_stack_context(
+            {
+                "schema_version": "stack_observation.v1",
+                "availability": "unavailable",
+                "repo": self.repo,
+                "selected_pr_number": self.pr,
+                "observed_at": "2026-08-01T12:00:00Z",
+                "members": [],
+            }
+        )
+        client = Mock()
+        client.get_stack_context.return_value = context
+        client.list_threads.return_value = []
+        stdout = io.StringIO()
+
+        with (
+            patch("gh_address_cr.commands.high_level.GitHubClient", return_value=client),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = HighLevelReviewRuntime().handle(
+                "address",
+                [self.repo, self.pr],
+                human=False,
+                lean=True,
+            )
+
+        self.assertEqual(exit_code, 0)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["stack_context"]["availability"], "unavailable")
+        self.assertEqual(summary["stack_merge_readiness"], "unknown")
+
+    def test_address_stack_lookup_failure_is_fail_open_for_thread_ingestion(self):
+        from gh_address_cr.commands.high_level import HighLevelReviewRuntime
+
+        client = Mock()
+        client.get_stack_context.side_effect = RuntimeError("preview endpoint temporarily unavailable")
+        client.list_threads.return_value = []
+        stdout = io.StringIO()
+
+        with (
+            patch("gh_address_cr.commands.high_level.GitHubClient", return_value=client),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = HighLevelReviewRuntime().handle(
+                "address",
+                [self.repo, self.pr],
+                human=False,
+                lean=True,
+            )
+
+        self.assertEqual(exit_code, 0)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["stack_context"]["availability"], "unavailable")
+        self.assertEqual(summary["stack_merge_readiness"], "unknown")
+        client.list_threads.assert_called_once_with(self.repo, self.pr)
 
     def test_cli_help_lists_unified_commands(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
@@ -276,6 +369,9 @@ else:
                 "waiting_on",
                 "telemetry",
                 "completion_summary_guidance",
+                "completion_scope",
+                "stack_context",
+                "stack_merge_readiness",
             },
         )
         self.assertEqual(summary["status"], "PASSED")
@@ -1423,6 +1519,7 @@ else:
             {
                 "artifact_path",
                 "commands",
+                "completion_scope",
                 "counts",
                 "exit_code",
                 "gate_scope",
@@ -1433,9 +1530,13 @@ else:
                 "reason_code",
                 "repo",
                 "status",
+                "stack_context",
+                "stack_merge_readiness",
                 "waiting_on",
             },
         )
+        self.assertEqual(summary["completion_scope"], "pull_request")
+        self.assertEqual(summary["stack_context"]["availability"], "unavailable")
         self.assertEqual(summary["status"], "BLOCKED")
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)

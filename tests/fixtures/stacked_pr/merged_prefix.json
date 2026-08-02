@@ -1,0 +1,16 @@
+{
+  "schema_version": "stack_observation.v1",
+  "availability": "present",
+  "repo": "octo/example",
+  "selected_pr_number": "103",
+  "observed_at": "2026-08-01T12:00:00Z",
+  "stack_node_id": "STACK_7",
+  "stack_number": 7,
+  "trunk_ref_name": "main",
+  "reported_size": 3,
+  "members": [
+    {"position": 1, "pr_number": "101", "state": "MERGED", "is_draft": false, "base_ref_name": "main", "head_ref_name": "feature/base", "head_oid": "1111111111111111111111111111111111111111", "merge_queue_state": null},
+    {"position": 2, "pr_number": "102", "state": "OPEN", "is_draft": false, "base_ref_name": "main", "head_ref_name": "feature/middle", "head_oid": "2222222222222222222222222222222222222222", "merge_queue_state": null},
+    {"position": 3, "pr_number": "103", "state": "OPEN", "is_draft": false, "base_ref_name": "feature/middle", "head_ref_name": "feature/top", "head_oid": "3333333333333333333333333333333333333333", "merge_queue_state": null}
+  ]
+}

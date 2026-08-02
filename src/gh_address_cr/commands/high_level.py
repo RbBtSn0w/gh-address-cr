@@ -30,6 +30,7 @@ from gh_address_cr.core.handoff import (
     record_producer_result,
 )
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.runtime_kernel.stack import unavailable_stack_context
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -321,6 +322,8 @@ def _native_summary(
 ) -> dict[str, Any]:
     raw_metrics = session.get("metrics")
     metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
+    stack_context = session_store.cached_stack_context(session) or unavailable_stack_context(repo, pr_number).to_dict()
+    stack_availability = str(stack_context.get("availability") or "unavailable")
     summary = {
         "status": status,
         "repo": repo,
@@ -341,6 +344,9 @@ def _native_summary(
         # Inline pre-gate: not the authoritative completion proof. Only
         # `final-gate` (gate_scope=final) checks pending reviews and PR checks.
         "gate_scope": "inline",
+        "completion_scope": "pull_request",
+        "stack_context": stack_context,
+        "stack_merge_readiness": "unknown" if stack_availability in {"unavailable", "invalid"} else "not_evaluated",
         "commands": summary_commands(repo, pr_number),
     }
     if diagnostics:
@@ -806,6 +812,21 @@ class HighLevelReviewRuntime:
         remote_threads: list[dict[str, Any]] = []
         if command in {"address", "review", "threads", "adapter"}:
             client = GitHubClient()
+            try:
+                stack_context = client.get_stack_context(repo, pr_number)
+            except Exception:
+                stack_context = unavailable_stack_context(repo, pr_number, observed_at=_utc_now())
+            session_store.cache_pull_request_context(session, stack_context.to_dict())
+            try:
+                from gh_address_cr.core.telemetry_safety import stack_telemetry_attributes
+                from gh_address_cr.otel_tracing import add_current_span_event
+
+                add_current_span_event(
+                    "gh_address_cr.stack.discovered",
+                    stack_telemetry_attributes(stack_context),
+                )
+            except Exception:
+                pass
             remote_threads = client.list_threads(repo, pr_number)
             session = core_gate.session_with_remote_threads(session, remote_threads)
         return session, remote_threads

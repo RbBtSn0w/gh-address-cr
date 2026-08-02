@@ -18,11 +18,15 @@ from gh_address_cr.commands.common import (
     maybe_prepend_implicit_scope,
     prepend_optional,
 )
+from gh_address_cr.core import command_templates as core_command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core import protocol_codes as core_protocol_codes
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core import stack_gate as core_stack_gate
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.github.client import GitHubClient
 
 
 def _parse_final_gate_args(
@@ -41,6 +45,7 @@ def _parse_final_gate_args(
     parser.set_defaults(auto_clean=True)
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("--snapshot", default="")
+    parser.add_argument("--stack", action="store_true", help="Evaluate the bottom-up stack segment through this PR.")
     checks_group = parser.add_mutually_exclusive_group()
     checks_group.add_argument("--require-checks", action="store_true", help="Require all PR checks to be green.")
     checks_group.add_argument(
@@ -58,7 +63,7 @@ def _parse_final_gate_args(
 
 def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
-    result: core_gate.GateResult,
+    result: core_gate.GateResult | core_stack_gate.StackGateResult,
     summary_path: Path,
     telemetry_report: EfficiencyReportPayload | None,
 ) -> tuple[Path, EfficiencyReportPayload | None]:
@@ -118,10 +123,131 @@ def _emit_machine_summary(
     sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
 
 
+def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: bool) -> int:
+    try:
+        stack_result = core_stack_gate.run_stack_gate(
+            parsed.repo,
+            parsed.pr_number,
+            github_client=GitHubClient(),
+            snapshot_path=parsed.snapshot or None,
+            require_checks=parsed.require_checks,
+            require_required_checks=parsed.require_required_checks,
+        )
+    except FileNotFoundError as exc:
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "FINAL_GATE_INPUT_MISSING",
+                str(exc),
+                2,
+                completion_scope="stack_segment",
+                stack_merge_readiness="unknown",
+            )
+        else:
+            print(str(exc), file=sys.stderr)
+        return 2
+    except core_stack_gate.StackContextDiscoveryError as exc:
+        message = f"Stack final gate failed to evaluate: {exc}"
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "STACK_CONTEXT_UNAVAILABLE",
+                message,
+                5,
+                waiting_on="stack_context",
+                completion_scope="stack_segment",
+                stack_merge_readiness="unknown",
+                next_action=(
+                    "Restore GitHub stack context, then rerun "
+                    f"`{core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number)}`."
+                ),
+                commands={
+                    "address": core_command_templates.address(parsed.repo, parsed.pr_number),
+                    "final_gate_stack": core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number),
+                },
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 5
+    except Exception as exc:
+        message = f"Stack final gate failed to evaluate: {exc}"
+        if machine_requested:
+            emit_final_gate_machine_error(
+                parsed.repo,
+                parsed.pr_number,
+                "FINAL_GATE_EVALUATION_FAILED",
+                message,
+                5,
+                completion_scope="stack_segment",
+                stack_merge_readiness="unknown",
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 5
+    stack_payload = stack_result.to_machine_summary()
+    stack_artifact, stack_telemetry = write_stack_final_gate_artifacts(
+        parsed.repo,
+        parsed.pr_number,
+        parsed.audit_id,
+        stack_result,
+    )
+    stack_artifact, archived_stack_telemetry = _archive_and_clean_workspace_if_passed(
+        parsed,
+        stack_result,
+        stack_artifact,
+        stack_telemetry,
+    )
+    stack_telemetry = archived_stack_telemetry or stack_telemetry
+    stack_payload["artifact_path"] = str(stack_artifact)
+    stack_payload["telemetry"] = {
+        "coverage_label": stack_telemetry["coverage_label"],
+        "report_artifact": stack_telemetry.get("report_artifact"),
+        "total_events": stack_telemetry.get("total_events"),
+        "success_rate": stack_telemetry.get("success_rate"),
+        "confidence": stack_telemetry.get("confidence"),
+        "sources": stack_telemetry.get("sources", []),
+        "total_observed_duration_ms": stack_telemetry.get("total_observed_duration_ms"),
+        "slowest_operations": stack_telemetry.get("slowest_operations", []),
+        "error_prone_operations": stack_telemetry.get("error_prone_operations", []),
+        "inefficiency_flags": stack_telemetry.get("inefficiency_flags", []),
+        "diagnostics": stack_telemetry.get("diagnostics", []),
+    }
+    if stack_result.passed:
+        completion_summary = build_stack_completion_summary_model(
+            stack_result,
+            stack_telemetry,
+        )
+        stack_payload["completion_summary"] = completion_summary
+        stack_payload["completion_summary_line"] = completion_summary["line"]
+        stack_payload["completion_summary_guidance"] = build_stack_completion_summary_guidance(
+            stack_result,
+            stack_telemetry,
+            summary_path=stack_artifact,
+        )
+    if machine_requested:
+        sys.stdout.write(json.dumps(stack_payload, indent=2, sort_keys=True) + "\n")
+    else:
+        emit_stack_final_gate_result(stack_result, stack_artifact, stack_telemetry)
+    if not stack_result.passed and not machine_requested:
+        blocked_member = (
+            f" at PR #{stack_result.first_blocked_pr_number}"
+            if stack_result.first_blocked_pr_number
+            else ""
+        )
+        print(
+            f"\nStack gate FAILED: {stack_result.reason_code}{blocked_member}. "
+            "Do not send completion summary.",
+            file=sys.stderr,
+        )
+    return stack_result.exit_code
+
+
 def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list[str]) -> int:
     if repo in {"-h", "--help"} or pr_number in {"-h", "--help"} or passthrough[:1] in (["-h"], ["--help"]):
         print(
-            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--no-auto-clean] [--require-checks|--require-required-checks]"
+            "usage: gh-address-cr final-gate <owner/repo> <pr_number> [--stack] [--no-auto-clean] [--require-checks|--require-required-checks]"
         )
         return 0
 
@@ -131,6 +257,9 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     assert parsed is not None
 
     machine_requested = bool(parsed.machine)
+
+    if parsed.stack:
+        return _handle_stack_final_gate(parsed, machine_requested=machine_requested)
 
     try:
         result = core_gate.Gatekeeper().run(
@@ -172,18 +301,180 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     return 0
 
 
-def emit_final_gate_machine_error(repo: str, pr_number: str, reason_code: str, message: str, exit_code: int) -> None:
+def build_stack_completion_summary_line(
+    result: core_stack_gate.StackGateResult,
+    telemetry_report: EfficiencyReportPayload,
+) -> str:
+    return build_stack_completion_summary_model(result, telemetry_report)["line"]
+
+
+def _stack_layer_projection(result: core_stack_gate.StackGateResult) -> core_gate.GateResult:
+    observed_counts = result.to_machine_summary().get("counts") or {}
+    counts = {key: _safe_int(observed_counts.get(key), default=0) for key in core_gate.COUNT_KEYS}
+    return core_gate.GateResult(
+        repo=result.repo,
+        pr_number=result.selected_pr_number,
+        counts=counts,
+        failure_codes=[result.reason_code] if result.reason_code else [],
+        check_requirement=result.check_requirement,
+        stack_context=result.stack_context.to_dict(),
+    )
+
+
+def build_stack_completion_summary_model(
+    result: core_stack_gate.StackGateResult,
+    telemetry_report: EfficiencyReportPayload,
+) -> dict[str, str]:
+    model = build_completion_summary_model(_stack_layer_projection(result), telemetry_report)
+    status = "PASSED" if result.passed else "FAILED"
+    layer_prefix = f"[gh-address-cr: {status} | "
+    suffix = model["line"].removeprefix(layer_prefix)
+    model["line"] = (
+        f"[gh-address-cr stack: {status} | scope: stack segment through PR #{result.selected_pr_number} | "
+        f"members: {len(result.covered_pr_numbers)} | {suffix}"
+    )
+    return model
+
+
+def build_stack_completion_summary_guidance(
+    result: core_stack_gate.StackGateResult,
+    telemetry_report: EfficiencyReportPayload,
+    *,
+    summary_path: Path,
+) -> str:
+    projection = _stack_layer_projection(result)
+    guidance = build_completion_summary_guidance(
+        projection,
+        telemetry_report,
+        summary_path=summary_path,
+        include_sha256=True,
+    )
+    return guidance.replace(
+        build_completion_summary_line(projection, telemetry_report),
+        build_stack_completion_summary_line(result, telemetry_report),
+        1,
+    ).replace(
+        "Recommended user-facing completion summary:",
+        "Recommended user-facing stack completion summary:",
+        1,
+    )
+
+
+def emit_stack_final_gate_result(
+    result: core_stack_gate.StackGateResult,
+    summary_path: Path,
+    telemetry_report: EfficiencyReportPayload,
+) -> None:
+    projection = _stack_layer_projection(result)
+    covered = ", ".join(f"#{number}" for number in result.covered_pr_numbers)
+    print(f"Stack segment {'PASSED' if result.passed else 'BLOCKED'}: {covered or 'none'}")
+    if result.passed:
+        print("Verified: 0 Unresolved Threads found")
+        print("Verified: 0 Pending Reviews found")
+        if result.check_requirement:
+            print("Verified: 0 Non-green PR Checks found")
+        print(f"Session blocking items: {projection.counts['blocking_items_count']}")
+    else:
+        print(f"Gate FAILED: {result.reason_code or 'STACK_MEMBER_BLOCKED'}")
+        if result.first_blocked_pr_number:
+            print(f"First blocked PR: #{result.first_blocked_pr_number}")
+        print(f"Next action: {result.to_machine_summary()['next_action']}")
+    print()
+    print("== Machine Gate Diagnostics ==")
+    for key in core_gate.COUNT_KEYS:
+        print(f"{key}={projection.counts[key]}")
+    print(f"reason_code={result.reason_code or 'PASSED'}")
+    print(f"exit_code={result.exit_code}")
+    print()
+    print("== Agent Efficiency Summary ==")
+    print(f"telemetry_coverage_label={telemetry_report['coverage_label']}")
+    print(f"telemetry_total_events={telemetry_report['total_events']}")
+    print(f"telemetry_success_rate={telemetry_report['success_rate']:.1f}")
+    print(f"telemetry_sources={telemetry_sources_summary(telemetry_report)}")
+    print(f"telemetry_diagnostics={telemetry_diagnostics_summary(telemetry_report)}")
+    if telemetry_report["inefficiency_flags"]:
+        print("telemetry_inefficiency_flags=" + "; ".join(telemetry_report["inefficiency_flags"]))
+    else:
+        print("telemetry_inefficiency_flags=none")
+    print(f"Efficiency report path: {telemetry_report.get('report_artifact') or 'N/A'}")
+    print(f"Audit summary path: {summary_path}")
+    print(f"Audit summary sha256: {read_file_sha256(summary_path)}")
+    if result.reason_code == core_protocol_codes.STACK_CONTEXT_STALE:
+        print("\nStack context changed during evaluation. Do not send completion summary.")
+    else:
+        print("\n== PR Completion Summary Guidance ==")
+        print(build_stack_completion_summary_guidance(result, telemetry_report, summary_path=summary_path))
+
+
+def write_stack_final_gate_artifacts(
+    repo: str,
+    pr_number: str,
+    audit_id: str,
+    result: core_stack_gate.StackGateResult,
+) -> tuple[Path, EfficiencyReportPayload]:
+    paths = core_paths.SessionPaths(repo, pr_number)
+    paths.workspace_dir.mkdir(parents=True, exist_ok=True)
+    artifact = paths.workspace_dir / "stack-audit-summary.md"
+    telemetry_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    projection = _stack_layer_projection(result)
+    lines = [
+        "# Stack Audit Summary",
+        "",
+        f"- repo: {repo}",
+        f"- selected_pr: {pr_number}",
+        f"- run_id: {audit_id or 'default'}",
+        "- completion_scope: stack_segment",
+        f"- status: {'passed' if result.passed else 'failed'}",
+        f"- reason_code: {result.reason_code or 'PASSED'}",
+        f"- covered_member_count: {len(result.covered_pr_numbers)}",
+        f"- check_requirement: {result.check_requirement or 'none'}",
+        *[f"- {key}: {projection.counts[key]}" for key in core_gate.COUNT_KEYS],
+        f"- telemetry_coverage_label: {telemetry_report['coverage_label']}",
+        f"- telemetry_total_events: {telemetry_report.get('total_events', 0)}",
+        f"- telemetry_success_rate: {_safe_float(telemetry_report.get('success_rate'), default=0.0):.1f}",
+        f"- telemetry_sources: {telemetry_sources_summary(telemetry_report)}",
+        f"- telemetry_diagnostics: {telemetry_diagnostics_summary(telemetry_report)}",
+        f"- telemetry_inefficiency_flags: {', '.join(telemetry_report.get('inefficiency_flags') or []) or 'none'}",
+        f"- efficiency_report_artifact: {paths.efficiency_report_file.name}",
+    ]
+    if result.passed:
+        lines.extend(["", "## Stack Completion Summary", build_stack_completion_summary_line(result, telemetry_report)])
+    write_json_atomic(paths.workspace_dir / "stack-gate-result.json", result.to_machine_summary())
+    artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return artifact, telemetry_report
+
+
+def emit_final_gate_machine_error(
+    repo: str,
+    pr_number: str,
+    reason_code: str,
+    message: str,
+    exit_code: int,
+    *,
+    waiting_on: str = "final_gate",
+    completion_scope: str | None = None,
+    stack_merge_readiness: str | None = None,
+    next_action: str | None = None,
+    commands: dict[str, str] | None = None,
+) -> None:
     payload = {
         "status": "BLOCKED",
         "reason_code": reason_code,
-        "next_action": message,
-        "waiting_on": "final_gate",
+        "next_action": next_action or message,
+        "waiting_on": waiting_on,
         "exit_code": exit_code,
         "repo": repo,
         "pr_number": str(pr_number),
         "counts": {},
         "failure_codes": [reason_code],
     }
+    if completion_scope is not None:
+        payload["gate_scope"] = "final"
+        payload["completion_scope"] = completion_scope
+    if stack_merge_readiness is not None:
+        payload["stack_merge_readiness"] = stack_merge_readiness
+    if commands is not None:
+        payload["commands"] = commands
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 

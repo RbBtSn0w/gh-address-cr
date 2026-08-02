@@ -11,7 +11,10 @@ with ``missing_required_evidence`` and no claim path can attach it
 """
 
 import json
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from gh_address_cr.core.logic_validation import generate_logic_validation_signals
 from tests.helpers import PythonScriptTestCase
@@ -136,6 +139,118 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
         result = self._add_validation("--validation", "python3 -m unittest=passed")
         self.assertEqual(result.returncode, 4, result.stdout)
         self.assertEqual(json.loads(result.stdout)["reason_code"], "THREAD_NOT_TERMINAL")
+
+
+class StackedValidationEvidenceIngestTest(unittest.TestCase):
+    def test_invalid_item_is_rejected_before_stack_discovery(self):
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.session import SessionManager
+
+        class NoNetworkClient:
+            calls = 0
+
+            def get_stack_context(self, repo, pr_number):
+                self.calls += 1
+                raise AssertionError("invalid item must fail before stack discovery")
+
+        repo = "octo/example"
+        pr_number = "102"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                SessionManager(repo, pr_number).save(
+                    SessionManager(repo, pr_number).create(status="WAITING_FOR_GATE")
+                )
+
+                client = NoNetworkClient()
+                with self.assertRaises(WorkflowError) as caught:
+                    workflow.record_validation_evidence(
+                        repo,
+                        pr_number,
+                        item_id="local:missing",
+                        commit_hash="abc1234",
+                        files=["src/recon.py"],
+                        validation_commands=[{"command": "unit", "result": "passed"}],
+                        github_client=client,
+                    )
+
+                self.assertEqual(caught.exception.reason_code, "UNKNOWN_VALIDATION_ITEM")
+                self.assertEqual(client.calls, 0)
+
+    def test_terminal_local_finding_accepts_revision_bound_validation(self):
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import SessionManager
+        from tests.helpers import stack_observation
+
+        class StackClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(stack_observation(selected_pr_number=pr_number))
+
+        repo = "octo/example"
+        pr_number = "102"
+        item = {
+            "item_id": "local:fixed",
+            "item_kind": "local_finding",
+            "source": "code-review",
+            "state": "fixed",
+            "status": "CLOSED",
+            "blocking": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager(repo, pr_number)
+                session = manager.create(status="WAITING_FOR_GATE")
+                session["items"] = {item["item_id"]: item}
+                manager.save(session)
+
+                result = workflow.record_validation_evidence(
+                    repo,
+                    pr_number,
+                    item_id=item["item_id"],
+                    commit_hash="abc1234",
+                    files=["src/recon.py"],
+                    validation_commands=[{"command": "unit", "result": "passed"}],
+                    github_client=StackClient(),
+                )
+
+                self.assertEqual(result["item_kind"], "local_finding")
+                persisted = manager.load()["items"][item["item_id"]]
+                self.assertEqual(persisted["revision_binding"]["head_oid"], "2" * 40)
+
+    def test_manual_evidence_discovers_current_stack_without_cached_context(self):
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context
+        from gh_address_cr.core.session import SessionManager
+        from tests.helpers import stack_observation
+
+        class StackClient:
+            def get_stack_context(self, repo, pr_number):
+                return project_stack_context(stack_observation(selected_pr_number=pr_number))
+
+        repo = "octo/example"
+        pr_number = "102"
+        item = _resolved_fix_thread()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager(repo, pr_number)
+                session = manager.create(status="WAITING_FOR_GATE")
+                session["items"] = {item["item_id"]: item}
+                manager.save(session)
+
+                result = workflow.record_validation_evidence(
+                    repo,
+                    pr_number,
+                    item_id=item["item_id"],
+                    commit_hash="abc1234",
+                    files=["src/recon.py"],
+                    validation_commands=[{"command": "unit", "result": "passed"}],
+                    github_client=StackClient(),
+                )
+
+                self.assertEqual(result["revision_binding"]["pr_number"], pr_number)
+                persisted = manager.load()["items"][item["item_id"]]
+                self.assertEqual(persisted["revision_binding"]["head_oid"], "2" * 40)
 
 
 if __name__ == "__main__":

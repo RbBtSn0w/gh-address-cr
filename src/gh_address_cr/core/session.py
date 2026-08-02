@@ -114,6 +114,54 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     write_json_atomic(path, payload)
 
 
+def cache_pull_request_context(session: dict[str, Any], stack_context: dict[str, Any]) -> None:
+    """Cache a labelled GitHub observation without making it session truth."""
+    metadata = session.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        session["metadata"] = metadata
+    previous = metadata.get("pull_request_context")
+    previous_context = previous.get("stack_context") if isinstance(previous, dict) else None
+    availability = stack_context.get("availability")
+    if availability in {"present", "absent"}:
+        stack_membership_observed = availability == "present"
+    else:
+        stack_membership_observed = bool(
+            (isinstance(previous, dict) and previous.get("stack_membership_observed") is True)
+            or (isinstance(previous_context, dict) and previous_context.get("availability") == "present")
+        )
+    metadata["pull_request_context"] = {
+        "authority": "github_observation",
+        "authoritative": False,
+        "stack_context": dict(stack_context),
+        "stack_membership_observed": stack_membership_observed,
+        "refreshed_at": str(stack_context.get("observed_at") or ""),
+    }
+
+
+def cached_stack_context(session: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = session.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    observed = metadata.get("pull_request_context")
+    if not isinstance(observed, dict) or observed.get("authoritative") is not False:
+        return None
+    context = observed.get("stack_context")
+    return dict(context) if isinstance(context, dict) else None
+
+
+def has_observed_stack_membership(session: dict[str, Any]) -> bool:
+    """Return a conservative safety hint, never a current topology assertion."""
+    metadata = session.get("metadata")
+    observed = metadata.get("pull_request_context") if isinstance(metadata, dict) else None
+    if not isinstance(observed, dict):
+        return False
+    if observed.get("stack_membership_observed") is True:
+        return True
+    context = observed.get("stack_context")
+    return isinstance(context, dict) and context.get("availability") == "present"
+
+
 def _coerce_lease_datetimes(payload: dict[str, Any]) -> None:
     leases = payload.get("leases")
     if not isinstance(leases, dict):

@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from tests.helpers import PythonScriptTestCase
 from tests.test_control_plane_workflow import github_thread
-from tests.test_native_workflow import stale_github_thread_item
+from tests.test_native_workflow import UnstackedGitHubClient, stale_github_thread_item
 
 DISPOSITIONS = ("fix", "trivial", "reject", "clarify")
 SELECTIONS = ("single", "files", "batch")
@@ -121,7 +121,7 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
     def test_decline_reaches_final_gate_pass(self):
         from gh_address_cr.core import gate, publisher, workflow
 
-        class FakeGitHubClient:
+        class FakeGitHubClient(UnstackedGitHubClient):
             def __init__(self):
                 self.replies = []
                 self.resolved = []
@@ -142,15 +142,17 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
                     repo, pr_number, stale_github_thread_item("github-thread:THREAD_DECLINE")
                 )
 
+                client = FakeGitHubClient()
                 workflow.decline_item(
                     repo, pr_number,
                     item_id="github-thread:THREAD_DECLINE",
                     agent_id="fixer-1",
                     resolution="reject",
                     why="Style preference only; not a defect.",
+                    github_client=client,
                 )
                 published = publisher.publish_github_thread_responses(
-                    repo, pr_number, agent_id="fixer-1", github_client=FakeGitHubClient(),
+                    repo, pr_number, agent_id="fixer-1", github_client=client,
                 )
                 result = gate.evaluate_final_gate(
                     manager.load(),

@@ -34,8 +34,11 @@ from gh_address_cr.core.agent_protocol import (
     _load_response_json_object,
     _prepare_action_response_submission,
     _raise_response_rejected,
+    _refresh_stack_context_for_request,
+    _release_irrecoverable_request_lease,
     _required_evidence_for,
     _response_skeleton_for_request,
+    _verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_github_thread_item, is_stale_github_thread_item
@@ -44,12 +47,38 @@ from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.leases import LeaseConflictError, claim_lease, expire_leases
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.paths import SessionPaths
+from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
 from gh_address_cr.core.utils import coerce_now as _coerce_now
 from gh_address_cr.core.utils import get_session_items as _items
 from gh_address_cr.core.utils import get_session_ledger as _ledger
 from gh_address_cr.core.utils import normalize_string_list as _normalize_string_list
 from gh_address_cr.core.utils import return_expired_items_to_open as _return_expired_items_to_open
 from gh_address_cr.core.utils import return_item_to_claimable_state as _return_item_to_claimable_state
+
+
+class _CoherentStackContextClient:
+    """Lazily reuse one stack observation for an atomic batch submission."""
+
+    def __init__(self, delegate: Any | None):
+        self.delegate = delegate
+        self._attempted = False
+        self._context: Any | None = None
+        self._error: Exception | None = None
+
+    def get_stack_context(self, repo: str, pr_number: str) -> Any:
+        if not self._attempted:
+            self._attempted = True
+            if self.delegate is None:
+                from gh_address_cr.github.client import GitHubClient
+
+                self.delegate = GitHubClient()
+            try:
+                self._context = self.delegate.get_stack_context(repo, pr_number)
+            except Exception as exc:
+                self._error = exc
+        if self._error is not None:
+            raise self._error
+        return self._context
 
 
 def _select_batch_target_items(
@@ -120,8 +149,12 @@ def _build_fixer_action_request(
         "item": request_item,
         "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
         "required_evidence": _required_evidence_for(item, "fixer"),
-        "repository_context": {"repo": repo, "pr_number": str(pr_number)},
-        "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
+        "repository_context": repository_context_for_stack(
+            repo,
+            pr_number,
+            session_store.cached_stack_context(session),
+        ),
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
         "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
     }
     handling_boundary = _handling_boundary_summary_or_none(item, role="fixer")
@@ -394,6 +427,7 @@ def issue_batch_action_request(
     if not target_items:
         session_store.save_session(repo, pr_number, session)
         raise _no_eligible_item_error()
+    _refresh_stack_context_for_request(repo, str(pr_number), session)
 
     leased_items: list[dict[str, Any]] = []
     newly_leased_items: list[tuple[str, dict[str, Any]]] = []
@@ -474,13 +508,19 @@ def issue_batch_action_request(
 
 
 def submit_batch_action_response(
-    repo: str, pr_number: str, *, batch_path: str | Path, now: datetime | None = None
+    repo: str,
+    pr_number: str,
+    *,
+    batch_path: str | Path,
+    now: datetime | None = None,
+    github_client: Any | None = None,
 ) -> dict[str, Any]:
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
     session_paths = SessionPaths(repo, pr_number)
     ledger = _ledger(session)
     prepared_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    stack_context_client = _CoherentStackContextClient(github_client)
     seen_leases: set[str] = set()
     seen_items: set[str] = set()
 
@@ -584,6 +624,21 @@ def submit_batch_action_response(
                 )
             prepared_rows.append((response, prepared))
 
+        for response, prepared in prepared_rows:
+            binding = _verify_request_revision_binding(
+                repo,
+                pr_number,
+                session,
+                prepared,
+                response,
+                github_client=stack_context_client,
+                ledger=ledger,
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
+                now=now,
+            )
+            if binding is not None:
+                response["_runtime_revision_binding"] = binding
+
         telemetry_seen: set[tuple[str, str, str, str, str, str]] = set()
         accepted = [
             _batch_acceptance_payload(
@@ -602,6 +657,12 @@ def submit_batch_action_response(
             for response, prepared in prepared_rows
         ]
     except WorkflowError as exc:
+        if exc.reason_code in {
+            protocol_codes.STALE_REQUEST_CONTEXT,
+            protocol_codes.STACK_ACTION_CONTEXT_MISMATCH,
+        }:
+            for _, prepared in prepared_rows:
+                _release_irrecoverable_request_lease(session, prepared, now=now)
         _augment_batch_recovery_error(exc, session_paths, batch_path=batch_path, agent_id=_batch_agent_id(batch))
         session_store.save_session(repo, pr_number, session)
         raise
