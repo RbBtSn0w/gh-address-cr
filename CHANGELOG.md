@@ -1,3 +1,9 @@
+## [3.7.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.0...v3.7.1) (2026-08-03)
+
+### Bug Fixes
+
+* bind validation evidence to revisions ([#222](https://github.com/RbBtSn0w/gh-address-cr/issues/222)) ([f44ea6e](https://github.com/RbBtSn0w/gh-address-cr/commit/f44ea6eea4b65e2a6cda6dd8d755c9dfecb501bb))
+
 ## [3.7.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.6.0...v3.7.0) (2026-08-02)
 
 ### Features
