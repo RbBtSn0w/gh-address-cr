@@ -38,6 +38,66 @@ def passing_session():
 
 
 class FinalGateKernelTests(unittest.TestCase):
+    def test_fresh_item_evidence_supersedes_stale_accepted_response_binding(self):
+        from gh_address_cr.core.logic_validation import generate_logic_validation_signals
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context, revision_binding_for_context
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        session = passing_session()
+        session["pr_number"] = "102"
+        session["metadata"] = {
+            "pull_request_context": {
+                "authority": "github_observation",
+                "authoritative": False,
+                "stack_context": context.to_dict(),
+            }
+        }
+        item = session["items"]["github-thread:THREAD_DONE"]
+        stale_binding = dict(revision_binding_for_context(context))
+        stale_binding["head_oid"] = "f" * 40
+        item["accepted_response"] = {
+            "validation_commands": [{"command": "old-unit", "result": "passed"}],
+            "revision_binding": stale_binding,
+        }
+        item["validation_evidence"] = [{"command": "fresh-unit", "result": "passed"}]
+        item["revision_binding"] = revision_binding_for_context(context)
+        session["items"]["local-finding:FIXED"]["revision_binding"] = revision_binding_for_context(context)
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
+
+    def test_fresh_accepted_response_supersedes_stale_item_evidence_binding(self):
+        from gh_address_cr.core.logic_validation import generate_logic_validation_signals
+        from gh_address_cr.core.runtime_kernel.stack import project_stack_context, revision_binding_for_context
+        from tests.helpers import stack_observation
+
+        context = project_stack_context(stack_observation(selected_pr_number="102"))
+        session = passing_session()
+        session["pr_number"] = "102"
+        session["metadata"] = {
+            "pull_request_context": {
+                "authority": "github_observation",
+                "authoritative": False,
+                "stack_context": context.to_dict(),
+            }
+        }
+        item = session["items"]["github-thread:THREAD_DONE"]
+        stale_binding = dict(revision_binding_for_context(context))
+        stale_binding["head_oid"] = "f" * 40
+        item["validation_evidence"] = [{"command": "old-unit", "result": "passed"}]
+        item["revision_binding"] = stale_binding
+        item["accepted_response"] = {
+            "validation_commands": [{"command": "fresh-unit", "result": "passed"}],
+            "revision_binding": revision_binding_for_context(context),
+        }
+        session["items"]["local-finding:FIXED"]["revision_binding"] = revision_binding_for_context(context)
+
+        signals = generate_logic_validation_signals(session)
+
+        self.assertEqual(signals, [])
+
     def test_stale_stacked_revision_has_specific_gate_reason(self):
         from gh_address_cr.core.logic_validation import generate_logic_validation_signals
         from gh_address_cr.core.runtime_kernel.final_gate import (

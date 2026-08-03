@@ -60,7 +60,7 @@ def generate_logic_validation_signals(session: Mapping[str, Any]) -> list[LogicV
             continue
 
         if stack_context is not None and _requires_validation_evidence(item, item_kind, state):
-            evidence_status = revision_evidence_status(_revision_binding(item), stack_context)
+            evidence_status = _item_revision_evidence_status(item, stack_context)
             if evidence_status != "current":
                 signal_type = f"{evidence_status}_revision_evidence"
                 signals.append(
@@ -104,13 +104,6 @@ def _current_stack_context(session: Mapping[str, Any]) -> StackContext | None:
     )
 
 
-def _revision_binding(item: Mapping[str, Any]) -> Any:
-    accepted = item.get("accepted_response")
-    if isinstance(accepted, Mapping) and isinstance(accepted.get("revision_binding"), Mapping):
-        return accepted["revision_binding"]
-    return item.get("revision_binding")
-
-
 def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
     claim = str(item.get("completion_claim") or item.get("claim") or "")
     state = str(item.get("state") or "")
@@ -125,26 +118,47 @@ def _has_state_contradiction(item: Mapping[str, Any]) -> bool:
 
 
 def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
+    return bool(_validation_evidence_bindings(item))
+
+
+def _item_revision_evidence_status(item: Mapping[str, Any], stack_context: StackContext) -> str:
+    statuses = {
+        revision_evidence_status(binding, stack_context) for binding in _validation_evidence_bindings(item)
+    }
+    if "current" in statuses:
+        return "current"
+    if "stale" in statuses:
+        return "stale"
+    return "unbound"
+
+
+def _validation_evidence_bindings(item: Mapping[str, Any]) -> list[Any]:
+    bindings: list[Any] = []
+    item_binding = item.get("revision_binding")
     for key in ("validation_evidence", "validation_commands", "validation_results"):
         if validation_evidence_has_success(item.get(key)):
-            return True
+            bindings.append(item_binding)
+            break
     accepted_response = item.get("accepted_response")
     if isinstance(accepted_response, Mapping):
         for key in ("validation_evidence", "validation_commands", "validation_results"):
             if validation_evidence_has_success(accepted_response.get(key)):
-                return True
+                bindings.append(accepted_response.get("revision_binding"))
+                break
     evidence = item.get("evidence")
     if isinstance(evidence, Mapping):
-        return validation_evidence_has_success(evidence.get("validation")) or validation_evidence_has_success(
+        if validation_evidence_has_success(evidence.get("validation")) or validation_evidence_has_success(
             evidence.get("validation_evidence")
-        )
+        ):
+            bindings.append(item_binding)
+        return bindings
     if _has_content(item.get("resolution_note")) and str(item.get("decision") or "").lower() in {
         "accept",
         "manual",
         "sync",
     }:
-        return True
-    return False
+        bindings.append(item_binding)
+    return bindings
 
 
 def _has_content(value: Any) -> bool:
