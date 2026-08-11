@@ -79,7 +79,7 @@ def _write_artifact(artifact: Path, report: dict[str, Any]) -> None:
         report["diagnostics"].append(f"cr-metrics artifact unavailable: {type(exc).__name__}")
 
 
-def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
+def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:  # noqa: C901
     path = core_paths.evidence_ledger_file(repo, pr_number)
     artifact = core_paths.workspace_dir(repo, pr_number) / "cr-metrics.json"
     events, unreadable, diagnostics = _read_ledger(path)
