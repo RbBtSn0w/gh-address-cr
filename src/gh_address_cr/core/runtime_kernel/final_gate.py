@@ -331,8 +331,7 @@ def evaluate_final_gate_policy(projection: FinalGateProjection) -> FinalGatePoli
             if "unbound_revision_evidence" in revision_signal_types:
                 failure_codes_list.append(protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE)
             if any(
-                str(signal.get("signal_type") or "")
-                not in {"stale_revision_evidence", "unbound_revision_evidence"}
+                str(signal.get("signal_type") or "") not in {"stale_revision_evidence", "unbound_revision_evidence"}
                 for signal in projection.blocking_logic_validation_signals
             ):
                 failure_codes_list.append(code)

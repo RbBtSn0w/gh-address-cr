@@ -531,9 +531,7 @@ def record_validation_evidence(
     item_kind = str(item.get("item_kind") or "") if isinstance(item, dict) else ""
     if not isinstance(item, dict) or item_kind not in {"github_thread", "local_finding"}:
         reason_code = (
-            "UNKNOWN_GITHUB_THREAD"
-            if resolved_item_id.startswith("github-thread:")
-            else "UNKNOWN_VALIDATION_ITEM"
+            "UNKNOWN_GITHUB_THREAD" if resolved_item_id.startswith("github-thread:") else "UNKNOWN_VALIDATION_ITEM"
         )
         raise WorkflowError(
             status="VALIDATION_EVIDENCE_REJECTED",
@@ -543,11 +541,11 @@ def record_validation_evidence(
             message=f"No validation-eligible item `{resolved_item_id}` exists in the session.",
         )
     item_state = (
-        normalized_thread_state(item)
-        if item_kind == "github_thread"
-        else str(item.get("state") or "").strip().lower()
+        normalized_thread_state(item) if item_kind == "github_thread" else str(item.get("state") or "").strip().lower()
     )
-    terminal_states = GITHUB_THREAD_TERMINAL_STATES if item_kind == "github_thread" else TERMINAL_LOCAL_VALIDATION_STATES
+    terminal_states = (
+        GITHUB_THREAD_TERMINAL_STATES if item_kind == "github_thread" else TERMINAL_LOCAL_VALIDATION_STATES
+    )
     if item_state not in terminal_states:
         raise WorkflowError(
             status="VALIDATION_EVIDENCE_REJECTED",
@@ -1065,6 +1063,8 @@ def _trivial_thread_eligibility(item: dict[str, Any] | None) -> tuple[bool, str]
     if not (path_trivial or text_trivial):
         return False, "Thread does not look like a documentation or typo-only concern."
     return True, "Thread is eligible for documentation or typo fast path."
+
+
 THREAD_ALIAS_RE = re.compile(r"^T(\d+)$")
 
 
