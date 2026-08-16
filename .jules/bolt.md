@@ -1,0 +1,3 @@
+## 2024-08-16 - Avoid Inline Generators and setdefault in Tight Loops
+**Learning:** In telemetry processing loops (and other hot paths), using inline generators like `any(...)` or `sum(...)` with comprehensions adds significant instantiation overhead and causes multiple iterations over the same collection. Similarly, using `dict.setdefault(key, [])` in a loop eagerly creates the fallback object (a new list) on every iteration, causing massive allocation overhead.
+**Action:** Use an explicit `for` loop to accumulate multiple metrics simultaneously over a collection. Instead of `setdefault` for complex default objects, use an explicit `if key not in dict: dict[key] = ...` check.
