@@ -468,8 +468,16 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
     known_status_events = [event for event in events if event.status != "unknown"]
     success_count = sum(1 for event in known_status_events if event.status == "success")
     success_rate = (success_count / len(known_status_events)) * 100.0 if known_status_events else 0.0
-    total_duration = sum(event.duration_ms for event in events)
-    duration_observed = any(event.duration_ms > 0 for event in events)
+
+    # ⚡ Bolt: Replace inline generator with explicit loop to reduce overhead in hot path
+    total_duration = 0
+    duration_observed = False
+    for event in events:
+        ms = event.duration_ms
+        total_duration += ms
+        if ms > 0:
+            duration_observed = True
+
     host_metrics = _aggregate_host_metrics(external_events)
     timed_events = [event for event in events if event.duration_ms > 0]
     slowest = sorted(timed_events, key=lambda event: event.duration_ms, reverse=True)[:3]
