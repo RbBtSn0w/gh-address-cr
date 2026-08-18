@@ -355,9 +355,13 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         help="Disposition (primary axis): what to do with the selected thread(s) — "
         "fix (default), trivial (doc/typo fast path), reject, or clarify.",
     )
-    parser.add_argument("--stale", action="store_true", help="Condition (primary axis): resolve matching STALE/outdated threads.")
+    parser.add_argument(
+        "--stale", action="store_true", help="Condition (primary axis): resolve matching STALE/outdated threads."
+    )
     parser.add_argument("--files", help="Selection: files-scope collective, instead of a single item_id.")
-    parser.add_argument("--file", action="append", default=[], help="Selection: repeatable single-path form of --files.")
+    parser.add_argument(
+        "--file", action="append", default=[], help="Selection: repeatable single-path form of --files."
+    )
     parser.add_argument("--input", help="Selection: BatchActionResponse JSON for per-thread evidence.")
     parser.add_argument(
         "--why",
@@ -384,7 +388,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         help="[deprecated: implied by --input] Resolve multiple threads from a BatchActionResponse.",
     )
     deprecated.add_argument(
-        "--trivial", action="store_true", help="[deprecated: use --disposition trivial] Documentation/typo-only fast path."
+        "--trivial",
+        action="store_true",
+        help="[deprecated: use --disposition trivial] Documentation/typo-only fast path.",
     )
     deprecated.add_argument(
         "--reject",
@@ -401,7 +407,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     )
     deprecated.add_argument("--concern-label", help="[deprecated] Short label for the homogeneous repeated concern.")
     deprecated.add_argument(
-        "--match-files", action="store_true", help="[deprecated: implied by --files/--file] Keep resolution file-scoped."
+        "--match-files",
+        action="store_true",
+        help="[deprecated: implied by --files/--file] Keep resolution file-scoped.",
     )
     deprecated.add_argument("--include-stale", action="store_true", help="[deprecated: use --stale]")
     parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
