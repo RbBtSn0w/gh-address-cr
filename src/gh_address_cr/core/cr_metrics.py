@@ -121,7 +121,11 @@ def build_cr_summary(repo: str, pr_number: str) -> dict[str, Any]:
 
     by_item: dict[str, list[tuple[datetime, dict[str, Any]]]] = {}
     for e, t in session_events:
-        by_item.setdefault(str(e["item_id"]), []).append((t, e))
+        item_id_str = str(e["item_id"])
+        # Optimize memory allocation: Avoid `setdefault` with eager list instantiation.
+        if item_id_str not in by_item:
+            by_item[item_id_str] = []
+        by_item[item_id_str].append((t, e))
 
     per_cr: list[dict[str, Any]] = []
     completed_spans: list[int] = []
