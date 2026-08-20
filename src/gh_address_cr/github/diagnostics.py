@@ -70,7 +70,9 @@ def classify_github_failure(
         "source_scope": _source_scope(category),
     }
     if command:
-        diagnostics["command"] = [str(part) for part in command]
+        from gh_address_cr.core.telemetry_safety import safe_command_args
+
+        diagnostics["command"] = safe_command_args([str(part) for part in command])
     if returncode is not None:
         diagnostics["returncode"] = returncode
     if detail:

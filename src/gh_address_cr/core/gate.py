@@ -426,8 +426,7 @@ def _logic_validation_next_action(
     blocking = [
         signal
         for signal in logic_validation_signals
-        if signal.get("gate_effect") == "blocking"
-        and signal.get("signal_type") == "missing_required_evidence"
+        if signal.get("gate_effect") == "blocking" and signal.get("signal_type") == "missing_required_evidence"
     ]
     if not blocking:
         return None
@@ -435,14 +434,10 @@ def _logic_validation_next_action(
     if any(not item_id for item_id in item_ids):
         return None
     reconcile_commands = [
-        f"`{command_templates.evidence_add_validation(repo, pr_number, item_id=item_id)}`"
-        for item_id in item_ids
+        f"`{command_templates.evidence_add_validation(repo, pr_number, item_id=item_id)}`" for item_id in item_ids
     ]
     final_gate = command_templates.final_gate(repo, pr_number)
-    return (
-        f"Record terminal-item validation evidence with {', '.join(reconcile_commands)}, "
-        f"then rerun `{final_gate}`."
-    )
+    return f"Record terminal-item validation evidence with {', '.join(reconcile_commands)}, then rerun `{final_gate}`."
 
 
 def _revision_validation_next_action(
@@ -478,11 +473,7 @@ def _next_action_with_pr(
         return f"Run `gh-address-cr address {repo} {pr_number} --lean`, publish accepted evidence, then rerun {final_gate}."
     if reason_code == FINAL_GATE_MISSING_REPLY_EVIDENCE:
         reconcile_blocker = next(
-            (
-                blocker
-                for blocker in (reply_evidence_blockers or [])
-                if blocker.get("recoverability") == "reconcile"
-            ),
+            (blocker for blocker in (reply_evidence_blockers or []) if blocker.get("recoverability") == "reconcile"),
             None,
         )
         if reconcile_blocker is not None:
