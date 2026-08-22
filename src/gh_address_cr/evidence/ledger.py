@@ -200,6 +200,22 @@ class EvidenceLedger:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 
+    def _iter_records(self):
+        if not self.path.exists():
+            return
+        with self.path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                stripped = line.strip()
+                if stripped:
+                    yield line_number, stripped
+
+    @staticmethod
+    def _record_from_line(line_number: int, line: str) -> EvidenceRecord:
+        try:
+            return EvidenceRecord.from_json(json.loads(line))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid evidence ledger row {line_number}: {exc}") from exc
+
     def append(self, record: EvidenceRecord) -> EvidenceRecord:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
@@ -233,16 +249,9 @@ class EvidenceLedger:
         )
 
     def load(self, *, event_type: str | None = None) -> list[EvidenceRecord]:
-        if not self.path.exists():
-            return []
         records: list[EvidenceRecord] = []
-        for line_number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), start=1):
-            if not line.strip():
-                continue
-            try:
-                record = EvidenceRecord.from_json(json.loads(line))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f"Invalid evidence ledger row {line_number}: {exc}") from exc
+        for line_number, line in self._iter_records():
+            record = self._record_from_line(line_number, line)
             if event_type is None or record.event_type == event_type:
                 records.append(record)
         return records
@@ -307,9 +316,16 @@ class EvidenceLedger:
         return attempts
 
     def successful_side_effect_url(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
-        for attempt in reversed(
-            self.side_effect_attempts(idempotency_key=idempotency_key, side_effect_type=side_effect_type)
-        ):
+        latest_successful_url: str | None = None
+        for line_number, line in self._iter_records():
+            record = self._record_from_line(line_number, line)
+            if record.event_type != "side_effect_attempt":
+                continue
+            attempt = SideEffectAttempt.from_json(record.payload)
+            if idempotency_key is not None and attempt.idempotency_key != idempotency_key:
+                continue
+            if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
+                continue
             if attempt.status == "succeeded" and attempt.external_url:
-                return attempt.external_url
-        return None
+                latest_successful_url = attempt.external_url
+        return latest_successful_url
