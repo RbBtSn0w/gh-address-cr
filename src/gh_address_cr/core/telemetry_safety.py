@@ -430,7 +430,15 @@ def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, 
 def safe_command_args(argv: list[str]) -> list[str]:
     """Sanitize command line arguments to redact sensitive inputs for telemetry."""
     res = []
+    redact_next = False
     for arg in argv:
+        if redact_next:
+            redact_next = False
+            # If the next argument doesn't look like another flag, redact it.
+            if not arg.startswith("-"):
+                res.append("[redacted]")
+                continue
+
         if "=" in arg:
             lhs, eq, rhs = arg.partition("=")
             key = lhs.lstrip("-")
@@ -444,6 +452,12 @@ def safe_command_args(argv: list[str]) -> list[str]:
             else:
                 res.append(arg)
         else:
+            key = arg.lstrip("-")
+            if arg.startswith("-") and _is_unsafe_metadata_key(key):
+                redact_next = True
+                res.append(arg)
+                continue
+
             if (
                 _contains_token_marker(arg)
                 or _contains_private_identifier(arg)

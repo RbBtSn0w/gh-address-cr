@@ -146,6 +146,31 @@ class TelemetrySafetyCommandArgsTestCase(unittest.TestCase):
         ]
         self.assertEqual(safe_command_args(argv), expected)
 
+    def test_safe_command_args_redacts_space_separated_secrets(self) -> None:
+        argv = [
+            "gh-address-cr",
+            "--token",
+            "ghp_1234",
+            "--password",
+            "mysecret",
+            "--normal-flag",
+            "safe-value",
+            "--secret-key",
+            "--other-flag",
+        ]
+        expected = [
+            "gh-address-cr",
+            "--token",
+            "[redacted]",
+            "--password",
+            "[redacted]",
+            "--normal-flag",
+            "safe-value",
+            "--secret-key",
+            "--other-flag",
+        ]
+        self.assertEqual(safe_command_args(argv), expected)
+
     def test_safe_command_args_preserves_positions_and_lengths(self) -> None:
         argv = [
             "gh-address-cr",
