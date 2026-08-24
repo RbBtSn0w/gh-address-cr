@@ -122,9 +122,7 @@ def _has_validation_evidence(item: Mapping[str, Any]) -> bool:
 
 
 def _item_revision_evidence_status(item: Mapping[str, Any], stack_context: StackContext) -> str:
-    statuses = {
-        revision_evidence_status(binding, stack_context) for binding in _validation_evidence_bindings(item)
-    }
+    statuses = {revision_evidence_status(binding, stack_context) for binding in _validation_evidence_bindings(item)}
     if "current" in statuses:
         return "current"
     if "stale" in statuses:

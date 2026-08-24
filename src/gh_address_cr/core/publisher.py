@@ -379,9 +379,7 @@ def _verify_publish_revision_bindings(
             )
     if reason is not None:
         waiting_on = (
-            "validation_evidence"
-            if reason == protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE
-            else "stack_refresh"
+            "validation_evidence" if reason == protocol_codes.FINAL_GATE_UNBOUND_REVISION_EVIDENCE else "stack_refresh"
         )
         raise WorkflowError(
             status=protocol_codes.PUBLISH_BLOCKED,
