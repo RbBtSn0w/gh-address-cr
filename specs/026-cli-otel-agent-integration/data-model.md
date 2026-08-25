@@ -44,7 +44,17 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 
 ## Entity 2 — Sanitized Argument Set (new, transient)
 
-Output of the new `safe_command_args(argv: list[str]) -> list[str]`:
+> **Superseded.** `safe_command_args` was designed here but never wired into any
+> production call site; `__main__.py` and `cli.py` shipped with the stricter
+> `sanitize_cli_argv` instead, which keeps only the executable basename and the
+> recognized command token and redacts every other argument. Because the
+> per-token design below was never reachable, it did not deliver the redaction
+> this section describes — it only attracted repeated "fix the sanitizer" PRs
+> against dead code. `safe_command_args` has since been removed. The rules below
+> are retained as the original design record; the shipped contract is
+> `sanitize_cli_argv`.
+
+Output of the (removed) `safe_command_args(argv: list[str]) -> list[str]`:
 - Per-token redaction: any token matching `_contains_token_marker`,
   `_contains_private_identifier`, or `_looks_like_unnecessary_absolute_path` is
   replaced with `"[redacted]"` (not dropped — preserves argument *position* so
