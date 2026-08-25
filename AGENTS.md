@@ -112,6 +112,40 @@ unmodeled state flags, hidden fallback paths, artifact-backed truth, or new
 layers that exceed the protected baseline without a recorded blast-radius
 justification.
 
+## Automated Agent PR Policy
+
+Third-party review bots open PRs against this repository. The rulings below are
+standing decisions. Check them before opening a performance or security PR: a
+re-proposal of a change a ruling already covers will be closed.
+
+### Standing rulings
+
+- **`cr_metrics.build_cr_summary` uses `dict.setdefault` intentionally.**
+  Rewriting it as `if key not in mapping: mapping[key] = []` pushes the function
+  past the ruff `C901` complexity cap (15) and forces a `# noqa: C901`
+  suppression. `src/` carries zero in-code lint suppressions and that is a
+  deliberate invariant. The input is a single PR's evidence ledger (tens to low
+  hundreds of rows), not a hot loop. Do not re-propose without profiling
+  evidence and a version that stays under the complexity cap.
+
+- **CLI argv sanitization is owned by `sanitize_cli_argv`.** It redacts every
+  token except the executable basename and the recognized command token, so
+  per-flag redaction logic (`--token secret` versus `--token=secret`) is
+  unnecessary in the telemetry-safety layer. Do not add per-flag redaction
+  there. Subprocess-side telemetry (`command_label`, `subprocess_operation`)
+  drops all flags and their values for the same reason.
+
+- **No repository-wide reformatting.** Line width and formatting follow
+  `pyproject.toml`. A PR that re-wraps files unrelated to its stated change is
+  closed regardless of the change's merit.
+
+### Agent journal files
+
+Do not add `.jules/` or equivalent per-persona journal files to a PR branch.
+They are created fresh on every run and never land on the default branch, so
+they carry nothing forward and produce the same finding repeatedly. Durable
+agent guidance belongs in this file.
+
 ## Completion Standard
 
 A task is complete only when:
