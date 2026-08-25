@@ -300,22 +300,6 @@ class EvidenceLedger:
             timestamp=timestamp,
         )
 
-    def side_effect_attempts(
-        self,
-        *,
-        idempotency_key: str | None = None,
-        side_effect_type: str | None = None,
-    ) -> list[SideEffectAttempt]:
-        attempts: list[SideEffectAttempt] = []
-        for record in self.load(event_type="side_effect_attempt"):
-            attempt = SideEffectAttempt.from_json(record.payload)
-            if idempotency_key is not None and attempt.idempotency_key != idempotency_key:
-                continue
-            if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
-                continue
-            attempts.append(attempt)
-        return attempts
-
     def successful_side_effect_url(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
         latest_successful_url: str | None = None
         for line_number, line in self._iter_records():
