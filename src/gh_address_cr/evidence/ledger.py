@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -200,7 +201,7 @@ class EvidenceLedger:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 
-    def _iter_records(self):
+    def _iter_records(self) -> Iterator[tuple[int, str]]:
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as handle:
