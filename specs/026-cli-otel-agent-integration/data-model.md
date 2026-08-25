@@ -42,7 +42,7 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 - `gen_ai.conversation.id.source` MUST be present iff `gen_ai.conversation.id` is.
 - `vcs.*` attributes MUST be absent for non-PR commands (`version`, `doctor`).
 
-## Entity 2 — Sanitized Argument Set (new, transient)
+## Entity 2 — Sanitized Argument Set (superseded, historical)
 
 > **Superseded.** `safe_command_args` was designed here but never wired into any
 > production call site; `__main__.py` and `cli.py` shipped with the stricter

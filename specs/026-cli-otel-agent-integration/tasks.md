@@ -12,7 +12,8 @@
 > Read `sanitize_cli_argv` as the delivered contract wherever these tasks name
 > `safe_command_args`.
 
-**Scope (confirmed)**: v1 MVP = **Dimension 1** (execution + new `safe_command_args`
+**Scope (confirmed)**: v1 MVP = **Dimension 1** (execution + full-argv
+sanitization, delivered as `sanitize_cli_argv` — see the correction above
 + exit.code/error.type) · **Dimension 2** (dormant `TRACEPARENT` G-1,
 `process.parent_pid`, **Tier 2 passive session correlation FR-011**) ·
 **Dimension 3** (`gen_ai.operation/tool.name/tool.call.arguments`) · **Tier 1 VCS
