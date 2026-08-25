@@ -212,6 +212,27 @@ class NativeFoundationTests(unittest.TestCase):
 
         self.assertEqual(diagnostics["stderr_category"], "permission_mismatch")
 
+    def test_classified_command_is_redacted_like_the_stderr_excerpt(self):
+        from gh_address_cr.github.diagnostics import classify_github_failure
+
+        diagnostics = classify_github_failure(
+            "Bad credentials",
+            "",
+            1,
+            ["gh", "api", "--header", "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwx"],
+        )
+
+        self.assertEqual(diagnostics["command"][:3], ["gh", "api", "--header"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwx", " ".join(diagnostics["command"]))
+        self.assertIn("[redacted-token]", diagnostics["command"][3])
+
+    def test_classified_command_preserves_ordinary_arguments(self):
+        from gh_address_cr.github.diagnostics import classify_github_failure
+
+        diagnostics = classify_github_failure("not found", "", 1, ["gh", "pr", "view", "123"])
+
+        self.assertEqual(diagnostics["command"], ["gh", "pr", "view", "123"])
+
 
 if __name__ == "__main__":
     unittest.main()
