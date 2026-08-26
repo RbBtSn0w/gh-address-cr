@@ -260,8 +260,7 @@ def _looks_like_unnecessary_absolute_path(value: str) -> bool:
 
 
 _KEY_MARKER_PAIRS = [
-    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])"))
-    for marker in UNSAFE_METADATA_KEY_MARKERS
+    (marker, re.compile(rf"(^|[_-]){re.escape(marker)}($|[_-])")) for marker in UNSAFE_METADATA_KEY_MARKERS
 ]
 _KEY_RE = re.compile(r"(^|[_-])key($|[_-])")
 
@@ -429,8 +428,14 @@ def split_inline_env_assignments(argv: list[str]) -> tuple[list[str], dict[str, 
 
 def safe_command_args(argv: list[str]) -> list[str]:
     """Sanitize command line arguments to redact sensitive inputs for telemetry."""
-    res = []
+    res: list[str] = []
+    redact_next = False
     for arg in argv:
+        if redact_next:
+            res.append("[redacted]")
+            redact_next = False
+            continue
+
         if "=" in arg:
             lhs, eq, rhs = arg.partition("=")
             key = lhs.lstrip("-")
@@ -450,6 +455,9 @@ def safe_command_args(argv: list[str]) -> list[str]:
                 or _looks_like_unnecessary_absolute_path(arg)
             ):
                 res.append("[redacted]")
+            elif arg.startswith("-") and _is_unsafe_metadata_key(arg.lstrip("-")):
+                res.append(arg)
+                redact_next = True
             else:
                 res.append(arg)
     return res
