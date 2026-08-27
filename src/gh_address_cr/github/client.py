@@ -104,10 +104,15 @@ class GitHubClient:
                 selected_pr = pr_payload
                 raw_stack = pr_payload.get("stack")
                 if raw_stack is None:
+                    selected_position = _selected_stack_entry_position(pr_payload)
                     selected_member = _stack_member_from_pull_request(
                         pr_payload,
-                        position=1,
+                        position=selected_position or 1,
                     )
+                    if selected_position is not None:
+                        selected_member["position"] = selected_position
+                    selected_pr = dict(pr_payload)
+                    selected_pr["stackEntry"] = {"position": selected_member["position"]}
                     return project_stack_context(
                         {
                             "schema_version": "stack_observation.v1",
@@ -115,7 +120,7 @@ class GitHubClient:
                             "repo": repo,
                             "selected_pr_number": str(pr_number),
                             "observed_at": observed_at,
-                            "selected_pr": selected_member,
+                            "selected_pr": selected_pr,
                             "members": [],
                         }
                     )
@@ -496,8 +501,9 @@ def _split_repo(repo: str) -> tuple[str, str]:
 def _stack_member_from_pull_request(payload: dict[str, Any], *, position: Any) -> dict[str, Any]:
     queue_entry = payload.get("mergeQueueEntry")
     queue_state = queue_entry.get("state") if isinstance(queue_entry, dict) else None
+    stack_position = _selected_stack_entry_position(payload)
     return {
-        "position": position,
+        "position": stack_position or position,
         "pr_number": payload.get("number"),
         "state": payload.get("state"),
         "is_draft": payload.get("isDraft"),
@@ -548,6 +554,12 @@ def _selected_pr_page_identity(payload: dict[str, Any]) -> tuple[Any, ...]:
         stack_entry.get("position") if isinstance(stack_entry, dict) else None,
         queue_entry.get("state") if isinstance(queue_entry, dict) else None,
     )
+
+
+def _selected_stack_entry_position(payload: dict[str, Any]) -> int | None:
+    stack_entry = payload.get("stackEntry")
+    position = stack_entry.get("position") if isinstance(stack_entry, dict) else None
+    return position if isinstance(position, int) and not isinstance(position, bool) and position >= 1 else None
 
 
 def _selected_stack_entry_invariant(

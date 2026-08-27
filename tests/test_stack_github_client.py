@@ -30,6 +30,19 @@ class StackGitHubClientTests(unittest.TestCase):
         self.assertEqual(context.selected_pr.head_ref_name, "feature/standalone")
         self.assertEqual(len(runner.calls), 1)
 
+    def test_absent_stack_uses_reported_stack_entry_position(self):
+        payload = load_stacked_pr_fixture("absent.json")
+        payload["data"]["repository"]["pullRequest"]["stackEntry"] = {"position": 3}
+        payload["data"]["repository"]["pullRequest"]["position"] = 3
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        context = GitHubClient(runner=run).get_stack_context("octo/example", "101")
+
+        self.assertEqual(context.availability, "absent")
+        self.assertEqual(context.selected_pr_number, "101")
+
     def test_valid_stack_returns_ordered_selected_context(self):
         runner = fixture_runner("three_layer.json")
 
