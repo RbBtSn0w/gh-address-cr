@@ -104,7 +104,8 @@ def fix_reply(
         lines.extend([f"Review signal: {review_signal}", ""])
 
     lines.extend(
-        [f"- `{path}`: {file_summary}" if file_summary else f"- `{path}`" for path in files] or ["- No file list provided."]
+        [f"- `{path}`: {file_summary}" if file_summary else f"- `{path}`" for path in files]
+        or ["- No file list provided."]
     )
 
     rationale_lines = _format_rationale(why)
