@@ -195,7 +195,9 @@ def project_stack_context(payload: Mapping[str, Any]) -> StackContext:
     if reported_size != len(raw_members):
         return _invalid_context(repo, selected_pr_number, observed_at, "reported_size_mismatch")
     try:
-        members = tuple(sorted((PullRequestMemberFact.from_dict(row) for row in raw_members), key=lambda row: row.position))
+        members = tuple(
+            sorted((PullRequestMemberFact.from_dict(row) for row in raw_members), key=lambda row: row.position)
+        )
     except (TypeError, ValueError) as exc:
         return _invalid_context(repo, selected_pr_number, observed_at, str(exc))
     invariant = _stack_invariant_failure(
