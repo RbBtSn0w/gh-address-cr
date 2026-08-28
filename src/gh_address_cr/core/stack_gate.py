@@ -83,9 +83,7 @@ class StackGateResult:
             layer_reason_code=layer_reason_code,
         )
         recovery_action = (
-            str(blocked_outcome.get("layer_next_action") or recovery_command)
-            if blocked_outcome
-            else recovery_command
+            str(blocked_outcome.get("layer_next_action") or recovery_command) if blocked_outcome else recovery_command
         )
         stack_merge_readiness = "ready" if self.passed else "blocked"
         if self.stack_context.availability in {"unavailable", "invalid"}:
@@ -112,11 +110,7 @@ class StackGateResult:
             "failure_codes": [self.reason_code] if self.reason_code else [],
             "counts": counts,
             "exit_code": self.exit_code,
-            "next_action": (
-                "The selected stack segment is ready."
-                if self.passed
-                else recovery_action
-            ),
+            "next_action": ("The selected stack segment is ready." if self.passed else recovery_action),
             "commands": {
                 "final_gate_stack": command_templates.final_gate_stack(self.repo, self.selected_pr_number),
                 "member_recovery": recovery_command,
@@ -217,8 +211,7 @@ def _layer_blocking_item_kind(layer: GateResult | None) -> str | None:
         (
             row
             for row in (layer.logic_validation_signals or [])
-            if row.get("gate_effect") == "blocking"
-            and row.get("signal_type") in expected_signal_types
+            if row.get("gate_effect") == "blocking" and row.get("signal_type") in expected_signal_types
         ),
         None,
     )

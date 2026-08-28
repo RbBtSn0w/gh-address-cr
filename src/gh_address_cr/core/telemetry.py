@@ -465,11 +465,23 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         coverage_diagnostics.extend(import_diagnostics)
     coverage_label = _coverage_label(runtime_events, external_events, coverage_diagnostics)
     total_events = len(events)
-    known_status_events = [event for event in events if event.status != "unknown"]
-    success_count = sum(1 for event in known_status_events if event.status == "success")
-    success_rate = (success_count / len(known_status_events)) * 100.0 if known_status_events else 0.0
-    total_duration = sum(event.duration_ms for event in events)
-    duration_observed = any(event.duration_ms > 0 for event in events)
+    # Optimized: Consolidated 4 iterations over `events` (previously using comprehensions,
+    # sum(), and any()) into a single pass to eliminate redundant context switching and
+    # generator instantiation in this core telemetry processing loop.
+    known_status_count = 0
+    success_count = 0
+    total_duration = 0
+    duration_observed = False
+    for event in events:
+        if event.status != "unknown":
+            known_status_count += 1
+            if event.status == "success":
+                success_count += 1
+        total_duration += event.duration_ms
+        if event.duration_ms > 0:
+            duration_observed = True
+
+    success_rate = (success_count / known_status_count) * 100.0 if known_status_count else 0.0
     host_metrics = _aggregate_host_metrics(external_events)
     timed_events = [event for event in events if event.duration_ms > 0]
     slowest = sorted(timed_events, key=lambda event: event.duration_ms, reverse=True)[:3]

@@ -61,6 +61,7 @@ def _parse_final_gate_args(
         return None, emit_scope_resolution_error(scope_error)
     return parser.parse_args(scoped_args), None
 
+
 def _archive_and_clean_workspace_if_passed(
     parsed: argparse.Namespace,
     result: core_gate.GateResult | core_stack_gate.StackGateResult,
@@ -232,13 +233,10 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         emit_stack_final_gate_result(stack_result, stack_artifact, stack_telemetry)
     if not stack_result.passed and not machine_requested:
         blocked_member = (
-            f" at PR #{stack_result.first_blocked_pr_number}"
-            if stack_result.first_blocked_pr_number
-            else ""
+            f" at PR #{stack_result.first_blocked_pr_number}" if stack_result.first_blocked_pr_number else ""
         )
         print(
-            f"\nStack gate FAILED: {stack_result.reason_code}{blocked_member}. "
-            "Do not send completion summary.",
+            f"\nStack gate FAILED: {stack_result.reason_code}{blocked_member}. Do not send completion summary.",
             file=sys.stderr,
         )
     return stack_result.exit_code

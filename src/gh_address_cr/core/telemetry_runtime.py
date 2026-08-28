@@ -162,7 +162,7 @@ class SessionTelemetry:
         except OSError:
             return
 
-    def evaluate_efficiency(self) -> list[str]:
+    def evaluate_efficiency(self) -> list[str]:  # noqa: C901
         flags: list[str] = []
         if not self.metrics:
             return flags
@@ -181,7 +181,11 @@ class SessionTelemetry:
                 flags.append(f"CRITICAL: `{_display_command(metric.command)}` hit execution timeout (hung).")
 
         total_invocations = len(self.metrics)
-        successes = sum(1 for metric in self.metrics if metric.is_success)
+        # Optimized: Count successes manually in a single pass to avoid generator overhead.
+        successes = 0
+        for metric in self.metrics:
+            if metric.is_success:
+                successes += 1
         error_rate = ((total_invocations - successes) / total_invocations) * 100.0
         if error_rate > MAX_ERROR_RATE_PERCENT:
             flags.append(f"Global error rate is {error_rate:.1f}% (Exceeds {MAX_ERROR_RATE_PERCENT}% threshold).")
@@ -221,8 +225,14 @@ class SessionTelemetry:
         if total_invocations == 0:
             return EfficiencyReport(0, 0.0, 0.0, [], [])
 
-        total_duration = sum(metric.duration for metric in self.metrics)
-        successes = sum(1 for metric in self.metrics if metric.is_success)
+        # Optimized: Compute multiple aggregate metrics in a single explicit loop
+        # to prevent generator overhead and redundant iterations in this hot path.
+        total_duration = 0.0
+        successes = 0
+        for metric in self.metrics:
+            total_duration += metric.duration
+            if metric.is_success:
+                successes += 1
         success_rate = (successes / total_invocations) * 100.0
 
         return EfficiencyReport(
