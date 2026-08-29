@@ -191,6 +191,12 @@ class TelemetrySafetyCommandArgsTestCase(unittest.TestCase):
         result = safe_command_args(argv)
         self.assertEqual(result, expected)
 
+    def test_safe_command_args_does_not_redact_a_following_flag(self) -> None:
+        argv = ["gh-address-cr", "--token", "--format", "json"]
+        expected = ["gh-address-cr", "--token", "--format", "json"]
+        result = safe_command_args(argv)
+        self.assertEqual(result, expected)
+
     def test_safe_command_args_does_not_mutate_original_list(self) -> None:
         argv = ["cmd", "ghp_123"]
         original = list(argv)

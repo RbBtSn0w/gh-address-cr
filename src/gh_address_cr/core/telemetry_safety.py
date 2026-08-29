@@ -432,9 +432,10 @@ def safe_command_args(argv: list[str]) -> list[str]:
     redact_next = False
     for arg in argv:
         if redact_next:
-            res.append("[redacted]")
             redact_next = False
-            continue
+            if not arg.startswith("-"):
+                res.append("[redacted]")
+                continue
 
         if "=" in arg:
             lhs, eq, rhs = arg.partition("=")
