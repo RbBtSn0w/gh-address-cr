@@ -1,3 +1,13 @@
+## [3.7.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.3...v3.7.4) (2026-08-29)
+
+### Bug Fixes
+
+* redact the command field in GitHub failure diagnostics ([#242](https://github.com/RbBtSn0w/gh-address-cr/issues/242)) ([6bd2ff9](https://github.com/RbBtSn0w/gh-address-cr/commit/6bd2ff992f442bef7ac91fc5786761a8841bcd73))
+
+### Performance Improvements
+
+* stream evidence ledger lookups ([#235](https://github.com/RbBtSn0w/gh-address-cr/issues/235)) ([5ea6f8e](https://github.com/RbBtSn0w/gh-address-cr/commit/5ea6f8e0bb1ad05686d7aef24ac290c56014f5ff))
+
 ## [3.7.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.2...v3.7.3) (2026-08-29)
 
 ## [3.7.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.1...v3.7.2) (2026-08-29)
