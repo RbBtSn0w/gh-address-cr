@@ -3,8 +3,18 @@
 **Input**: Design documents from `/specs/026-cli-otel-agent-integration/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/cli-otel-span-attributes.md
 
-**Scope (confirmed)**: v1 MVP = **Dimension 1** (execution + new `safe_command_args`
-+ exit.code/error.type) · **Dimension 2** (dormant `TRACEPARENT` G-1,
+> **Post-implementation correction.** T006/T007/T009 below are checked off as
+> written, but `safe_command_args` was never wired into `__main__.py` or
+> `cli.py`. Those call sites shipped with `sanitize_cli_argv`, which redacts
+> every argument except the executable basename and the recognized command
+> token — strictly stronger than the per-token design these tasks specify. The
+> unreferenced `safe_command_args` has since been removed along with its tests.
+> Read `sanitize_cli_argv` as the delivered contract wherever these tasks name
+> `safe_command_args`.
+
+**Scope (confirmed)**: v1 MVP = **Dimension 1** (execution, full-argv
+sanitization delivered as `sanitize_cli_argv` — see the correction above —
+plus exit.code/error.type) · **Dimension 2** (dormant `TRACEPARENT` G-1,
 `process.parent_pid`, **Tier 2 passive session correlation FR-011**) ·
 **Dimension 3** (`gen_ai.operation/tool.name/tool.call.arguments`) · **Tier 1 VCS
 GitHub-PR mapping FR-012** (plain PR#+provider, hashed repo, no plain owner/URL) ·

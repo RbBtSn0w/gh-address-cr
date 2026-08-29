@@ -22,6 +22,9 @@ CLI-flag change, no packaged-skill behavior change:
    `exit.code` (synthetic `1` on exception), bounded `error.type`, and a **new**
    `safe_command_args` full-argv redactor (the repo has no full-argv sanitizer
    today — `command_label()` only reduces to a single label).
+   *Delivered differently:* the shipped redactor is `sanitize_cli_argv`, which
+   keeps only the executable basename and the recognized command token.
+   `safe_command_args` was written but never called, and has been removed.
 2. **Dimension 2 — Correlation, rescued by Tier 2** (`gen_ai.conversation.id`,
    `gen_ai.agent.name`, `process.parent_pid`, dormant `TRACEPARENT`): a live demo
    proved Claude Code already exports `CLAUDE_CODE_SESSION_ID` + `AI_AGENT` with

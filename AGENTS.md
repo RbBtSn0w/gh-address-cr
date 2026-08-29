@@ -25,7 +25,7 @@ with `--skill skill`.
   - Span names must default to `{process.executable.name}` (e.g. `"git"`, `"claude"`) or documented low-cardinality values.
   - Correctly record all **Required** attributes: `process.executable.name`, `process.exit.code`, and `process.pid`.
   - Correctly record `error.type` on failure spans (when `process.exit.code !== 0`) as **Conditionally Required**.
-- **Telemetry Privacy**: **All telemetry data must comply with privacy standards**—never log raw file paths, personally identifiable information (PII), or user secrets/tokens. Sanitization (e.g., `sanitizeArgs()`) is mandatory before collecting `process.command_args`.
+- **Telemetry Privacy**: **All telemetry data must comply with privacy standards**—never log raw file paths, personally identifiable information (PII), or user secrets/tokens. Sanitization is mandatory before collecting `process.command_args`: CLI argv goes through `sanitize_cli_argv`, which keeps only the executable basename and the recognized command token and redacts every other argument. Subprocess argv goes through `command_label`, which keeps the executable basename, a `python -m <module>` prefix when one is present, and at most one safe positional token, dropping every other flag and flag value; or through `subprocess_operation`, which reduces the command to a bounded category name and retains no argument at all.
 
 ## Scope and Authority
 

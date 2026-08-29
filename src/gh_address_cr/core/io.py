@@ -30,7 +30,7 @@ def write_json_atomic(path: str | Path, payload: Any) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix=f"{target.name}.", suffix=".tmp", dir=target.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(_json_ready(payload), handle, indent=2, sort_keys=True)
+            json.dump(json_ready(payload), handle, indent=2, sort_keys=True)
             handle.write("\n")
         os.replace(tmp_name, target)
     except Exception:
@@ -52,7 +52,18 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
     return payload
 
 
-def _json_ready(value: Any) -> Any:
+def json_ready(value: Any) -> Any:
+    """Normalize a value into JSON-serializable form.
+
+    This is the single normalizer for the whole package; `core.utils.json_ready`
+    re-exports it. It lives here because `core.io` imports nothing from the
+    package, while `core.utils` reaches `core.io` through `core.session` — so
+    the dependency can only point this way.
+
+    Ordering matters: dataclass instances also carry `__dict__`, so the
+    dataclass branch must run before the `__dict__` branch, or dataclasses
+    would bypass `asdict` and lose its recursive field expansion.
+    """
     # Performance optimized: exact type checks are significantly faster than isinstance/is_dataclass
     if value is None:
         return None
@@ -60,20 +71,32 @@ def _json_ready(value: Any) -> Any:
     if t is str or t is int or t is bool or t is float:
         return value
     if t is dict:
-        return {str(key): _json_ready(inner) for key, inner in value.items()}
+        return {str(key): json_ready(inner) for key, inner in value.items()}
     if t is list or t is tuple or t is set:
-        return [_json_ready(inner) for inner in value]
+        return [json_ready(inner) for inner in value]
 
     # Fallback to isinstance for subclasses
     if isinstance(value, dict):
-        return {str(key): _json_ready(inner) for key, inner in value.items()}
+        return {str(key): json_ready(inner) for key, inner in value.items()}
     if isinstance(value, (list, tuple, set)):
-        return [_json_ready(inner) for inner in value]
+        return [json_ready(inner) for inner in value]
+
+    # Subclasses of JSON scalars are already serializable and must be returned
+    # as-is. This notably covers `str`-based Enums such as `AgentRole`: sending
+    # one through the `__dict__` branch below would emit enum internals, and
+    # its `__objclass__` back-reference would then drag in an unserializable
+    # `mappingproxy`.
+    if isinstance(value, (str, int, float, bool)):
+        return value
 
     if is_dataclass(value) and not isinstance(value, type):
-        return _json_ready(asdict(value))
+        return json_ready(asdict(value))
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, Path):
         return str(value)
+    # Only instances are expanded. A class object also carries a `__dict__`,
+    # but expanding one is never meaningful, so let the encoder fail loudly.
+    if not isinstance(value, type) and hasattr(value, "__dict__"):
+        return json_ready(vars(value))
     return value

@@ -6,6 +6,7 @@ from typing import Any
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import returned_claimable_state
+from gh_address_cr.core.io import json_ready as _io_json_ready
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
 from gh_address_cr.evidence.ledger import EvidenceLedger
 
@@ -57,28 +58,14 @@ def format_timestamp(value: datetime) -> str:
 
 
 def json_ready(value: Any) -> Any:
-    # Performance optimized: exact type checks are significantly faster than isinstance/hasattr
-    if value is None:
-        return None
-    t = type(value)
-    if t is str or t is int or t is bool or t is float:
-        return value
-    if t is dict:
-        return {str(key): json_ready(inner) for key, inner in value.items()}
-    if t is list or t is tuple or t is set:
-        return [json_ready(inner) for inner in value]
+    """Normalize a value into JSON-serializable form.
 
-    # Fallback to isinstance for subclasses
-    if isinstance(value, dict):
-        return {str(key): json_ready(inner) for key, inner in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [json_ready(inner) for inner in value]
-
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if hasattr(value, "__dict__"):
-        return json_ready(vars(value))
-    return value
+    Delegates to the single implementation in `core.io`. Kept as a named
+    function rather than a bare re-export so this module's import surface
+    (`from gh_address_cr.core.utils import json_ready`) stays unchanged for
+    `core.ids`, `core.leases`, and `core.workflow`.
+    """
+    return _io_json_ready(value)
 
 
 def get_session_items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
