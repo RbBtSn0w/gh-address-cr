@@ -1,3 +1,5 @@
+## [3.7.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.2...v3.7.3) (2026-08-29)
+
 ## [3.7.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.1...v3.7.2) (2026-08-29)
 
 ## [3.7.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.0...v3.7.1) (2026-08-03)
