@@ -63,6 +63,68 @@ class EvidenceLedgerTests(unittest.TestCase):
         self.assertEqual([row.record_id for row in rows], [first.record_id, second.record_id])
         self.assertTrue(self.ledger_path.read_text(encoding="utf-8").startswith(first_line))
 
+    def test_successful_side_effect_url_returns_latest_matching_success(self):
+        from gh_address_cr.evidence.ledger import EvidenceLedger, SideEffectAttempt
+
+        ledger = EvidenceLedger(self.ledger_path)
+        ledger.record_side_effect_attempt(
+            attempt=SideEffectAttempt.new(
+                session_id="session-1",
+                item_id="item-1",
+                side_effect_type="github_reply",
+                idempotency_key="reply:item-1",
+                status="failed",
+                external_url=None,
+                timestamp="2026-04-24T01:00:00Z",
+            ),
+            lease_id=None,
+            agent_id="agent-1",
+            timestamp="2026-04-24T01:00:00Z",
+        )
+        ledger.record_side_effect_attempt(
+            attempt=SideEffectAttempt.new(
+                session_id="session-1",
+                item_id="item-1",
+                side_effect_type="github_reply",
+                idempotency_key="reply:item-1",
+                status="succeeded",
+                external_url="https://example.test/reply/1",
+                timestamp="2026-04-24T01:01:00Z",
+            ),
+            lease_id=None,
+            agent_id="agent-1",
+            timestamp="2026-04-24T01:01:00Z",
+        )
+        ledger.record_side_effect_attempt(
+            attempt=SideEffectAttempt.new(
+                session_id="session-1",
+                item_id="item-1",
+                side_effect_type="github_reply",
+                idempotency_key="reply:item-1:other",
+                status="succeeded",
+                external_url="https://example.test/reply/ignored",
+                timestamp="2026-04-24T01:02:00Z",
+            ),
+            lease_id=None,
+            agent_id="agent-1",
+            timestamp="2026-04-24T01:02:00Z",
+        )
+        ledger.record_side_effect_attempt(
+            attempt=SideEffectAttempt.new(
+                session_id="session-1",
+                item_id="item-1",
+                side_effect_type="github_reply",
+                idempotency_key="reply:item-1",
+                status="succeeded",
+                external_url="https://example.test/reply/2",
+                timestamp="2026-04-24T01:03:00Z",
+            ),
+            lease_id=None,
+            agent_id="agent-1",
+            timestamp="2026-04-24T01:03:00Z",
+        )
+        self.assertEqual(ledger.successful_side_effect_url("reply:item-1", "github_reply"), "https://example.test/reply/2")
+
     def test_lease_events_append_evidence_records(self):
         from gh_address_cr.evidence.ledger import EvidenceLedger
 
