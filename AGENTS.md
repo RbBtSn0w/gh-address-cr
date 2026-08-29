@@ -131,9 +131,12 @@ re-proposal of a change a ruling already covers will be closed.
 - **CLI argv sanitization is owned by `sanitize_cli_argv`.** It redacts every
   token except the executable basename and the recognized command token, so
   per-flag redaction logic (`--token secret` versus `--token=secret`) is
-  unnecessary in the telemetry-safety layer. Do not add per-flag redaction
-  there. Subprocess-side telemetry (`command_label`, `subprocess_operation`)
-  drops all flags and their values for the same reason.
+  unnecessary in the telemetry-safety layer. `safe_command_args`, the
+  unreferenced per-flag redactor that drew eight such PRs (#233, #236, #237,
+  #238, #244, #245, #247, #249), was removed in #241 — there is no per-flag
+  redactor to patch, and adding one back is not a fix. Subprocess-side
+  telemetry is bounded for the same reason: see the Telemetry Privacy rule
+  above for exactly what `command_label` and `subprocess_operation` retain.
 
 - **No repository-wide reformatting.** Line width and formatting follow
   `pyproject.toml`. A PR that re-wraps files unrelated to its stated change is
