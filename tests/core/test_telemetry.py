@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from gh_address_cr.core import paths as core_paths
-from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
+from gh_address_cr.core.agent_protocol_validation import record_validation_command_telemetry
 from gh_address_cr.core.telemetry import (
     SessionTelemetry,
     _normalize_external_event,
@@ -3604,7 +3604,7 @@ class TestTelemetry(unittest.TestCase):
             tracker.configure_context("octo/example", "77")
 
             # The skill reports a validation command with measured timing.
-            _record_validation_command_telemetry({}, ["ruff check=passed@1500ms"])
+            record_validation_command_telemetry({}, ["ruff check=passed@1500ms"])
 
             report = build_efficiency_report("octo/example", "77")
 

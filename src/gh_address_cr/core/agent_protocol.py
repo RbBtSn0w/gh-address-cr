@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
+from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.agent_protocol_evidence import (
-    TERMINAL_RESOLUTIONS,
-)
-from gh_address_cr.core.agent_protocol_evidence import (
-    required_evidence_for as _required_evidence_for_impl,
+from gh_address_cr.core.agent_protocol_evidence import required_evidence_for
+from gh_address_cr.core.agent_protocol_validation import (
+    normalize_validation_command_records,
+    record_validation_command_telemetry,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
@@ -44,7 +42,6 @@ from gh_address_cr.core.runtime_kernel.stack import (
     repository_context_for_stack,
     unavailable_stack_context,
 )
-from gh_address_cr.core.severity import first_scene_item_severity
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
 )
@@ -61,9 +58,6 @@ from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
 )
 from gh_address_cr.core.utils import (
-    normalize_optional_fix_reply_severity as _normalize_optional_fix_reply_severity,
-)
-from gh_address_cr.core.utils import (
     normalize_string_list as _normalize_string_list,
 )
 from gh_address_cr.core.utils import (
@@ -72,10 +66,6 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     return_item_to_claimable_state as _return_item_to_claimable_state,
 )
-from gh_address_cr.core.utils import (
-    severity_override_note as _severity_override_note,
-)
-from gh_address_cr.core.validation_evidence import validation_result_is_success
 from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
 from gh_address_cr.evidence.ledger import EvidenceLedger
 from gh_address_cr.github.client import GitHubClient
@@ -304,7 +294,7 @@ def issue_action_request(
         "agent_role": role,
         "item": request_item,
         "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
-        "required_evidence": _required_evidence_for(item, role),
+        "required_evidence": required_evidence_for(item, role),
         "repository_context": repository_context_for_stack(
             repo,
             pr_number,
@@ -725,7 +715,7 @@ def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> s
         response["files"] = profile_files
         response_files = profile_files
 
-    profile_validation = _normalize_validation_command_records(profile.get("validation_commands"))
+    profile_validation = normalize_validation_command_records(profile.get("validation_commands"))
     if not response.get("validation_commands") and profile_validation:
         response["validation_commands"] = profile_validation
 
@@ -1023,7 +1013,7 @@ def _accept_action_response_submission(
         accept_lease(session, lease_id, now=now)
 
     if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
-        _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
+        record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
         item["state"] = "open"
         item["blocking"] = True
         item["verification_rejection_note"] = response["note"]
@@ -1047,7 +1037,7 @@ def _accept_action_response_submission(
 
     apply_response_to_item(item, response)
 
-    _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
+    record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
 
     return ledger.append_event(
         session_id=str(session["session_id"]),
@@ -1078,91 +1068,6 @@ def replayable_action_response(response: dict[str, Any]) -> dict[str, Any]:
         if response.get(key) is not None:
             snapshot[key] = response[key]
     return snapshot
-
-
-def _record_validation_command_telemetry(
-    session: dict[str, Any],
-    validation_cmds: Any,
-    *,
-    seen: set[tuple[str, str, str, str, str, str]] | None = None,
-) -> None:
-    if not isinstance(validation_cmds, list):
-        return
-    try:
-        import shlex
-        import time
-
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        from gh_address_cr.core.telemetry_safety import command_label, is_inline_env_assignment
-
-        telemetry = SessionTelemetry.get_instance()
-    except Exception:
-        return
-
-    if seen is None:
-        seen = set()
-
-    for val_cmd in _normalize_validation_command_records(validation_cmds):
-        try:
-            cmd_name = val_cmd.get("command")
-            if not isinstance(cmd_name, str):
-                continue
-            try:
-                argv = shlex.split(cmd_name)
-            except ValueError:
-                continue
-            while argv and is_inline_env_assignment(argv[0]):
-                argv.pop(0)
-            if not argv:
-                continue
-            cmd_label = command_label(argv)
-            dedupe_key = (
-                cmd_label,
-                _validation_command_fingerprint(cmd_name),
-                _dedupe_value(val_cmd.get("result")),
-                _dedupe_value(val_cmd.get("duration")),
-                _dedupe_value(val_cmd.get("start_time")),
-                _dedupe_value(val_cmd.get("end_time")),
-            )
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-
-            exit_code = _validation_result_exit_code(val_cmd.get("result"))
-            dur = val_cmd.get("duration")
-            start = val_cmd.get("start_time")
-            end = val_cmd.get("end_time")
-
-            if start is not None and end is not None:
-                start_val = float(start)
-                end_val = float(end)
-            elif dur is not None:
-                end_val = time.time()
-                start_val = end_val - float(dur)
-            else:
-                end_val = time.time()
-                start_val = end_val
-
-            telemetry.record(
-                command=cmd_label,
-                start_time=start_val,
-                end_time=end_val,
-                exit_code=exit_code,
-            )
-        except Exception:
-            continue
-
-
-def _dedupe_value(value: Any) -> str:
-    return "" if value is None else str(value)
-
-
-def _validation_command_fingerprint(command: str) -> str:
-    return hashlib.sha256(command.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _validation_result_exit_code(result: Any) -> int:
-    return 0 if validation_result_is_success(result) else 1
 
 
 def _lease_submission_rejection_reason(
@@ -1256,121 +1161,6 @@ def _response_rejection_message(payload_name: str, reason_code: str, *, repo: st
     return f"{payload_name} rejected: {reason_code}"
 
 
-def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    commands: list[dict[str, Any]] = []
-    for entry in value:
-        if isinstance(entry, dict):
-            command = str(entry.get("command") or "").strip()
-            result = str(entry.get("result") or "").strip()
-            summary = str(entry.get("summary") or "").strip()
-            duration = entry.get("duration")
-            start_time = entry.get("start_time")
-            end_time = entry.get("end_time")
-        else:
-            raw = str(entry or "").strip()
-            command, result, duration = _split_validation_command_record(raw)
-            summary = ""
-            start_time = None
-            end_time = None
-        if not command or not result:
-            continue
-        row: dict[str, Any] = {"command": command, "result": result}
-        if summary:
-            row["summary"] = summary
-        if duration is not None:
-            row["duration"] = duration
-        if start_time is not None:
-            row["start_time"] = start_time
-        if end_time is not None:
-            row["end_time"] = end_time
-        commands.append(row)
-    return commands
-
-
-_VALIDATION_DURATION_SUFFIX_RE = re.compile(r"@(\d+(?:\.\d+)?)(ms|s)$")
-
-
-def _strip_validation_duration_suffix(value: str) -> tuple[str, float | None]:
-    """Split a trailing ``@<n>ms``/``@<n>s`` timing suffix off a validation result token.
-
-    Returns ``(token_without_suffix, duration_seconds_or_None)``. Durations are
-    normalized to seconds to match the existing validation ``duration`` contract.
-    """
-    stripped = value.strip()
-    match = _VALIDATION_DURATION_SUFFIX_RE.search(stripped)
-    if match is None:
-        return value, None
-    number = float(match.group(1))
-    seconds = number / 1000.0 if match.group(2) == "ms" else number
-    return stripped[: match.start()], seconds
-
-
-def _split_validation_command_record(raw: str) -> tuple[str, str, float | None]:
-    command, separator, result = raw.rpartition("=")
-    result_token, duration = _strip_validation_duration_suffix(result)
-    if not separator or not _looks_like_validation_result(result_token):
-        return raw.strip(), "passed", None
-    return command.strip(), result_token.strip(), duration
-
-
-def _looks_like_validation_result(value: str) -> bool:
-    normalized = value.strip().lower()
-    if not normalized or any(char.isspace() for char in normalized):
-        return False
-    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
-
-
-def _validate_requested_severity(
-    value: Any,
-    *,
-    status: str,
-    waiting_on: str,
-    payload: dict[str, Any] | None = None,
-) -> str | None:
-    if value in (None, ""):
-        return None
-    normalized = _normalize_optional_fix_reply_severity(value)
-    if normalized:
-        return normalized
-    raise WorkflowError(
-        status=status,
-        reason_code="INVALID_FIX_REPLY_SEVERITY",
-        waiting_on=waiting_on,
-        exit_code=2,
-        message="Explicit severity override must be one of P0, P1, P2, P3, or P4.",
-        payload=payload or {},
-    )
-
-
-def _validate_severity_override_note(
-    severity: str,
-    item: dict[str, Any],
-    note: str | None,
-    *,
-    status: str,
-    waiting_on: str,
-    payload: dict[str, Any] | None = None,
-) -> None:
-    first_scene_severity = first_scene_item_severity(item)
-    if not first_scene_severity or first_scene_severity == severity:
-        return
-    if _severity_override_note(note):
-        return
-    raise WorkflowError(
-        status=status,
-        reason_code="SEVERITY_OVERRIDE_NOTE_REQUIRED",
-        waiting_on=waiting_on,
-        exit_code=2,
-        message=(
-            f"Explicit severity override {severity} conflicts with first-scene severity "
-            f"{first_scene_severity}; add a severity note explaining the override."
-        ),
-        payload=payload or {},
-    )
-
-
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
     for lease_id, lease in session.get("leases", {}).items():
         if not isinstance(lease, dict):
@@ -1439,10 +1229,6 @@ def _has_classification_evidence(item: dict[str, Any]) -> bool:
     return isinstance(evidence, dict) and evidence.get("classification") in TERMINAL_RESOLUTIONS
 
 
-def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
-    return _required_evidence_for_impl(item, role)
-
-
 def _validate_fix_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
     if not _has_classification_evidence(item):
         return protocol_codes.MISSING_CLASSIFICATION
@@ -1479,7 +1265,7 @@ def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | 
     if resolution == "fix":
         return _validate_fix_response(response, item)
     else:
-        if "validation_commands" in response and not _normalize_validation_command_records(
+        if "validation_commands" in response and not normalize_validation_command_records(
             response.get("validation_commands")
         ):
             return "INVALID_VALIDATION_COMMANDS"

@@ -16,9 +16,15 @@ from gh_address_cr.core import agent_batch, agent_protocol, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol import (
     _load_response_json_object,
-    _normalize_validation_command_records,
-    _validate_requested_severity,
-    _validate_severity_override_note,
+)
+from gh_address_cr.core.agent_protocol_validation import (
+    normalize_validation_command_records as _normalize_validation_command_records,
+)
+from gh_address_cr.core.agent_protocol_validation import (
+    validate_requested_severity as _validate_requested_severity,
+)
+from gh_address_cr.core.agent_protocol_validation import (
+    validate_severity_override_note as _validate_severity_override_note,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (

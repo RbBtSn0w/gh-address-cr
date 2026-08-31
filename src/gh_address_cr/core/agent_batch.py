@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import MAX_PARALLEL_CLAIMS, PROTOCOL_VERSION
+from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 
@@ -23,7 +24,6 @@ from gh_address_cr.core import session as session_store
 # no load-time dependency on agent_batch and either module may be imported first.
 from gh_address_cr.core.agent_protocol import (
     _BATCH_CLASSIFICATION_NOTE,
-    TERMINAL_RESOLUTIONS,
     _accept_action_response_submission,
     _active_fixer_lease_for_item,
     _handling_boundary_summary_or_none,
@@ -36,10 +36,10 @@ from gh_address_cr.core.agent_protocol import (
     _raise_response_rejected,
     _refresh_stack_context_for_request,
     _release_irrecoverable_request_lease,
-    _required_evidence_for,
     _response_skeleton_for_request,
     _verify_request_revision_binding,
 )
+from gh_address_cr.core.agent_protocol_evidence import required_evidence_for as _required_evidence_for
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_github_thread_item, is_stale_github_thread_item
 from gh_address_cr.core.ids import stable_id as _stable_id
