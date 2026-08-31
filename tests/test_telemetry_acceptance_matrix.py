@@ -21,9 +21,9 @@ class LayeredTelemetryAcceptanceTests(unittest.TestCase):
         self.tracer = self.provider.get_tracer("layered_telemetry_acceptance")
 
     def tearDown(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
-        telemetry._reset_telemetry_for_tests()
+        otel_tracing._reset_telemetry_for_tests()
 
     def test_adapter_execution_emits_child_span_under_root_invocation(self) -> None:
         from gh_address_cr import telemetry

@@ -44,27 +44,27 @@ class _DelayedOTLPHandler(BaseHTTPRequestHandler):
 
 class OpenTelemetryInitializationTests(unittest.TestCase):
     def tearDown(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
-        telemetry._reset_telemetry_for_tests()
+        otel_tracing._reset_telemetry_for_tests()
 
     def test_opt_out_returns_noop_tracer_without_creating_exporter(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         with (
             patch.dict(os.environ, {"DISABLE_TELEMETRY": "1"}, clear=True),
-            patch.object(telemetry, "OTLPSpanExporter") as exporter,
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter,
         ):
-            tracer = telemetry.initialize_telemetry()
+            tracer = otel_tracing.initialize_telemetry()
 
         self.assertEqual(type(tracer).__name__, "NoOpTracer")
         exporter.assert_not_called()
 
     def test_do_not_track_returns_noop_tracer(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         with patch.dict(os.environ, {"DO_NOT_TRACK": "1"}, clear=True):
-            tracer = telemetry.initialize_telemetry()
+            tracer = otel_tracing.initialize_telemetry()
 
         self.assertEqual(type(tracer).__name__, "NoOpTracer")
 
@@ -80,7 +80,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             harness.tearDown()
 
     def test_initialization_configures_product_resource_and_gateway(self) -> None:
-        from gh_address_cr import __version__, telemetry
+        from gh_address_cr import __version__, otel_tracing
 
         provider = MagicMock()
         tracer = MagicMock()
@@ -88,11 +88,11 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider) as provider_type,
-            patch.object(telemetry, "OTLPSpanExporter") as exporter_type,
-            patch.object(telemetry, "BatchSpanProcessor") as processor_type,
+            patch.object(otel_tracing, "TracerProvider", return_value=provider) as provider_type,
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
+            patch.object(otel_tracing, "BatchSpanProcessor") as processor_type,
         ):
-            result = telemetry.initialize_telemetry()
+            result = otel_tracing.initialize_telemetry()
 
         self.assertIs(result, tracer)
         resource = provider_type.call_args.kwargs["resource"]
@@ -106,38 +106,38 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertNotIn("deployment.environment.name", resource.attributes)
         exporter_type.assert_called_once()
         exporter_arguments = exporter_type.call_args.kwargs
-        self.assertEqual(exporter_arguments["endpoint"], telemetry.OTLP_TRACES_ENDPOINT)
-        self.assertEqual(exporter_arguments["timeout"], telemetry.EXPORT_TIMEOUT_SECONDS)
-        self.assertEqual(exporter_arguments["headers"], telemetry._SAFE_EXPORT_HEADERS)
+        self.assertEqual(exporter_arguments["endpoint"], otel_tracing.OTLP_TRACES_ENDPOINT)
+        self.assertEqual(exporter_arguments["timeout"], otel_tracing.EXPORT_TIMEOUT_SECONDS)
+        self.assertEqual(exporter_arguments["headers"], otel_tracing._SAFE_EXPORT_HEADERS)
         self.assertEqual(exporter_arguments["compression"], Compression.Gzip)
         self.assertFalse(exporter_arguments["session"].trust_env)
         processor_type.assert_called_once_with(
             exporter_type.return_value,
             max_queue_size=128,
             max_export_batch_size=32,
-            export_timeout_millis=telemetry.EXPORT_TIMEOUT_MILLIS,
+            export_timeout_millis=otel_tracing.EXPORT_TIMEOUT_MILLIS,
         )
         provider.add_span_processor.assert_called_once_with(processor_type.return_value)
 
     def test_distributable_client_does_not_claim_a_hosted_deployment_environment(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         provider = MagicMock()
         provider.get_tracer.return_value = MagicMock()
         with (
-            patch.dict(os.environ, {telemetry.TELEMETRY_ENVIRONMENT_VARIABLE: "test"}, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider) as provider_type,
-            patch.object(telemetry, "OTLPSpanExporter"),
-            patch.object(telemetry, "BatchSpanProcessor"),
+            patch.dict(os.environ, {otel_tracing.TELEMETRY_ENVIRONMENT_VARIABLE: "test"}, clear=True),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider) as provider_type,
+            patch.object(otel_tracing, "OTLPSpanExporter"),
+            patch.object(otel_tracing, "BatchSpanProcessor"),
         ):
-            telemetry.initialize_telemetry()
+            otel_tracing.initialize_telemetry()
 
         resource = provider_type.call_args.kwargs["resource"]
         self.assertEqual(resource.attributes["service.name"], "gh-address-cr")
         self.assertNotIn("deployment.environment.name", resource.attributes)
 
     def test_resource_ignores_ambient_attributes_and_instance_identity(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         provider = MagicMock()
         provider.get_tracer.return_value = MagicMock()
@@ -151,11 +151,11 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
                 },
                 clear=True,
             ),
-            patch.object(telemetry, "TracerProvider", return_value=provider) as provider_type,
-            patch.object(telemetry, "OTLPSpanExporter"),
-            patch.object(telemetry, "BatchSpanProcessor"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider) as provider_type,
+            patch.object(otel_tracing, "OTLPSpanExporter"),
+            patch.object(otel_tracing, "BatchSpanProcessor"),
         ):
-            telemetry.initialize_telemetry()
+            otel_tracing.initialize_telemetry()
 
         resource = provider_type.call_args.kwargs["resource"]
         self.assertEqual(resource.attributes["service.name"], "gh-address-cr")
@@ -164,7 +164,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertNotIn("service.instance.id", resource.attributes)
 
     def test_endpoint_precedence_prefers_signal_then_base_then_default(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         cases = [
             (
@@ -192,18 +192,18 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             ),
             (
                 {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev"},
-                telemetry.OTLP_TRACES_ENDPOINT,
-                telemetry._SAFE_EXPORT_HEADERS,
+                otel_tracing.OTLP_TRACES_ENDPOINT,
+                otel_tracing._SAFE_EXPORT_HEADERS,
             ),
             (
                 {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway-development.hamiltonsnow.workers.dev"},
                 "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces",
-                telemetry._SAFE_EXPORT_HEADERS,
+                otel_tracing._SAFE_EXPORT_HEADERS,
             ),
             (
                 {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway-staging.hamiltonsnow.workers.dev"},
                 "https://telemetry-gateway-staging.hamiltonsnow.workers.dev/v1/traces",
-                telemetry._SAFE_EXPORT_HEADERS,
+                otel_tracing._SAFE_EXPORT_HEADERS,
             ),
             (
                 {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://telemetry-gateway.hamiltonsnow.workers.dev"},
@@ -218,9 +218,9 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             (
                 {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev:443"},
                 "https://telemetry-gateway.hamiltonsnow.workers.dev:443/v1/traces",
-                telemetry._SAFE_EXPORT_HEADERS,
+                otel_tracing._SAFE_EXPORT_HEADERS,
             ),
-            ({}, telemetry.OTLP_TRACES_ENDPOINT, telemetry._SAFE_EXPORT_HEADERS),
+            ({}, otel_tracing.OTLP_TRACES_ENDPOINT, otel_tracing._SAFE_EXPORT_HEADERS),
         ]
         for environment, expected, expected_headers in cases:
             with self.subTest(environment=environment):
@@ -228,18 +228,18 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
                 provider.get_tracer.return_value = MagicMock()
                 with (
                     patch.dict(os.environ, environment, clear=True),
-                    patch.object(telemetry, "TracerProvider", return_value=provider),
-                    patch.object(telemetry, "OTLPSpanExporter") as exporter_type,
-                    patch.object(telemetry, "BatchSpanProcessor"),
+                    patch.object(otel_tracing, "TracerProvider", return_value=provider),
+                    patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
+                    patch.object(otel_tracing, "BatchSpanProcessor"),
                 ):
-                    telemetry.initialize_telemetry()
-                    telemetry._reset_telemetry_for_tests()
+                    otel_tracing.initialize_telemetry()
+                    otel_tracing._reset_telemetry_for_tests()
 
                 self.assertEqual(exporter_type.call_args.kwargs["endpoint"], expected)
                 self.assertEqual(exporter_type.call_args.kwargs["headers"], expected_headers)
 
     def test_initialization_does_not_inherit_ambient_otlp_credentials(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         provider = MagicMock()
         provider.get_tracer.return_value = MagicMock()
@@ -251,10 +251,10 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, ambient_credentials, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider),
-            patch.object(telemetry, "BatchSpanProcessor") as processor_type,
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "BatchSpanProcessor") as processor_type,
         ):
-            telemetry.initialize_telemetry()
+            otel_tracing.initialize_telemetry()
 
         exporter = processor_type.call_args.args[0]
         request_headers = {key.lower(): value for key, value in exporter._session.headers.items()}
@@ -264,24 +264,24 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertFalse(exporter._session.trust_env)
 
     def test_shutdown_flushes_provider_once(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         provider = MagicMock()
         provider.get_tracer.return_value = MagicMock()
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider),
-            patch.object(telemetry, "OTLPSpanExporter"),
-            patch.object(telemetry, "BatchSpanProcessor"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "OTLPSpanExporter"),
+            patch.object(otel_tracing, "BatchSpanProcessor"),
         ):
-            telemetry.initialize_telemetry()
-            telemetry.shutdown_telemetry()
-            telemetry.shutdown_telemetry()
+            otel_tracing.initialize_telemetry()
+            otel_tracing.shutdown_telemetry()
+            otel_tracing.shutdown_telemetry()
 
         provider.shutdown.assert_called_once_with()
 
     def test_exporter_accepts_relay_response_exceeding_legacy_budget(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         _DelayedOTLPHandler.response_completed.clear()
         _DelayedOTLPHandler.client_disconnected.clear()
@@ -299,10 +299,10 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
 
             export_session = requests.Session()
             export_session.trust_env = False
-            exporter = telemetry.OTLPSpanExporter(
+            exporter = otel_tracing.OTLPSpanExporter(
                 endpoint=endpoint,
-                headers=dict(telemetry._SAFE_EXPORT_HEADERS),
-                timeout=telemetry.EXPORT_TIMEOUT_SECONDS,
+                headers=dict(otel_tracing._SAFE_EXPORT_HEADERS),
+                timeout=otel_tracing.EXPORT_TIMEOUT_SECONDS,
                 session=export_session,
             )
             result = exporter.export(in_memory_exporter.get_finished_spans())
@@ -316,7 +316,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             server_thread.join(timeout=1)
 
     def test_shutdown_returns_within_fail_open_budget_when_provider_blocks(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         shutdown_started = threading.Event()
         release_shutdown = threading.Event()
@@ -330,14 +330,14 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         provider.shutdown.side_effect = block_shutdown
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider),
-            patch.object(telemetry, "OTLPSpanExporter"),
-            patch.object(telemetry, "BatchSpanProcessor"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "OTLPSpanExporter"),
+            patch.object(otel_tracing, "BatchSpanProcessor"),
             patch("gh_address_cr.otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS", 0.05),
         ):
-            telemetry.initialize_telemetry()
+            otel_tracing.initialize_telemetry()
             started_at = time.monotonic()
-            telemetry.shutdown_telemetry()
+            otel_tracing.shutdown_telemetry()
             elapsed = time.monotonic() - started_at
 
         self.assertTrue(shutdown_started.wait(timeout=0.1))
@@ -353,20 +353,20 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         )
 
     def test_initialization_keeps_exporter_failures_off_stderr(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         provider = MagicMock()
         provider.get_tracer.return_value = MagicMock()
         stderr = io.StringIO()
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch.object(telemetry, "TracerProvider", return_value=provider),
-            patch.object(telemetry, "OTLPSpanExporter"),
-            patch.object(telemetry, "BatchSpanProcessor"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "OTLPSpanExporter"),
+            patch.object(otel_tracing, "BatchSpanProcessor"),
             contextlib.redirect_stderr(stderr),
         ):
-            telemetry.initialize_telemetry()
-            for logger_name in telemetry._OTEL_EXPORT_LOGGERS:
+            otel_tracing.initialize_telemetry()
+            for logger_name in otel_tracing._OTEL_EXPORT_LOGGERS:
                 logging.getLogger(logger_name).error("Failed to export span batch: token=secret")
 
         self.assertEqual(stderr.getvalue(), "")
@@ -374,7 +374,7 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
 
 class TracedExecutionTests(unittest.TestCase):
     def test_records_exception_and_error_status_before_reraising(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         span = MagicMock()
         context_manager = MagicMock()
@@ -384,7 +384,7 @@ class TracedExecutionTests(unittest.TestCase):
 
         private_error = ValueError("token=secret /Users/alice/private.py")
         with self.assertRaises(ValueError) as raised:
-            telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(private_error))
+            otel_tracing.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(private_error))
 
         self.assertIs(raised.exception, private_error)
         recorded_error = span.record_exception.call_args.args[0]
@@ -396,7 +396,7 @@ class TracedExecutionTests(unittest.TestCase):
         self.assertIsNone(status.description)
 
     def test_successful_system_exit_is_not_recorded_as_error(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         span = MagicMock()
         context_manager = MagicMock()
@@ -404,14 +404,14 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = MagicMock()
         tracer.start_as_current_span.return_value = context_manager
 
-        result = telemetry.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(0)))
+        result = otel_tracing.run_traced(tracer, "gh-address-cr.cli", lambda: (_ for _ in ()).throw(SystemExit(0)))
 
         self.assertEqual(result, 0)
         span.record_exception.assert_not_called()
         span.set_status.assert_not_called()
 
     def test_nonzero_system_exit_is_not_recorded_as_error(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
         from gh_address_cr.core.otel_semconv import PROCESS_EXIT_CODE
 
         span = MagicMock()
@@ -420,7 +420,7 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = MagicMock()
         tracer.start_as_current_span.return_value = context_manager
 
-        result = telemetry.run_traced(
+        result = otel_tracing.run_traced(
             tracer,
             "gh-address-cr.cli",
             lambda: (_ for _ in ()).throw(SystemExit(2)),
@@ -433,7 +433,7 @@ class TracedExecutionTests(unittest.TestCase):
         span.set_attribute.assert_any_call(PROCESS_EXIT_CODE, 2)
 
     def test_span_event_helper_emits_events_on_the_active_span(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
         exporter = InMemorySpanExporter()
         provider = TracerProvider()
@@ -441,17 +441,17 @@ class TracedExecutionTests(unittest.TestCase):
         tracer = provider.get_tracer("test_span_event_helper")
 
         def operation() -> int:
-            telemetry.add_current_span_event(
+            otel_tracing.add_current_span_event(
                 "gh-address-cr.test.phase.start",
                 {"gh_address_cr.test.phase": "start", "gh_address_cr.test.step": 1},
             )
-            telemetry.add_current_span_event(
+            otel_tracing.add_current_span_event(
                 "gh-address-cr.test.phase.end",
                 {"gh_address_cr.test.phase": "end", "gh_address_cr.test.step": 1},
             )
             return 0
 
-        result = telemetry.run_traced(tracer, "gh-address-cr.cli", operation)
+        result = otel_tracing.run_traced(tracer, "gh-address-cr.cli", operation)
 
         self.assertEqual(result, 0)
         spans = exporter.get_finished_spans()
@@ -460,7 +460,7 @@ class TracedExecutionTests(unittest.TestCase):
         self.assertEqual(event_names, ["gh-address-cr.test.phase.start", "gh-address-cr.test.phase.end"])
 
     def test_command_session_emits_child_span_for_operation_and_summary_event(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
         from gh_address_cr.commands.command_session import handle_command_session
 
         exporter = InMemorySpanExporter()
@@ -473,7 +473,7 @@ class TracedExecutionTests(unittest.TestCase):
             request_path = Path(temp_dir) / "command-session.json"
             request_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            result = telemetry.run_traced(
+            result = otel_tracing.run_traced(
                 tracer,
                 "gh-address-cr.cli",
                 lambda: handle_command_session(["--input", str(request_path)]),
@@ -496,7 +496,7 @@ class TracedExecutionTests(unittest.TestCase):
         self.assertEqual(event_names, ["gh_address_cr.command_session.summary"])
 
     def test_command_session_redacts_unsafe_operation_ids_on_operation_span(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
         from gh_address_cr.commands.command_session import handle_command_session
 
         exporter = InMemorySpanExporter()
@@ -516,7 +516,7 @@ class TracedExecutionTests(unittest.TestCase):
             request_path = Path(temp_dir) / "command-session.json"
             request_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            result = telemetry.run_traced(
+            result = otel_tracing.run_traced(
                 tracer,
                 "gh-address-cr.cli",
                 lambda: handle_command_session(["--input", str(request_path)]),
