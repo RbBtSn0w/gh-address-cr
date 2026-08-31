@@ -1,3 +1,5 @@
+## [3.7.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.4...v3.7.5) (2026-08-31)
+
 ## [3.7.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.3...v3.7.4) (2026-08-29)
 
 ### Bug Fixes
