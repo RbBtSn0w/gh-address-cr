@@ -28,9 +28,9 @@ class TestCliOtelGenai(unittest.TestCase):
         self.tracer = self.provider.get_tracer("test_cli_otel_genai")
 
     def tearDown(self) -> None:
-        from gh_address_cr import telemetry
+        from gh_address_cr import otel_tracing
 
-        telemetry._reset_telemetry_for_tests()
+        otel_tracing._reset_telemetry_for_tests()
 
     def _run_cli_main_and_get_span(self, argv: list[str] | None) -> unittest.TestCase:
         # Patch sys.argv for the duration of the main run
