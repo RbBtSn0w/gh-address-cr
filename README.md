@@ -410,11 +410,34 @@ Stable machine summary fields:
 - `reason_code`
 - `waiting_on`
 - `next_action`
+- `primary_action` (`kind`, `command`, `item_id`, `why_now`, `requires_human`)
+- `context` (bounded PR, check, changed-file, and selected-item context)
 - `commands`
 - `exit_code`
 
 Use `--lean` or `--summary` when reducing token load. Machine summaries also
 surface the current-login pending review count.
+
+`review`, `address`, and `threads` may be run without a PR target. Resolution
+prefers the current GitHub repository and branch's unique OPEN PR, then a
+same-repository unique ACTIVE session, then a globally unique ACTIVE session.
+Explicit targets always win. Ambiguous targets, detached HEAD, missing OPEN
+PRs, and GitHub authentication or network failures fail with a diagnostic;
+query failures never fall back to potentially stale cached state.
+
+For the shortest repeatable loop, run `gh-address-cr address`, execute the one
+`primary_action.command` when it is non-null, and run `gh-address-cr address`
+again. The action vocabulary is deliberately small: `claim`, `resolve`,
+`publish`, `wait`, `run_final_gate`, `repair_environment`, and `complete`.
+`command=null` is valid whenever the next step needs new human/agent evidence,
+waiting, environment repair, or represents completion; read `why_now` rather
+than inventing an action.
+
+Zero-argument success rate is measured only across eligible invocations:
+those with a unique current-branch OPEN PR or an eligible unique ACTIVE
+session, while GitHub CLI, authentication, and network prerequisites are
+available. Ineligible invocations remain visible but do not enter the success
+rate denominator.
 
 ## Advanced / Developer Integration
 
@@ -568,6 +591,7 @@ When machine output is ambiguous, inspect:
 - `reason_code`
 - `waiting_on`
 - `next_action`
+- `primary_action`
 - `commands`
 - `artifact_path`
 

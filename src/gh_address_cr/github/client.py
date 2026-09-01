@@ -391,6 +391,34 @@ class GitHubClient:
             raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub checks response must be a JSON array.")
         return [row for row in payload if isinstance(row, dict)]
 
+    def list_pr_files(self, repo: str, pr_number: str) -> list[dict[str, Any]]:
+        page = 1
+        files: list[dict[str, Any]] = []
+        while True:
+            payload = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"])
+            if not isinstance(payload, list):
+                raise GitHubError(
+                    protocol_codes.GITHUB_INCOMPLETE_RESPONSE,
+                    "GitHub pull request files response must be a JSON array.",
+                )
+            if not payload:
+                return files
+            for row in payload:
+                if not isinstance(row, dict) or not row.get("filename"):
+                    continue
+                files.append(
+                    {
+                        "path": str(row["filename"]),
+                        "status": row.get("status"),
+                        "additions": row.get("additions"),
+                        "deletions": row.get("deletions"),
+                        "changes": row.get("changes"),
+                    }
+                )
+            if len(payload) < 100:
+                return files
+            page += 1
+
     def viewer_login(self) -> str:
         payload = self._read_json(["api", "user"])
         login = payload.get("login")

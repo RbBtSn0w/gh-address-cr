@@ -167,6 +167,7 @@ def maybe_prepend_implicit_scope(
     *,
     value_options: set[str] | None = None,
     allow_trailing_positionals: bool = False,
+    prefer_current_branch: bool = False,
 ) -> tuple[list[str], dict | None]:
     # Let argparse handle help requests instead of resolving (or failing to
     # resolve) the cached PR scope first.
@@ -184,11 +185,48 @@ def maybe_prepend_implicit_scope(
             "candidates": [],
             "exit_code": 2,
         }
+    if prefer_current_branch:
+        from gh_address_cr.commands.active_pr import resolve_current_pr_scope
+
+        current = resolve_current_pr_scope()
+        if current.get("status") == "ACTIVE_PR_FOUND":
+            _record_zero_argument_resolution(eligible=True, succeeded=True, source="current_branch")
+            return [str(current["repo"]), str(current["pr_number"]), *args], None
+        if current.get("reason_code") not in {"ACTIVE_PR_TARGET_REQUIRED", "NO_ACTIVE_PR"}:
+            _record_zero_argument_resolution(eligible=False, succeeded=False, source="github_error")
+            return args, current
+        current_repo = current.get("repo")
+        if current_repo:
+            matching = [row for row in active_cached_sessions() if row[0] == current_repo]
+            if len(matching) == 1:
+                _record_zero_argument_resolution(eligible=True, succeeded=True, source="same_repo_session")
+                return [matching[0][0], matching[0][1], *args], None
     resolved = resolve_active_cached_scope()
     if isinstance(resolved, dict):
+        if prefer_current_branch:
+            _record_zero_argument_resolution(eligible=False, succeeded=False, source="unresolved")
         return args, resolved
     repo, pr_number = resolved
+    if prefer_current_branch:
+        _record_zero_argument_resolution(eligible=True, succeeded=True, source="global_session")
     return [repo, pr_number, *args], None
+
+
+def _record_zero_argument_resolution(*, eligible: bool, succeeded: bool, source: str) -> None:
+    try:
+        from gh_address_cr.otel_tracing import add_current_span_event
+
+        add_current_span_event(
+            "gh_address_cr.zero_argument_resolution",
+            {
+                "gh_address_cr.zero_argument.attempted": True,
+                "gh_address_cr.zero_argument.eligible": eligible,
+                "gh_address_cr.zero_argument.succeeded": succeeded,
+                "gh_address_cr.zero_argument.target_source": source,
+            },
+        )
+    except Exception:
+        pass
 
 
 def agent_args_with_scope(repo: str | None, passthrough: list[str]) -> tuple[list[str], dict | None]:

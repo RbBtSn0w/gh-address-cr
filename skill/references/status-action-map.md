@@ -2,6 +2,14 @@
 
 This document maps the `gh-address-cr` runtime `status` fields to the next safe action. As a thin adapter, the skill must follow this map without redefining the state machine.
 
+High-level summaries project exactly one additive `primary_action`. Prefer its
+public `command` when non-null and repeat the same high-level entrypoint after
+the action. A null command is intentional when evidence must be supplied before
+a public command can be formed, and for `wait`, `repair_environment`, or
+`complete`; follow `why_now` instead of constructing a synthetic command. The
+projection is advisory and does not change session item truth, publish
+authority, or `final-gate` semantics.
+
 ## Stacked PR Context and Evidence
 
 - `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub preview

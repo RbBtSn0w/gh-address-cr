@@ -62,12 +62,21 @@ mutation. Do not copy runtime state-machine logic into the skill.
 
 1. Run the selected public main entrypoint.
 2. Read only the machine summary fields `status`, `reason_code`, `waiting_on`,
-   `next_action`, `commands`, and `counts`.
-3. Prefer the returned `commands` templates over reconstructing commands.
+   `primary_action`, `commands`, `counts`, and bounded `context`.
+3. Follow the single `primary_action`. Run its `command` when non-null; when it
+   is null, use `why_now` and do not invent a command. Use `commands` only for
+   recovery or deeper flows.
 4. Follow `references/status-action-map.md` until the runtime accepts evidence.
 5. Submit decisions through `gh-address-cr agent resolve`; publish accepted
    GitHub-thread evidence through `gh-address-cr agent publish`.
 6. Run `gh-address-cr final-gate <owner/repo> <pr_number>` last.
+
+For `review`, `address`, and `threads`, omit the PR target when operating in a
+Git checkout. The runtime resolves the unique OPEN PR for the current branch
+before considering an ACTIVE cached session. Repeat the same entrypoint after
+each action to refresh the recommendation. The only primary action kinds are
+`claim`, `resolve`, `publish`, `wait`, `run_final_gate`,
+`repair_environment`, and `complete`.
 
 For a GitHub stacked PR, each command still owns only the selected PR layer.
 Work bottom-up and use `gh-address-cr final-gate <owner/repo> <pr_number>

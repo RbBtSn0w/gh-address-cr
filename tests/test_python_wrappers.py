@@ -570,6 +570,8 @@ else:
         self.assertEqual(summary["status"], "WAITING_FOR_EXTERNAL_REVIEW")
         self.assertEqual(summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
         self.assertEqual(summary["waiting_on"], "external_review")
+        self.assertEqual(summary["primary_action"]["kind"], "resolve")
+        self.assertIsNone(summary["primary_action"]["command"])
         self.assertIn("rerun the same review command", summary["next_action"])
         self.assertIn("review-to-findings", summary["next_action"])
         self.assertIn("findings", summary["next_action"])
@@ -1519,6 +1521,7 @@ else:
             {
                 "artifact_path",
                 "commands",
+                "context",
                 "completion_scope",
                 "counts",
                 "exit_code",
@@ -1527,6 +1530,7 @@ else:
                 "item_kind",
                 "next_action",
                 "pr_number",
+                "primary_action",
                 "reason_code",
                 "repo",
                 "status",
