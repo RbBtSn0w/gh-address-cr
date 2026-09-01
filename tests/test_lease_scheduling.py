@@ -80,7 +80,7 @@ class TestLeaseReleaseOrderingOnSubmit(unittest.TestCase):
         self.pr = "123"
         self.temp_dir = tempfile.TemporaryDirectory()
         self.stack_client_patch = patch(
-            "gh_address_cr.core.agent_protocol.GitHubClient",
+            "gh_address_cr.core.agent_protocol_submission.GitHubClient",
             return_value=UnstackedGitHubClient(),
         )
         self.stack_client_patch.start()

@@ -53,7 +53,7 @@ def open_item(item_id="local:1"):
 class NativeWorkflowTests(unittest.TestCase):
     def setUp(self):
         patcher = patch(
-            "gh_address_cr.core.agent_protocol.GitHubClient",
+            "gh_address_cr.core.agent_protocol_submission.GitHubClient",
             return_value=UnstackedGitHubClient(),
         )
         patcher.start()
@@ -110,7 +110,7 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
-                patch("gh_address_cr.core.agent_protocol.GitHubClient", create=True, return_value=client),
+                patch("gh_address_cr.core.agent_protocol_submission.GitHubClient", create=True, return_value=client),
             ):
                 self.write_session(repo, pr_number, open_item())
                 agent_protocol.record_classification(
@@ -160,7 +160,7 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
-                patch("gh_address_cr.core.agent_protocol.GitHubClient", return_value=client),
+                patch("gh_address_cr.core.agent_protocol_submission.GitHubClient", return_value=client),
             ):
                 manager = self.write_session(repo, pr_number, item)
 
@@ -219,7 +219,7 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
-                patch("gh_address_cr.core.agent_protocol.GitHubClient", return_value=initial_client),
+                patch("gh_address_cr.core.agent_protocol_submission.GitHubClient", return_value=initial_client),
             ):
                 manager = SessionManager(repo, pr_number)
                 session = manager.create(status="WAITING_FOR_GATE")
@@ -314,7 +314,7 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
-                patch("gh_address_cr.core.agent_protocol.GitHubClient", return_value=initial_client),
+                patch("gh_address_cr.core.agent_protocol_submission.GitHubClient", return_value=initial_client),
             ):
                 manager = SessionManager(repo, pr_number)
                 session = manager.create(status="WAITING_FOR_GATE")
@@ -1638,7 +1638,7 @@ def stale_github_thread_item(item_id="github-thread:THREAD_STALE"):
 class StaleThreadClaimabilityTests(unittest.TestCase):
     def setUp(self):
         patcher = patch(
-            "gh_address_cr.core.agent_protocol.GitHubClient",
+            "gh_address_cr.core.agent_protocol_submission.GitHubClient",
             return_value=UnstackedGitHubClient(),
         )
         patcher.start()

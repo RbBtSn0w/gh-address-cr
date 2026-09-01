@@ -14,8 +14,8 @@ from gh_address_cr import (
 )
 from gh_address_cr.core import agent_batch, agent_protocol, protocol_codes
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.agent_protocol import (
-    _load_response_json_object,
+from gh_address_cr.core.agent_protocol_submission import (
+    load_response_json_object as _load_response_json_object,
 )
 from gh_address_cr.core.agent_protocol_validation import (
     normalize_validation_command_records as _normalize_validation_command_records,
