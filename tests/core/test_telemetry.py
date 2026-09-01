@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from gh_address_cr.core import paths as core_paths
-from gh_address_cr.core.agent_protocol import _record_validation_command_telemetry
+from gh_address_cr.core.agent_protocol_validation import record_validation_command_telemetry
 from gh_address_cr.core.telemetry import (
     SessionTelemetry,
     _normalize_external_event,
@@ -2579,15 +2579,15 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(res.stderr, "")
         mock_stderr.write.assert_not_called()
 
-    @patch("gh_address_cr.core.agent_protocol.submit_lease")
-    @patch("gh_address_cr.core.agent_protocol.accept_lease")
-    @patch("gh_address_cr.core.agent_protocol.apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol_submission.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.apply_response_to_item")
     def test_accept_action_response_submission_records_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
         import tempfile
         from pathlib import Path
         from unittest.mock import MagicMock
 
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
+        from gh_address_cr.core.agent_protocol_submission import accept_action_response_submission
 
         session = {
             "session_id": "owner/repo#123",
@@ -2651,7 +2651,7 @@ class TestTelemetry(unittest.TestCase):
             tracker = SessionTelemetry.get_instance()
             tracker.configure_file(telemetry_file)
 
-            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+            accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
 
             # We should have 5 metrics recorded; only the exact duplicate and malformed command are skipped.
             self.assertEqual(len(tracker.metrics), 5)
@@ -2676,18 +2676,18 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(tracker.metrics[4].command, "pytest")
             self.assertNotIn("_telemetry_validation_seen", session)
 
-            _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+            accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
             self.assertEqual(len(tracker.metrics), 10)
 
-    @patch("gh_address_cr.core.agent_protocol.submit_lease")
-    @patch("gh_address_cr.core.agent_protocol.accept_lease")
-    @patch("gh_address_cr.core.agent_protocol.apply_response_to_item")
+    @patch("gh_address_cr.core.agent_protocol_submission.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.apply_response_to_item")
     def test_shared_batch_seen_deduplicates_validation_telemetry(self, mock_apply, mock_accept, mock_submit):
         import tempfile
         from pathlib import Path
         from unittest.mock import MagicMock
 
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
+        from gh_address_cr.core.agent_protocol_submission import accept_action_response_submission
 
         session = {
             "session_id": "owner/repo#123",
@@ -2723,24 +2723,24 @@ class TestTelemetry(unittest.TestCase):
             tracker.configure_file(telemetry_file)
             telemetry_seen = set()
 
-            _accept_action_response_submission(
+            accept_action_response_submission(
                 session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
             )
-            _accept_action_response_submission(
+            accept_action_response_submission(
                 session, ledger, response, prepared, now=datetime.now(timezone.utc), telemetry_seen=telemetry_seen
             )
 
             self.assertEqual(len(tracker.metrics), 1)
             self.assertNotIn("_telemetry_validation_seen", session)
 
-    @patch("gh_address_cr.core.agent_protocol.submit_lease")
-    @patch("gh_address_cr.core.agent_protocol.accept_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.submit_lease")
+    @patch("gh_address_cr.core.agent_protocol_submission.accept_lease")
     def test_verifier_rejection_records_validation_telemetry(self, mock_accept, mock_submit):
         import tempfile
         from pathlib import Path
         from unittest.mock import MagicMock
 
-        from gh_address_cr.core.agent_protocol import _accept_action_response_submission
+        from gh_address_cr.core.agent_protocol_submission import accept_action_response_submission
         from gh_address_cr.core.errors import WorkflowError
 
         session = {
@@ -2778,7 +2778,7 @@ class TestTelemetry(unittest.TestCase):
             tracker.configure_file(telemetry_file)
 
             with self.assertRaises(WorkflowError):
-                _accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
+                accept_action_response_submission(session, ledger, response, prepared, now=datetime.now(timezone.utc))
 
             self.assertEqual(len(tracker.metrics), 1)
             self.assertEqual(tracker.metrics[0].command, "pytest")
@@ -3604,7 +3604,7 @@ class TestTelemetry(unittest.TestCase):
             tracker.configure_context("octo/example", "77")
 
             # The skill reports a validation command with measured timing.
-            _record_validation_command_telemetry({}, ["ruff check=passed@1500ms"])
+            record_validation_command_telemetry({}, ["ruff check=passed@1500ms"])
 
             report = build_efficiency_report("octo/example", "77")
 

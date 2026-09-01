@@ -22,7 +22,7 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.env_patch = patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": self.temp_dir.name}, clear=False)
         self.env_patch.start()
         self.stack_client_patch = patch(
-            "gh_address_cr.core.agent_protocol.GitHubClient",
+            "gh_address_cr.core.agent_protocol_submission.GitHubClient",
             return_value=UnstackedGitHubClient(),
         )
         self.stack_client_patch.start()
