@@ -161,7 +161,7 @@ def _execute_single_publish_plan(
                     message=(
                         f"A prior publish attempt for {item_id} may have posted a reply before the "
                         "process was interrupted, and it could not be automatically matched against "
-                        "the thread's current comments. Inspect the thread and, if a reply is already "
+                        "the thread's latest comment. Inspect the thread and, if a reply is already "
                         "there, record it with `"
                         + command_templates.evidence_add_reply(repo, str(pr_number), item_id=item_id)
                         + "` before retrying."
