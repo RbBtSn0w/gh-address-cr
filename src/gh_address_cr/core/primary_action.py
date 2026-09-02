@@ -28,6 +28,7 @@ _ENVIRONMENT_WAITING_ON = {
     "pr_scope",
     "revision",
     "session",
+    "state_directory",
 }
 _SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 

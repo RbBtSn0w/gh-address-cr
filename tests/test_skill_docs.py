@@ -120,8 +120,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         skill_text = SKILL_MD.read_text(encoding="utf-8")
         readme_text = README_MD.read_text(encoding="utf-8")
 
-        for text in (skill_text, readme_text):
-            with self.subTest(document="skill" if text == skill_text else "readme"):
+        for document, text in (("skill", skill_text), ("readme", readme_text)):
+            with self.subTest(document=document):
                 self.assertIn("GH_ADDRESS_CR_STATE_DIR", text)
                 self.assertIn("reuse it for the full PR session", text)
 
