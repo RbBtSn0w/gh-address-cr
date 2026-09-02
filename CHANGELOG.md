@@ -1,3 +1,9 @@
+## [3.11.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.10.0...v3.11.0) (2026-09-02)
+
+### Features
+
+* inline reason-code remediation and drop three phantom codes ([#260](https://github.com/RbBtSn0w/gh-address-cr/issues/260)) ([f3d998a](https://github.com/RbBtSn0w/gh-address-cr/commit/f3d998a817b631a5feb909ecc097b8144e5b44e5))
+
 ## [3.10.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.9.0...v3.10.0) (2026-09-02)
 
 ### Features
