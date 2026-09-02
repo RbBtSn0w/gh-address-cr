@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from gh_address_cr.core.command_templates import common_summary_commands
+from gh_address_cr.core.remediation import remediation_for
 
 
 class WorkflowError(RuntimeError):
@@ -35,5 +36,6 @@ class WorkflowError(RuntimeError):
             # Error paths otherwise ship a diagnosis with no runnable command, forcing a
             # reference-doc lookup. Curated per-raise-site menus win over the default.
             "commands": self.payload.get("commands") or common_summary_commands(repo, str(pr_number)),
+            "remediation": remediation_for(self.reason_code, repo=repo, pr_number=str(pr_number)),
             "exit_code": self.exit_code,
         }

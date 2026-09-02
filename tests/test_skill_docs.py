@@ -256,6 +256,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "waiting_on",
             "next_action",
             "commands",
+            "remediation",
             "exit_code",
         ):
             self.assertIn(f"`{field}`", combined)
@@ -264,6 +265,22 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("--input <batch-response.json>", protocol_text)
         self.assertIn("--why <why>", protocol_text)
         self.assertIn("--stale", protocol_text)
+
+    def test_status_action_map_documents_only_codes_the_runtime_emits(self):
+        # One-directional doc ⊆ runtime, mirroring
+        # test_skill_root_commands_are_exposed_by_runtime_manifest. The reverse is not
+        # assertable: agent_protocol_submission.required_response_field mints codes via
+        # f"MISSING_{field.upper()}", so the emitted set is open by construction.
+        # Guards against phantom entries like the former NO_WORK_AVAILABLE /
+        # WAITING_FOR_ACTION, which sent agents looking for a status never produced.
+        documented = set(re.findall(r"`([A-Z][A-Z0-9_]{3,})`", STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")))
+        runtime_source = " ".join(
+            path.read_text(encoding="utf-8") for path in (ROOT / "src").rglob("*.py")
+        )
+
+        phantom = sorted(token for token in documented if token not in runtime_source)
+
+        self.assertEqual(phantom, [], f"status-action-map.md documents codes the runtime never emits: {phantom}")
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()

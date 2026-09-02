@@ -62,9 +62,11 @@ mutation. Do not copy runtime state-machine logic into the skill.
 
 1. Run the selected public main entrypoint.
 2. Read only the machine summary fields `status`, `reason_code`, `waiting_on`,
-   `next_action`, `commands`, and `counts`.
+   `next_action`, `commands`, `remediation`, and `counts`.
 3. Prefer the returned `commands` templates over reconstructing commands.
-4. Follow `references/status-action-map.md` until the runtime accepts evidence.
+4. On a blocked or failed state, follow `remediation.summary` and
+   `remediation.command`. Read `references/status-action-map.md` only when
+   `remediation` does not name the next step.
 5. Submit decisions through `gh-address-cr agent resolve`; publish accepted
    GitHub-thread evidence through `gh-address-cr agent publish`.
 6. Run `gh-address-cr final-gate <owner/repo> <pr_number>` last.
@@ -147,7 +149,8 @@ authenticated login.
 
 Read only the reference required by the current runtime state:
 
-- For blocked or waiting states: `references/status-action-map.md`
+- For blocked or waiting states where `remediation` is absent or does not name
+  the next step: `references/status-action-map.md`
 - For resolve, batch, evidence, or lease details:
   `references/agent-protocol.md`
 - For lower-layer ownership and the authorized branch-management handoff:
