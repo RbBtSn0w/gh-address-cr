@@ -87,8 +87,9 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
         )
     try:
         repo = parsed.repo or _derive_current_repo()
-        repo_source = "explicit" if parsed.repo else "remote.origin.url"
+        repo_source = "--repo" if parsed.repo else "remote.origin.url"
         head = parsed.head or _derive_current_branch()
+        head_source = "--head" if parsed.head else "git branch --show-current"
     except RuntimeError as exc:
         return _emit_active_pr_payload(
             {
@@ -122,7 +123,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "GH_NOT_FOUND",
                 "waiting_on": "github_cli",
                 "next_action": "Install GitHub CLI and ensure `gh` is available on PATH, then rerun active-pr.",
@@ -138,7 +139,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "ACTIVE_PR_QUERY_FAILED",
                 "waiting_on": github_waiting_on(diagnostics),
                 "next_action": "Fix the GitHub CLI query failure, then rerun `gh-address-cr active-pr`.",
@@ -155,7 +156,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "ACTIVE_PR_INVALID_JSON",
                 "waiting_on": "github_cli",
                 "next_action": "Inspect `gh pr list` output; it must be a JSON array.",
@@ -167,11 +168,14 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
         pull_requests = []
 
     if not pull_requests:
-        next_action = f"No OPEN PR for `{head}` in {repo} (from {repo_source}). "
+        next_action = f"No OPEN PR for `{head}` in {repo} (repo from {repo_source}, head from {head_source}). "
         other_remotes = _other_git_remotes()
         if other_remotes:
             candidates = "; ".join(f"{name} → {url}" for name, url in other_remotes.items())
-            next_action += f"Other remotes: {candidates}. Pass --repo explicitly if the PR lives there."
+            if parsed.repo:
+                next_action += f"Other remotes: {candidates}. Try a different --repo value if the PR lives there."
+            else:
+                next_action += f"Other remotes: {candidates}. Pass --repo explicitly if the PR lives there."
         else:
             next_action += f"Open a PR or run `gh pr list --repo {repo} --state open --head {head}` to inspect candidates."
         return _emit_active_pr_payload(
@@ -179,7 +183,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": "NO_ACTIVE_PR",
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "NO_ACTIVE_PR",
                 "waiting_on": "open_pr",
                 "next_action": next_action,
@@ -193,7 +197,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": "AMBIGUOUS_ACTIVE_PR",
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "AMBIGUOUS_ACTIVE_PR",
                 "waiting_on": "open_pr",
                 "next_action": "Multiple OPEN PRs match this branch. Pass the intended PR number to review/address.",
@@ -211,7 +215,7 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": repo,
                 "head": head,
-                "resolved": {"repo": repo, "head": head, "source": repo_source},
+                "resolved": {"repo": repo, "head": head, "repo_source": repo_source, "head_source": head_source},
                 "reason_code": "ACTIVE_PR_INVALID_RESPONSE",
                 "waiting_on": "github_cli",
                 "next_action": f"Inspect `gh pr list --repo {repo} --state open --head {head}` output; each row must include a PR number.",
@@ -225,7 +229,13 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
             "status": "ACTIVE_PR_FOUND",
             "repo": repo,
             "head": head,
-            "resolved": {"repo": repo, "head": head, "pr_number": pr_number, "source": repo_source},
+            "resolved": {
+                "repo": repo,
+                "head": head,
+                "pr_number": pr_number,
+                "repo_source": repo_source,
+                "head_source": head_source,
+            },
             "pr_number": pr_number,
             "url": pr.get("url"),
             "state": pr.get("state"),

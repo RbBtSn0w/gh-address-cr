@@ -58,7 +58,13 @@ class TestHandleActivePrCommand(unittest.TestCase):
         self.assertEqual(payload["status"], "ACTIVE_PR_FOUND")
         self.assertEqual(
             payload["resolved"],
-            {"repo": "owner/repo", "head": "feature", "pr_number": "77", "source": "explicit"},
+            {
+                "repo": "owner/repo",
+                "head": "feature",
+                "pr_number": "77",
+                "repo_source": "--repo",
+                "head_source": "--head",
+            },
         )
 
     def test_no_active_pr_lists_other_remotes_instead_of_silence(self):
@@ -83,12 +89,73 @@ class TestHandleActivePrCommand(unittest.TestCase):
         self.assertEqual(exit_code, 4)
         self.assertEqual(payload["status"], "NO_ACTIVE_PR")
         self.assertEqual(
-            payload["resolved"], {"repo": "RbBtSn0w/example", "head": "feature-x", "source": "explicit"}
+            payload["resolved"],
+            {"repo": "RbBtSn0w/example", "head": "feature-x", "repo_source": "--repo", "head_source": "--head"},
         )
         self.assertIn("Other remotes:", payload["next_action"])
         self.assertIn("upstream", payload["next_action"])
         self.assertIn("houjoe0829/example.git", payload["next_action"])
-        self.assertIn("--repo explicitly", payload["next_action"])
+        # --repo was already passed explicitly here, so telling the user to "pass
+        # --repo explicitly" would be self-contradictory; it must ask for a
+        # *different* value instead.
+        self.assertIn("different --repo value", payload["next_action"])
+        self.assertNotIn("Pass --repo explicitly", payload["next_action"])
+
+    def test_no_active_pr_with_derived_repo_still_suggests_passing_repo_explicitly(self):
+        with (
+            patch.object(active_pr.shutil, "which", return_value="/usr/bin/gh"),
+            patch.object(
+                active_pr,
+                "run_cmd",
+                return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
+            ),
+            patch.object(
+                active_pr,
+                "_derive_current_repo",
+                return_value="RbBtSn0w/example",
+            ),
+            patch.object(
+                active_pr,
+                "_git_output",
+                return_value=(
+                    "origin\thttps://github.com/RbBtSn0w/example.git (fetch)\n"
+                    "upstream\thttps://github.com/houjoe0829/example.git (fetch)\n"
+                ),
+            ),
+        ):
+            exit_code, payload = self._run(["--head", "feature-x"])
+
+        self.assertEqual(exit_code, 4)
+        self.assertEqual(payload["resolved"]["repo_source"], "remote.origin.url")
+        self.assertEqual(payload["resolved"]["head_source"], "--head")
+        # No --repo was passed here, so this guidance is still actionable as written.
+        self.assertIn("Pass --repo explicitly", payload["next_action"])
+        self.assertNotIn("different --repo value", payload["next_action"])
+
+    def test_resolved_repo_and_head_sources_are_derived_independently(self):
+        # repo_source and head_source used to collapse into one `source` field even
+        # though --repo and --head are independently either passed or derived.
+        with (
+            patch.object(active_pr.shutil, "which", return_value="/usr/bin/gh"),
+            patch.object(
+                active_pr,
+                "run_cmd",
+                return_value=subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout=json.dumps(
+                        [{"number": 5, "url": "https://github.test/pull/5", "headRefName": "feature", "state": "OPEN"}]
+                    ),
+                    stderr="",
+                ),
+            ),
+            patch.object(active_pr, "_derive_current_branch", return_value="feature"),
+        ):
+            exit_code, payload = self._run(["--repo", "owner/repo"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["resolved"]["repo_source"], "--repo")
+        self.assertEqual(payload["resolved"]["head_source"], "git branch --show-current")
 
     def test_no_active_pr_falls_back_to_generic_hint_without_other_remotes(self):
         with (
