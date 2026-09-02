@@ -316,7 +316,11 @@ class EvidenceLedger:
         return latest_successful_url
 
     def latest_side_effect_status(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
-        """Status of the most recent attempt for a key, or None; detects a dangling `in_flight` crash window."""
+        """Status of the most recent attempt for a key, or None.
+
+        Callers detect a dangling `in_flight` crash window by comparing the
+        returned value to `"in_flight"`; this method only reports the status.
+        """
         latest_status: str | None = None
         for line_number, line in self._iter_records():
             record = self._record_from_line(line_number, line)

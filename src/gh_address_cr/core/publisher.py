@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from gh_address_cr.core import protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
@@ -157,7 +157,9 @@ def _execute_single_publish_plan(
                     f"A prior publish attempt for {item_id} may have posted a reply before the "
                     "process was interrupted, and it could not be automatically matched against "
                     "the thread's current comments. Inspect the thread and, if a reply is already "
-                    "there, record it with `agent evidence add --item-id --reply-url` before retrying."
+                    "there, record it with `"
+                    + command_templates.evidence_add_reply(repo, str(pr_number), item_id=item_id)
+                    + "` before retrying."
                 ),
                 payload={"item_id": item_id},
             )

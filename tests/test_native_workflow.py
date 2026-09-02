@@ -844,6 +844,14 @@ class NativeWorkflowTests(unittest.TestCase):
                     publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
 
                 self.assertEqual(context.exception.reason_code, protocol_codes.PUBLISH_RECONCILE_REQUIRED)
+                # The manual-reconciliation hint used to omit <owner/repo> <pr_number>
+                # and the flag values, leaving an unusable command fragment.
+                message = str(context.exception)
+                self.assertIn(
+                    "gh-address-cr agent evidence add owner/repo 123 "
+                    "--item-id github-thread:THREAD_1 --reply-url <reply_url> --author-login <login>",
+                    message,
+                )
 
     def test_publish_github_thread_response_posts_reply_resolves_and_closes_item(self):
         from gh_address_cr.core import publisher
