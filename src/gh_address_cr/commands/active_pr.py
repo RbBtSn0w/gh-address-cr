@@ -148,7 +148,17 @@ def resolve_current_pr_scope(*, repo: str | None = None, head: str | None = None
         timeout=GH_QUERY_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
-        return {"status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED, "repo": resolved["repo"], "head": resolved["head"], "reason_code": "ACTIVE_PR_QUERY_FAILED", "waiting_on": "github", "exit_code": PR_IO_PREFLIGHT_EXIT}
+        diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, [])
+        return {
+            "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
+            "repo": resolved["repo"],
+            "head": resolved["head"],
+            "reason_code": "ACTIVE_PR_QUERY_FAILED",
+            "waiting_on": github_waiting_on(diagnostics),
+            "next_action": "Fix the GitHub CLI query failure, then rerun `gh-address-cr active-pr`.",
+            "exit_code": PR_IO_PREFLIGHT_EXIT,
+            "diagnostics": diagnostics,
+        }
     try:
         rows = json.loads(result.stdout or "[]")
     except json.JSONDecodeError:
