@@ -121,7 +121,7 @@ Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `r
 
 ## Error Remediation
 
-Every error summary carries `commands` (the runnable template menu) and a `remediation` object:
+A `WorkflowError` summary carries `commands` (the runnable template menu) and a `remediation` object:
 
 ```json
 {
@@ -133,7 +133,9 @@ Every error summary carries `commands` (the runnable template menu) and a `remed
 }
 ```
 
-`remediation.summary` is the next step for this `reason_code`; `remediation.command` is the template to run. Read these before opening `references/status-action-map.md` — that map is a curated subset and does not cover every code the runtime emits. Unregistered codes resolve to a generic remediation pointing back at `commands`, so the field is always present and never empty.
+`remediation.summary` is the next step for this `reason_code`; `remediation.command` is the template to run. Read these before opening `references/status-action-map.md` — that map is a curated subset and does not cover every code the runtime emits. Every `WorkflowError` unregistered `reason_code` still resolves to a generic remediation pointing back at `commands`, never an absent or empty field.
+
+A handful of terminal failure paths — orchestration crashes and other cases in `commands/common.py:output_generic_agent_error` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
 
 `agent next` and the written `ActionRequest` may include an additive `handling_boundary` object for migrated work item types. For the first migrated GitHub review-thread fix path, `boundary_id` is `github-thread-fix`; `required_evidence` lists the evidence categories the runtime expects; `completion_criteria` lists the runtime-owned completion checks; `terminal_failure_reasons` lists stable reason codes; and `next_action` points to the next runtime-mediated action. Absence of `handling_boundary` means the item is on an unmigrated compatibility path, not that agents may bypass leases, evidence, publish, or final-gate.
 

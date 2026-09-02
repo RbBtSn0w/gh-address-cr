@@ -105,7 +105,7 @@ If `status` is `AMBIGUOUS_ACTIVE_PR`:
 
 ## Error States
 
-If `status` is `FAILED`, `SESSION_ERROR`, `SYSTEM_ERROR`, or the machine summary is malformed (missing required fields):
+If `status` is `FAILED`, or `reason_code` is `SESSION_ERROR` or `SYSTEM_ERROR`, or the machine summary is malformed (missing required fields):
 - **Action**: Fail loudly. Do NOT guess the next action. Request human intervention or refer to the audit logs.
 
 If `reason_code` is `RESOLVE_AXIS_CONFLICT`:
