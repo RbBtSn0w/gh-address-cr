@@ -1,3 +1,9 @@
+## [3.12.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.11.0...v3.12.0) (2026-09-02)
+
+### Features
+
+* carry reviewer-authored item text in an untrusted_content envelope ([#259](https://github.com/RbBtSn0w/gh-address-cr/issues/259)) ([b4caae2](https://github.com/RbBtSn0w/gh-address-cr/commit/b4caae25a25110963135219f9c0f714fbd44540e))
+
 ## [3.11.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.10.0...v3.11.0) (2026-09-02)
 
 ### Features
