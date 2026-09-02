@@ -37,6 +37,22 @@ class TestWorkflowErrorCommands(unittest.TestCase):
 
         self.assertEqual(summary["commands"], curated)
 
+    def test_an_explicitly_empty_curated_commands_dict_is_preserved(self):
+        # A truthiness check (`payload.get("commands") or default`) would treat an
+        # intentionally empty {} as absent and silently replace it with the default
+        # menu. Presence must be checked by key, not by truthiness.
+        error = WorkflowError(
+            status="BLOCKED",
+            reason_code="SOME_CODE",
+            exit_code=4,
+            message="No commands apply here.",
+            payload={"commands": {}},
+        )
+
+        summary = error.to_summary(repo="owner/repo", pr_number="123")
+
+        self.assertEqual(summary["commands"], {})
+
     def test_summary_keeps_its_existing_machine_fields(self):
         error = WorkflowError(
             status="PUBLISH_BLOCKED",
