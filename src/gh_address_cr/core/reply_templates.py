@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+REPLY_ATTRIBUTION = "_🤖 Addressed by gh-address-cr_"
+
 SEVERITY_SIGNAL_LABELS = {
     "P0": "`P0`",
     "P1": "`P1`",
@@ -34,6 +36,10 @@ def _normalize_review_priority(priority: str | None) -> str | None:
     if normalized not in VALID_REVIEW_PRIORITIES:
         raise SystemExit(f"Invalid reviewer priority: {priority} (expected high/medium/low)")
     return normalized
+
+
+def _finalize(lines: list[str]) -> str:
+    return "\n".join([*lines, "", REPLY_ATTRIBUTION]) + "\n"
 
 
 def _review_priority_label(priority: str) -> str:
@@ -121,7 +127,7 @@ def fix_reply(
 
     lines.append(f"- Validation: `{test_command}` {test_result}")
 
-    return "\n".join(lines) + "\n"
+    return _finalize(lines)
 
 
 def _display_commit_hash(commit_hash: str) -> str:
@@ -149,7 +155,7 @@ def clarify_reply(payload: list[str]) -> str:
         ]
     )
 
-    return "\n".join(lines) + "\n"
+    return _finalize(lines)
 
 
 def defer_reply(payload: list[str]) -> str:
@@ -169,4 +175,4 @@ def defer_reply(payload: list[str]) -> str:
         ]
     )
 
-    return "\n".join(lines) + "\n"
+    return _finalize(lines)
