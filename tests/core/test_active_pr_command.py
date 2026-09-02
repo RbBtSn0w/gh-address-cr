@@ -259,6 +259,19 @@ class TestHandleActivePrCommand(unittest.TestCase):
         self.assertIsNone(payload["resolved"]["head"])
         self.assertIsNone(payload["resolved"]["head_source"])
 
+    def test_unrecognized_arguments_still_reports_resolved(self):
+        # This was the one remaining path without `resolved`, inconsistent with the
+        # rest of the function. No derivation is attempted here (it fires before any
+        # git calls), so `resolved` only echoes what was explicitly passed.
+        exit_code, payload = self._run(["--repo", "owner/repo", "--bogus-flag", "value"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["reason_code"], "INVALID_ARGUMENTS")
+        self.assertEqual(
+            payload["resolved"],
+            {"repo": "owner/repo", "head": None, "repo_source": "--repo", "head_source": None},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

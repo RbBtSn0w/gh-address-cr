@@ -130,11 +130,20 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
     parser.add_argument("--head")
     parsed, remaining = parser.parse_known_args(passthrough)
     if remaining:
+        # No derivation is attempted here -- this fires before any git calls -- so
+        # `resolved` only echoes what was explicitly passed, same shape as every
+        # other path in this function.
         return _emit_active_pr_payload(
             {
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
                 "repo": parsed.repo,
                 "head": parsed.head,
+                "resolved": {
+                    "repo": parsed.repo,
+                    "head": parsed.head,
+                    "repo_source": "--repo" if parsed.repo else None,
+                    "head_source": "--head" if parsed.head else None,
+                },
                 "reason_code": protocol_codes.INVALID_ARGUMENTS,
                 "waiting_on": "active_pr_target",
                 "next_action": f"Unrecognized arguments: {' '.join(remaining)}. Pass --repo <owner/repo> and --head <branch> only.",
