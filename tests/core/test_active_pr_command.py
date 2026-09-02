@@ -28,6 +28,47 @@ class TestOtherGitRemotes(unittest.TestCase):
         with patch.object(active_pr, "_git_output", side_effect=RuntimeError("not a git repo")):
             self.assertEqual(active_pr._other_git_remotes(), {})
 
+    def test_prefers_fetch_url_even_when_push_line_comes_first(self):
+        # A dedupe that just keeps "whichever line was seen first" silently picks the
+        # push URL whenever git happens to list it before the fetch URL, even though
+        # fetch and push can genuinely differ (HTTPS fetch, SSH push, say).
+        with patch.object(
+            active_pr,
+            "_git_output",
+            return_value=(
+                "upstream\thttps://push.example.com/houjoe0829/example.git (push)\n"
+                "upstream\thttps://fetch.example.com/houjoe0829/example.git (fetch)\n"
+            ),
+        ):
+            remotes = active_pr._other_git_remotes()
+
+        self.assertEqual(remotes, {"upstream": "https://fetch.example.com/houjoe0829/example.git"})
+
+    def test_strips_embedded_credentials_from_remote_urls(self):
+        # This URL reaches next_action, which is written to stdout/stderr -- an
+        # embedded token must not be echoed back out.
+        with patch.object(
+            active_pr,
+            "_git_output",
+            return_value="upstream\thttps://ghp_secrettoken123@github.com/houjoe0829/example.git (fetch)\n",
+        ):
+            remotes = active_pr._other_git_remotes()
+
+        self.assertEqual(remotes, {"upstream": "https://github.com/houjoe0829/example.git"})
+        self.assertNotIn("ghp_secrettoken123", remotes["upstream"])
+
+    def test_leaves_ssh_scp_style_remotes_unchanged(self):
+        # `git@host:path` carries no embedded secret -- it's always the fixed "git"
+        # SSH login name, not a credential -- and isn't a "scheme://" URL to begin with.
+        with patch.object(
+            active_pr,
+            "_git_output",
+            return_value="upstream\tgit@github.com:houjoe0829/example.git (fetch)\n",
+        ):
+            remotes = active_pr._other_git_remotes()
+
+        self.assertEqual(remotes, {"upstream": "git@github.com:houjoe0829/example.git"})
+
 
 class TestHandleActivePrCommand(unittest.TestCase):
     def _run(self, argv):

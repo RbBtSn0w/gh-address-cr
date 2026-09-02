@@ -39,6 +39,17 @@ def _derive_current_branch() -> str:
     return branch
 
 
+# Strips userinfo (e.g. an embedded token: https://ghp_xxx@github.com/...) from a
+# scheme://user[:pass]@host URL before it reaches next_action, which is written to
+# stdout/stderr. `git@host:path` (SSH scp-like syntax, no "://") is left alone --
+# it carries no embedded secret, only the fixed "git" SSH login name.
+_URL_USERINFO_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]+@")
+
+
+def _strip_url_userinfo(url: str) -> str:
+    return _URL_USERINFO_RE.sub(r"\1", url)
+
+
 def _other_git_remotes(*, exclude: str = "origin") -> dict[str, str]:
     try:
         output = _git_output(["git", "remote", "-v"])
@@ -47,8 +58,15 @@ def _other_git_remotes(*, exclude: str = "origin") -> dict[str, str]:
     remotes: dict[str, str] = {}
     for line in output.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[0] != exclude and parts[0] not in remotes:
-            remotes[parts[0]] = parts[1]
+        if len(parts) < 2 or parts[0] == exclude:
+            continue
+        name, url = parts[0], parts[1]
+        # `git remote -v` lists a (fetch) and a (push) line per remote, which can
+        # differ (e.g. HTTPS fetch, SSH push). Prefer (fetch) regardless of which
+        # line appears first, rather than silently keeping whichever was seen first.
+        is_fetch = len(parts) >= 3 and parts[2] == "(fetch)"
+        if name not in remotes or is_fetch:
+            remotes[name] = _strip_url_userinfo(url)
     return remotes
 
 
