@@ -5,9 +5,10 @@ import time
 from datetime import datetime
 from typing import Any
 
-from gh_address_cr.core import protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
 from gh_address_cr.core.reply_templates import (
     clarify_reply as render_clarify_reply,
 )
@@ -143,7 +144,69 @@ def _execute_single_publish_plan(
     existing_reply_url = ledger.successful_side_effect_url(reply_key, "github_reply")
     if existing_reply_url:
         reply_url = existing_reply_url
+    if not reply_url and ledger.latest_side_effect_status(reply_key, "github_reply") == "in_flight":
+        reconciled_url = _reconcile_in_flight_reply(client, repo, str(pr_number), thread_id, publisher_login)
+        if reconciled_url is None:
+            # The narrow latest-comment match found nothing. That alone doesn't tell us
+            # whether the crash happened before post_reply() ever ran (safe to retry)
+            # or after it succeeded but the reply is no longer the latest comment
+            # (ambiguous). Check the broader viewer-reply signal before blocking.
+            if not _publisher_never_replied(client, repo, str(pr_number), thread_id):
+                _record_publish_blocked(session, ledger, item_id, agent_id, protocol_codes.PUBLISH_RECONCILE_REQUIRED)
+                session_store.save_session(repo, pr_number, session)
+                raise WorkflowError(
+                    status=protocol_codes.PUBLISH_BLOCKED,
+                    reason_code=protocol_codes.PUBLISH_RECONCILE_REQUIRED,
+                    waiting_on="reply_reconciliation",
+                    exit_code=5,
+                    message=(
+                        f"A prior publish attempt for {item_id} may have posted a reply before the "
+                        "process was interrupted, and it could not be automatically matched against "
+                        "the thread's latest comment. Inspect the thread and, if a reply is already "
+                        "there, record it with `"
+                        + command_templates.evidence_add_reply(repo, str(pr_number), item_id=item_id)
+                        + "` before retrying."
+                    ),
+                    payload={"item_id": item_id},
+                )
+            # Nothing was ever posted, so falling through to the normal post-reply path
+            # below (which re-records a fresh in_flight attempt) is safe.
+        else:
+            reply_url = reconciled_url
+            _record_side_effect_attempt(
+                ledger,
+                session=session,
+                item_id=item_id,
+                lease_id=lease_id,
+                agent_id=agent_id,
+                side_effect_type="github_reply",
+                idempotency_key=reply_key,
+                status="succeeded",
+                timestamp=timestamp,
+                external_url=reply_url,
+            )
+            ledger.append_event(
+                session_id=str(session["session_id"]),
+                item_id=item_id,
+                lease_id=lease_id,
+                agent_id=agent_id,
+                role="publisher",
+                event_type="reply_reconciled",
+                payload={"thread_id": thread_id, "reply_url": reply_url, "idempotency_key": reply_key},
+                timestamp=timestamp,
+            )
     if not reply_url:
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_reply",
+            idempotency_key=reply_key,
+            status="in_flight",
+            timestamp=timestamp,
+        )
         try:
             reply_url = client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"]))
         except GitHubError as exc:
@@ -251,6 +314,74 @@ def _execute_single_publish_plan(
         timestamp=timestamp,
     )
     return item_id
+
+
+def _reconcile_in_flight_reply(
+    client: Any,
+    repo: str,
+    pr_number: str,
+    thread_id: str,
+    publisher_login: str,
+) -> str | None:
+    """Match only the thread's latest comment by login + attribution footer; anything less certain returns None."""
+    list_threads = getattr(client, "list_threads", None)
+    if not callable(list_threads) or not publisher_login:
+        return None
+    try:
+        threads = list_threads(repo, pr_number)
+    except Exception:
+        return None
+    for thread in threads or []:
+        if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
+            continue
+        latest_author = thread.get("latest_author_login")
+        # This is a proof match, so a non-str latest_body (bytes, or a structured
+        # value, depending on the client implementation) must fail the match rather
+        # than being stringified: str()-coercing a dict/list could accidentally
+        # contain REPLY_ATTRIBUTION as a substring of its repr, causing a false-
+        # positive adoption of the wrong URL.
+        raw_latest_body = thread.get("latest_body")
+        latest_body = raw_latest_body if isinstance(raw_latest_body, str) else ""
+        latest_url = thread.get("latest_url")
+        if latest_author == publisher_login and REPLY_ATTRIBUTION in latest_body and latest_url:
+            return str(latest_url)
+        return None
+    return None
+
+
+def _publisher_never_replied(client: Any, repo: str, pr_number: str, thread_id: str) -> bool:
+    """True only when GitHub proves the publisher has posted no reply anywhere on this thread.
+
+    Distinguishes two crash windows that both leave a dangling `in_flight` marker: a
+    kill *after* `post_reply()` succeeded (ambiguous -- something may need adopting)
+    from a kill *before* it ever ran (nothing was posted, so a normal retry is safe).
+    `_reconcile_in_flight_reply` only checks the thread's *latest* comment, which
+    proves the first case but not the absence of the second; `viewer_replied` scans
+    every comment on the thread, so it proves absence when false.
+
+    Any inability to fetch or interpret thread state is NOT proof of safety -- this
+    returns False (fall back to manual reconciliation) rather than guessing.
+    """
+    list_threads = getattr(client, "list_threads", None)
+    if not callable(list_threads):
+        return False
+    try:
+        threads = list_threads(repo, pr_number)
+    except Exception:
+        return False
+    for thread in threads or []:
+        if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
+            continue
+        if thread.get("viewer_reply_checked") is not True:
+            return False
+        viewer_replied = thread.get("viewer_replied")
+        if not isinstance(viewer_replied, bool):
+            # This is meant to be a proof check, not a best-effort guess: a client
+            # that sets viewer_reply_checked=True without reliably populating
+            # viewer_replied as an actual bool has not proven anything.
+            return False
+        return not viewer_replied
+    return False
 
 
 def _wait_for_remote_thread_resolution(
