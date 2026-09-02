@@ -711,7 +711,11 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.post_reply_calls += 1
                 if self.posted_body is None:
                     self.posted_body = body
-                    raise KeyboardInterrupt("simulated SIGKILL right after the POST succeeded")
+                    # KeyboardInterrupt is used only because it's a convenient catchable
+                    # exception here; it does not model SIGKILL specifically (SIGKILL
+                    # can't be raised or caught in-process at all) -- just a crash right
+                    # after the POST succeeded.
+                    raise KeyboardInterrupt("simulated crash right after the POST succeeded")
                 raise AssertionError("post_reply must not be called again once a reply is reconcilable")
 
             def resolve_thread(self, repo, pr_number, thread_id):
