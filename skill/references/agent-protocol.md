@@ -119,6 +119,24 @@ Classification is triage-phase evidence. Resolution is response-phase evidence. 
 
 Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `reject`.
 
+## Error Remediation
+
+A `WorkflowError` summary carries `commands` (the runnable template menu) and a `remediation` object:
+
+```json
+{
+  "reason_code": "INVALID_RESPONSE_SHAPE",
+  "remediation": {
+    "summary": "The response file is missing or is not the shape the runtime issued. Rewrite it from the `response_skeleton_path` in the ActionRequest, then resubmit.",
+    "command": "gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>"
+  }
+}
+```
+
+`remediation.summary` is the next step for this `reason_code`; `remediation.command` is the template to run. Read these before opening `references/status-action-map.md` — that map is a curated subset and does not cover every code the runtime emits. Every `WorkflowError` unregistered `reason_code` still resolves to a generic remediation pointing back at `commands`, never an absent or empty field.
+
+A handful of terminal failure paths — orchestration crashes and other cases that never construct a `WorkflowError` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
+
 `agent next` and the written `ActionRequest` may include an additive `handling_boundary` object for migrated work item types. For the first migrated GitHub review-thread fix path, `boundary_id` is `github-thread-fix`; `required_evidence` lists the evidence categories the runtime expects; `completion_criteria` lists the runtime-owned completion checks; `terminal_failure_reasons` lists stable reason codes; and `next_action` points to the next runtime-mediated action. Absence of `handling_boundary` means the item is on an unmigrated compatibility path, not that agents may bypass leases, evidence, publish, or final-gate.
 
 For GitHub thread `fix`, `fix_reply` **must be a JSON object**, not a string. Submitting a plain string may pass `agent submit` but will block `agent publish` with `MISSING_PUBLISH_REPLY`. Required worker fields: `files`. Optional fields: `commit_hash`, `summary`, `severity`, `why`, `test_command`, `test_result`. If `commit_hash` is omitted, `agent publish` hydrates commit evidence from the session or current Git `HEAD`; if no commit evidence is available, publish blocks with `MISSING_FIX_REPLY_COMMIT_HASH`. If `test_command` and `test_result` are omitted, `validation_commands` at the response level is used as default validation evidence. For `P0` and `P1` severities, `why` SHOULD contain a rich technical rationale (at least two paragraphs or 150+ characters).
