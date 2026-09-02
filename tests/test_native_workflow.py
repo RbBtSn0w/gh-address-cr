@@ -852,6 +852,16 @@ class NativeWorkflowTests(unittest.TestCase):
                     "--item-id github-thread:THREAD_1 --reply-url <reply_url> --author-login <login>",
                     message,
                 )
+                # Every other PUBLISH_BLOCKED raise site in this module records a
+                # publish_blocked ledger event; this one used to be silent.
+                blocked_session = manager.load()
+                blocked_events = [
+                    json.loads(line)
+                    for line in Path(blocked_session["ledger_path"]).read_text(encoding="utf-8").splitlines()
+                ]
+                publish_blocked = [row for row in blocked_events if row["event_type"] == "publish_blocked"]
+                self.assertEqual(len(publish_blocked), 1)
+                self.assertEqual(publish_blocked[0]["payload"]["reason_code"], protocol_codes.PUBLISH_RECONCILE_REQUIRED)
 
     def test_publish_retries_normally_when_crash_happened_before_the_post_ever_ran(self):
         # A crash between recording `in_flight` and calling post_reply() leaves the

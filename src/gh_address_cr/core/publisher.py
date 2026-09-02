@@ -152,6 +152,7 @@ def _execute_single_publish_plan(
             # or after it succeeded but the reply is no longer the latest comment
             # (ambiguous). Check the broader viewer-reply signal before blocking.
             if not _publisher_never_replied(client, repo, str(pr_number), thread_id):
+                _record_publish_blocked(session, ledger, item_id, agent_id, protocol_codes.PUBLISH_RECONCILE_REQUIRED)
                 session_store.save_session(repo, pr_number, session)
                 raise WorkflowError(
                     status=protocol_codes.PUBLISH_BLOCKED,
@@ -334,7 +335,10 @@ def _reconcile_in_flight_reply(
         if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
             continue
         latest_author = thread.get("latest_author_login")
-        latest_body = thread.get("latest_body") or ""
+        # str(...) rather than relying on `or ""`: a truthy non-string value (e.g. bytes,
+        # depending on the GitHub client implementation) would otherwise pass through
+        # and raise TypeError from the `in` check below.
+        latest_body = str(thread.get("latest_body") or "")
         latest_url = thread.get("latest_url")
         if latest_author == publisher_login and REPLY_ATTRIBUTION in latest_body and latest_url:
             return str(latest_url)
@@ -365,9 +369,15 @@ def _publisher_never_replied(client: Any, repo: str, pr_number: str, thread_id: 
     for thread in threads or []:
         if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
             continue
-        if not thread.get("viewer_reply_checked"):
+        if thread.get("viewer_reply_checked") is not True:
             return False
-        return not bool(thread.get("viewer_replied"))
+        viewer_replied = thread.get("viewer_replied")
+        if not isinstance(viewer_replied, bool):
+            # This is meant to be a proof check, not a best-effort guess: a client
+            # that sets viewer_reply_checked=True without reliably populating
+            # viewer_replied as an actual bool has not proven anything.
+            return False
+        return not viewer_replied
     return False
 
 
