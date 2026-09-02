@@ -8,6 +8,7 @@ from typing import Any
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
 from gh_address_cr.core.reply_templates import (
     clarify_reply as render_clarify_reply,
 )
@@ -143,7 +144,58 @@ def _execute_single_publish_plan(
     existing_reply_url = ledger.successful_side_effect_url(reply_key, "github_reply")
     if existing_reply_url:
         reply_url = existing_reply_url
+    if not reply_url and ledger.latest_side_effect_status(reply_key, "github_reply") == "in_flight":
+        reconciled_url = _reconcile_in_flight_reply(client, repo, str(pr_number), thread_id, publisher_login)
+        if reconciled_url is None:
+            session_store.save_session(repo, pr_number, session)
+            raise WorkflowError(
+                status=protocol_codes.PUBLISH_BLOCKED,
+                reason_code=protocol_codes.PUBLISH_RECONCILE_REQUIRED,
+                waiting_on="reply_reconciliation",
+                exit_code=5,
+                message=(
+                    f"A prior publish attempt for {item_id} may have posted a reply before the "
+                    "process was interrupted, and it could not be automatically matched against "
+                    "the thread's current comments. Inspect the thread and, if a reply is already "
+                    "there, record it with `agent evidence add --item-id --reply-url` before retrying."
+                ),
+                payload={"item_id": item_id},
+            )
+        reply_url = reconciled_url
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_reply",
+            idempotency_key=reply_key,
+            status="succeeded",
+            timestamp=timestamp,
+            external_url=reply_url,
+        )
+        ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            role="publisher",
+            event_type="reply_reconciled",
+            payload={"thread_id": thread_id, "reply_url": reply_url, "idempotency_key": reply_key},
+            timestamp=timestamp,
+        )
     if not reply_url:
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_reply",
+            idempotency_key=reply_key,
+            status="in_flight",
+            timestamp=timestamp,
+        )
         try:
             reply_url = client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"]))
         except GitHubError as exc:
@@ -251,6 +303,33 @@ def _execute_single_publish_plan(
         timestamp=timestamp,
     )
     return item_id
+
+
+def _reconcile_in_flight_reply(
+    client: Any,
+    repo: str,
+    pr_number: str,
+    thread_id: str,
+    publisher_login: str,
+) -> str | None:
+    """Match only the thread's latest comment by login + attribution footer; anything less certain returns None."""
+    list_threads = getattr(client, "list_threads", None)
+    if not callable(list_threads) or not publisher_login:
+        return None
+    try:
+        threads = list_threads(repo, pr_number)
+    except Exception:
+        return None
+    for thread in threads or []:
+        if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
+            continue
+        latest_author = thread.get("latest_author_login")
+        latest_body = thread.get("latest_body") or ""
+        latest_url = thread.get("latest_url")
+        if latest_author == publisher_login and REPLY_ATTRIBUTION in latest_body and latest_url:
+            return str(latest_url)
+        return None
+    return None
 
 
 def _wait_for_remote_thread_resolution(

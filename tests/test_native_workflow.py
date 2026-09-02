@@ -695,6 +695,156 @@ class NativeWorkflowTests(unittest.TestCase):
 
                 self.assertEqual(context.exception.reason_code, "UNSUPPORTED_CLASSIFICATION")
 
+    def test_publish_reconciles_reply_after_kill_between_post_and_ledger_write(self):
+        from gh_address_cr.core import publisher
+
+        class CrashOnceThenReconcileClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.post_reply_calls = 0
+                self.resolved = []
+                self.posted_body = None
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.post_reply_calls += 1
+                if self.posted_body is None:
+                    self.posted_body = body
+                    raise KeyboardInterrupt("simulated SIGKILL right after the POST succeeded")
+                raise AssertionError("post_reply must not be called again once a reply is reconcilable")
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+            def list_threads(self, repo, pr_number):
+                if self.posted_body is None:
+                    return []
+                return [
+                    {
+                        "id": "THREAD_1",
+                        "isResolved": False,
+                        "latest_author_login": "agent-login",
+                        "latest_body": self.posted_body,
+                        "latest_url": "https://github.test/reply-recovered",
+                    }
+                ]
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "clarify",
+                "note": "Need maintainer input.",
+                "reply_markdown": "Can you confirm the intended behavior?",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                client = CrashOnceThenReconcileClient()
+
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                session = manager.load()
+                ledger_events = [
+                    json.loads(line) for line in Path(session["ledger_path"]).read_text(encoding="utf-8").splitlines()
+                ]
+                in_flight = [
+                    row
+                    for row in ledger_events
+                    if row["event_type"] == "side_effect_attempt" and row["payload"]["status"] == "in_flight"
+                ]
+                self.assertEqual(len(in_flight), 1)
+                # The item was never marked handled, so a naive retry would re-select it and repost.
+                self.assertFalse(session["items"]["github-thread:THREAD_1"].get("reply_posted"))
+
+                result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(client.post_reply_calls, 1, "post_reply must only ever be attempted once")
+                self.assertEqual(client.resolved[0], (repo, pr_number, "THREAD_1"))
+                updated = manager.load()["items"]["github-thread:THREAD_1"]
+                self.assertEqual(updated["reply_url"], "https://github.test/reply-recovered")
+                self.assertEqual(updated["status"], "CLOSED")
+
+    def test_publish_blocks_for_manual_reconciliation_when_in_flight_reply_is_unmatched(self):
+        from gh_address_cr.core import protocol_codes, publisher
+        from gh_address_cr.core.errors import WorkflowError
+
+        class NeverReconcilableClient(UnstackedGitHubClient):
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                raise AssertionError("post_reply must not be called while state is in_flight and unmatched")
+
+            def list_threads(self, repo, pr_number):
+                return [
+                    {
+                        "id": "THREAD_1",
+                        "isResolved": False,
+                        "latest_author_login": "someone-else",
+                        "latest_body": "An unrelated later comment.",
+                        "latest_url": "https://github.test/other-comment",
+                    }
+                ]
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "clarify",
+                "note": "Need maintainer input.",
+                "reply_markdown": "Can you confirm the intended behavior?",
+                "validation_commands": [{"command": "python3 -m unittest tests.test_example", "result": "passed"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                session = manager.load()
+                from gh_address_cr.core.utils import get_session_ledger
+                from gh_address_cr.evidence.ledger import SideEffectAttempt
+
+                ledger = get_session_ledger(session)
+                ledger.record_side_effect_attempt(
+                    attempt=SideEffectAttempt.new(
+                        session_id=str(session["session_id"]),
+                        item_id="github-thread:THREAD_1",
+                        side_effect_type="github_reply",
+                        idempotency_key=f"{session['session_id']}:github-thread:THREAD_1:github_reply",
+                        status="in_flight",
+                        timestamp="2026-08-01T00:00:00Z",
+                    ),
+                    lease_id=None,
+                    agent_id="gh-address-cr-publisher",
+                    timestamp="2026-08-01T00:00:00Z",
+                )
+                client = NeverReconcilableClient()
+
+                with self.assertRaises(WorkflowError) as context:
+                    publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(context.exception.reason_code, protocol_codes.PUBLISH_RECONCILE_REQUIRED)
+
     def test_publish_github_thread_response_posts_reply_resolves_and_closes_item(self):
         from gh_address_cr.core import publisher
 

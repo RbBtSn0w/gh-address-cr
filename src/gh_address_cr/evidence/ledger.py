@@ -314,3 +314,18 @@ class EvidenceLedger:
             if attempt.status == "succeeded" and attempt.external_url:
                 latest_successful_url = attempt.external_url
         return latest_successful_url
+
+    def latest_side_effect_status(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
+        """Status of the most recent attempt for a key, or None; detects a dangling `in_flight` crash window."""
+        latest_status: str | None = None
+        for line_number, line in self._iter_records():
+            record = self._record_from_line(line_number, line)
+            if record.event_type != "side_effect_attempt":
+                continue
+            attempt = SideEffectAttempt.from_json(record.payload)
+            if idempotency_key is not None and attempt.idempotency_key != idempotency_key:
+                continue
+            if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
+                continue
+            latest_status = attempt.status
+        return latest_status
