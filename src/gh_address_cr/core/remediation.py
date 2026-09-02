@@ -13,7 +13,7 @@ unmatched code resolves through `_fallback`, never a KeyError.
 
 from __future__ import annotations
 
-from gh_address_cr.core import command_templates
+from gh_address_cr.core import command_templates, protocol_codes
 
 _RESPONSE_SHAPE_CODES = frozenset(
     {
@@ -61,13 +61,15 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.address(repo, pr_number),
         }
 
-    if code == "MISSING_CLASSIFICATION" or code == "MISSING_CLASSIFICATION_NOTE":
+    # MISSING_CLASSIFICATION_NOTE has no protocol_codes constant -- it's a raw literal
+    # at its one call site (agent_protocol.py), not centralized there either.
+    if code == protocol_codes.MISSING_CLASSIFICATION or code == "MISSING_CLASSIFICATION_NOTE":
         return {
             "summary": "Record triage classification evidence with a note before requesting a fixer lease.",
             "command": command_templates.classify(repo, pr_number),
         }
 
-    if code == "MISSING_PUBLISH_REPLY" or code == "MISSING_FIX_REPLY_COMMIT_HASH":
+    if code == protocol_codes.MISSING_PUBLISH_REPLY or code == protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH:
         return {
             "summary": (
                 "Publish needs structured reply evidence: `fix_reply` must be a JSON object, "

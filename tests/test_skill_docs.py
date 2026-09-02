@@ -60,6 +60,24 @@ def emitted_status_tokens(source: str) -> set[str]:
     return set(re.findall(STATUS_TOKEN_PATTERN, source))
 
 
+def unreferenced_protocol_codes(protocol_codes_source: str, rest_of_source: str) -> set[str]:
+    """protocol_codes.py constants that are declared but never referenced anywhere else.
+
+    protocol_codes.py's own docstring calls it "the single source of truth" for
+    reason/status tokens, but declaring a constant there is not evidence the runtime
+    ever emits it -- six constants (UNKNOWN_SLICE among them) are declared and never
+    referenced again. Scoped to this one module: the same "declare but never use"
+    pattern isn't verified for constant families defined elsewhere (e.g. FINAL_GATE_*
+    in final_gate.py), where treating a bare declaration as insufficient evidence
+    produced false negatives against genuinely emitted codes (PER_THREAD_EVIDENCE_REQUIRED
+    is assigned to a differently-named constant and would vanish under a blanket rule).
+    """
+    declared = set(
+        re.findall(rf"^\s*({STATUS_TOKEN_PATTERN})\s*=\s*\"\1\"\s*$", protocol_codes_source, re.M)
+    )
+    return declared - emitted_status_tokens(rest_of_source)
+
+
 def cli_topology_section():
     text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
     start = text.index("## Command Topology (ASCII)")
@@ -292,10 +310,17 @@ class SkillDocumentationContractTest(unittest.TestCase):
         # Guards against phantom entries like the former NO_WORK_AVAILABLE /
         # WAITING_FOR_ACTION, which sent agents looking for a status never produced.
         documented = set(re.findall(rf"`({STATUS_TOKEN_PATTERN})`", STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")))
-        runtime_source = "\n".join(
-            path.read_text(encoding="utf-8") for path in (ROOT / "src").rglob("*.py")
+        src_files = sorted((ROOT / "src").rglob("*.py"))
+        protocol_codes_path = ROOT / "src" / "gh_address_cr" / "core" / "protocol_codes.py"
+        protocol_codes_source = protocol_codes_path.read_text(encoding="utf-8")
+        other_source = "\n".join(
+            path.read_text(encoding="utf-8") for path in src_files if path != protocol_codes_path
         )
-        emitted = emitted_status_tokens(runtime_source)
+        runtime_source = protocol_codes_source + "\n" + other_source
+
+        emitted = emitted_status_tokens(runtime_source) - unreferenced_protocol_codes(
+            protocol_codes_source, other_source
+        )
 
         phantom = sorted(token for token in documented if token not in emitted)
 
@@ -328,6 +353,29 @@ class SkillDocumentationContractTest(unittest.TestCase):
         for token in ("FINAL_GATE_UNRESOLVED_REMOTE_THREADS", "BLOCKED", "MISSING_THREAD_ID", "NO_ELIGIBLE_ITEM"):
             with self.subTest(token=token):
                 self.assertIn(token, emitted)
+
+    def test_unreferenced_protocol_codes_excludes_declared_but_unused_constants(self):
+        # Regression: UNKNOWN_SLICE is declared in protocol_codes.py and never
+        # referenced anywhere else. A plain word-boundary scan over all of src/ counts
+        # its own declaration line as "emitted", which would let a genuinely phantom
+        # `UNKNOWN_SLICE` status slip past the doc guard undetected.
+        protocol_codes_source = 'UNKNOWN_SLICE = "UNKNOWN_SLICE"\nNO_ELIGIBLE_ITEM = "NO_ELIGIBLE_ITEM"\n'
+        rest_of_source = 'raise WorkflowError(reason_code=protocol_codes.NO_ELIGIBLE_ITEM)\n'
+
+        dead = unreferenced_protocol_codes(protocol_codes_source, rest_of_source)
+
+        self.assertIn("UNKNOWN_SLICE", dead)
+        self.assertNotIn("NO_ELIGIBLE_ITEM", dead)
+
+    def test_unreferenced_protocol_codes_does_not_penalize_differently_named_aliases(self):
+        # A constant defined elsewhere under a different variable name than its own
+        # value (FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED" in
+        # workflow_matching.py) must still count as emitted -- this guard only tightens
+        # protocol_codes.py's own self-referential declarations, not every constant in
+        # the codebase.
+        rest_of_source = 'FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"\n'
+
+        self.assertIn("PER_THREAD_EVIDENCE_REQUIRED", emitted_status_tokens(rest_of_source))
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()
