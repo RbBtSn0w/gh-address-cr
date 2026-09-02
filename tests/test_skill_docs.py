@@ -49,12 +49,15 @@ def emitted_status_tokens(source: str) -> set[str]:
     """Extract ALLCAPS tokens that plausibly appear as an emitted status/reason_code.
 
     Used to guard status-action-map.md against phantom entries: a documented token
-    that the runtime never actually produces. Excludes the two contexts that read as
-    "emitted" under a naive word-boundary scan but are not: prose in a full-line
-    comment, and an `x or 'TOKEN'` / `x or "TOKEN"` read-side fallback default (a
-    stand-in for a *missing* value, not something the runtime writes) -- both quote
-    styles occur in this codebase (final_gate.py uses single quotes inside f-strings).
+    that the runtime never actually produces. Excludes the three contexts that read
+    as "emitted" under a naive word-boundary scan but are not: prose in a triple-
+    quoted docstring, prose in a full-line comment, and an `x or 'TOKEN'` /
+    `x or "TOKEN"` read-side fallback default (a stand-in for a *missing* value, not
+    something the runtime writes) -- both quote styles occur in this codebase
+    (final_gate.py uses single quotes inside f-strings).
     """
+    source = re.sub(r'"""[\s\S]*?"""', "", source)
+    source = re.sub(r"'''[\s\S]*?'''", "", source)
     source = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
     source = re.sub(rf"""\bor\s+['"]({STATUS_TOKEN_PATTERN})['"]""", "", source)
     return set(re.findall(STATUS_TOKEN_PATTERN, source))
@@ -341,6 +344,30 @@ class SkillDocumentationContractTest(unittest.TestCase):
         emitted = emitted_status_tokens(source)
         self.assertNotIn("UNKNOWN", emitted)
         self.assertNotIn("STACK_MEMBER_BLOCKED", emitted)
+
+    def test_emitted_status_tokens_rejects_docstring_prose(self):
+        # Regression: workflow.py's docstring mentions FINAL_GATE_MISSING_REPLY_EVIDENCE
+        # in a ".. note::"-style explanation, not as an emission. A token that appeared
+        # ONLY in prose like this would incorrectly read as emitted without this strip.
+        source = (
+            'def f():\n'
+            '    """See ``final-gate``, which reports ``TOTALLY_FAKE_DOCSTRING_ONLY_CODE``\n'
+            '    even though this function never raises it."""\n'
+            '    pass\n'
+        )
+
+        self.assertNotIn("TOTALLY_FAKE_DOCSTRING_ONLY_CODE", emitted_status_tokens(source))
+
+    def test_emitted_status_tokens_still_counts_a_code_alongside_its_own_docstring(self):
+        # Stripping docstrings must not blind the scan to a real emission that happens
+        # to sit near documentation in the same file.
+        source = (
+            'def f():\n'
+            '    """Raises MISSING_THREAD_ID when the thread id is absent."""\n'
+            '    raise WorkflowError(reason_code="MISSING_THREAD_ID")\n'
+        )
+
+        self.assertIn("MISSING_THREAD_ID", emitted_status_tokens(source))
 
     def test_emitted_status_tokens_still_counts_real_emission_shapes(self):
         source = (

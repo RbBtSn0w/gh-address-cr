@@ -40,6 +40,10 @@ class WorkflowError(RuntimeError):
             "commands": (
                 self.payload["commands"] if "commands" in self.payload else common_summary_commands(repo, str(pr_number))
             ),
-            "remediation": remediation_for(self.reason_code, repo=repo, pr_number=str(pr_number)),
+            "remediation": (
+                self.payload["remediation"]
+                if "remediation" in self.payload
+                else remediation_for(self.reason_code, repo=repo, pr_number=str(pr_number))
+            ),
             "exit_code": self.exit_code,
         }
