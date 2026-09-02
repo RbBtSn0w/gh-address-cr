@@ -53,6 +53,24 @@ class TestWorkflowErrorCommands(unittest.TestCase):
 
         self.assertEqual(summary["commands"], {})
 
+    def test_curated_payload_remediation_wins_over_the_computed_default(self):
+        # remediation used to be unconditionally overwritten by remediation_for(),
+        # unlike commands (checked by key presence). A raise site that needs a more
+        # specific remediation than the generic reason_code lookup must be able to
+        # provide one.
+        curated = {"summary": "Specific to this raise site.", "command": "gh-address-cr agent leases owner/repo 123"}
+        error = WorkflowError(
+            status="BLOCKED",
+            reason_code="LEASE_LOCKED_ITEM",
+            exit_code=4,
+            message="Item is locked by an active lease.",
+            payload={"remediation": curated},
+        )
+
+        summary = error.to_summary(repo="owner/repo", pr_number="123")
+
+        self.assertEqual(summary["remediation"], curated)
+
     def test_summary_keeps_its_existing_machine_fields(self):
         error = WorkflowError(
             status="PUBLISH_BLOCKED",

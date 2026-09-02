@@ -42,6 +42,45 @@ def read_repo_docs(*paths):
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
+STATUS_TOKEN_PATTERN = r"[A-Z][A-Z0-9_]{3,}"
+
+
+def emitted_status_tokens(source: str) -> set[str]:
+    """Extract ALLCAPS tokens that plausibly appear as an emitted status/reason_code.
+
+    Used to guard status-action-map.md against phantom entries: a documented token
+    that the runtime never actually produces. Excludes the three contexts that read
+    as "emitted" under a naive word-boundary scan but are not: prose in a triple-
+    quoted docstring, prose in a full-line comment, and an `x or 'TOKEN'` /
+    `x or "TOKEN"` read-side fallback default (a stand-in for a *missing* value, not
+    something the runtime writes) -- both quote styles occur in this codebase
+    (final_gate.py uses single quotes inside f-strings).
+    """
+    source = re.sub(r'"""[\s\S]*?"""', "", source)
+    source = re.sub(r"'''[\s\S]*?'''", "", source)
+    source = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
+    source = re.sub(rf"""\bor\s+['"]({STATUS_TOKEN_PATTERN})['"]""", "", source)
+    return set(re.findall(STATUS_TOKEN_PATTERN, source))
+
+
+def unreferenced_protocol_codes(protocol_codes_source: str, rest_of_source: str) -> set[str]:
+    """protocol_codes.py constants that are declared but never referenced anywhere else.
+
+    protocol_codes.py's own docstring calls it "the single source of truth" for
+    reason/status tokens, but declaring a constant there is not evidence the runtime
+    ever emits it -- six constants (UNKNOWN_SLICE among them) are declared and never
+    referenced again. Scoped to this one module: the same "declare but never use"
+    pattern isn't verified for constant families defined elsewhere (e.g. FINAL_GATE_*
+    in final_gate.py), where treating a bare declaration as insufficient evidence
+    produced false negatives against genuinely emitted codes (PER_THREAD_EVIDENCE_REQUIRED
+    is assigned to a differently-named constant and would vanish under a blanket rule).
+    """
+    declared = set(
+        re.findall(rf"^\s*({STATUS_TOKEN_PATTERN})\s*=\s*\"\1\"\s*$", protocol_codes_source, re.M)
+    )
+    return declared - emitted_status_tokens(rest_of_source)
+
+
 def cli_topology_section():
     text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
     start = text.index("## Command Topology (ASCII)")
@@ -256,6 +295,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "waiting_on",
             "next_action",
             "commands",
+            "remediation",
             "exit_code",
         ):
             self.assertIn(f"`{field}`", combined)
@@ -264,6 +304,105 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("--input <batch-response.json>", protocol_text)
         self.assertIn("--why <why>", protocol_text)
         self.assertIn("--stale", protocol_text)
+
+    def test_status_action_map_documents_only_codes_the_runtime_emits(self):
+        # One-directional doc ⊆ runtime, mirroring
+        # test_skill_root_commands_are_exposed_by_runtime_manifest. The reverse is not
+        # assertable: agent_protocol_submission.required_response_field mints codes via
+        # f"MISSING_{field.upper()}", so the emitted set is open by construction.
+        # Guards against phantom entries like the former NO_WORK_AVAILABLE /
+        # WAITING_FOR_ACTION, which sent agents looking for a status never produced.
+        documented = set(re.findall(rf"`({STATUS_TOKEN_PATTERN})`", STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")))
+        src_files = sorted((ROOT / "src").rglob("*.py"))
+        protocol_codes_path = ROOT / "src" / "gh_address_cr" / "core" / "protocol_codes.py"
+        protocol_codes_source = protocol_codes_path.read_text(encoding="utf-8")
+        other_source = "\n".join(
+            path.read_text(encoding="utf-8") for path in src_files if path != protocol_codes_path
+        )
+        runtime_source = protocol_codes_source + "\n" + other_source
+
+        emitted = emitted_status_tokens(runtime_source) - unreferenced_protocol_codes(
+            protocol_codes_source, other_source
+        )
+
+        phantom = sorted(token for token in documented if token not in emitted)
+
+        self.assertEqual(phantom, [], f"status-action-map.md documents codes the runtime never emits: {phantom}")
+
+    def test_emitted_status_tokens_rejects_fallback_defaults_and_comments(self):
+        # Regression for a guard that read too permissively: a plain word-boundary scan
+        # counts `UNKNOWN` as emitted because of code shaped exactly like this, even
+        # though the runtime never actually produces `status: "UNKNOWN"` anywhere -- the
+        # `or` branch only fires when a value is already missing.
+        source = (
+            '# UNKNOWN is only ever a display fallback here, never a real emission.\n'
+            'status = str(payload.get("status") or "UNKNOWN")\n'
+            # final_gate.py uses this single-quoted shape inside f-strings.
+            'print(f"reason_code={result.reason_code or \'STACK_MEMBER_BLOCKED\'}")\n'
+        )
+
+        emitted = emitted_status_tokens(source)
+        self.assertNotIn("UNKNOWN", emitted)
+        self.assertNotIn("STACK_MEMBER_BLOCKED", emitted)
+
+    def test_emitted_status_tokens_rejects_docstring_prose(self):
+        # Regression: workflow.py's docstring mentions FINAL_GATE_MISSING_REPLY_EVIDENCE
+        # in a ".. note::"-style explanation, not as an emission. A token that appeared
+        # ONLY in prose like this would incorrectly read as emitted without this strip.
+        source = (
+            'def f():\n'
+            '    """See ``final-gate``, which reports ``TOTALLY_FAKE_DOCSTRING_ONLY_CODE``\n'
+            '    even though this function never raises it."""\n'
+            '    pass\n'
+        )
+
+        self.assertNotIn("TOTALLY_FAKE_DOCSTRING_ONLY_CODE", emitted_status_tokens(source))
+
+    def test_emitted_status_tokens_still_counts_a_code_alongside_its_own_docstring(self):
+        # Stripping docstrings must not blind the scan to a real emission that happens
+        # to sit near documentation in the same file.
+        source = (
+            'def f():\n'
+            '    """Raises MISSING_THREAD_ID when the thread id is absent."""\n'
+            '    raise WorkflowError(reason_code="MISSING_THREAD_ID")\n'
+        )
+
+        self.assertIn("MISSING_THREAD_ID", emitted_status_tokens(source))
+
+    def test_emitted_status_tokens_still_counts_real_emission_shapes(self):
+        source = (
+            'FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"\n'
+            'raise WorkflowError(status="BLOCKED", reason_code="MISSING_THREAD_ID", ...)\n'
+            '"reason_code": protocol_codes.NO_ELIGIBLE_ITEM,\n'
+        )
+
+        emitted = emitted_status_tokens(source)
+        for token in ("FINAL_GATE_UNRESOLVED_REMOTE_THREADS", "BLOCKED", "MISSING_THREAD_ID", "NO_ELIGIBLE_ITEM"):
+            with self.subTest(token=token):
+                self.assertIn(token, emitted)
+
+    def test_unreferenced_protocol_codes_excludes_declared_but_unused_constants(self):
+        # Regression: UNKNOWN_SLICE is declared in protocol_codes.py and never
+        # referenced anywhere else. A plain word-boundary scan over all of src/ counts
+        # its own declaration line as "emitted", which would let a genuinely phantom
+        # `UNKNOWN_SLICE` status slip past the doc guard undetected.
+        protocol_codes_source = 'UNKNOWN_SLICE = "UNKNOWN_SLICE"\nNO_ELIGIBLE_ITEM = "NO_ELIGIBLE_ITEM"\n'
+        rest_of_source = 'raise WorkflowError(reason_code=protocol_codes.NO_ELIGIBLE_ITEM)\n'
+
+        dead = unreferenced_protocol_codes(protocol_codes_source, rest_of_source)
+
+        self.assertIn("UNKNOWN_SLICE", dead)
+        self.assertNotIn("NO_ELIGIBLE_ITEM", dead)
+
+    def test_unreferenced_protocol_codes_does_not_penalize_differently_named_aliases(self):
+        # A constant defined elsewhere under a different variable name than its own
+        # value (FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED" in
+        # workflow_matching.py) must still count as emitted -- this guard only tightens
+        # protocol_codes.py's own self-referential declarations, not every constant in
+        # the codebase.
+        rest_of_source = 'FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"\n'
+
+        self.assertIn("PER_THREAD_EVIDENCE_REQUIRED", emitted_status_tokens(rest_of_source))
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()
