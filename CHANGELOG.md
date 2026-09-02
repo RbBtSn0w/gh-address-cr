@@ -1,3 +1,9 @@
+## [3.8.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.0...v3.8.1) (2026-09-02)
+
+### Bug Fixes
+
+* reconcile in-flight replies instead of double-posting after a crash ([#258](https://github.com/RbBtSn0w/gh-address-cr/issues/258)) ([f5bc378](https://github.com/RbBtSn0w/gh-address-cr/commit/f5bc378487ee3f984997901de5f659ab53f98e9a))
+
 ## [3.8.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.6...v3.8.0) (2026-09-02)
 
 ### Features
