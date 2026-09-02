@@ -307,7 +307,7 @@ class EvidenceLedger:
             if record.event_type != "side_effect_attempt":
                 continue
             attempt = SideEffectAttempt.from_json(record.payload)
-            if idempotency_key is not None and attempt.idempotency_key != idempotency_key:
+            if attempt.idempotency_key != idempotency_key:
                 continue
             if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
                 continue
@@ -327,7 +327,7 @@ class EvidenceLedger:
             if record.event_type != "side_effect_attempt":
                 continue
             attempt = SideEffectAttempt.from_json(record.payload)
-            if idempotency_key is not None and attempt.idempotency_key != idempotency_key:
+            if attempt.idempotency_key != idempotency_key:
                 continue
             if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
                 continue

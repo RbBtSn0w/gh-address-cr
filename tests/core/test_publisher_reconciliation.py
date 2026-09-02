@@ -75,6 +75,26 @@ class TestReconcileInFlightReply(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_non_string_latest_body_does_not_false_positive_match(self):
+        # This is a proof match: str()-coercing a structured latest_body (dict/list)
+        # could accidentally contain REPLY_ATTRIBUTION as a substring of its repr,
+        # wrongly adopting a URL that was never a genuine attributed reply. A non-str
+        # latest_body must fail the match, never be stringified and searched.
+        client = FakeThreadsClient(
+            [
+                {
+                    "id": "T1",
+                    "latest_author_login": "agent-login",
+                    "latest_body": {"note": REPLY_ATTRIBUTION},
+                    "latest_url": "https://github.test/reply",
+                }
+            ]
+        )
+
+        result = _reconcile_in_flight_reply(client, "owner/repo", "1", "T1", "agent-login")
+
+        self.assertIsNone(result)
+
     def test_matches_when_latest_body_is_a_real_string(self):
         client = FakeThreadsClient(
             [

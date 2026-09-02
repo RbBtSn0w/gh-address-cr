@@ -335,10 +335,13 @@ def _reconcile_in_flight_reply(
         if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
             continue
         latest_author = thread.get("latest_author_login")
-        # str(...) rather than relying on `or ""`: a truthy non-string value (e.g. bytes,
-        # depending on the GitHub client implementation) would otherwise pass through
-        # and raise TypeError from the `in` check below.
-        latest_body = str(thread.get("latest_body") or "")
+        # This is a proof match, so a non-str latest_body (bytes, or a structured
+        # value, depending on the client implementation) must fail the match rather
+        # than being stringified: str()-coercing a dict/list could accidentally
+        # contain REPLY_ATTRIBUTION as a substring of its repr, causing a false-
+        # positive adoption of the wrong URL.
+        raw_latest_body = thread.get("latest_body")
+        latest_body = raw_latest_body if isinstance(raw_latest_body, str) else ""
         latest_url = thread.get("latest_url")
         if latest_author == publisher_login and REPLY_ATTRIBUTION in latest_body and latest_url:
             return str(latest_url)
