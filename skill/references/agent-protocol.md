@@ -124,10 +124,12 @@ Allowed `ActionResponse.resolution` values are `fix`, `clarify`, `defer`, and `r
 Every error summary carries `commands` (the runnable template menu) and a `remediation` object:
 
 ```json
-"reason_code": "INVALID_RESPONSE_SHAPE",
-"remediation": {
-  "summary": "The response file is missing or is not the shape the runtime issued. Rewrite it from the `response_skeleton_path` in the ActionRequest, then resubmit.",
-  "command": "gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>"
+{
+  "reason_code": "INVALID_RESPONSE_SHAPE",
+  "remediation": {
+    "summary": "The response file is missing or is not the shape the runtime issued. Rewrite it from the `response_skeleton_path` in the ActionRequest, then resubmit.",
+    "command": "gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>"
+  }
 }
 ```
 

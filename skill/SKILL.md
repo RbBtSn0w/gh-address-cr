@@ -149,8 +149,8 @@ authenticated login.
 
 Read only the reference required by the current runtime state:
 
-- For blocked or waiting states where `remediation` is absent or does not name
-  the next step: `references/status-action-map.md`
+- For blocked or waiting states where `remediation` does not name the next
+  step: `references/status-action-map.md`
 - For resolve, batch, evidence, or lease details:
   `references/agent-protocol.md`
 - For lower-layer ownership and the authorized branch-management handoff:

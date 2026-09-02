@@ -277,8 +277,12 @@ class SkillDocumentationContractTest(unittest.TestCase):
         runtime_source = " ".join(
             path.read_text(encoding="utf-8") for path in (ROOT / "src").rglob("*.py")
         )
+        # Match on word boundaries, not substrings: a plain `in` check reports a phantom
+        # as present whenever it is a prefix of a real code, so documenting FINAL_GATE
+        # (only ever FINAL_GATE_*) or PARITY (only ever PARITY_DIFF) would slip through.
+        emitted = set(re.findall(r"[A-Z][A-Z0-9_]{3,}", runtime_source))
 
-        phantom = sorted(token for token in documented if token not in runtime_source)
+        phantom = sorted(token for token in documented if token not in emitted)
 
         self.assertEqual(phantom, [], f"status-action-map.md documents codes the runtime never emits: {phantom}")
 
