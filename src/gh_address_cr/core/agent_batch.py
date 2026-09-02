@@ -46,6 +46,7 @@ from gh_address_cr.core.leases import LeaseConflictError, claim_lease, expire_le
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.paths import SessionPaths
 from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
+from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.core.utils import coerce_now as _coerce_now
 from gh_address_cr.core.utils import get_session_items as _items
 from gh_address_cr.core.utils import get_session_ledger as _ledger
@@ -138,7 +139,7 @@ def _build_fixer_action_request(
     session: dict[str, Any], repo: str, pr_number: str, *, item: dict[str, Any], lease_id: str, request_id: str
 ) -> dict[str, Any]:
     """Build the fixer ActionRequest payload (without the response-skeleton path)."""
-    request_item = dict(item)
+    request_item = request_item_projection(item)
     request_item["state"] = "claimed"
     request = {
         "schema_version": PROTOCOL_VERSION,
