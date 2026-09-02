@@ -93,6 +93,32 @@ before reply/resolve side effects, so refresh and revalidate the owning layer.
 For an already-terminal GitHub thread or local finding, record that fresh proof
 with `agent evidence add --item-id <item_id> --commit <sha> --files <paths>
 --validation <cmd=passed>`; the runtime attaches the current stack binding.
+Each stacked PR has its own CR session and evidence lifecycle. For example, a
+three-member stack is handled with `address owner/repo 101`, `address
+owner/repo 102`, and `address owner/repo 103`; resolve and publish findings in
+the session for the owning PR reported by `stack_context.selected_pr`. A
+finding seen on the top PR but introduced by a lower PR must be handed back to
+that lower PR. Run each member's layer `final-gate` separately, and use
+`final-gate ... --stack` only for explicitly requested bottom-up aggregate proof.
+After `gh stack sync` or `gh stack rebase`, refresh every affected member and
+revalidate its changed revision before publishing again. Stack merge remains an
+atomic, contiguous, bottom-up GitHub operation.
+
+### Sandbox-safe session state
+
+PR-scoped commands persist their session, evidence, and final-gate artifacts in
+one state directory. In a restricted agent runtime, choose a writable directory
+explicitly and reuse it for the full PR session:
+
+```bash
+export GH_ADDRESS_CR_STATE_DIR="/path/to/writable/gh-address-cr-state"
+gh-address-cr review owner/repo 123
+```
+
+Use the same value for `review`, `address`, `agent next`, `agent submit`,
+`agent publish`, and `final-gate`; changing it starts a different local session
+view. If the configured directory is unavailable, the runtime returns
+`STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
 Completion means the latest final gate reports:
 

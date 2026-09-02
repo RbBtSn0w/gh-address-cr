@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,7 @@ def state_dir() -> Path:
         path = paths.state_dir()
     except paths.PathResolutionError as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
-    path.mkdir(parents=True, exist_ok=True)
+    _ensure_writable_state_directory(path)
     return path
 
 
@@ -37,8 +38,21 @@ def workspace_dir(repo: str, pr_number: str) -> Path:
         path = paths.workspace_dir(repo, pr_number)
     except paths.PathResolutionError as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
-    path.mkdir(parents=True, exist_ok=True)
+    _ensure_writable_state_directory(path)
     return path
+
+
+def _ensure_writable_state_directory(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(prefix=".gh-address-cr-", dir=path):
+            pass
+    except OSError as exc:
+        raise SessionError(
+            "STATE_DIR_NOT_WRITABLE",
+            "The gh-address-cr state directory is not writable. "
+            "Set GH_ADDRESS_CR_STATE_DIR to one writable directory and reuse it for the full PR session.",
+        ) from exc
 
 
 def session_file(repo: str, pr_number: str) -> Path:

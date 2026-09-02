@@ -513,6 +513,13 @@ def build_preflight_summary(
     artifact_path: str | None = None,
     diagnostics: dict | None = None,
 ) -> dict:
+    if artifact_path is None:
+        try:
+            artifact_path = str(session_store.workspace_dir(repo, pr_number))
+        except session_store.SessionError:
+            # The state directory itself may be the failed prerequisite. Keep
+            # the diagnostic machine-readable without attempting another write.
+            artifact_path = None
     summary = {
         "status": status,
         "repo": repo,
@@ -525,7 +532,7 @@ def build_preflight_summary(
             "unresolved_github_threads_count": None,
             "needs_human_items_count": None,
         },
-        "artifact_path": artifact_path or str(session_store.workspace_dir(repo, pr_number)),
+        "artifact_path": artifact_path,
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,
@@ -695,6 +702,21 @@ def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) ->
 def preflight_high_level(args: argparse.Namespace) -> int | None:
     repo = args.args[0]
     pr_number = args.args[1]
+
+    try:
+        session_store.state_dir()
+    except session_store.SessionError as exc:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            str(exc),
+            reason_code=exc.reason_code,
+            waiting_on="state_directory",
+            next_action=str(exc),
+            exit_code=5,
+            persist=False,
+        )
 
     if args.command == "adapter" and len(args.args) < 3:
         return output_preflight_error(

@@ -58,6 +58,22 @@ payload.
 If the runtime or required version is unavailable, fail before session
 mutation. Do not copy runtime state-machine logic into the skill.
 
+## Sandbox-Safe State Directory
+
+PR-scoped state must be writable and persistent across the full workflow. In a
+Codex sandbox, CI worker, or container, set one allowed directory before the
+first PR command and reuse it for the full PR session:
+
+```text
+export GH_ADDRESS_CR_STATE_DIR="<writable-dir>"
+gh-address-cr address <owner/repo> <pr_number> --lean
+```
+
+Keep the same value for `review`, `address`, `agent next`, `agent submit`,
+`agent publish`, and `final-gate`; changing it selects a different local
+session. `STATE_DIR_NOT_WRITABLE` means the runtime could not initialize that
+directory: choose a permitted location and rerun the same command.
+
 ## Execution Ladder
 
 1. Run the selected public main entrypoint.

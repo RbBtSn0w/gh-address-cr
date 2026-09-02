@@ -20,6 +20,42 @@ different concern that truly belongs to another layer, classify the original
 item as `clarify`, `defer`, or `reject` with rationale and create or ingest the
 separate owning-layer item.
 
+## Multiple PRs and CR Sessions
+
+A stack is a set of independent PR-scoped CR sessions, with one PR-scoped
+session per stack member, not one shared review session. For a stack with bottom
+`PR #101`, middle `PR #102`, and top `PR #103`:
+
+1. Refresh the selected PR and read `stack_context.selected_pr.pr_number` and
+   `head_ref_name` to identify the owning layer.
+2. Run `review` or `address` with that exact PR number. Each member keeps its
+   own session, findings, leases, replies, validation evidence, and
+   `final-gate` result:
+
+   ```text
+   gh-address-cr address owner/repo 101 --lean
+   gh-address-cr address owner/repo 102 --lean
+   gh-address-cr address owner/repo 103 --lean
+   ```
+
+3. Resolve a finding only in the owning session (`agent next`, `agent resolve`,
+   `agent submit`, and `agent publish` all use the owning PR number). A finding
+   discovered while checking `PR #103` but introduced by `PR #101` is handed
+   back to `PR #101`; it is not fixed or evidenced on `PR #103`.
+4. Run the owning layer's `final-gate` after its evidence is complete. A green
+   layer gate covers only that PR. Use `final-gate --stack` on `PR #102` or
+   `PR #103` only when the user explicitly requests aggregate readiness; it
+   evaluates the contiguous bottom-up range and reports the covered PRs.
+
+Stack merge operations remain GitHub-owned. Merging a selected member includes
+all lower unmerged members in one atomic contiguous operation; if one member is
+blocked, none of that group merges. Use `gh stack sync` for routine
+synchronization and `gh stack rebase` only when an explicit cascading rebase is
+needed. After either operation, refresh every affected member, discard stale
+ActionRequests and validation evidence, and repeat the corresponding PR-scoped
+CR flow. Once the complete stack is merged, submit new work as a new stack
+rooted at the trunk rather than extending the merged stack.
+
 ## Review Worker Boundary
 
 The `gh-address-cr` worker may classify the item, edit and validate code in an

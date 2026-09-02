@@ -40,6 +40,14 @@ authority, or `final-gate` semantics.
   item-scoped `agent evidence add`. Blocking local items use normal `review`,
   not thread-only `--auto-simple` handling.
 
+## Runtime Environment
+
+If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
+- **Action**: Set `GH_ADDRESS_CR_STATE_DIR` to one writable directory, then
+  reuse it for the full PR session across `review`, `address`, `agent next`,
+  `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
+  do not change `HOME` or create a second state directory mid-session.
+
 ## Active Work
 
 If `status` is `WAITING_FOR_ACTION`:

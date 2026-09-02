@@ -115,7 +115,9 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict[str, Any]:
     created = False
     try:
         session = manager.load()
-    except session_store.SessionError:
+    except session_store.SessionError as exc:
+        if exc.reason_code != "SESSION_NOT_FOUND":
+            raise
         session = manager.create(status="ACTIVE")
         created = True
     _ensure_native_session_fields(session)
@@ -1020,8 +1022,25 @@ class HighLevelReviewRuntime:
         if exit_code is not None:
             return exit_code
 
-        with _high_level_phase(command, "session"):
-            session = _load_or_create_session(repo, pr_number)
+        try:
+            with _high_level_phase(command, "session"):
+                session = _load_or_create_session(repo, pr_number)
+        except session_store.SessionError as exc:
+            waiting_on = "state_directory" if exc.reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
+            summary = _native_summary(
+                command=command,
+                repo=repo,
+                pr_number=pr_number,
+                status="BLOCKED",
+                reason_code=exc.reason_code,
+                waiting_on=waiting_on,
+                next_action=str(exc),
+                exit_code=5,
+                session={},
+                lean=lean,
+            )
+            _emit_native_summary(summary, human=human)
+            return 5
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:
