@@ -1,7 +1,13 @@
 import inspect
 import unittest
 
-from gh_address_cr.core.reply_templates import _normalize_severity, clarify_reply, defer_reply, fix_reply
+from gh_address_cr.core.reply_templates import (
+    REPLY_ATTRIBUTION,
+    _normalize_severity,
+    clarify_reply,
+    defer_reply,
+    fix_reply,
+)
 
 
 class TestReplyTemplates(unittest.TestCase):
@@ -79,6 +85,15 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertNotIn("generate_reply.py", message)
         self.assertIn("gh-address-cr agent submit", message)
         self.assertIn("gh-address-cr submit-action", message)
+
+    def test_all_reply_templates_end_with_machine_readable_attribution(self):
+        fix = fix_reply(None, ["sha123", "src/a.py", "pytest", "Passed", "Rationale."])
+        clarify = clarify_reply(["Rationale."])
+        defer = defer_reply(["Out of scope for this PR."])
+
+        for rendered in (fix, clarify, defer):
+            self.assertTrue(rendered.endswith(f"{REPLY_ATTRIBUTION}\n"))
+
 
 if __name__ == "__main__":
     unittest.main()
