@@ -366,7 +366,7 @@ def _native_summary(
         "stack_merge_readiness": "unknown" if stack_availability in {"unavailable", "invalid"} else "not_evaluated",
         "commands": summary_commands(repo, pr_number),
     }
-    summary["primary_action"] = project_primary_action(
+    primary_action = project_primary_action(
         repo=repo,
         pr_number=str(pr_number),
         command=command,
@@ -375,11 +375,12 @@ def _native_summary(
         waiting_on=waiting_on,
         session=session,
     )
+    summary["primary_action"] = primary_action
     summary["context"] = project_context_summary(
         session,
-        selected_item_id=summary["primary_action"].get("item_id"),
+        selected_item_id=primary_action.get("item_id"),
     )
-    _record_recommendation_observation(repo, str(pr_number), session, summary["primary_action"])
+    _record_recommendation_observation(repo, str(pr_number), session, primary_action)
     if diagnostics:
         summary["diagnostics"] = diagnostics
     if command == "threads" or include_threads:

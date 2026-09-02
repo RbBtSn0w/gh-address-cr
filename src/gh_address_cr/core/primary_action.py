@@ -32,18 +32,22 @@ _ENVIRONMENT_WAITING_ON = {
 _SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
+def _mapping(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _head_sha(session: dict[str, Any]) -> str | None:
-    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
-    context = metadata.get("pull_request_context") if isinstance(metadata.get("pull_request_context"), dict) else {}
+    metadata = _mapping(session.get("metadata"))
+    context = _mapping(metadata.get("pull_request_context"))
     direct = context.get("head_sha") or context.get("head_oid")
     if direct:
         return str(direct)
-    stack = context.get("stack_context") if isinstance(context.get("stack_context"), dict) else {}
-    selected_pr = stack.get("selected_pr") if isinstance(stack.get("selected_pr"), dict) else {}
+    stack = _mapping(context.get("stack_context"))
+    selected_pr = _mapping(stack.get("selected_pr"))
     if selected_pr.get("head_oid"):
         return str(selected_pr["head_oid"])
     selected = str(stack.get("selected_pr_number") or selected_pr.get("pr_number") or "")
-    stack_details = stack.get("stack") if isinstance(stack.get("stack"), dict) else {}
+    stack_details = _mapping(stack.get("stack"))
     members = stack_details.get("members") if isinstance(stack_details.get("members"), list) else stack.get("members")
     members = members if isinstance(members, list) else []
     for member in members:
@@ -60,10 +64,11 @@ def build_recommendation_observation(
     emitted_at: str,
 ) -> dict[str, Any]:
     """Build non-authoritative recommendation metadata for dedupe telemetry."""
-    item_id = action.get("item_id")
+    raw_item_id = action.get("item_id")
+    item_id = str(raw_item_id) if isinstance(raw_item_id, str) else None
     raw_items = session.get("items")
     items = raw_items if isinstance(raw_items, dict) else {}
-    item = items.get(item_id) if item_id and isinstance(items.get(item_id), dict) else {}
+    item = _mapping(items.get(item_id)) if item_id else {}
     evidence_state = {
         "state": item.get("state"),
         "status": item.get("status"),
@@ -92,12 +97,12 @@ def build_recommendation_observation(
 
 def project_context_summary(session: dict[str, Any], *, selected_item_id: str | None) -> dict[str, Any]:
     """Project bounded context from facts already refreshed by the high-level command."""
-    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
-    observed = metadata.get("pull_request_context") if isinstance(metadata.get("pull_request_context"), dict) else {}
-    stack = observed.get("stack_context") if isinstance(observed.get("stack_context"), dict) else {}
-    serialized_selected = stack.get("selected_pr") if isinstance(stack.get("selected_pr"), dict) else {}
+    metadata = _mapping(session.get("metadata"))
+    observed = _mapping(metadata.get("pull_request_context"))
+    stack = _mapping(observed.get("stack_context"))
+    serialized_selected = _mapping(stack.get("selected_pr"))
     selected_pr = str(stack.get("selected_pr_number") or serialized_selected.get("pr_number") or "")
-    stack_details = stack.get("stack") if isinstance(stack.get("stack"), dict) else {}
+    stack_details = _mapping(stack.get("stack"))
     members = stack_details.get("members") if isinstance(stack_details.get("members"), list) else stack.get("members")
     members = members if isinstance(members, list) else []
     member = serialized_selected or next(
@@ -110,7 +115,7 @@ def project_context_summary(session: dict[str, Any], *, selected_item_id: str | 
     )
     raw_items = session.get("items")
     items = raw_items if isinstance(raw_items, dict) else {}
-    selected = items.get(selected_item_id) if selected_item_id and isinstance(items.get(selected_item_id), dict) else {}
+    selected = _mapping(items.get(selected_item_id)) if selected_item_id else {}
     changed_files = metadata.get("changed_files") if isinstance(metadata.get("changed_files"), list) else []
     check_summary = metadata.get("check_summary") if isinstance(metadata.get("check_summary"), dict) else None
     return {
@@ -245,9 +250,9 @@ def project_primary_action(
             why_now="A blocking local finding must be resolved before the final gate.",
         )
 
-    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
-    check_summary = metadata.get("check_summary") if isinstance(metadata.get("check_summary"), dict) else {}
-    check_counts = check_summary.get("counts") if isinstance(check_summary.get("counts"), dict) else {}
+    metadata = _mapping(session.get("metadata"))
+    check_summary = _mapping(metadata.get("check_summary"))
+    check_counts = _mapping(check_summary.get("counts"))
     if int(check_counts.get("pending") or 0) > 0:
         return _action(
             "wait",
