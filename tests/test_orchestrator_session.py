@@ -31,9 +31,17 @@ class TestOrchestratorSession(unittest.TestCase):
         self.assertEqual(action_request["session_id"], "owner__repo/pr-123")
         self.assertEqual(action_request["lease_id"], "lease-abc")
         self.assertEqual(action_request["agent_role"], "fixer")
-        self.assertEqual(action_request["item"], item)
         self.assertIn("allowed_actions", action_request)
         self.assertIn("required_evidence", action_request)
+
+        # Machine operands stay flat; producer-authored text sits behind the envelope.
+        packet_item = action_request["item"]
+        self.assertEqual(packet_item["item_id"], "finding-1")
+        self.assertEqual(packet_item["item_kind"], "local_finding")
+        self.assertEqual(packet_item["title"], "Example finding")
+        self.assertNotIn("body", packet_item)
+        self.assertEqual(packet_item["untrusted_content"]["body"], "Fix the null pointer.")
+        self.assertEqual(packet_item["untrusted_content"]["source"], "local_finding_producer")
 
     def test_evidence_omission_causes_submission_failure(self):
         # Missing 'files' which is required

@@ -38,6 +38,7 @@ from gh_address_cr.core.leases import (
 )
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
+from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
 )
@@ -231,7 +232,7 @@ def issue_action_request(
             "lease_id": lease_id,
         },
     )
-    request_item = dict(item)
+    request_item = request_item_projection(item)
     request_item["state"] = "claimed"
     stack_context = refresh_stack_context_for_request(
         repo,
