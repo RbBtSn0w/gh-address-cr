@@ -380,7 +380,8 @@ def _native_summary(
         session,
         selected_item_id=primary_action.get("item_id"),
     )
-    _record_recommendation_observation(repo, str(pr_number), session, primary_action)
+    if session:
+        _record_recommendation_observation(repo, str(pr_number), session, primary_action)
     if diagnostics:
         summary["diagnostics"] = diagnostics
     if command == "threads" or include_threads:
@@ -407,8 +408,9 @@ def _record_recommendation_observation(
         and previous.get("kind") in {"claim", "resolve"}
         and observation.get("kind") in {"publish", "wait"}
     )
-    metadata["recommendation_observation"] = observation
-    session_store.save_session(repo, pr_number, session)
+    if not repeated:
+        metadata["recommendation_observation"] = observation
+        session_store.save_session(repo, pr_number, session)
     try:
         from gh_address_cr.otel_tracing import add_current_span_event
 

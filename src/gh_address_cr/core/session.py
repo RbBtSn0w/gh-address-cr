@@ -9,6 +9,7 @@ from gh_address_cr.core import paths
 from gh_address_cr.core.io import JsonIOError, read_json_object, write_json_atomic
 
 DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
+_WRITABLE_STATE_DIRECTORIES: set[Path] = set()
 
 
 class SessionError(RuntimeError):
@@ -43,10 +44,13 @@ def workspace_dir(repo: str, pr_number: str) -> Path:
 
 
 def _ensure_writable_state_directory(path: Path) -> None:
+    if path in _WRITABLE_STATE_DIRECTORIES:
+        return
     try:
         path.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=".gh-address-cr-", dir=path):
             pass
+        _WRITABLE_STATE_DIRECTORIES.add(path)
     except OSError as exc:
         raise SessionError(
             "STATE_DIR_NOT_WRITABLE",
