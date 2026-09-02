@@ -17,6 +17,10 @@ GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 GH_QUERY_TIMEOUT_SECONDS = 30.0
 
 
+class DetachedHeadError(RuntimeError):
+    """Raised when the current checkout has no branch to use as PR scope."""
+
+
 def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     if stderr:
@@ -35,7 +39,7 @@ def _git_output(command: list[str]) -> str:
 def _derive_current_branch() -> str:
     branch = _git_output(["git", "branch", "--show-current"])
     if not branch:
-        raise RuntimeError("Current git branch is detached or empty. Pass --head explicitly.")
+        raise DetachedHeadError("Current git branch is detached or empty. Pass --head explicitly.")
     return branch
 
 
@@ -133,7 +137,7 @@ def resolve_current_pr_scope(*, repo: str | None = None, head: str | None = None
             "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
             "repo": resolved["repo"],
             "head": resolved["head"],
-            "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
+            "reason_code": "DETACHED_HEAD" if isinstance(error, DetachedHeadError) else "ACTIVE_PR_TARGET_REQUIRED",
             "waiting_on": "active_pr_target",
             "next_action": f"{error} Pass --repo <owner/repo> and --head <branch> explicitly.",
             "exit_code": 2,
