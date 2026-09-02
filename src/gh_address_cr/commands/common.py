@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core.remediation import remediation_for
 
 IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--agent-id",
@@ -135,6 +136,14 @@ def resolve_active_cached_scope() -> tuple[str, str] | dict:
 
 
 def emit_scope_resolution_error(payload: dict) -> int:
+    # This fires before repo/pr_number are known -- that is the failure -- so the
+    # remediation command is built from literal placeholders, not real values.
+    # command_templates.quote_arg keeps a "<...>"-shaped argument literal, so the
+    # rendered command reads as an instructive template rather than a broken one.
+    payload = {
+        **payload,
+        "remediation": remediation_for(payload.get("reason_code"), repo="<owner/repo>", pr_number="<pr_number>"),
+    }
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     print(payload["next_action"], file=sys.stderr)
     return int(payload["exit_code"])

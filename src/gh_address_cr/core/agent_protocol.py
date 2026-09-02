@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
+from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
-from gh_address_cr.core.agent_protocol_evidence import (
-    TERMINAL_RESOLUTIONS,
-)
-from gh_address_cr.core.agent_protocol_evidence import (
-    required_evidence_for as _required_evidence_for_impl,
+from gh_address_cr.core.agent_protocol_evidence import required_evidence_for
+from gh_address_cr.core.agent_protocol_submission import (
+    accept_action_response_submission,
+    handling_boundary_summary_or_none,
+    has_classification_evidence,
+    load_response_json_object,
+    prepare_action_response_submission,
+    refresh_stack_context_for_request,
+    response_skeleton_for_request,
+    verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
@@ -28,28 +31,16 @@ from gh_address_cr.core.ids import stable_id as _stable_id
 from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.leases import (
     LeaseConflictError,
-    LeaseSubmissionError,
-    accept_lease,
     calculate_lease_recovery_state,
     claim_lease,
     expire_leases,
     release_lease,
-    submit_lease,
 )
 from gh_address_cr.core.models import ActionRequest
-from gh_address_cr.core.runtime_kernel.stack import (
-    STACK_MANAGEMENT_ACTIONS,
-    StackContext,
-    compare_revision_binding,
-    repository_context_for_stack,
-    unavailable_stack_context,
-)
-from gh_address_cr.core.severity import first_scene_item_severity
+from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
+from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
-)
-from gh_address_cr.core.utils import (
-    fix_reply_severity_rejection_reason as _fix_reply_severity_rejection_reason,
 )
 from gh_address_cr.core.utils import (
     get_field as _get,
@@ -61,60 +52,13 @@ from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
 )
 from gh_address_cr.core.utils import (
-    normalize_optional_fix_reply_severity as _normalize_optional_fix_reply_severity,
-)
-from gh_address_cr.core.utils import (
-    normalize_string_list as _normalize_string_list,
-)
-from gh_address_cr.core.utils import (
     return_expired_items_to_open as _return_expired_items_to_open,
 )
 from gh_address_cr.core.utils import (
     return_item_to_claimable_state as _return_item_to_claimable_state,
 )
-from gh_address_cr.core.utils import (
-    severity_override_note as _severity_override_note,
-)
-from gh_address_cr.core.validation_evidence import validation_result_is_success
-from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
-from gh_address_cr.evidence.ledger import EvidenceLedger
-from gh_address_cr.github.client import GitHubClient
 
 MUTATING_ROLES = {"fixer"}
-
-
-def _refresh_stack_context_for_request(
-    repo: str,
-    pr_number: str,
-    session: dict[str, Any],
-    *,
-    github_client: Any | None = None,
-) -> StackContext:
-    """Refresh the non-authoritative GitHub observation used to bind a new request."""
-    was_known_stacked = session_store.has_observed_stack_membership(session)
-    client = github_client or GitHubClient()
-    try:
-        stack_context = client.get_stack_context(repo, str(pr_number))
-    except Exception:
-        stack_context = unavailable_stack_context(repo, str(pr_number))
-    session_store.cache_pull_request_context(session, stack_context.to_dict())
-    if stack_context.availability == "invalid":
-        raise WorkflowError(
-            status="REQUEST_REJECTED",
-            reason_code=protocol_codes.STACK_CONTEXT_INVALID,
-            waiting_on="stack_refresh",
-            exit_code=5,
-            message="ActionRequest was not issued because current stack context is invalid.",
-        )
-    if stack_context.availability == "unavailable" and was_known_stacked:
-        raise WorkflowError(
-            status="REQUEST_REJECTED",
-            reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
-            waiting_on="stack_refresh",
-            exit_code=5,
-            message="ActionRequest was not issued because known stacked-PR context could not be refreshed.",
-        )
-    return stack_context
 
 
 def record_classification(
@@ -249,9 +193,9 @@ def issue_action_request(
             message=f"No eligible work item exists for role `{role}`.",
         )
 
-    if role in MUTATING_ROLES and not _has_classification_evidence(item):
+    if role in MUTATING_ROLES and not has_classification_evidence(item):
         _restore_classification_evidence_from_session(session, item_id, item)
-    if role in MUTATING_ROLES and not _has_classification_evidence(item):
+    if role in MUTATING_ROLES and not has_classification_evidence(item):
         next_action = (
             f"Missing triage classification evidence for {item_id}. Run "
             f"`gh-address-cr agent classify {repo} {pr_number} {item_id} "
@@ -288,9 +232,9 @@ def issue_action_request(
             "lease_id": lease_id,
         },
     )
-    request_item = dict(item)
+    request_item = request_item_projection(item)
     request_item["state"] = "claimed"
-    stack_context = _refresh_stack_context_for_request(
+    stack_context = refresh_stack_context_for_request(
         repo,
         str(pr_number),
         session,
@@ -304,7 +248,7 @@ def issue_action_request(
         "agent_role": role,
         "item": request_item,
         "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
-        "required_evidence": _required_evidence_for(item, role),
+        "required_evidence": required_evidence_for(item, role),
         "repository_context": repository_context_for_stack(
             repo,
             pr_number,
@@ -313,7 +257,7 @@ def issue_action_request(
         "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
         "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
     }
-    handling_boundary = _handling_boundary_summary_or_none(item, role=role)
+    handling_boundary = handling_boundary_summary_or_none(item, role=role)
     if handling_boundary is not None:
         request["handling_boundary"] = handling_boundary
     request_hash = ActionRequest.from_dict(request).stable_hash()
@@ -352,7 +296,7 @@ def issue_action_request(
     item["state"] = "claimed"
     item["active_lease_id"] = lease_id
     write_json_atomic(request_path, request)
-    response_skeleton = _response_skeleton_for_request(request, agent_id=agent_id, item=item)
+    response_skeleton = response_skeleton_for_request(request, agent_id=agent_id, item=item)
     write_json_atomic(response_skeleton_path, response_skeleton)
 
     ledger.append_event(
@@ -383,40 +327,6 @@ def issue_action_request(
     }
 
 
-_BATCH_CLASSIFICATION_NOTE = "Batch fix skeleton requested by agent next --batch."
-
-
-def _active_fixer_lease_for_item(
-    session: dict[str, Any], item_id: str, *, agent_id: str | None = None
-) -> dict[str, Any] | None:
-    for lease in session.get("leases", {}).values():
-        if not isinstance(lease, dict):
-            continue
-        if lease.get("item_id") != item_id:
-            continue
-        if lease.get("status") != "active":
-            continue
-        if lease.get("role") != "fixer":
-            continue
-        if agent_id is not None and lease.get("agent_id") != agent_id:
-            continue
-        return lease
-    return None
-
-
-def _is_batch_claimable_github_thread(item: dict[str, Any]) -> bool:
-    return is_claimable_github_thread(item) and not is_stale_github_thread_item(item)
-
-
-def _handling_boundary_summary_or_none(item: dict[str, Any], *, role: str) -> dict[str, Any] | None:
-    if role != "fixer" or item.get("item_kind") != "github_thread":
-        return None
-    try:
-        return boundary_summary_for_item(item, role=role)
-    except WorkItemBoundaryError:
-        return None
-
-
 def submit_action_response(
     repo: str,
     pr_number: str,
@@ -430,7 +340,7 @@ def submit_action_response(
     now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
-    response = _load_response_json_object(
+    response = load_response_json_object(
         response_path,
         status=protocol_codes.ACTION_REJECTED,
         missing_reason_code="RESPONSE_FILE_NOT_FOUND",
@@ -443,8 +353,8 @@ def submit_action_response(
     try:
         if publish:
             _validate_publish_shortcut_target(session, response)
-        prepared = _prepare_action_response_submission(session, ledger, response, now=now)
-        binding = _verify_request_revision_binding(
+        prepared = prepare_action_response_submission(session, ledger, response, now=now)
+        binding = verify_request_revision_binding(
             repo,
             pr_number,
             session,
@@ -457,7 +367,7 @@ def submit_action_response(
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
-        record = _accept_action_response_submission(session, ledger, response, prepared, now=now)
+        record = accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
         session_store.save_session(repo, pr_number, session)
         raise
@@ -486,268 +396,6 @@ def submit_action_response(
     payload["publish"] = published
     payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
-
-
-def _request_repository_context(lease: dict[str, Any]) -> dict[str, Any] | None:
-    request_path = str(_get(lease, "request_path") or "")
-    if not request_path:
-        return None
-    try:
-        request = json.loads(Path(request_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    repository_context = request.get("repository_context") if isinstance(request, dict) else None
-    return dict(repository_context) if isinstance(repository_context, dict) else None
-
-
-def _verify_request_revision_binding(
-    repo: str,
-    pr_number: str,
-    session: dict[str, Any],
-    prepared: dict[str, Any],
-    response: dict[str, Any],
-    *,
-    github_client: Any | None,
-    ledger: EvidenceLedger,
-    rejected_status: str,
-    now: datetime,
-) -> dict[str, Any] | None:
-    """Refresh a stacked request binding before accepting any response evidence."""
-    request_context = _request_repository_context(prepared["lease"])
-    binding_payload = request_context.get("revision_binding") if isinstance(request_context, dict) else None
-    binding = dict(binding_payload) if isinstance(binding_payload, dict) else None
-    request_stack_context = request_context.get("stack_context") if isinstance(request_context, dict) else None
-    request_stack_availability = (
-        str(request_stack_context.get("availability") or "") if isinstance(request_stack_context, dict) else ""
-    )
-    was_known_stacked = session_store.has_observed_stack_membership(session)
-    reason: str | None
-    if binding is not None and str(binding.get("pr_number") or "") != str(pr_number):
-        reason = protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
-    elif binding is None and request_stack_availability == "invalid":
-        reason = protocol_codes.STACK_CONTEXT_INVALID
-    elif binding is None and request_stack_availability not in {"present", "unavailable"}:
-        if not was_known_stacked:
-            return None
-        reason = protocol_codes.STALE_REQUEST_CONTEXT
-    else:
-        if github_client is None:
-            from gh_address_cr.github.client import GitHubClient
-
-            github_client = GitHubClient()
-        try:
-            current = github_client.get_stack_context(repo, str(pr_number))
-        except Exception:
-            current = None
-        if not isinstance(current, StackContext):
-            reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE if binding is not None or was_known_stacked else None
-        else:
-            session_store.cache_pull_request_context(session, current.to_dict())
-            if binding is not None:
-                reason = compare_revision_binding(binding, current)
-            elif request_stack_availability == "present":
-                reason = protocol_codes.STALE_REQUEST_CONTEXT
-            elif current.availability == "present":
-                reason = protocol_codes.STALE_REQUEST_CONTEXT
-            elif current.availability == "invalid":
-                reason = protocol_codes.STACK_CONTEXT_INVALID
-            elif current.availability == "unavailable" and was_known_stacked:
-                reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE
-            else:
-                reason = None
-    if reason is None:
-        return binding
-    _record_response_rejected(session, ledger, response, reason, item_id=str(prepared["item_id"]))
-    if reason in {protocol_codes.STALE_REQUEST_CONTEXT, protocol_codes.STACK_ACTION_CONTEXT_MISMATCH}:
-        _release_irrecoverable_request_lease(session, prepared, now=now)
-    raise WorkflowError(
-        status=rejected_status,
-        reason_code=reason,
-        waiting_on="stack_refresh",
-        exit_code=5,
-        message=f"ActionResponse rejected: {reason}",
-        payload={"item_id": prepared["item_id"], "lease_id": prepared["lease_id"]},
-    )
-
-
-def _release_irrecoverable_request_lease(
-    session: dict[str, Any],
-    prepared: dict[str, Any],
-    *,
-    now: datetime,
-) -> None:
-    lease = prepared["lease"]
-    lease_id = str(prepared["lease_id"])
-    if str(_get(lease, "status") or "") in {"active", "submitted"}:
-        release_lease(session, lease_id, now=now, reason="stale_request_context")
-    item = prepared["item"]
-    active_lease_id = str(item.get("active_lease_id") or "")
-    if active_lease_id and active_lease_id != lease_id:
-        return
-    _return_item_to_claimable_state(item)
-    item["claimed_by"] = None
-    item["claimed_at"] = None
-    item["lease_expires_at"] = None
-    item.pop("active_lease_id", None)
-
-
-def _load_response_json_object(
-    response_path: str | Path,
-    *,
-    status: str,
-    missing_reason_code: str,
-    invalid_reason_code: str,
-    shape_reason_code: str,
-    shape_message: str,
-    payload_name: str,
-    waiting_on: str = "action_response",
-) -> dict[str, Any]:
-    path = Path(response_path)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise WorkflowError(
-            status=status,
-            reason_code=missing_reason_code,
-            waiting_on=waiting_on,
-            exit_code=2,
-            message=f"{payload_name} file does not exist: {path}",
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise WorkflowError(
-            status=status,
-            reason_code=invalid_reason_code,
-            waiting_on=waiting_on,
-            exit_code=2,
-            message=f"Invalid {payload_name} JSON: {exc}",
-        ) from exc
-
-    if not isinstance(payload, dict):
-        raise WorkflowError(
-            status=status,
-            reason_code=shape_reason_code,
-            waiting_on=waiting_on,
-            exit_code=2,
-            message=shape_message,
-        )
-    return payload
-
-
-def _response_skeleton_for_request(request: dict[str, Any], *, agent_id: str, item: dict[str, Any]) -> dict[str, Any]:
-    role = str(request.get("agent_role") or "")
-    resolution = _classified_resolution(item) if role == "fixer" else None
-    resolution = resolution or "<fix|clarify|defer|reject>"
-    skeleton: dict[str, Any] = {
-        "schema_version": str(request.get("schema_version") or PROTOCOL_VERSION),
-        "request_id": str(request["request_id"]),
-        "lease_id": str(request["lease_id"]),
-        "agent_id": agent_id,
-        "item_id": str(item.get("item_id") or ""),
-        "resolution": resolution,
-        "note": "",
-    }
-    if role == "fixer" and resolution == "fix":
-        skeleton["files"] = []
-        skeleton["validation_commands"] = [{"command": "", "result": ""}]
-    if item.get("item_kind") == "github_thread":
-        if role == "fixer" and resolution == "fix":
-            skeleton["fix_reply"] = {
-                "summary": "",
-                "files": [],
-                "why": "",
-                "test_command": "",
-                "test_result": "",
-            }
-        else:
-            skeleton["reply_markdown"] = ""
-    elif resolution != "fix":
-        skeleton["reply_markdown"] = ""
-    return skeleton
-
-
-def _classified_resolution(item: dict[str, Any]) -> str | None:
-    evidence = item.get("classification_evidence")
-    if isinstance(evidence, dict) and evidence.get("classification") in TERMINAL_RESOLUTIONS:
-        return str(evidence["classification"])
-    decision = str(item.get("decision") or "").strip().lower()
-    if decision in TERMINAL_RESOLUTIONS:
-        return decision
-    return None
-
-
-def _restore_classification_evidence_from_session(session: dict[str, Any], item_id: str, item: dict[str, Any]) -> None:
-    decision = str(item.get("decision") or "").strip().lower()
-    if decision in TERMINAL_RESOLUTIONS:
-        item["classification_evidence"] = {
-            "event_type": "classification_recorded",
-            "classification": decision,
-            "note": str(
-                item.get("classification_note") or item.get("resolution_note") or "Restored from item decision."
-            ),
-            "record_id": str(item.get("classification_record_id") or "session-decision"),
-        }
-        return
-
-    try:
-        records = _ledger(session).load(event_type="classification_recorded")
-    except ValueError:
-        return
-    for record in reversed(records):
-        if record.item_id != item_id:
-            continue
-        classification = str(record.payload.get("classification") or "").strip().lower()
-        if classification not in TERMINAL_RESOLUTIONS:
-            continue
-        item["classification_evidence"] = {
-            "event_type": "classification_recorded",
-            "classification": classification,
-            "note": str(record.payload.get("note") or "Restored from evidence ledger."),
-            "record_id": record.record_id,
-        }
-        item["decision"] = classification
-        return
-
-
-def _expand_evidence_ref(session: dict[str, Any], response: dict[str, Any]) -> str | None:
-    evidence_ref = str(response.get("evidence_ref") or "").strip()
-    if not evidence_ref:
-        return None
-    profiles = session.get("evidence_profiles")
-    if not isinstance(profiles, dict):
-        return "EVIDENCE_PROFILE_NOT_FOUND"
-    profile = profiles.get(evidence_ref)
-    if not isinstance(profile, dict):
-        return "EVIDENCE_PROFILE_NOT_FOUND"
-
-    profile_files = _normalize_string_list(profile.get("files"))
-    response_files = _normalize_string_list(response.get("files"))
-    if not response_files and profile_files:
-        response["files"] = profile_files
-        response_files = profile_files
-
-    profile_validation = _normalize_validation_command_records(profile.get("validation_commands"))
-    if not response.get("validation_commands") and profile_validation:
-        response["validation_commands"] = profile_validation
-
-    raw_profile_fix_reply = profile.get("fix_reply")
-    profile_fix_reply: dict[str, Any] = raw_profile_fix_reply if isinstance(raw_profile_fix_reply, dict) else {}
-    if (
-        "fix_reply" in response
-        and response.get("fix_reply") is not None
-        and not isinstance(response.get("fix_reply"), dict)
-    ):
-        return "INVALID_FIX_REPLY"
-    raw_response_fix_reply = response.get("fix_reply")
-    response_fix_reply: dict[str, Any] = raw_response_fix_reply if isinstance(raw_response_fix_reply, dict) else {}
-    merged_fix_reply = dict(profile_fix_reply)
-    merged_fix_reply.update(response_fix_reply)
-    if profile.get("commit_hash") and not merged_fix_reply.get("commit_hash"):
-        merged_fix_reply["commit_hash"] = profile["commit_hash"]
-    if response_files and not merged_fix_reply.get("files"):
-        merged_fix_reply["files"] = response_files
-    if str(response.get("resolution") or "") == "fix" and merged_fix_reply:
-        response["fix_reply"] = merged_fix_reply
-    return None
 
 
 def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[str, Any]) -> None:
@@ -783,592 +431,6 @@ def _validate_publish_shortcut_target(session: dict[str, Any], response: dict[st
             message="--publish is only supported for GitHub review-thread fix responses.",
             payload={"item_id": item_id, "lease_id": lease_id},
         )
-
-
-def _prepare_action_response_submission(
-    session: dict[str, Any],
-    ledger: EvidenceLedger,
-    response: dict[str, Any],
-    *,
-    now: datetime,
-    rejected_status: str = protocol_codes.ACTION_REJECTED,
-) -> dict[str, Any]:
-    lease_id = _required_response_field(response, "lease_id", status=rejected_status)
-    lease = session.get("leases", {}).get(lease_id)
-    if not isinstance(lease, dict):
-        rebound = _recover_rebound_github_thread_lease(
-            session,
-            response,
-            item_id=str(response.get("item_id") or ""),
-            current_lease_id=lease_id,
-        )
-        if rebound is not None:
-            lease_id = str(rebound["lease_id"])
-            lease = rebound["lease"]
-            item_id = str(rebound["item_id"])
-            item = rebound["item"]
-            evidence_ref_reason = _expand_evidence_ref(session, response)
-            if evidence_ref_reason:
-                _raise_response_rejected(
-                    session,
-                    ledger,
-                    response,
-                    evidence_ref_reason,
-                    status=rejected_status,
-                    item_id=item_id,
-                    lease_id=lease_id,
-                )
-            reason_code = _validate_response(response, item)
-            if reason_code:
-                _raise_response_rejected(
-                    session,
-                    ledger,
-                    response,
-                    reason_code,
-                    status=rejected_status,
-                    item_id=item_id,
-                    lease_id=lease_id,
-                )
-            return {
-                "lease_id": lease_id,
-                "lease": lease,
-                "item_id": item_id,
-                "item": item,
-                "expected_request_hash": str(_get(lease, "request_hash") or ""),
-            }
-        _record_response_rejected(session, ledger, response, "LEASE_NOT_FOUND")
-        raise WorkflowError(
-            status=rejected_status,
-            reason_code="LEASE_NOT_FOUND",
-            waiting_on="lease",
-            exit_code=5,
-            message=f"Lease not found: {lease_id}",
-        )
-
-    item_id = str(lease["item_id"])
-    declared_item_id = response.get("item_id")
-    if declared_item_id and str(declared_item_id) != item_id:
-        _raise_response_rejected(
-            session,
-            ledger,
-            response,
-            "ITEM_ID_MISMATCH",
-            status=rejected_status,
-            item_id=item_id,
-            lease_id=lease_id,
-        )
-
-    item = _items(session).get(item_id)
-    if not isinstance(item, dict):
-        _record_response_rejected(session, ledger, response, "ITEM_NOT_FOUND")
-        raise WorkflowError(
-            status=rejected_status,
-            reason_code="ITEM_NOT_FOUND",
-            waiting_on="work_item",
-            exit_code=5,
-            message=f"Work item not found: {item_id}",
-        )
-
-    evidence_ref_reason = _expand_evidence_ref(session, response)
-    if evidence_ref_reason:
-        _raise_response_rejected(
-            session,
-            ledger,
-            response,
-            evidence_ref_reason,
-            status=rejected_status,
-            item_id=item_id,
-            lease_id=lease_id,
-        )
-
-    reason_code = _validate_response(response, item)
-    if reason_code:
-        _raise_response_rejected(
-            session,
-            ledger,
-            response,
-            reason_code,
-            status=rejected_status,
-            item_id=item_id,
-            lease_id=lease_id,
-        )
-
-    expected_request_hash, context_reason_code = _expected_request_hash_for_response(response, lease)
-    if context_reason_code:
-        lease_recovery = _lease_recovery_payload_for_response(
-            session,
-            response,
-            lease,
-            item_id=item_id,
-            request_hash=str(response.get("request_id") or ""),
-            now=now,
-        )
-        _raise_response_rejected(
-            session,
-            ledger,
-            response,
-            context_reason_code,
-            status=rejected_status,
-            item_id=item_id,
-            lease_id=lease_id,
-            lease_recovery=lease_recovery,
-        )
-
-    return {
-        "lease_id": lease_id,
-        "lease": lease,
-        "item_id": item_id,
-        "item": item,
-        "expected_request_hash": expected_request_hash,
-    }
-
-
-def _recover_rebound_github_thread_lease(
-    session: dict[str, Any],
-    response: dict[str, Any],
-    *,
-    item_id: str,
-    current_lease_id: str | None = None,
-) -> dict[str, Any] | None:
-    normalized_item_id = item_id.strip()
-    if not normalized_item_id:
-        return None
-    item = _items(session).get(normalized_item_id)
-    if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
-        return None
-    if str(response.get("resolution") or "") != "fix":
-        return None
-    state = str(item.get("state") or "").lower()
-    if state not in {"stale", "claimed"} and not bool(item.get("is_outdated")):
-        return None
-    rebound_lease = _active_fixer_lease_for_item(
-        session,
-        normalized_item_id,
-        agent_id=str(response.get("agent_id") or ""),
-    )
-    if not isinstance(rebound_lease, dict):
-        return None
-    rebound_lease_id = str(_get(rebound_lease, "lease_id") or "")
-    if not rebound_lease_id or rebound_lease_id == str(current_lease_id or ""):
-        return None
-    return {
-        "lease_id": rebound_lease_id,
-        "lease": rebound_lease,
-        "item_id": normalized_item_id,
-        "item": item,
-    }
-
-
-def _accept_action_response_submission(
-    session: dict[str, Any],
-    ledger: EvidenceLedger,
-    response: dict[str, Any],
-    prepared: dict[str, Any],
-    *,
-    now: datetime,
-    rejected_status: str = protocol_codes.ACTION_REJECTED,
-    telemetry_seen: set[tuple[str, str, str, str, str, str]] | None = None,
-) -> Any:
-    lease_id = str(prepared["lease_id"])
-    lease = prepared["lease"]
-    item_id = str(prepared["item_id"])
-    item = prepared["item"]
-    try:
-        submit_lease(
-            session,
-            lease_id,
-            agent_id=str(response["agent_id"]),
-            role=str(lease["role"]),
-            item_id=item_id,
-            request_hash=str(prepared["expected_request_hash"]),
-            now=now,
-        )
-        accept_lease(session, lease_id, now=now)
-    except LeaseSubmissionError as exc:
-        rebound = None
-        if exc.reason_code in {"STALE_LEASE", "LEASE_NOT_FOUND"}:
-            rebound = _recover_rebound_github_thread_lease(
-                session,
-                response,
-                item_id=item_id,
-                current_lease_id=lease_id,
-            )
-        if rebound is None:
-            _record_response_rejected(session, ledger, response, exc.reason_code, item_id=item_id)
-            payload: dict[str, Any] = {"item_id": item_id, "lease_id": lease_id}
-            if exc.recovery_state:
-                payload["lease_recovery"] = exc.recovery_state
-            raise WorkflowError(
-                status=rejected_status,
-                reason_code=exc.reason_code,
-                waiting_on="lease",
-                exit_code=5,
-                message=str(exc),
-                payload=payload,
-            ) from exc
-        lease_id = str(rebound["lease_id"])
-        lease = rebound["lease"]
-        prepared["lease_id"] = lease_id
-        prepared["lease"] = lease
-        prepared["expected_request_hash"] = str(_get(lease, "request_hash") or "")
-        submit_lease(
-            session,
-            lease_id,
-            agent_id=str(response["agent_id"]),
-            role=str(lease["role"]),
-            item_id=item_id,
-            request_hash=str(prepared["expected_request_hash"]),
-            now=now,
-        )
-        accept_lease(session, lease_id, now=now)
-
-    if str(lease["role"]) == "verifier" and str(response["resolution"]) == "reject":
-        _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
-        item["state"] = "open"
-        item["blocking"] = True
-        item["verification_rejection_note"] = response["note"]
-        record = ledger.append_event(
-            session_id=str(session["session_id"]),
-            item_id=item_id,
-            lease_id=lease_id,
-            agent_id=str(response["agent_id"]),
-            role=str(lease["role"]),
-            event_type="verification_rejected",
-            payload={"note": response["note"], "validation_commands": response.get("validation_commands", [])},
-        )
-        raise WorkflowError(
-            status="VERIFICATION_REJECTED",
-            reason_code="VERIFICATION_REJECTED",
-            waiting_on="fixer",
-            exit_code=5,
-            message="Verifier rejected the submitted evidence; the item is open again.",
-            payload={"item_id": item_id, "lease_id": lease_id, "evidence_record_id": record.record_id},
-        )
-
-    apply_response_to_item(item, response)
-
-    _record_validation_command_telemetry(session, response.get("validation_commands") or [], seen=telemetry_seen)
-
-    return ledger.append_event(
-        session_id=str(session["session_id"]),
-        item_id=item_id,
-        lease_id=lease_id,
-        agent_id=str(response["agent_id"]),
-        role=str(lease["role"]),
-        event_type="response_accepted",
-        # Carry the full applied response so session items remain a rebuildable
-        # projection of the ledger (#116), not only a forward-mutated cache.
-        payload={
-            "resolution": response["resolution"],
-            "note": response["note"],
-            "response": replayable_action_response(response),
-        },
-    )
-
-
-def replayable_action_response(response: dict[str, Any]) -> dict[str, Any]:
-    """Subset of an ActionResponse needed to replay `apply_response_to_item`."""
-    snapshot: dict[str, Any] = {
-        "resolution": response.get("resolution"),
-        "note": response.get("note"),
-        "files": response.get("files", []),
-        "validation_commands": response.get("validation_commands", []),
-    }
-    for key in ("reply_markdown", "fix_reply", "evidence_ref"):
-        if response.get(key) is not None:
-            snapshot[key] = response[key]
-    return snapshot
-
-
-def _record_validation_command_telemetry(
-    session: dict[str, Any],
-    validation_cmds: Any,
-    *,
-    seen: set[tuple[str, str, str, str, str, str]] | None = None,
-) -> None:
-    if not isinstance(validation_cmds, list):
-        return
-    try:
-        import shlex
-        import time
-
-        from gh_address_cr.core.telemetry import SessionTelemetry
-        from gh_address_cr.core.telemetry_safety import command_label, is_inline_env_assignment
-
-        telemetry = SessionTelemetry.get_instance()
-    except Exception:
-        return
-
-    if seen is None:
-        seen = set()
-
-    for val_cmd in _normalize_validation_command_records(validation_cmds):
-        try:
-            cmd_name = val_cmd.get("command")
-            if not isinstance(cmd_name, str):
-                continue
-            try:
-                argv = shlex.split(cmd_name)
-            except ValueError:
-                continue
-            while argv and is_inline_env_assignment(argv[0]):
-                argv.pop(0)
-            if not argv:
-                continue
-            cmd_label = command_label(argv)
-            dedupe_key = (
-                cmd_label,
-                _validation_command_fingerprint(cmd_name),
-                _dedupe_value(val_cmd.get("result")),
-                _dedupe_value(val_cmd.get("duration")),
-                _dedupe_value(val_cmd.get("start_time")),
-                _dedupe_value(val_cmd.get("end_time")),
-            )
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-
-            exit_code = _validation_result_exit_code(val_cmd.get("result"))
-            dur = val_cmd.get("duration")
-            start = val_cmd.get("start_time")
-            end = val_cmd.get("end_time")
-
-            if start is not None and end is not None:
-                start_val = float(start)
-                end_val = float(end)
-            elif dur is not None:
-                end_val = time.time()
-                start_val = end_val - float(dur)
-            else:
-                end_val = time.time()
-                start_val = end_val
-
-            telemetry.record(
-                command=cmd_label,
-                start_time=start_val,
-                end_time=end_val,
-                exit_code=exit_code,
-            )
-        except Exception:
-            continue
-
-
-def _dedupe_value(value: Any) -> str:
-    return "" if value is None else str(value)
-
-
-def _validation_command_fingerprint(command: str) -> str:
-    return hashlib.sha256(command.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _validation_result_exit_code(result: Any) -> int:
-    return 0 if validation_result_is_success(result) else 1
-
-
-def _lease_submission_rejection_reason(
-    response: dict[str, Any],
-    prepared: dict[str, Any],
-    now: datetime,
-) -> str | None:
-    lease = prepared["lease"]
-    status = str(_get(lease, "status") or "")
-    if status == "submitted":
-        return "DUPLICATE_SUBMISSION"
-    if status in {"accepted", "rejected", "expired", "released"}:
-        return "STALE_LEASE"
-    if status != "active":
-        return "STALE_LEASE"
-
-    expires_at = _get(lease, "expires_at")
-    if isinstance(expires_at, str):
-        expires_at = _coerce_now(expires_at)
-    if expires_at is not None and expires_at <= now:
-        return "EXPIRED_LEASE"
-    if str(_get(lease, "agent_id")) != str(response["agent_id"]):
-        return "WRONG_AGENT"
-    if str(_get(lease, "item_id")) != str(prepared["item_id"]):
-        return "WRONG_ITEM"
-    if str(_get(lease, "request_hash")) != str(prepared["expected_request_hash"]):
-        return protocol_codes.STALE_REQUEST_CONTEXT
-    return None
-
-
-def _raise_response_rejected(
-    session: dict[str, Any],
-    ledger: EvidenceLedger,
-    response: dict[str, Any],
-    reason_code: str,
-    *,
-    status: str,
-    item_id: str | None = None,
-    lease_id: str | None = None,
-    lease_recovery: dict[str, Any] | None = None,
-) -> None:
-    _record_response_rejected(session, ledger, response, reason_code, item_id=item_id)
-    is_batch = status == protocol_codes.BATCH_ACTION_REJECTED
-    payload_name = "BatchActionResponse" if is_batch else "ActionResponse"
-    message = _response_rejection_message(
-        payload_name,
-        reason_code,
-        repo=str(session.get("repo") or ""),
-        pr_number=str(session.get("pr_number") or ""),
-    )
-    payload = {"item_id": item_id, "lease_id": lease_id or response.get("lease_id")}
-    if lease_recovery:
-        payload["lease_recovery"] = lease_recovery
-    raise WorkflowError(
-        status=status,
-        reason_code=reason_code,
-        waiting_on="batch_action_response" if is_batch else "action_response",
-        exit_code=5,
-        message=message,
-        payload=payload,
-    )
-
-
-def _lease_recovery_payload_for_response(
-    session: dict[str, Any],
-    response: dict[str, Any],
-    lease: dict[str, Any],
-    *,
-    item_id: str,
-    request_hash: str,
-    now: datetime,
-) -> dict[str, Any]:
-    return calculate_lease_recovery_state(
-        session,
-        str(lease.get("lease_id") or response.get("lease_id") or ""),
-        agent_id=str(response.get("agent_id") or lease.get("agent_id") or ""),
-        role=str(lease.get("role") or ""),
-        item_id=item_id,
-        request_hash=request_hash,
-        now=now,
-    ).to_dict()
-
-
-def _response_rejection_message(payload_name: str, reason_code: str, *, repo: str, pr_number: str) -> str:
-    if reason_code == "MISSING_RESOLUTION":
-        return (
-            f'{payload_name} rejected: missing fixer response field "resolution". '
-            'Add "resolution": "fix|clarify|defer|reject" to the ActionResponse JSON and rerun '
-            f"`gh-address-cr agent submit {repo} {pr_number} --input <response.json>`."
-        )
-    return f"{payload_name} rejected: {reason_code}"
-
-
-def _normalize_validation_command_records(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    commands: list[dict[str, Any]] = []
-    for entry in value:
-        if isinstance(entry, dict):
-            command = str(entry.get("command") or "").strip()
-            result = str(entry.get("result") or "").strip()
-            summary = str(entry.get("summary") or "").strip()
-            duration = entry.get("duration")
-            start_time = entry.get("start_time")
-            end_time = entry.get("end_time")
-        else:
-            raw = str(entry or "").strip()
-            command, result, duration = _split_validation_command_record(raw)
-            summary = ""
-            start_time = None
-            end_time = None
-        if not command or not result:
-            continue
-        row: dict[str, Any] = {"command": command, "result": result}
-        if summary:
-            row["summary"] = summary
-        if duration is not None:
-            row["duration"] = duration
-        if start_time is not None:
-            row["start_time"] = start_time
-        if end_time is not None:
-            row["end_time"] = end_time
-        commands.append(row)
-    return commands
-
-
-_VALIDATION_DURATION_SUFFIX_RE = re.compile(r"@(\d+(?:\.\d+)?)(ms|s)$")
-
-
-def _strip_validation_duration_suffix(value: str) -> tuple[str, float | None]:
-    """Split a trailing ``@<n>ms``/``@<n>s`` timing suffix off a validation result token.
-
-    Returns ``(token_without_suffix, duration_seconds_or_None)``. Durations are
-    normalized to seconds to match the existing validation ``duration`` contract.
-    """
-    stripped = value.strip()
-    match = _VALIDATION_DURATION_SUFFIX_RE.search(stripped)
-    if match is None:
-        return value, None
-    number = float(match.group(1))
-    seconds = number / 1000.0 if match.group(2) == "ms" else number
-    return stripped[: match.start()], seconds
-
-
-def _split_validation_command_record(raw: str) -> tuple[str, str, float | None]:
-    command, separator, result = raw.rpartition("=")
-    result_token, duration = _strip_validation_duration_suffix(result)
-    if not separator or not _looks_like_validation_result(result_token):
-        return raw.strip(), "passed", None
-    return command.strip(), result_token.strip(), duration
-
-
-def _looks_like_validation_result(value: str) -> bool:
-    normalized = value.strip().lower()
-    if not normalized or any(char.isspace() for char in normalized):
-        return False
-    return normalized in {"pass", "passed", "success", "succeeded", "ok", "fail", "failed", "error", "skipped"}
-
-
-def _validate_requested_severity(
-    value: Any,
-    *,
-    status: str,
-    waiting_on: str,
-    payload: dict[str, Any] | None = None,
-) -> str | None:
-    if value in (None, ""):
-        return None
-    normalized = _normalize_optional_fix_reply_severity(value)
-    if normalized:
-        return normalized
-    raise WorkflowError(
-        status=status,
-        reason_code="INVALID_FIX_REPLY_SEVERITY",
-        waiting_on=waiting_on,
-        exit_code=2,
-        message="Explicit severity override must be one of P0, P1, P2, P3, or P4.",
-        payload=payload or {},
-    )
-
-
-def _validate_severity_override_note(
-    severity: str,
-    item: dict[str, Any],
-    note: str | None,
-    *,
-    status: str,
-    waiting_on: str,
-    payload: dict[str, Any] | None = None,
-) -> None:
-    first_scene_severity = first_scene_item_severity(item)
-    if not first_scene_severity or first_scene_severity == severity:
-        return
-    if _severity_override_note(note):
-        return
-    raise WorkflowError(
-        status=status,
-        reason_code="SEVERITY_OVERRIDE_NOTE_REQUIRED",
-        waiting_on=waiting_on,
-        exit_code=2,
-        message=(
-            f"Explicit severity override {severity} conflicts with first-scene severity "
-            f"{first_scene_severity}; add a severity note explaining the override."
-        ),
-        payload=payload or {},
-    )
 
 
 def _release_active_triage_lease(session: dict[str, Any], item_id: str, *, agent_id: str) -> str | None:
@@ -1434,195 +496,34 @@ def _active_lease_for_item(session: dict[str, Any], item_id: str) -> dict[str, A
     return None
 
 
-def _has_classification_evidence(item: dict[str, Any]) -> bool:
-    evidence = item.get("classification_evidence")
-    return isinstance(evidence, dict) and evidence.get("classification") in TERMINAL_RESOLUTIONS
-
-
-def _required_evidence_for(item: dict[str, Any], role: str) -> list[str]:
-    return _required_evidence_for_impl(item, role)
-
-
-def _validate_fix_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
-    if not _has_classification_evidence(item):
-        return protocol_codes.MISSING_CLASSIFICATION
-    if not response.get("files"):
-        return "MISSING_FILES"
-    if not response.get("validation_commands"):
-        return "MISSING_VALIDATION_COMMANDS"
-    if item.get("item_kind") == "github_thread":
-        fix_reply = response.get("fix_reply")
-        if not fix_reply:
-            return "MISSING_FIX_REPLY"
-        if not isinstance(fix_reply, dict):
-            return "INVALID_FIX_REPLY"
-        severity_reason = _fix_reply_severity_rejection_reason(fix_reply, item)
-        if severity_reason:
-            return severity_reason
-        from gh_address_cr.core.publisher import validate_fix_reply_for_submit
-
-        submit_error = validate_fix_reply_for_submit(item, response)
-        if submit_error:
-            return submit_error
-    return None
-
-
-def _validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:
-    for field in ("request_id", "lease_id", "agent_id", "resolution", "note"):
-        if not response.get(field):
-            return f"MISSING_{field.upper()}"
-    if _claims_direct_github_side_effect(response):
-        return "DIRECT_GITHUB_SIDE_EFFECT_FORBIDDEN"
-    resolution = str(response["resolution"])
-    if resolution not in TERMINAL_RESOLUTIONS:
-        return "UNSUPPORTED_RESOLUTION"
-    if resolution == "fix":
-        return _validate_fix_response(response, item)
-    else:
-        if "validation_commands" in response and not _normalize_validation_command_records(
-            response.get("validation_commands")
-        ):
-            return "INVALID_VALIDATION_COMMANDS"
-        if not response.get("reply_markdown"):
-            return "MISSING_REPLY_MARKDOWN"
-    return None
-
-
-def _expected_request_hash_for_response(
-    response: dict[str, Any], lease: dict[str, Any]
-) -> tuple[str | None, str | None]:
-    response_request_id = str(response["request_id"])
-    request_path = _get(lease, "request_path")
-    if request_path:
-        path = Path(str(request_path))
-        if not path.is_file():
-            return None, "REQUEST_CONTEXT_NOT_FOUND"
-        try:
-            request = json.loads(path.read_text(encoding="utf-8"))
-            expected_hash = ActionRequest.from_dict(request).stable_hash()
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            return None, "INVALID_REQUEST_CONTEXT"
-        if response_request_id != str(request.get("request_id") or ""):
-            return None, protocol_codes.STALE_REQUEST_CONTEXT
-        return expected_hash, None
-
-    lease_request_id = _get(lease, "request_id")
-    if lease_request_id:
-        if response_request_id != str(lease_request_id):
-            return None, protocol_codes.STALE_REQUEST_CONTEXT
-        return str(_get(lease, "request_hash")), None
-
-    lease_request_hash = _get(lease, "request_hash")
-    if lease_request_hash:
-        if response_request_id != str(lease_request_hash):
-            return None, protocol_codes.STALE_REQUEST_CONTEXT
-        return str(lease_request_hash), None
-
-    return None, "REQUEST_CONTEXT_NOT_FOUND"
-
-
-def apply_response_to_item(item: dict[str, Any], response: dict[str, Any]) -> None:
-    """Fold an accepted ActionResponse onto a session item in place.
-
-    Public item-state helper retained for deterministic session/item updates.
-    """
-    resolution = str(response["resolution"])
-    if item.get("item_kind") == "github_thread":
-        item["state"] = "publish_ready"
-        item["status"] = "OPEN"
-        item["blocking"] = True
-        item["publish_resolution"] = resolution
-        item["accepted_response"] = {
-            "note": response["note"],
-            "resolution": resolution,
-            "files": response.get("files", []),
-            "validation_commands": response.get("validation_commands", []),
-            "reply_markdown": response.get("reply_markdown"),
-            "fix_reply": response.get("fix_reply"),
+def _restore_classification_evidence_from_session(session: dict[str, Any], item_id: str, item: dict[str, Any]) -> None:
+    decision = str(item.get("decision") or "").strip().lower()
+    if decision in TERMINAL_RESOLUTIONS:
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": decision,
+            "note": str(
+                item.get("classification_note") or item.get("resolution_note") or "Restored from item decision."
+            ),
+            "record_id": str(item.get("classification_record_id") or "session-decision"),
         }
-        if response.get("_runtime_revision_binding"):
-            item["accepted_response"]["revision_binding"] = response["_runtime_revision_binding"]
-        if response.get("evidence_ref"):
-            item["accepted_response"]["evidence_ref"] = response["evidence_ref"]
         return
-    item["state"] = "fixed" if resolution == "fix" else resolution
-    item["status"] = _local_status_for_resolution(resolution)
-    item["blocking"] = False
-    item["handled"] = True
-    item["handled_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    item["resolution_note"] = response["note"]
-    item["validation_evidence"] = response.get("validation_commands", [])
-    if response.get("_runtime_revision_binding"):
-        item["revision_binding"] = response["_runtime_revision_binding"]
-    item["claimed_by"] = None
-    item["claimed_at"] = None
-    item["lease_expires_at"] = None
-    if response.get("files"):
-        item["files"] = response["files"]
-    if response.get("reply_markdown"):
-        item["reply_markdown"] = response["reply_markdown"]
-    if response.get("fix_reply"):
-        item["fix_reply"] = response["fix_reply"]
-    if response.get("evidence_ref"):
-        item["evidence_ref"] = response["evidence_ref"]
 
-
-def _local_status_for_resolution(resolution: str) -> str:
-    if resolution == "fix":
-        return "CLOSED"
-    if resolution == "clarify":
-        return "CLARIFIED"
-    if resolution == "defer":
-        return "DEFERRED"
-    if resolution == "reject":
-        return "DROPPED"
-    return resolution.upper()
-
-
-def _claims_direct_github_side_effect(response: dict[str, Any]) -> bool:
-    forbidden_keys = {
-        "github_side_effects",
-        "reply_posted",
-        "reply_url",
-        "thread_resolved",
-        "resolved_thread_id",
-    }
-    return any(key in response for key in forbidden_keys)
-
-
-def _record_response_rejected(
-    session: dict[str, Any],
-    ledger: EvidenceLedger,
-    response: dict[str, Any],
-    reason_code: str,
-    *,
-    item_id: str | None = None,
-) -> None:
-    lease_id = response.get("lease_id")
-    lease = session.get("leases", {}).get(lease_id) if lease_id else None
-    if isinstance(lease, dict) and item_id is None:
-        item_id = str(lease.get("item_id"))
-    ledger.append_event(
-        session_id=str(session["session_id"]),
-        item_id=item_id or "",
-        lease_id=lease_id,
-        agent_id=str(response.get("agent_id") or "unknown"),
-        role=str(lease.get("role") if isinstance(lease, dict) else "unknown"),
-        event_type="response_rejected",
-        payload={"reason_code": reason_code},
-    )
-
-
-def _required_response_field(
-    response: dict[str, Any], field: str, *, status: str = protocol_codes.ACTION_REJECTED
-) -> str:
-    value = response.get(field)
-    if not value:
-        raise WorkflowError(
-            status=status,
-            reason_code=f"MISSING_{field.upper()}",
-            waiting_on="action_response",
-            exit_code=2,
-            message=f"ActionResponse is missing `{field}`.",
-        )
-    return str(value)
+    try:
+        records = _ledger(session).load(event_type="classification_recorded")
+    except ValueError:
+        return
+    for record in reversed(records):
+        if record.item_id != item_id:
+            continue
+        classification = str(record.payload.get("classification") or "").strip().lower()
+        if classification not in TERMINAL_RESOLUTIONS:
+            continue
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": classification,
+            "note": str(record.payload.get("note") or "Restored from evidence ledger."),
+            "record_id": record.record_id,
+        }
+        item["decision"] = classification
+        return

@@ -50,8 +50,8 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
 
 ## Active Work
 
-If `status` is `WAITING_FOR_ACTION`:
-- **Action**: Inspect the `item_id` and `item_kind`. Use `gh-address-cr agent next` and `gh-address-cr agent submit` to claim the item and submit your work.
+If `status` is `ACTION_REQUESTED`:
+- **Action**: Inspect the `item_id` and `item_kind`. `gh-address-cr agent next` has claimed the item and written the `ActionRequest`; fill the issued `response_skeleton_path` and submit with `gh-address-cr agent submit`.
 
 If `status` is `ACTION_ACCEPTED`:
 - **Action**: Run the returned `next_action` exactly. For accepted GitHub-thread fixes, this publishes through `gh-address-cr agent publish`.
@@ -109,7 +109,7 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 
 ## Stop Conditions
 
-If `status` is `NO_WORK_AVAILABLE` or `PASSED`:
+If `status` is `NO_ELIGIBLE_ITEM` or `PASSED`:
 - **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success. The final response must include the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`; explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present.
 - **Telemetry note**: `runtime-only` coverage is advisory for local loops when host telemetry was not imported. Report it honestly, but do not escalate it as a review-resolution blocker by itself.
 
@@ -121,7 +121,7 @@ If `status` is `AMBIGUOUS_ACTIVE_PR`:
 
 ## Error States
 
-If `status` is `UNKNOWN`, `FAILED`, or the machine summary is malformed (missing required fields):
+If `status` is `FAILED`, or `reason_code` is `SESSION_ERROR` or `SYSTEM_ERROR`, or the machine summary is malformed (missing required fields):
 - **Action**: Fail loudly. Do NOT guess the next action. Request human intervention or refer to the audit logs.
 
 If `reason_code` is `RESOLVE_AXIS_CONFLICT`:

@@ -37,6 +37,7 @@ from gh_address_cr.core.primary_action import (
 )
 from gh_address_cr.core.runtime_kernel.stack import unavailable_stack_context
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
+from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
 from gh_address_cr.github.errors import GitHubError
@@ -294,7 +295,7 @@ def _write_native_action_request(repo: str, pr_number: str, item: dict, *, comma
         "repo": repo,
         "pr_number": str(pr_number),
         "run_id": run_id,
-        "item": item,
+        "item": request_item_projection(item),
         "instructions": [
             "Inspect the selected item and decide one resolution: fix, clarify, defer, or reject.",
             "Submit structured evidence with `gh-address-cr agent submit` or rerun the originating command after recording the fix.",

@@ -1,3 +1,41 @@
+## [3.12.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.11.0...v3.12.0) (2026-09-02)
+
+### Features
+
+* carry reviewer-authored item text in an untrusted_content envelope ([#259](https://github.com/RbBtSn0w/gh-address-cr/issues/259)) ([b4caae2](https://github.com/RbBtSn0w/gh-address-cr/commit/b4caae25a25110963135219f9c0f714fbd44540e))
+
+## [3.11.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.10.0...v3.11.0) (2026-09-02)
+
+### Features
+
+* inline reason-code remediation and drop three phantom codes ([#260](https://github.com/RbBtSn0w/gh-address-cr/issues/260)) ([f3d998a](https://github.com/RbBtSn0w/gh-address-cr/commit/f3d998a817b631a5feb909ecc097b8144e5b44e5))
+
+## [3.10.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.9.0...v3.10.0) (2026-09-02)
+
+### Features
+
+* echo the resolved PR target and surface other remotes on NO_ACTIVE_PR ([#256](https://github.com/RbBtSn0w/gh-address-cr/issues/256)) ([d662ccf](https://github.com/RbBtSn0w/gh-address-cr/commit/d662ccf54c72273f02f519934894e13a66e077f0))
+
+## [3.9.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.1...v3.9.0) (2026-09-02)
+
+### Features
+
+* attach the runnable command menu to error summaries ([#257](https://github.com/RbBtSn0w/gh-address-cr/issues/257)) ([8522ddd](https://github.com/RbBtSn0w/gh-address-cr/commit/8522ddd0f60959ff4bbd60d8f028d14597ebe9f1))
+
+## [3.8.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.0...v3.8.1) (2026-09-02)
+
+### Bug Fixes
+
+* reconcile in-flight replies instead of double-posting after a crash ([#258](https://github.com/RbBtSn0w/gh-address-cr/issues/258)) ([f5bc378](https://github.com/RbBtSn0w/gh-address-cr/commit/f5bc378487ee3f984997901de5f659ab53f98e9a))
+
+## [3.8.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.6...v3.8.0) (2026-09-02)
+
+### Features
+
+* sign published replies with a machine-readable attribution ([#254](https://github.com/RbBtSn0w/gh-address-cr/issues/254)) ([4a011ef](https://github.com/RbBtSn0w/gh-address-cr/commit/4a011ef9a348cc1c2f5581af0b6cecb55bf6b149))
+
+## [3.7.6](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.5...v3.7.6) (2026-09-01)
+
 ## [3.7.5](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.4...v3.7.5) (2026-08-31)
 
 ## [3.7.4](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.7.3...v3.7.4) (2026-08-29)

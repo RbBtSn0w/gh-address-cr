@@ -30,6 +30,7 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.core import (
     agent_batch,
     agent_protocol,
+    agent_protocol_validation,
     leases,
     protocol_codes,
     publisher,
@@ -279,7 +280,7 @@ def _parse_agent_validation(values: list[str] | None) -> list[dict[str, str | fl
         # and the `@<n>ms`/`@<n>s` timing suffix the runtime records for
         # efficiency reporting. Splitting locally previously dropped the suffix
         # into the command name and recorded zero duration.
-        command, result, duration = agent_protocol._split_validation_command_record(raw.strip())
+        command, result, duration = agent_protocol_validation.split_validation_command_record(raw.strip())
         if command and result:
             record: dict[str, str | float] = {"command": command, "result": result}
             if duration is not None:

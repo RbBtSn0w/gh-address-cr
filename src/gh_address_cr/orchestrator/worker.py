@@ -3,6 +3,8 @@ import os
 from typing import Any, Dict, List
 from uuid import uuid4
 
+from gh_address_cr.core.untrusted_content import request_item_projection
+
 MAX_RETRIES = 3
 
 
@@ -49,7 +51,7 @@ def build_worker_packet(
         "session_id": session_id,
         "lease_id": lease_token,
         "agent_role": role,
-        "item": item,
+        "item": request_item_projection(item),
         "allowed_actions": ["fix", "clarify", "defer"],
         "required_evidence": ["files", "validation_commands", "note", "fix_reply"],
     }

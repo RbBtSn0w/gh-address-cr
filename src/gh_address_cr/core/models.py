@@ -83,6 +83,7 @@ class WorkItem:
     conflict_keys: tuple[str, ...] = ()
     reply_evidence: JsonDict | None = None
     validation_evidence: tuple[JsonDict, ...] = ()
+    untrusted_content: JsonDict | None = None
 
     @classmethod
     def from_dict(cls, payload: JsonDict) -> "WorkItem":
@@ -100,6 +101,7 @@ class WorkItem:
             conflict_keys=_string_tuple(payload.get("conflict_keys")),
             reply_evidence=payload.get("reply_evidence"),
             validation_evidence=tuple(dict(record) for record in payload.get("validation_evidence", ())),
+            untrusted_content=_optional_dict_copy(payload.get("untrusted_content"), field_name="untrusted_content"),
         )
 
     def to_dict(self) -> JsonDict:
@@ -124,6 +126,10 @@ class WorkItem:
             payload["reply_evidence"] = dict(self.reply_evidence)
         if self.validation_evidence:
             payload["validation_evidence"] = [dict(record) for record in self.validation_evidence]
+        # Conditional so a pre-envelope request file on disk still hashes to the value its
+        # own writer computed — an in-flight lease must not turn into STALE_REQUEST_CONTEXT.
+        if self.untrusted_content is not None:
+            payload["untrusted_content"] = dict(self.untrusted_content)
         return payload
 
 
