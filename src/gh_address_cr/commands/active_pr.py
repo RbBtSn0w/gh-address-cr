@@ -39,11 +39,14 @@ def _derive_current_branch() -> str:
     return branch
 
 
-# Strips userinfo (e.g. an embedded token: https://ghp_xxx@github.com/...) from a
-# scheme://user[:pass]@host URL before it reaches next_action, which is written to
-# stdout/stderr. `git@host:path` (SSH scp-like syntax, no "://") is left alone --
-# it carries no embedded secret, only the fixed "git" SSH login name.
-_URL_USERINFO_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]+@")
+# Strips userinfo (e.g. an embedded token: https://ghp_xxx@github.com/...) from an
+# http(s)://user[:pass]@host URL before it reaches next_action, which is written to
+# stdout/stderr -- that's the only scheme where an embedded token is realistic. SSH
+# forms are left untouched: `git@host:path` (scp-like, no "://") carries no embedded
+# secret, only the fixed "git" login name, and `ssh://git@host/...` needs that same
+# `git@` to remain a usable, copy-pasteable remote -- stripping it would silently
+# rewrite the URL into one that no longer matches the configured remote.
+_URL_USERINFO_RE = re.compile(r"^(https?://)[^/@]+@")
 
 
 def _strip_url_userinfo(url: str) -> str:
@@ -85,6 +88,42 @@ def _derive_current_repo() -> str:
     raise RuntimeError(f"Could not derive owner/repo from remote.origin.url: {remote_url}")
 
 
+def _resolve_repo_and_head(parsed: argparse.Namespace) -> tuple[dict[str, str | None], RuntimeError | None]:
+    """Resolve repo and head independently so a failure in one still reports the other.
+
+    Returns (resolved, error): `resolved` always has repo/head/repo_source/head_source
+    (any may be None), suitable for embedding directly as the payload's `resolved`
+    field; `error` is the first RuntimeError encountered, if any.
+    """
+    repo = parsed.repo
+    repo_source: str | None = "--repo" if parsed.repo else None
+    repo_error: RuntimeError | None = None
+    if not repo:
+        try:
+            repo = _derive_current_repo()
+            repo_source = "remote.origin.url"
+        except RuntimeError as exc:
+            repo_error = exc
+
+    head = parsed.head
+    head_source: str | None = "--head" if parsed.head else None
+    head_error: RuntimeError | None = None
+    if not head:
+        try:
+            head = _derive_current_branch()
+            head_source = "git branch --show-current"
+        except RuntimeError as exc:
+            head_error = exc
+
+    resolved: dict[str, str | None] = {
+        "repo": repo,
+        "head": head,
+        "repo_source": repo_source,
+        "head_source": head_source,
+    }
+    return resolved, (repo_error or head_error)
+
+
 def handle_active_pr_command(passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr active-pr")
     parser.add_argument("--repo")
@@ -103,24 +142,28 @@ def handle_active_pr_command(passthrough: list[str]) -> int:
             },
             stderr=f"Unrecognized arguments: {' '.join(remaining)}",
         )
-    try:
-        repo = parsed.repo or _derive_current_repo()
-        repo_source = "--repo" if parsed.repo else "remote.origin.url"
-        head = parsed.head or _derive_current_branch()
-        head_source = "--head" if parsed.head else "git branch --show-current"
-    except RuntimeError as exc:
+    resolved, derivation_error = _resolve_repo_and_head(parsed)
+    if derivation_error is not None:
         return _emit_active_pr_payload(
             {
                 "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
-                "repo": parsed.repo,
-                "head": parsed.head,
+                "repo": resolved["repo"],
+                "head": resolved["head"],
+                "resolved": resolved,
                 "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
                 "waiting_on": "active_pr_target",
-                "next_action": f"{exc} Pass --repo <owner/repo> and --head <branch> explicitly.",
+                "next_action": f"{derivation_error} Pass --repo <owner/repo> and --head <branch> explicitly.",
                 "exit_code": 2,
             },
-            stderr=str(exc),
+            stderr=str(derivation_error),
         )
+    # _resolve_repo_and_head only returns derivation_error=None once both derivations
+    # succeeded, so both are guaranteed non-None here.
+    assert resolved["repo"] is not None and resolved["head"] is not None
+    repo = resolved["repo"]
+    repo_source = resolved["repo_source"]
+    head = resolved["head"]
+    head_source = resolved["head_source"]
 
     command = [
         "gh",

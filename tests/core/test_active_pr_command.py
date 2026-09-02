@@ -69,6 +69,19 @@ class TestOtherGitRemotes(unittest.TestCase):
 
         self.assertEqual(remotes, {"upstream": "git@github.com:houjoe0829/example.git"})
 
+    def test_leaves_ssh_scheme_remotes_unchanged(self):
+        # An earlier version of the stripping regex matched any "scheme://user@host",
+        # so `ssh://git@github.com/...` got rewritten to `ssh://github.com/...` -- a
+        # broken remote missing the `git@` login it actually needs to connect over SSH.
+        with patch.object(
+            active_pr,
+            "_git_output",
+            return_value="upstream\tssh://git@github.com/houjoe0829/example.git (fetch)\n",
+        ):
+            remotes = active_pr._other_git_remotes()
+
+        self.assertEqual(remotes, {"upstream": "ssh://git@github.com/houjoe0829/example.git"})
+
 
 class TestHandleActivePrCommand(unittest.TestCase):
     def _run(self, argv):
@@ -213,6 +226,38 @@ class TestHandleActivePrCommand(unittest.TestCase):
         self.assertEqual(exit_code, 4)
         self.assertNotIn("Other remotes:", payload["next_action"])
         self.assertIn("--state open", payload["next_action"])
+
+    def test_derivation_failure_still_reports_resolved(self):
+        # The ACTIVE_PR_TARGET_REQUIRED path used to omit `resolved` entirely, dropping
+        # the source hints (--repo/derived, --head/derived) that matter most for
+        # debugging exactly this failure mode.
+        with patch.object(
+            active_pr, "_git_output", side_effect=RuntimeError("fatal: not a git repository")
+        ):
+            exit_code, payload = self._run([])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["reason_code"], "ACTIVE_PR_TARGET_REQUIRED")
+        self.assertIn("resolved", payload)
+        self.assertIsNone(payload["resolved"]["repo"])
+        self.assertIsNone(payload["resolved"]["head"])
+        self.assertIsNone(payload["resolved"]["repo_source"])
+        self.assertIsNone(payload["resolved"]["head_source"])
+
+    def test_derivation_failure_still_reports_the_side_that_succeeded(self):
+        # repo and head are resolved independently: an explicit --repo must still show
+        # up in `resolved` even when head derivation is what failed.
+        with patch.object(
+            active_pr, "_derive_current_branch", side_effect=RuntimeError("Current git branch is detached.")
+        ):
+            exit_code, payload = self._run(["--repo", "owner/repo"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["reason_code"], "ACTIVE_PR_TARGET_REQUIRED")
+        self.assertEqual(payload["resolved"]["repo"], "owner/repo")
+        self.assertEqual(payload["resolved"]["repo_source"], "--repo")
+        self.assertIsNone(payload["resolved"]["head"])
+        self.assertIsNone(payload["resolved"]["head_source"])
 
 
 if __name__ == "__main__":
