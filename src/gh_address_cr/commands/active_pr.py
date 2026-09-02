@@ -124,6 +124,40 @@ def _resolve_repo_and_head(parsed: argparse.Namespace) -> tuple[dict[str, str | 
     return resolved, (repo_error or head_error)
 
 
+def resolve_current_pr_scope(*, repo: str | None = None, head: str | None = None) -> dict:
+    """Resolve the current checkout to one open PR without emitting CLI output."""
+    parsed = argparse.Namespace(repo=repo, head=head)
+    resolved, error = _resolve_repo_and_head(parsed)
+    if error is not None:
+        return {
+            "status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED,
+            "repo": resolved["repo"],
+            "head": resolved["head"],
+            "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
+            "waiting_on": "active_pr_target",
+            "next_action": f"{error} Pass --repo <owner/repo> and --head <branch> explicitly.",
+            "exit_code": 2,
+        }
+    assert resolved["repo"] is not None and resolved["head"] is not None
+    result = run_cmd(
+        ["gh", "pr", "list", "--repo", resolved["repo"], "--state", "open", "--head", resolved["head"], "--json", "number,url,headRefName,state"],
+        timeout=GH_QUERY_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        return {"status": protocol_codes.ACTIVE_PR_LOOKUP_FAILED, "repo": resolved["repo"], "head": resolved["head"], "reason_code": "ACTIVE_PR_QUERY_FAILED", "waiting_on": "github", "exit_code": PR_IO_PREFLIGHT_EXIT}
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        rows = []
+    if not isinstance(rows, list) or not rows:
+        return {"status": "NO_ACTIVE_PR", "repo": resolved["repo"], "head": resolved["head"], "reason_code": "NO_ACTIVE_PR", "waiting_on": "open_pr", "exit_code": 4}
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        return {"status": "AMBIGUOUS_ACTIVE_PR", "repo": resolved["repo"], "head": resolved["head"], "reason_code": "AMBIGUOUS_ACTIVE_PR", "waiting_on": "open_pr", "exit_code": 5}
+    row = rows[0]
+    number = str(row.get("number") or "")
+    return {"status": "ACTIVE_PR_FOUND", "repo": resolved["repo"], "head": resolved["head"], "pr_number": number, "url": row.get("url"), "state": row.get("state"), "reason_code": "ACTIVE_PR_FOUND", "waiting_on": None, "exit_code": 0}
+
+
 def handle_active_pr_command(passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gh-address-cr active-pr")
     parser.add_argument("--repo")
