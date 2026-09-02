@@ -1,3 +1,9 @@
+## [3.10.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.9.0...v3.10.0) (2026-09-02)
+
+### Features
+
+* echo the resolved PR target and surface other remotes on NO_ACTIVE_PR ([#256](https://github.com/RbBtSn0w/gh-address-cr/issues/256)) ([d662ccf](https://github.com/RbBtSn0w/gh-address-cr/commit/d662ccf54c72273f02f519934894e13a66e077f0))
+
 ## [3.9.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.1...v3.9.0) (2026-09-02)
 
 ### Features
