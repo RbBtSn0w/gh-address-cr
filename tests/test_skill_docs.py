@@ -42,6 +42,23 @@ def read_repo_docs(*paths):
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
+STATUS_TOKEN_PATTERN = r"[A-Z][A-Z0-9_]{3,}"
+
+
+def emitted_status_tokens(source: str) -> set[str]:
+    """Extract ALLCAPS tokens that plausibly appear as an emitted status/reason_code.
+
+    Used to guard status-action-map.md against phantom entries: a documented token
+    that the runtime never actually produces. Excludes the two contexts that read as
+    "emitted" under a naive word-boundary scan but are not: prose in a full-line
+    comment, and a `x.get(...) or "TOKEN"` read-side fallback default (a stand-in for
+    a *missing* value, not something the runtime writes).
+    """
+    source = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
+    source = re.sub(rf'\bor\s+"({STATUS_TOKEN_PATTERN})"', "", source)
+    return set(re.findall(STATUS_TOKEN_PATTERN, source))
+
+
 def cli_topology_section():
     text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
     start = text.index("## Command Topology (ASCII)")
@@ -273,18 +290,39 @@ class SkillDocumentationContractTest(unittest.TestCase):
         # f"MISSING_{field.upper()}", so the emitted set is open by construction.
         # Guards against phantom entries like the former NO_WORK_AVAILABLE /
         # WAITING_FOR_ACTION, which sent agents looking for a status never produced.
-        documented = set(re.findall(r"`([A-Z][A-Z0-9_]{3,})`", STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")))
-        runtime_source = " ".join(
+        documented = set(re.findall(rf"`({STATUS_TOKEN_PATTERN})`", STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")))
+        runtime_source = "\n".join(
             path.read_text(encoding="utf-8") for path in (ROOT / "src").rglob("*.py")
         )
-        # Match on word boundaries, not substrings: a plain `in` check reports a phantom
-        # as present whenever it is a prefix of a real code, so documenting FINAL_GATE
-        # (only ever FINAL_GATE_*) or PARITY (only ever PARITY_DIFF) would slip through.
-        emitted = set(re.findall(r"[A-Z][A-Z0-9_]{3,}", runtime_source))
+        emitted = emitted_status_tokens(runtime_source)
 
         phantom = sorted(token for token in documented if token not in emitted)
 
         self.assertEqual(phantom, [], f"status-action-map.md documents codes the runtime never emits: {phantom}")
+
+    def test_emitted_status_tokens_rejects_fallback_defaults_and_comments(self):
+        # Regression for a guard that read too permissively: a plain word-boundary scan
+        # counts `UNKNOWN` as emitted because of code shaped exactly like this, even
+        # though the runtime never actually produces `status: "UNKNOWN"` anywhere -- the
+        # `or` branch only fires when a value is already missing.
+        source = (
+            '# UNKNOWN is only ever a display fallback here, never a real emission.\n'
+            'status = str(payload.get("status") or "UNKNOWN")\n'
+        )
+
+        self.assertNotIn("UNKNOWN", emitted_status_tokens(source))
+
+    def test_emitted_status_tokens_still_counts_real_emission_shapes(self):
+        source = (
+            'FINAL_GATE_UNRESOLVED_REMOTE_THREADS = "FINAL_GATE_UNRESOLVED_REMOTE_THREADS"\n'
+            'raise WorkflowError(status="BLOCKED", reason_code="MISSING_THREAD_ID", ...)\n'
+            '"reason_code": protocol_codes.NO_ELIGIBLE_ITEM,\n'
+        )
+
+        emitted = emitted_status_tokens(source)
+        for token in ("FINAL_GATE_UNRESOLVED_REMOTE_THREADS", "BLOCKED", "MISSING_THREAD_ID", "NO_ELIGIBLE_ITEM"):
+            with self.subTest(token=token):
+                self.assertIn(token, emitted)
 
     def test_cli_reference_ascii_topology_covers_public_command_surface(self):
         section = cli_topology_section()
