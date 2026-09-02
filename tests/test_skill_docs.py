@@ -51,11 +51,12 @@ def emitted_status_tokens(source: str) -> set[str]:
     Used to guard status-action-map.md against phantom entries: a documented token
     that the runtime never actually produces. Excludes the two contexts that read as
     "emitted" under a naive word-boundary scan but are not: prose in a full-line
-    comment, and a `x.get(...) or "TOKEN"` read-side fallback default (a stand-in for
-    a *missing* value, not something the runtime writes).
+    comment, and an `x or 'TOKEN'` / `x or "TOKEN"` read-side fallback default (a
+    stand-in for a *missing* value, not something the runtime writes) -- both quote
+    styles occur in this codebase (final_gate.py uses single quotes inside f-strings).
     """
     source = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
-    source = re.sub(rf'\bor\s+"({STATUS_TOKEN_PATTERN})"', "", source)
+    source = re.sub(rf"""\bor\s+['"]({STATUS_TOKEN_PATTERN})['"]""", "", source)
     return set(re.findall(STATUS_TOKEN_PATTERN, source))
 
 
@@ -308,9 +309,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         source = (
             '# UNKNOWN is only ever a display fallback here, never a real emission.\n'
             'status = str(payload.get("status") or "UNKNOWN")\n'
+            # final_gate.py uses this single-quoted shape inside f-strings.
+            'print(f"reason_code={result.reason_code or \'STACK_MEMBER_BLOCKED\'}")\n'
         )
 
-        self.assertNotIn("UNKNOWN", emitted_status_tokens(source))
+        emitted = emitted_status_tokens(source)
+        self.assertNotIn("UNKNOWN", emitted)
+        self.assertNotIn("STACK_MEMBER_BLOCKED", emitted)
 
     def test_emitted_status_tokens_still_counts_real_emission_shapes(self):
         source = (
