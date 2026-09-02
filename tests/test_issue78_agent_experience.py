@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from gh_address_cr import cli as runtime_cli
 from gh_address_cr.agent.responses import ResponseValidationError, validate_workflow_decision
+from gh_address_cr.commands import active_pr
+from gh_address_cr.commands.common import maybe_prepend_implicit_scope
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.leases import (
     LeaseConflictError,
@@ -22,6 +24,18 @@ from tests.helpers import CLI_PY, PythonScriptTestCase
 
 
 class Issue78ActiveScopeTests(PythonScriptTestCase):
+    @staticmethod
+    def _no_current_repo():
+        return {
+            "status": "ACTIVE_PR_LOOKUP_FAILED",
+            "repo": None,
+            "head": None,
+            "reason_code": "ACTIVE_PR_TARGET_REQUIRED",
+            "waiting_on": "active_pr_target",
+            "next_action": "Pass an explicit PR target.",
+            "exit_code": 2,
+        }
+
     def _write_session(self, repo="octo/example", pr="77", status="ACTIVE"):
         manager = session_store.SessionManager(repo, pr)
         payload = manager.create(status=status)
@@ -72,18 +86,132 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         self._write_session()
         self._install_fake_gh_for_threads()
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+        with patch(
+            "gh_address_cr.commands.active_pr.resolve_current_pr_scope",
+            return_value=self._no_current_repo(),
+        ):
+            result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["repo"], "octo/example")
         self.assertEqual(payload["pr_number"], "77")
+        self.assertEqual(payload["primary_action"]["kind"], "run_final_gate")
+        self.assertEqual(
+            payload["primary_action"]["command"],
+            "gh-address-cr final-gate octo/example 77",
+        )
+
+    def test_zero_argument_high_level_command_prefers_current_branch_pr_over_cached_session(self):
+        self._write_session("octo/cached", "12")
+        current_pr = {
+            "status": "ACTIVE_PR_FOUND",
+            "repo": "octo/example",
+            "head": "feature/current",
+            "pr_number": "77",
+            "url": "https://github.com/octo/example/pull/77",
+            "state": "OPEN",
+            "reason_code": "ACTIVE_PR_FOUND",
+            "waiting_on": None,
+            "next_action": "Run `gh-address-cr address octo/example 77 --lean`.",
+            "exit_code": 0,
+        }
+        with patch("gh_address_cr.commands.active_pr.resolve_current_pr_scope", return_value=current_pr):
+            args, error = maybe_prepend_implicit_scope(["--lean"], prefer_current_branch=True)
+
+        self.assertIsNone(error)
+        self.assertEqual(args[:2], ["octo/example", "77"])
+
+    def test_explicit_target_does_not_run_implicit_resolver(self):
+        with patch("gh_address_cr.commands.active_pr.resolve_current_pr_scope") as resolver:
+            args, error = maybe_prepend_implicit_scope(
+                ["octo/explicit", "88", "--lean"],
+                prefer_current_branch=True,
+            )
+
+        resolver.assert_not_called()
+        self.assertIsNone(error)
+        self.assertEqual(args[:2], ["octo/explicit", "88"])
+
+    def test_zero_argument_github_failure_does_not_fall_back_to_cache(self):
+        self._write_session("octo/cached", "12")
+        github_failure = {
+            "status": "ACTIVE_PR_LOOKUP_FAILED",
+            "repo": "octo/example",
+            "head": "feature/current",
+            "reason_code": "ACTIVE_PR_QUERY_FAILED",
+            "waiting_on": "network",
+            "next_action": "Repair network access.",
+            "exit_code": 5,
+        }
+
+        with patch("gh_address_cr.commands.active_pr.resolve_current_pr_scope", return_value=github_failure):
+            args, error = maybe_prepend_implicit_scope(["--lean"], prefer_current_branch=True)
+
+        self.assertEqual(args, ["--lean"])
+        self.assertEqual(error, github_failure)
+
+    def test_detached_head_is_distinct_from_missing_repo_context(self):
+        with (
+            patch.object(active_pr, "_derive_current_repo", return_value="octo/example"),
+            patch.object(
+                active_pr,
+                "_derive_current_branch",
+                side_effect=active_pr.DetachedHeadError(
+                    "Current git branch is detached or empty. Pass --head explicitly."
+                ),
+            ),
+        ):
+            result = active_pr.resolve_current_pr_scope()
+
+        self.assertEqual(result["reason_code"], "DETACHED_HEAD")
+
+    def test_zero_argument_detached_head_does_not_fall_back_to_cache(self):
+        self._write_session("octo/cached", "12")
+        detached = {
+            "status": "ACTIVE_PR_LOOKUP_FAILED",
+            "repo": "octo/example",
+            "head": None,
+            "reason_code": "DETACHED_HEAD",
+            "waiting_on": "active_pr_target",
+            "next_action": "Check out a branch or pass an explicit target.",
+            "exit_code": 2,
+        }
+
+        with patch("gh_address_cr.commands.active_pr.resolve_current_pr_scope", return_value=detached):
+            args, error = maybe_prepend_implicit_scope(["--lean"], prefer_current_branch=True)
+
+        self.assertEqual(args, ["--lean"])
+        self.assertEqual(error, detached)
+
+    def test_zero_argument_uses_unique_same_repo_session_when_branch_has_no_pr(self):
+        self._write_session("octo/example", "77")
+        self._write_session("octo/other", "12")
+        no_branch_pr = {
+            "status": "NO_ACTIVE_PR",
+            "repo": "octo/example",
+            "head": "feature/current",
+            "reason_code": "NO_ACTIVE_PR",
+            "waiting_on": "open_pr",
+            "next_action": "Open a PR.",
+            "exit_code": 4,
+        }
+
+        with patch("gh_address_cr.commands.active_pr.resolve_current_pr_scope", return_value=no_branch_pr):
+            args, error = maybe_prepend_implicit_scope(["--lean"], prefer_current_branch=True)
+
+        self.assertIsNone(error)
+        self.assertEqual(args[:2], ["octo/example", "77"])
 
     def test_high_level_command_rejects_ambiguous_cached_session(self):
         self._write_session("octo/example", "77")
         self._write_session("octo/other", "12")
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+        with patch(
+            "gh_address_cr.commands.active_pr.resolve_current_pr_scope",
+            return_value=self._no_current_repo(),
+        ):
+            result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -94,7 +222,11 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         self._write_session("octo/inactive", "12", status="PASSED")
         self._install_fake_gh_for_threads()
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+        with patch(
+            "gh_address_cr.commands.active_pr.resolve_current_pr_scope",
+            return_value=self._no_current_repo(),
+        ):
+            result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -107,7 +239,11 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
         state_file.write_text("not a directory", encoding="utf-8")
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(state_file)
 
-        result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
+        with patch(
+            "gh_address_cr.commands.active_pr.resolve_current_pr_scope",
+            return_value=self._no_current_repo(),
+        ):
+            result = self.run_cmd([sys.executable, str(CLI_PY), "address", "--lean"])
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)

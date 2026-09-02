@@ -93,6 +93,32 @@ before reply/resolve side effects, so refresh and revalidate the owning layer.
 For an already-terminal GitHub thread or local finding, record that fresh proof
 with `agent evidence add --item-id <item_id> --commit <sha> --files <paths>
 --validation <cmd=passed>`; the runtime attaches the current stack binding.
+Each stacked PR has its own CR session and evidence lifecycle. For example, a
+three-member stack is handled with `address owner/repo 101`, `address
+owner/repo 102`, and `address owner/repo 103`; resolve and publish findings in
+the session for the owning PR reported by `stack_context.selected_pr`. A
+finding seen on the top PR but introduced by a lower PR must be handed back to
+that lower PR. Run each member's layer `final-gate` separately, and use
+`final-gate ... --stack` only for explicitly requested bottom-up aggregate proof.
+After `gh stack sync` or `gh stack rebase`, refresh every affected member and
+revalidate its changed revision before publishing again. Stack merge remains an
+atomic, contiguous, bottom-up GitHub operation.
+
+### Sandbox-safe session state
+
+PR-scoped commands persist their session, evidence, and final-gate artifacts in
+one state directory. In a restricted agent runtime, choose a writable directory
+explicitly and reuse it for the full PR session:
+
+```bash
+export GH_ADDRESS_CR_STATE_DIR="/path/to/writable/gh-address-cr-state"
+gh-address-cr review owner/repo 123
+```
+
+Use the same value for `review`, `address`, `agent next`, `agent submit`,
+`agent publish`, and `final-gate`; changing it starts a different local session
+view. If the configured directory is unavailable, the runtime returns
+`STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
 Completion means the latest final gate reports:
 
@@ -410,11 +436,34 @@ Stable machine summary fields:
 - `reason_code`
 - `waiting_on`
 - `next_action`
+- `primary_action` (`kind`, `command`, `item_id`, `why_now`, `requires_human`)
+- `context` (bounded PR, check, changed-file, and selected-item context)
 - `commands`
 - `exit_code`
 
 Use `--lean` or `--summary` when reducing token load. Machine summaries also
 surface the current-login pending review count.
+
+`review`, `address`, and `threads` may be run without a PR target. Resolution
+prefers the current GitHub repository and branch's unique OPEN PR, then a
+same-repository unique ACTIVE session, then a globally unique ACTIVE session.
+Explicit targets always win. Ambiguous targets, detached HEAD, missing OPEN
+PRs, and GitHub authentication or network failures fail with a diagnostic;
+query failures never fall back to potentially stale cached state.
+
+For the shortest repeatable loop, run `gh-address-cr address`, execute the one
+`primary_action.command` when it is non-null, and run `gh-address-cr address`
+again. The action vocabulary is deliberately small: `claim`, `resolve`,
+`publish`, `wait`, `run_final_gate`, `repair_environment`, and `complete`.
+`command=null` is valid whenever the next step needs new human/agent evidence,
+waiting, environment repair, or represents completion; read `why_now` rather
+than inventing an action.
+
+Zero-argument success rate is measured only across eligible invocations:
+those with a unique current-branch OPEN PR or an eligible unique ACTIVE
+session, while GitHub CLI, authentication, and network prerequisites are
+available. Ineligible invocations remain visible but do not enter the success
+rate denominator.
 
 ## Advanced / Developer Integration
 
@@ -568,6 +617,7 @@ When machine output is ambiguous, inspect:
 - `reason_code`
 - `waiting_on`
 - `next_action`
+- `primary_action`
 - `commands`
 - `artifact_path`
 

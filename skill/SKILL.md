@@ -71,6 +71,22 @@ payload.
 If the runtime or required version is unavailable, fail before session
 mutation. Do not copy runtime state-machine logic into the skill.
 
+## Sandbox-Safe State Directory
+
+PR-scoped state must be writable and persistent across the full workflow. In a
+Codex sandbox, CI worker, or container, set one allowed directory before the
+first PR command and reuse it for the full PR session:
+
+```text
+export GH_ADDRESS_CR_STATE_DIR="<writable-dir>"
+gh-address-cr address <owner/repo> <pr_number> --lean
+```
+
+Keep the same value for `review`, `address`, `agent next`, `agent submit`,
+`agent publish`, and `final-gate`; changing it selects a different local
+session. `STATE_DIR_NOT_WRITABLE` means the runtime could not initialize that
+directory: choose a permitted location and rerun the same command.
+
 ## Execution Ladder
 
 1. Run the selected public main entrypoint.
@@ -85,6 +101,13 @@ mutation. Do not copy runtime state-machine logic into the skill.
 5. Submit decisions through `gh-address-cr agent resolve`; publish accepted
    GitHub-thread evidence through `gh-address-cr agent publish`.
 6. Run `gh-address-cr final-gate <owner/repo> <pr_number>` last.
+
+For `review`, `address`, and `threads`, omit the PR target when operating in a
+Git checkout. The runtime resolves the unique OPEN PR for the current branch
+before considering an ACTIVE cached session. Repeat the same entrypoint after
+each action to refresh the recommendation. The only primary action kinds are
+`claim`, `resolve`, `publish`, `wait`, `run_final_gate`,
+`repair_environment`, and `complete`.
 
 For a GitHub stacked PR, each command still owns only the selected PR layer.
 Work bottom-up and use `gh-address-cr final-gate <owner/repo> <pr_number>

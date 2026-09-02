@@ -116,6 +116,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotRegex(text, r"(?m)^\$gh-address-cr ")
         self.assertIn("Use $gh-address-cr review", text)
 
+    def test_sandbox_safe_state_directory_contract_is_documented(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        readme_text = README_MD.read_text(encoding="utf-8")
+
+        for document, text in (("skill", skill_text), ("readme", readme_text)):
+            with self.subTest(document=document):
+                self.assertIn("GH_ADDRESS_CR_STATE_DIR", text)
+                self.assertIn("reuse it for the full PR session", text)
+
     def test_dispatch_matrix_matches_current_cli_intake_contract(self):
         text = MODE_PRODUCER_MATRIX_MD.read_text(encoding="utf-8")
         expected_commands = (
@@ -899,3 +908,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Do not implement a lower-layer fix on an upper branch", normalized_workflow)
         self.assertIn("separately authorized stack-management workflow", normalized_workflow)
         self.assertIn("Discard the old ActionRequest", normalized_workflow)
+        self.assertIn("one PR-scoped session per stack member", normalized_workflow)
+        self.assertIn("PR #101", normalized_workflow)
+        self.assertIn("address owner/repo 101", normalized_workflow)
+        self.assertIn("gh stack sync", normalized_workflow)
+        self.assertIn("atomic", normalized_workflow)

@@ -79,6 +79,28 @@ def next_fixer(repo: str, pr_number: str) -> str:
     )
 
 
+def next_fixer_for_item(
+    repo: str,
+    pr_number: str,
+    item_id: str,
+    *,
+    agent_id: str = "gh-address-cr-agent",
+) -> str:
+    return shell_command(
+        "gh-address-cr",
+        "agent",
+        "next",
+        repo,
+        pr_number,
+        "--role",
+        "fixer",
+        "--agent-id",
+        agent_id,
+        "--item-id",
+        item_id,
+    )
+
+
 def batch_next(repo: str, pr_number: str, *, files: list[str] | None = None) -> str:
     parts = [
         "gh-address-cr",

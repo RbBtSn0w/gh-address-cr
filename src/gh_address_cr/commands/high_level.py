@@ -30,6 +30,11 @@ from gh_address_cr.core.handoff import (
     record_producer_result,
 )
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.primary_action import (
+    build_recommendation_observation,
+    project_context_summary,
+    project_primary_action,
+)
 from gh_address_cr.core.runtime_kernel.stack import unavailable_stack_context
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
 from gh_address_cr.core.untrusted_content import request_item_projection
@@ -92,6 +97,15 @@ def _build_preflight_summary(
         "gate_scope": "inline",
         "commands": summary_commands(repo, pr_number),
     }
+    summary["primary_action"] = project_primary_action(
+        repo=repo,
+        pr_number=pr_number,
+        command=command,
+        status=status,
+        reason_code=reason_code,
+        waiting_on=waiting_on,
+        session={},
+    )
     if diagnostics:
         summary["diagnostics"] = diagnostics
     return summary
@@ -102,7 +116,9 @@ def _load_or_create_session(repo: str, pr_number: str) -> dict[str, Any]:
     created = False
     try:
         session = manager.load()
-    except session_store.SessionError:
+    except session_store.SessionError as exc:
+        if exc.reason_code != "SESSION_NOT_FOUND":
+            raise
         session = manager.create(status="ACTIVE")
         created = True
     _ensure_native_session_fields(session)
@@ -350,11 +366,67 @@ def _native_summary(
         "stack_merge_readiness": "unknown" if stack_availability in {"unavailable", "invalid"} else "not_evaluated",
         "commands": summary_commands(repo, pr_number),
     }
+    primary_action = project_primary_action(
+        repo=repo,
+        pr_number=str(pr_number),
+        command=command,
+        status=status,
+        reason_code=reason_code,
+        waiting_on=waiting_on,
+        session=session,
+    )
+    summary["primary_action"] = primary_action
+    summary["context"] = project_context_summary(
+        session,
+        selected_item_id=primary_action.get("item_id"),
+    )
+    if session:
+        _record_recommendation_observation(repo, str(pr_number), session, primary_action)
     if diagnostics:
         summary["diagnostics"] = diagnostics
     if command == "threads" or include_threads:
         summary["threads"] = _native_thread_rows(session, lean=lean)
     return summary
+
+
+def _record_recommendation_observation(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    action: dict[str, Any],
+) -> None:
+    metadata = session.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        session["metadata"] = metadata
+    previous = metadata.get("recommendation_observation")
+    observation = build_recommendation_observation(session, action, emitted_at=_utc_now())
+    repeated = isinstance(previous, dict) and previous.get("fingerprint") == observation["fingerprint"]
+    suppressed = (
+        isinstance(previous, dict)
+        and previous.get("item_id") == observation.get("item_id")
+        and previous.get("kind") in {"claim", "resolve"}
+        and observation.get("kind") in {"publish", "wait"}
+    )
+    if not repeated:
+        metadata["recommendation_observation"] = observation
+        session_store.save_session(repo, pr_number, session)
+    try:
+        from gh_address_cr.otel_tracing import add_current_span_event
+
+        add_current_span_event(
+            "gh_address_cr.primary_action.projected",
+            {
+                "gh_address_cr.primary_action.kind": str(action["kind"]),
+                "gh_address_cr.primary_action.executable": action.get("command") is not None,
+                "gh_address_cr.primary_action.commands_to_first_action": 1 if action.get("command") else 0,
+                "gh_address_cr.primary_action.repeated": repeated,
+                "gh_address_cr.primary_action.duplicate_suppressed": suppressed,
+            },
+        )
+    except Exception:
+        # Telemetry is deliberately fail-open and carries no repo or item identity.
+        pass
 
 
 def summary_commands(repo: str, pr_number: str) -> dict[str, str]:
@@ -713,6 +785,11 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
             print(summary["next_action"])
         else:
             print(f"Review workflow {status}")
+        action = summary["primary_action"]
+        print(f"Next: {action['kind']}")
+        if action.get("command"):
+            print(action["command"])
+        print(action["why_now"])
         return
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
@@ -830,6 +907,32 @@ class HighLevelReviewRuntime:
                 pass
             remote_threads = client.list_threads(repo, pr_number)
             session = core_gate.session_with_remote_threads(session, remote_threads)
+            metadata = session.setdefault("metadata", {})
+            if isinstance(metadata, dict):
+                try:
+                    checks = client.list_pr_checks(repo, pr_number)
+                    if not isinstance(checks, list):
+                        checks = []
+                    counts: dict[str, int] = {}
+                    for check in checks:
+                        bucket = str(check.get("bucket") or "unknown").lower()
+                        counts[bucket] = counts.get(bucket, 0) + 1
+                    metadata["check_summary"] = {
+                        "availability": "present",
+                        "counts": counts,
+                    }
+                except GitHubError as exc:
+                    metadata["check_summary"] = {
+                        "availability": "unavailable",
+                        "counts": {},
+                        "diagnostic_code": exc.reason_code,
+                    }
+                try:
+                    changed_files = client.list_pr_files(repo, pr_number)
+                    metadata["changed_files"] = changed_files if isinstance(changed_files, list) else []
+                except GitHubError as exc:
+                    metadata["changed_files"] = []
+                    metadata["changed_files_diagnostic_code"] = exc.reason_code
         return session, remote_threads
 
     def _handle_format_error(
@@ -923,8 +1026,25 @@ class HighLevelReviewRuntime:
         if exit_code is not None:
             return exit_code
 
-        with _high_level_phase(command, "session"):
-            session = _load_or_create_session(repo, pr_number)
+        try:
+            with _high_level_phase(command, "session"):
+                session = _load_or_create_session(repo, pr_number)
+        except session_store.SessionError as exc:
+            waiting_on = "state_directory" if exc.reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
+            summary = _native_summary(
+                command=command,
+                repo=repo,
+                pr_number=pr_number,
+                status="BLOCKED",
+                reason_code=exc.reason_code,
+                waiting_on=waiting_on,
+                next_action=str(exc),
+                exit_code=5,
+                session={},
+                lean=lean,
+            )
+            _emit_native_summary(summary, human=human)
+            return 5
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:

@@ -38,6 +38,7 @@ from gh_address_cr.core.otel_semconv import (
     GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
     PROCESS_COMMAND_ARGS,
 )
+from gh_address_cr.core.primary_action import project_context_summary, project_primary_action
 from gh_address_cr.core.telemetry_safety import (
     classify_workflow_span_layer,
     sanitize_cli_argv,
@@ -512,6 +513,13 @@ def build_preflight_summary(
     artifact_path: str | None = None,
     diagnostics: dict | None = None,
 ) -> dict:
+    if artifact_path is None:
+        try:
+            artifact_path = str(session_store.workspace_dir(repo, pr_number))
+        except session_store.SessionError:
+            # The state directory itself may be the failed prerequisite. Keep
+            # the diagnostic machine-readable without attempting another write.
+            artifact_path = None
     summary = {
         "status": status,
         "repo": repo,
@@ -524,13 +532,23 @@ def build_preflight_summary(
             "unresolved_github_threads_count": None,
             "needs_human_items_count": None,
         },
-        "artifact_path": artifact_path or str(session_store.workspace_dir(repo, pr_number)),
+        "artifact_path": artifact_path,
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": exit_code,
         "commands": summary_commands(repo, pr_number),
     }
+    summary["primary_action"] = project_primary_action(
+        repo=repo,
+        pr_number=pr_number,
+        command=command,
+        status=status,
+        reason_code=reason_code,
+        waiting_on=waiting_on,
+        session={},
+    )
+    summary["context"] = project_context_summary({}, selected_item_id=None)
     if diagnostics:
         summary["diagnostics"] = diagnostics
     return summary
@@ -685,6 +703,21 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
     repo = args.args[0]
     pr_number = args.args[1]
 
+    try:
+        session_store.state_dir()
+    except session_store.SessionError as exc:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            str(exc),
+            reason_code=exc.reason_code,
+            waiting_on="state_directory",
+            next_action=str(exc),
+            exit_code=5,
+            persist=False,
+        )
+
     if args.command == "adapter" and len(args.args) < 3:
         return output_preflight_error(
             args,
@@ -804,10 +837,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
-            "  gh-address-cr address owner/repo 123 [--human|--lean|--summary]\n"
-            "  gh-address-cr review owner/repo 123 [--human]\n"
+            "  gh-address-cr address [owner/repo 123] [--human|--lean|--summary]\n"
+            "  gh-address-cr review [owner/repo 123] [--human]\n"
             "  gh-address-cr review --auto-simple owner/repo 123 [--human|--lean|--summary]\n"
-            "  gh-address-cr threads owner/repo 123 [--human|--lean|--summary]\n"
+            "  gh-address-cr threads [owner/repo 123] [--human|--lean|--summary]\n"
             "  gh-address-cr doctor [owner/repo] [123]\n"
             "  gh-address-cr version\n"
             "  gh-address-cr findings owner/repo 123 --input findings.json [--human]\n"
@@ -968,7 +1001,10 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
             set_current_span_attributes({"gh_address_cr.cli.init.exit_code": 0})
             return 0
         if args.command in OUTPUT_MODE_COMMANDS and len(args.args) < 2:
-            args.args, scope_error = _maybe_prepend_implicit_scope(args.args)
+            args.args, scope_error = _maybe_prepend_implicit_scope(
+                args.args,
+                prefer_current_branch=args.command in {"address", "review", "threads"},
+            )
             if scope_error is not None:
                 rc = _emit_scope_resolution_error(scope_error)
                 set_current_span_attributes({"gh_address_cr.cli.init.exit_code": rc})

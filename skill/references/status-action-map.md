@@ -2,6 +2,14 @@
 
 This document maps the `gh-address-cr` runtime `status` fields to the next safe action. As a thin adapter, the skill must follow this map without redefining the state machine.
 
+High-level summaries project exactly one additive `primary_action`. Prefer its
+public `command` when non-null and repeat the same high-level entrypoint after
+the action. A null command is intentional when evidence must be supplied before
+a public command can be formed, and for `wait`, `repair_environment`, or
+`complete`; follow `why_now` instead of constructing a synthetic command. The
+projection is advisory and does not change session item truth, publish
+authority, or `final-gate` semantics.
+
 ## Stacked PR Context and Evidence
 
 - `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub preview
@@ -31,6 +39,14 @@ This document maps the `gh-address-cr` runtime `status` fields to the next safe 
   this aggregate layer too: terminal GitHub threads and local findings use
   item-scoped `agent evidence add`. Blocking local items use normal `review`,
   not thread-only `--auto-simple` handling.
+
+## Runtime Environment
+
+If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
+- **Action**: Set `GH_ADDRESS_CR_STATE_DIR` to one writable directory, then
+  reuse it for the full PR session across `review`, `address`, `agent next`,
+  `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
+  do not change `HOME` or create a second state directory mid-session.
 
 ## Active Work
 

@@ -220,6 +220,35 @@ class NativeGitHubClientTests(unittest.TestCase):
 
         self.assertEqual(checks, [{"name": "unit", "bucket": "fail"}])
 
+    def test_list_pr_files_returns_bounded_changed_file_metadata(self):
+        from gh_address_cr.github.client import GitHubClient
+
+        runner = RecordingRunner(
+            [
+                lambda cmd: completed(
+                    cmd,
+                    [
+                        {
+                            "filename": "src/app.py",
+                            "status": "modified",
+                            "additions": 4,
+                            "deletions": 2,
+                            "changes": 6,
+                            "patch": "must not be retained",
+                        }
+                    ],
+                ),
+            ]
+        )
+
+        files = GitHubClient(runner=runner).list_pr_files("owner/repo", "123")
+
+        self.assertEqual(
+            files,
+            [{"path": "src/app.py", "status": "modified", "additions": 4, "deletions": 2, "changes": 6}],
+        )
+        self.assertIn("repos/owner/repo/pulls/123/files?per_page=100&page=1", runner.calls[0])
+
 
 if __name__ == "__main__":
     unittest.main()
