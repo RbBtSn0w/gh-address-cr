@@ -1,3 +1,9 @@
+## [3.9.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.1...v3.9.0) (2026-09-02)
+
+### Features
+
+* attach the runnable command menu to error summaries ([#257](https://github.com/RbBtSn0w/gh-address-cr/issues/257)) ([8522ddd](https://github.com/RbBtSn0w/gh-address-cr/commit/8522ddd0f60959ff4bbd60d8f028d14597ebe9f1))
+
 ## [3.8.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.8.0...v3.8.1) (2026-09-02)
 
 ### Bug Fixes
