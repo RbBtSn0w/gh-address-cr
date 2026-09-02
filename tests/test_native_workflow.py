@@ -756,6 +756,8 @@ class NativeWorkflowTests(unittest.TestCase):
                     "- No code changes were made for this specific comment.\n"
                     "\n"
                     "If you feel this still needs an adjustment, let me know and I can follow up with a patch!\n"
+                    "\n"
+                    "_🤖 Addressed by gh-address-cr_\n"
                     )
 
                 self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", expected_reply))
@@ -1132,6 +1134,8 @@ class NativeWorkflowTests(unittest.TestCase):
             "- `src/example.py`: Added the missing input guard.\n"
             "- Why: The input is now checked before use.\n"
             "- Validation: `python3 -m unittest tests.test_example` passed\n"
+            "\n"
+            "_🤖 Addressed by gh-address-cr_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -1190,6 +1194,8 @@ class NativeWorkflowTests(unittest.TestCase):
             "- `AGENTS.md`: Fixed the stale GitHub thread reference called out here.\n"
             "- Why: The updated reference now matches the review-thread contract.\n"
             "- Validation: `python3 -m unittest tests.test_skill_docs` passed\n"
+            "\n"
+            "_🤖 Addressed by gh-address-cr_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -1565,6 +1571,8 @@ class NativeWorkflowTests(unittest.TestCase):
             "- Marking as deferred (non-blocking for this PR) because: This needs a broader cleanup outside this PR.\n"
             "\n"
             "If you prefer, I can bring this into the current PR instead.\n"
+            "\n"
+            "_🤖 Addressed by gh-address-cr_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
