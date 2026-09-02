@@ -45,6 +45,27 @@ class TestUntrustedContentEnvelope(unittest.TestCase):
         self.assertNotIn("item_id", projected["untrusted_content"])
         self.assertNotIn("thread_id", projected["untrusted_content"])
 
+    def test_first_and_latest_body_move_behind_the_envelope_when_present(self):
+        # No current producer sets these on a session item, but the projection must
+        # not silently leak them flat if one ever does -- see untrusted_content.py's
+        # _ADDITIONAL_TEXT_FIELDS.
+        item = _thread_item(first_body="Original nit.", latest_body=DIRECTIVE_BODY)
+
+        projected = request_item_projection(item)
+
+        self.assertNotIn("first_body", projected)
+        self.assertNotIn("latest_body", projected)
+        self.assertEqual(projected["untrusted_content"]["first_body"], "Original nit.")
+        self.assertEqual(projected["untrusted_content"]["latest_body"], DIRECTIVE_BODY)
+
+    def test_absent_first_and_latest_body_do_not_appear_in_the_envelope(self):
+        # The common case today: neither field is ever set, so the envelope should
+        # stay exactly as small as before rather than growing empty keys.
+        projected = request_item_projection(_thread_item())
+
+        self.assertNotIn("first_body", projected["untrusted_content"])
+        self.assertNotIn("latest_body", projected["untrusted_content"])
+
     def test_local_finding_is_labelled_as_producer_authored(self):
         envelope = untrusted_content_envelope(
             {"item_id": "local:1", "item_kind": "local_finding", "source": "json", "body": "Producer text."}
@@ -80,9 +101,9 @@ class TestSessionItemInvariantsHold(unittest.TestCase):
 
 
 class TestRequestHashCompatibility(unittest.TestCase):
-    def _request(self, item):
+    def _request(self, item, *, schema_version="1.1"):
         return {
-            "schema_version": "1.1",
+            "schema_version": schema_version,
             "request_id": "req-1",
             "session_id": "sess-1",
             "lease_id": "lease-1",
@@ -92,12 +113,13 @@ class TestRequestHashCompatibility(unittest.TestCase):
             "required_evidence": ["note"],
         }
 
-    def test_pre_envelope_request_file_hashes_exactly_as_before(self):
+    def test_pre_envelope_request_file_hash_is_stable_on_recomputation(self):
         # An in-flight lease claimed before the upgrade must not fail submission with
-        # STALE_REQUEST_CONTEXT: its on-disk file still has flat `body` and no envelope,
-        # and `to_dict` emits `untrusted_content` only when present.
+        # STALE_REQUEST_CONTEXT: its on-disk file still has schema_version 1.0, flat
+        # `body`, and no envelope, and `to_dict` emits `untrusted_content` only when
+        # present.
         legacy_item = _thread_item(state="claimed")
-        legacy_request = self._request(legacy_item)
+        legacy_request = self._request(legacy_item, schema_version="1.0")
 
         rehashed = ActionRequest.from_dict(legacy_request).stable_hash()
 

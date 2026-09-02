@@ -34,7 +34,8 @@ class TestOrchestratorSession(unittest.TestCase):
         self.assertIn("allowed_actions", action_request)
         self.assertIn("required_evidence", action_request)
 
-        # Machine operands stay flat; producer-authored text sits behind the envelope.
+        # Body text moves behind the envelope; other fields -- machine operands like
+        # item_id, and producer-authored labels like title -- stay flat.
         packet_item = action_request["item"]
         self.assertEqual(packet_item["item_id"], "finding-1")
         self.assertEqual(packet_item["item_kind"], "local_finding")

@@ -17,6 +17,13 @@ from typing import Any
 GITHUB_REVIEW_THREAD_SOURCE = "github_review_thread"
 LOCAL_FINDING_SOURCE = "local_finding_producer"
 
+# No current producer sets these on a session item (gate.py's merge reads them
+# from the raw GitHub payload only to feed severity/priority extraction, never
+# onto the item) -- confirmed by grep, not by reading one call site. They're
+# handled anyway so a future producer that does set one is covered by
+# construction rather than needing to remember this module exists.
+_ADDITIONAL_TEXT_FIELDS = ("first_body", "latest_body")
+
 
 def untrusted_content_envelope(item: Mapping[str, Any]) -> dict[str, Any]:
     """Build the envelope carrying an item's third-party-authored text."""
@@ -25,6 +32,10 @@ def untrusted_content_envelope(item: Mapping[str, Any]) -> dict[str, Any]:
         "source": GITHUB_REVIEW_THREAD_SOURCE if is_github_thread else LOCAL_FINDING_SOURCE,
         "body": str(item.get("body") or ""),
     }
+    for field in _ADDITIONAL_TEXT_FIELDS:
+        value = item.get(field)
+        if value:
+            envelope[field] = str(value)
     author_login = item.get("first_author_login") or item.get("latest_author_login")
     if author_login:
         envelope["author_login"] = str(author_login)
@@ -34,8 +45,10 @@ def untrusted_content_envelope(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def request_item_projection(item: Mapping[str, Any]) -> dict[str, Any]:
-    """Project a session item for an ActionRequest, moving `body` behind the envelope."""
+    """Project a session item for an ActionRequest, moving reviewer-authored text behind the envelope."""
     projected = dict(item)
     projected.pop("body", None)
+    for field in _ADDITIONAL_TEXT_FIELDS:
+        projected.pop(field, None)
     projected["untrusted_content"] = untrusted_content_envelope(item)
     return projected
