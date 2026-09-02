@@ -1,3 +1,9 @@
+## [3.12.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.12.0...v3.12.1) (2026-09-02)
+
+### Bug Fixes
+
+* support sandbox-safe PR session state ([#263](https://github.com/RbBtSn0w/gh-address-cr/issues/263)) ([0da5665](https://github.com/RbBtSn0w/gh-address-cr/commit/0da566581541e2162b7a8ad732c2271082c3d2b5))
+
 ## [3.12.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.11.0...v3.12.0) (2026-09-02)
 
 ### Features
