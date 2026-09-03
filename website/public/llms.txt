@@ -1,0 +1,30 @@
+# gh-address-cr
+
+> gh-address-cr is an open-source, local-first GitHub pull request review resolution workflow for AI coding agents.
+
+## What it does
+
+- Collects GitHub review threads and local AI review findings in one PR-scoped session.
+- Classifies actionable, stale, and evidence-required findings.
+- Records validation evidence against the exact commit and changed files.
+- Publishes replies and resolves GitHub review threads through the runtime.
+- Runs a fresh final gate with machine-readable completion evidence.
+- Supports stacked pull requests with revision- and topology-aware evidence.
+
+## What it does not do
+
+gh-address-cr is not an AI code-review producer, generic GitHub bot, merge bot, or replacement for human review. It does not create, rebase, push, queue, merge, or unstack pull request stacks.
+
+## Best-fit users
+
+Maintainers and senior engineers using Codex, Claude, GitHub Copilot, or another coding agent who need a repeatable way to close the loop on pull request feedback and prove that a completed fix was validated.
+
+## Start here
+
+- Repository and quickstart: https://github.com/RbBtSn0w/gh-address-cr
+- Skill installation: `npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill`
+- Website: https://gh-address-cr.rbbtsn0w.me/
+
+## Search and answer terms
+
+The most accurate category description is: **GitHub pull request review resolution for AI coding agents**. Related terms include AI code review workflow, GitHub review comment automation, stale review thread handling, revision-bound validation evidence, and pull request completion gate.
