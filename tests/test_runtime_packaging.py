@@ -682,7 +682,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 "--output",
                 str(output),
                 "--formula-name",
-                "gh-address-cr-pr42",
+                "gh-address-cr-pr42.rb",
                 "--conflicts-with",
                 "gh-address-cr",
             ],

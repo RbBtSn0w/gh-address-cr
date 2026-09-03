@@ -10,11 +10,12 @@ on:
     - cron: "0 3 * * 1"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   lint-and-test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -108,6 +109,9 @@ jobs:
     name: Publish PR Dev Preview
     needs: lint-and-test
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR head
@@ -170,7 +174,7 @@ jobs:
             gh release create pr-preview \
               --title "PR Preview Builds" \
               --notes "Automated rolling release for PR dev preview builds." \
-              --prerelease || true
+              --prerelease
           fi
 
           echo "Uploading ${SDIST_ASSET_NAME} to pr-preview release..."
@@ -179,16 +183,13 @@ jobs:
           SDIST_URL="https://github.com/${{ github.repository }}/releases/download/pr-preview/${SDIST_ASSET_NAME}"
           echo "sdist_url=${SDIST_URL}" >> "$GITHUB_OUTPUT"
 
-      - name: Render PR Homebrew Formula
+      - name: Render Dev Homebrew Formula
         id: render-formula
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_NUM="${{ steps.versioning.outputs.pr_number }}"
           DEV_VERSION="${{ steps.versioning.outputs.dev_version }}"
           SDIST_URL="${{ steps.release-upload.outputs.sdist_url }}"
           SHA256="${{ steps.release-upload.outputs.sha256 }}"
-          FORMULA_NAME="gh-address-cr-pr${PR_NUM}"
+          FORMULA_NAME="gh-address-cr-dev"
           FORMULA_FILE="${FORMULA_NAME}.rb"
 
           python3 scripts/release/render_homebrew_formula.py \
@@ -199,12 +200,46 @@ jobs:
             --conflicts-with "gh-address-cr" \
             --output "${FORMULA_FILE}"
 
-          echo "Uploading ${FORMULA_FILE} to pr-preview release..."
-          gh release upload pr-preview "${FORMULA_FILE}" --clobber
-
-          FORMULA_URL="https://github.com/${{ github.repository }}/releases/download/pr-preview/${FORMULA_FILE}"
-          echo "formula_url=${FORMULA_URL}" >> "$GITHUB_OUTPUT"
           echo "formula_name=${FORMULA_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Homebrew tap installation token
+        id: homebrew-tap-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: RbBtSn0w
+          repositories: homebrew-tap
+
+      - name: Sync Formula to RbBtSn0w/homebrew-tap
+        id: sync-tap
+        if: steps.homebrew-tap-token.outputs.token != ''
+        uses: actions/checkout@v4
+        with:
+          repository: RbBtSn0w/homebrew-tap
+          token: ${{ steps.homebrew-tap-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Commit and Push Dev Formula to Tap
+        if: steps.homebrew-tap-token.outputs.token != ''
+        working-directory: homebrew-tap
+        env:
+          DEV_VERSION: ${{ steps.versioning.outputs.dev_version }}
+          PR_NUM: ${{ steps.versioning.outputs.pr_number }}
+        run: |
+          mkdir -p Formula
+          cp ../gh-address-cr-dev.rb Formula/gh-address-cr-dev.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/gh-address-cr-dev.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "gh-address-cr-dev ${DEV_VERSION} (PR #${PR_NUM})"
+            git push
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Comment on PR with Multi-Path Verification Instructions
         uses: actions/github-script@v7
@@ -214,8 +249,6 @@ jobs:
             const devVersion = '${{ steps.versioning.outputs.dev_version }}';
             const shortSha = '${{ steps.versioning.outputs.short_sha }}';
             const prNumber = '${{ steps.versioning.outputs.pr_number }}';
-            const formulaName = '${{ steps.render-formula.outputs.formula_name }}';
-            const formulaUrl = '${{ steps.render-formula.outputs.formula_url }}';
             const runId = context.runId;
             const repoOwner = context.repo.owner;
             const repoName = context.repo.repo;
@@ -224,7 +257,7 @@ jobs:
             const body = `${marker}
             ### 🚀 PR Dev Preview Ready
             
-            A dev preview build for this PR has been compiled, packaged, and rendered!
+            A dev preview build for this PR has been compiled, packaged, and published!
             
             - **Dev Version**: \`${devVersion}\`
             - **Commit**: \`${shortSha}\`
@@ -234,19 +267,15 @@ jobs:
             
             #### 📦 Choose Your Installation & Validation Path
             
-            #### Path 1: 🍺 Homebrew (Recommended for macOS)
-            Load and test this PR's rendered standalone Formula directly in your tapped repository:
+            #### Path 1: 🍺 Homebrew Dedicated Dev Formula (Recommended for macOS)
+            Install or update the dedicated dev build directly from \`RbBtSn0w/homebrew-tap\`:
             
             \`\`\`bash
-            # 1. Download formula to your local tap directory
-            curl -sSL "${formulaUrl}" -o "$(brew --repository rbbtsn0w/tap)/Formula/${formulaName}.rb"
+            # 1. Update tap index and install/reinstall dev preview
+            brew update
+            brew reinstall RbBtSn0w/tap/gh-address-cr-dev
             
-            # 2. Install (or reinstall) this PR dev build
-            brew install rbbtsn0w/tap/${formulaName}
-            # Or if updating:
-            brew reinstall rbbtsn0w/tap/${formulaName}
-            
-            # 3. Verify installation
+            # 2. Verify installation
             gh-address-cr --version
             gh-address-cr agent manifest
             \`\`\`
@@ -284,16 +313,17 @@ jobs:
             ---
             
             #### 🧹 Cleanup Instructions
-            - **Homebrew**: \`brew uninstall ${formulaName} && brew link gh-address-cr\`
+            - **Homebrew**: \`brew uninstall gh-address-cr-dev && brew link gh-address-cr\`
             - **pipx**: \`pipx uninstall gh-address-cr\`
             - **venv**: \`rm -rf /tmp/pr-${prNumber}-dist /tmp/pr-${prNumber}-venv\`
             `;
 
             try {
-              const { data: comments } = await github.rest.issues.listComments({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: repoOwner,
                 repo: repoName,
                 issue_number: parseInt(prNumber, 10),
+                per_page: 100,
               });
 
               const botComment = comments.find(comment => 

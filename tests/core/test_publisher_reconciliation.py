@@ -1,7 +1,10 @@
 import unittest
 
 from gh_address_cr.core.publisher import _publisher_never_replied, _reconcile_in_flight_reply
-from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
+from gh_address_cr.core.reply_templates import (
+    LEGACY_REPLY_ATTRIBUTIONS,
+    REPLY_ATTRIBUTION,
+)
 
 
 class FakeThreadsClient:
@@ -102,6 +105,23 @@ class TestReconcileInFlightReply(unittest.TestCase):
                     "id": "T1",
                     "latest_author_login": "agent-login",
                     "latest_body": f"Reply text.\n\n{REPLY_ATTRIBUTION}",
+                    "latest_url": "https://github.test/reply",
+                }
+            ]
+        )
+
+        result = _reconcile_in_flight_reply(client, "owner/repo", "1", "T1", "agent-login")
+
+        self.assertEqual(result, "https://github.test/reply")
+
+    def test_matches_when_latest_body_has_legacy_attribution(self):
+        legacy_attr = LEGACY_REPLY_ATTRIBUTIONS[0]
+        client = FakeThreadsClient(
+            [
+                {
+                    "id": "T1",
+                    "latest_author_login": "agent-login",
+                    "latest_body": f"Reply text.\n\n{legacy_attr}",
                     "latest_url": "https://github.test/reply",
                 }
             ]

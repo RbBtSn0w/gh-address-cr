@@ -409,6 +409,8 @@ def main() -> int:
     url, sha256 = resolve_source(args)
     resources = resolve_dependency_resources(args, root_payload)
     target_name = args.formula_name or args.package_name
+    if target_name.endswith(".rb"):
+        target_name = target_name[:-3]
     formula = render_formula(
         class_name=formula_class_name(target_name),
         url=url,
