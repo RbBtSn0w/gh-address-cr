@@ -2,4 +2,4 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:; connect-src 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'sha256-Q1v1jP6ZYyovp2FpPzFlOy0yaTT9q30fN5a+zY3oGyM=' 'sha256-juWAnBeAMK0ISJazg4E+ZbdpCxjomQK+QFanlRfbGkQ=' 'sha256-S0Qp0UIc+RuS5YdLvMXzkwFTZ+9X2oggrPlXojLJWmg=' 'sha256-GjePmuOCQubD/TpQRdcbC/E4TcSvrn02BvTu0ZBUE8s='; img-src 'self' data:; connect-src 'none'; frame-ancestors 'none'
