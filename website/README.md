@@ -13,7 +13,8 @@ npx wrangler pages dev public
 Cloudflare Pages Git Integration is the default deployment path. The project is
 connected to `RbBtSn0w/gh-address-cr`, uses `website` as its root directory and
 `public` as its output directory. Push changes to any non-`main` branch for a
-preview; push `main` for production. The path filter is `website/*`.
+preview; push `main` for production. The path filter is `website/**`, so nested
+assets such as `website/public/zh/` also trigger a deployment.
 
 The production custom domain is `gh-address-cr.rbbtsn0w.me`. Wrangler Direct
 Upload remains available only as an emergency/manual fallback.

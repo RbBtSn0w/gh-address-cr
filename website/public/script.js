@@ -2,6 +2,7 @@ const menuButton = document.querySelector('.menu-button');
 const mobileNav = document.querySelector('.mobile-nav');
 
 menuButton?.addEventListener('click', () => {
+  if (!mobileNav) return;
   const isOpen = mobileNav.classList.toggle('open');
   menuButton.setAttribute('aria-expanded', String(isOpen));
 });
@@ -13,15 +14,20 @@ mobileNav?.querySelectorAll('a').forEach((link) => {
   });
 });
 
-document.querySelector('#year').textContent = new Date().getFullYear();
+const year = document.querySelector('#year');
+if (year) year.textContent = new Date().getFullYear();
 
 document.querySelectorAll('.copy-button').forEach((button) => button.addEventListener('click', async (event) => {
   const command = event.currentTarget.dataset.command;
+  if (!command) return;
+  const defaultLabel = event.currentTarget.dataset.copyLabel || 'Copy';
+  const successLabel = event.currentTarget.dataset.copiedLabel || 'Copied';
+  const errorLabel = event.currentTarget.dataset.errorLabel || (defaultLabel === '复制' ? '请选中文本' : 'Select text');
   try {
     await navigator.clipboard.writeText(command);
-    event.currentTarget.textContent = 'Copied';
-    setTimeout(() => { event.currentTarget.textContent = 'Copy'; }, 1600);
+    event.currentTarget.textContent = successLabel;
+    setTimeout(() => { event.currentTarget.textContent = defaultLabel; }, 1600);
   } catch {
-    event.currentTarget.textContent = 'Select text';
+    event.currentTarget.textContent = errorLabel;
   }
 }));
