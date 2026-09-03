@@ -222,69 +222,69 @@ jobs:
 
             const marker = '<!-- pr-dev-preview-comment -->';
             const body = `${marker}
-### 🚀 PR Dev Preview Ready
-
-A dev preview build for this PR has been compiled, packaged, and rendered!
-
-- **Dev Version**: \`${devVersion}\`
-- **Commit**: \`${shortSha}\`
-- **Workflow Run**: [#${runId}](https://github.com/${repoOwner}/${repoName}/actions/runs/${runId})
-
----
-
-#### 📦 Choose Your Installation & Validation Path
-
-#### Path 1: 🍺 Homebrew Direct URL (Recommended for macOS)
-Install this PR's rendered standalone Formula directly via Homebrew (no tap repository pollution):
-
-\`\`\`bash
-# 1. Install (or reinstall) this exact PR build
-brew install --formula ${formulaUrl}
-# Or if previously installed for this PR:
-brew reinstall --formula ${formulaUrl}
-
-# 2. Verify installation
-gh-address-cr --version
-gh-address-cr agent manifest
-\`\`\`
-> **Note**: If you already have the stable formula linked, run \`brew unlink gh-address-cr\` first.
-
----
-
-#### Path 2: ⚡ \`pipx\` from PR Git Ref (Zero-Download Quick Validation)
-Install globally in an isolated environment directly from the PR's GitHub ref:
-
-\`\`\`bash
-pipx install --force git+https://github.com/${repoOwner}/${repoName}.git@refs/pull/${prNumber}/head
-gh-address-cr --version
-gh-address-cr agent manifest
-\`\`\`
-
----
-
-#### Path 3: 🐍 Download Pre-built Wheel (\`venv\` Sandbox Testing)
-Download the pre-compiled \`.whl\` artifact from this CI run into a temporary virtual environment:
-
-\`\`\`bash
-# 1. Download build artifacts using GitHub CLI
-gh run download ${runId} -n gh-address-cr-dist --dir /tmp/pr-${prNumber}-dist
-
-# 2. Create isolated venv and install wheel
-python3 -m venv /tmp/pr-${prNumber}-venv
-/tmp/pr-${prNumber}-venv/bin/pip install /tmp/pr-${prNumber}-dist/*.whl
-
-# 3. Test CLI runtime
-/tmp/pr-${prNumber}-venv/bin/gh-address-cr --version
-/tmp/pr-${prNumber}-venv/bin/gh-address-cr agent manifest
-\`\`\`
-
----
-
-#### 🧹 Cleanup Instructions
-- **Homebrew**: \`brew uninstall ${formulaName} && brew link gh-address-cr\`
-- **pipx**: \`pipx uninstall gh-address-cr\`
-- **venv**: \`rm -rf /tmp/pr-${prNumber}-dist /tmp/pr-${prNumber}-venv\`
-`;
+            ### 🚀 PR Dev Preview Ready
+            
+            A dev preview build for this PR has been compiled, packaged, and rendered!
+            
+            - **Dev Version**: \`${devVersion}\`
+            - **Commit**: \`${shortSha}\`
+            - **Workflow Run**: [#${runId}](https://github.com/${repoOwner}/${repoName}/actions/runs/${runId})
+            
+            ---
+            
+            #### 📦 Choose Your Installation & Validation Path
+            
+            #### Path 1: 🍺 Homebrew Direct URL (Recommended for macOS)
+            Install this PR's rendered standalone Formula directly via Homebrew (no tap repository pollution):
+            
+            \`\`\`bash
+            # 1. Install (or reinstall) this exact PR build
+            brew install --formula ${formulaUrl}
+            # Or if previously installed for this PR:
+            brew reinstall --formula ${formulaUrl}
+            
+            # 2. Verify installation
+            gh-address-cr --version
+            gh-address-cr agent manifest
+            \`\`\`
+            > **Note**: If you already have the stable formula linked, run \`brew unlink gh-address-cr\` first.
+            
+            ---
+            
+            #### Path 2: ⚡ \`pipx\` from PR Git Ref (Zero-Download Quick Validation)
+            Install globally in an isolated environment directly from the PR's GitHub ref:
+            
+            \`\`\`bash
+            pipx install --force git+https://github.com/${repoOwner}/${repoName}.git@refs/pull/${prNumber}/head
+            gh-address-cr --version
+            gh-address-cr agent manifest
+            \`\`\`
+            
+            ---
+            
+            #### Path 3: 🐍 Download Pre-built Wheel (\`venv\` Sandbox Testing)
+            Download the pre-compiled \`.whl\` artifact from this CI run into a temporary virtual environment:
+            
+            \`\`\`bash
+            # 1. Download build artifacts using GitHub CLI
+            gh run download ${runId} -n gh-address-cr-dist --dir /tmp/pr-${prNumber}-dist
+            
+            # 2. Create isolated venv and install wheel
+            python3 -m venv /tmp/pr-${prNumber}-venv
+            /tmp/pr-${prNumber}-venv/bin/pip install /tmp/pr-${prNumber}-dist/*.whl
+            
+            # 3. Test CLI runtime
+            /tmp/pr-${prNumber}-venv/bin/gh-address-cr --version
+            /tmp/pr-${prNumber}-venv/bin/gh-address-cr agent manifest
+            \`\`\`
+            
+            ---
+            
+            #### 🧹 Cleanup Instructions
+            - **Homebrew**: \`brew uninstall ${formulaName} && brew link gh-address-cr\`
+            - **pipx**: \`pipx uninstall gh-address-cr\`
+            - **venv**: \`rm -rf /tmp/pr-${prNumber}-dist /tmp/pr-${prNumber}-venv\`
+            `;
 
             try {
               const { data: comments } = await github.rest.issues.listComments({
