@@ -1015,7 +1015,7 @@ class NativeWorkflowTests(unittest.TestCase):
                     "\n"
                     "If you feel this still needs an adjustment, let me know and I can follow up with a patch!\n"
                     "\n"
-                    "_🤖 Addressed by gh-address-cr_\n"
+                    "_🤖 Addressed by [gh-address-cr](https://gh-address-cr.rbbtsn0w.me)_\n"
                     )
 
                 self.assertEqual(client.replies[0], (repo, pr_number, "THREAD_1", expected_reply))
@@ -1393,7 +1393,7 @@ class NativeWorkflowTests(unittest.TestCase):
             "- Why: The input is now checked before use.\n"
             "- Validation: `python3 -m unittest tests.test_example` passed\n"
             "\n"
-            "_🤖 Addressed by gh-address-cr_\n"
+            "_🤖 Addressed by [gh-address-cr](https://gh-address-cr.rbbtsn0w.me)_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -1453,7 +1453,7 @@ class NativeWorkflowTests(unittest.TestCase):
             "- Why: The updated reference now matches the review-thread contract.\n"
             "- Validation: `python3 -m unittest tests.test_skill_docs` passed\n"
             "\n"
-            "_🤖 Addressed by gh-address-cr_\n"
+            "_🤖 Addressed by [gh-address-cr](https://gh-address-cr.rbbtsn0w.me)_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
@@ -1830,7 +1830,7 @@ class NativeWorkflowTests(unittest.TestCase):
             "\n"
             "If you prefer, I can bring this into the current PR instead.\n"
             "\n"
-            "_🤖 Addressed by gh-address-cr_\n"
+            "_🤖 Addressed by [gh-address-cr](https://gh-address-cr.rbbtsn0w.me)_\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):

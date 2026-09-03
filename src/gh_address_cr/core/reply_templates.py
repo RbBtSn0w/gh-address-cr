@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-REPLY_ATTRIBUTION = "_🤖 Addressed by gh-address-cr_"
+REPLY_ATTRIBUTION = "_🤖 Addressed by [gh-address-cr](https://gh-address-cr.rbbtsn0w.me)_"
 
 SEVERITY_SIGNAL_LABELS = {
     "P0": "`P0`",
