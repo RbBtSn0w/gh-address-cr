@@ -109,9 +109,13 @@ jobs:
     name: Publish PR Dev Preview
     needs: lint-and-test
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: pr-dev-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR head
