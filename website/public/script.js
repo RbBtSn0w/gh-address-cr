@@ -1,5 +1,6 @@
 const menuButton = document.querySelector('.menu-button');
 const mobileNav = document.querySelector('.mobile-nav');
+const locale = document.documentElement.lang.toLowerCase();
 
 menuButton?.addEventListener('click', () => {
   if (!mobileNav) return;
@@ -22,7 +23,7 @@ document.querySelectorAll('.copy-button').forEach((button) => button.addEventLis
   if (!command) return;
   const defaultLabel = event.currentTarget.dataset.copyLabel || 'Copy';
   const successLabel = event.currentTarget.dataset.copiedLabel || 'Copied';
-  const errorLabel = event.currentTarget.dataset.errorLabel || (defaultLabel === '复制' ? '请选中文本' : 'Select text');
+  const errorLabel = event.currentTarget.dataset.errorLabel || (locale.startsWith('zh') ? '请选中文本' : 'Select text');
   try {
     await navigator.clipboard.writeText(command);
     event.currentTarget.textContent = successLabel;
