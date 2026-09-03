@@ -234,16 +234,19 @@ jobs:
             
             #### 📦 Choose Your Installation & Validation Path
             
-            #### Path 1: 🍺 Homebrew Direct URL (Recommended for macOS)
-            Install this PR's rendered standalone Formula directly via Homebrew (no tap repository pollution):
+            #### Path 1: 🍺 Homebrew (Recommended for macOS)
+            Load and test this PR's rendered standalone Formula directly in your tapped repository:
             
             \`\`\`bash
-            # 1. Install (or reinstall) this exact PR build
-            brew install --formula ${formulaUrl}
-            # Or if previously installed for this PR:
-            brew reinstall --formula ${formulaUrl}
+            # 1. Download formula to your local tap directory
+            curl -sSL "${formulaUrl}" -o "$(brew --repository rbbtsn0w/tap)/Formula/${formulaName}.rb"
             
-            # 2. Verify installation
+            # 2. Install (or reinstall) this PR dev build
+            brew install rbbtsn0w/tap/${formulaName}
+            # Or if updating:
+            brew reinstall rbbtsn0w/tap/${formulaName}
+            
+            # 3. Verify installation
             gh-address-cr --version
             gh-address-cr agent manifest
             \`\`\`
