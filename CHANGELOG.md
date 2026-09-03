@@ -1,3 +1,9 @@
+## [3.13.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.13.0...v3.13.1) (2026-09-03)
+
+### Bug Fixes
+
+* **web:** address product site review findings ([#265](https://github.com/RbBtSn0w/gh-address-cr/issues/265)) ([31f0aa2](https://github.com/RbBtSn0w/gh-address-cr/commit/31f0aa29fe5a28027a0314dd552dca3434e23c9f))
+
 ## [3.13.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.12.1...v3.13.0) (2026-09-03)
 
 ### Features
