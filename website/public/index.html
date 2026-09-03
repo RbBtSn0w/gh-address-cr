@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="gh-address-cr is an open-source GitHub PR review resolution workflow for AI coding agents. Track findings, validate fixes, and gate completion with evidence." />
+    <meta name="keywords" content="GitHub PR review, AI code review workflow, pull request review comments, coding agent workflow, review resolution, final gate" />
+    <link rel="canonical" href="https://gh-address-cr.rbbtsn0w.me/" />
+    <link rel="alternate" hreflang="en" href="https://gh-address-cr.rbbtsn0w.me/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://gh-address-cr.rbbtsn0w.me/zh/" />
+    <link rel="alternate" hreflang="x-default" href="https://gh-address-cr.rbbtsn0w.me/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://gh-address-cr.rbbtsn0w.me/" />
+    <meta property="og:title" content="gh-address-cr · GitHub PR review resolution with proof" />
+    <meta property="og:description" content="Turn AI code review feedback into verified, auditable pull request outcomes." />
+    <meta property="og:site_name" content="gh-address-cr" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="gh-address-cr · GitHub PR review resolution with proof" />
+    <meta name="twitter:description" content="An evidence-first GitHub PR workflow for AI coding agents." />
+    <meta name="theme-color" content="#101315" />
+    <title>GitHub PR Review Resolution for AI Agents | gh-address-cr</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23d7f36b'/%3E%3Cpath d='M19 32h26M35 22l10 10-10 10' fill='none' stroke='%23101315' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="gh-address-cr home">
+        <span class="brand-mark">→</span><span>gh-address-cr</span>
+      </a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#principles">Principles</a>
+        <a class="nav-cta" href="https://github.com/RbBtSn0w/gh-address-cr">View on GitHub <span>↗</span></a>
+      </nav>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="mobile-nav">Menu</button>
+    </header>
+
+    <main id="top">
+      <section class="hero section-shell">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="pulse"></span> Built for the last mile of AI-assisted development</p>
+          <h1>Resolve every review.<br /><em>Keep the proof.</em></h1>
+          <p class="hero-lede"><strong>gh-address-cr is an open-source GitHub PR review resolution workflow for AI coding agents.</strong> Turn review comments and local findings into verified, auditable outcomes—without losing the context behind “done”.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#install">Install the workflow <span>↓</span></a>
+            <a class="locale-link" href="/zh/" lang="zh-CN">中文</a>
+            <a class="text-link" href="#workflow">See how it works <span>↓</span></a>
+          </div>
+          <div class="trust-line"><span>Designed for</span><span class="trust-chip">GitHub</span><span class="trust-chip">Codex</span><span class="trust-chip">AI review agents</span></div>
+        </div>
+        <div class="hero-art" aria-label="A visual representation of an evidence ledger">
+          <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+          <div class="evidence-card">
+            <div class="card-top"><span class="window-dots"><i></i><i></i><i></i></span><span class="card-label">FINAL-GATE / 123</span><span class="status-pill">PASSED</span></div>
+            <div class="card-title">Completion evidence</div>
+            <div class="metric-row"><strong>04</strong><span>review items resolved</span><b>100%</b></div>
+            <div class="progress"><span></span></div>
+            <div class="metric-row"><strong>03</strong><span>validation checks</span><b>fresh</b></div>
+            <div class="divider"></div>
+            <div class="proof-row"><span class="check">✓</span><span>Reply evidence attached</span></div>
+            <div class="proof-row"><span class="check">✓</span><span>Head revision verified</span></div>
+            <div class="proof-row"><span class="check">✓</span><span>Telemetry captured</span></div>
+          </div>
+          <span class="float-note note-one">evidence-first</span><span class="float-note note-two">revision-aware</span>
+        </div>
+      </section>
+
+      <section class="statement section-shell" id="principles">
+        <p class="eyebrow">The problem with “done”</p>
+        <h2>AI can find the issue.<br /><span>Shipping needs to prove the fix.</span></h2>
+        <p class="statement-copy">Review resolution is not a checkbox. It is a chain of decisions: what changed, why it is safe, which revision was tested, and whether the final state is still true. gh-address-cr keeps that chain attached to the pull request.</p>
+      </section>
+
+      <section class="workflow section-shell" id="workflow">
+        <div class="section-intro"><p class="eyebrow">One deterministic loop</p><h2>From feedback<br />to final proof.</h2></div>
+        <div class="steps">
+          <article class="step"><span class="step-number">01</span><h3>Collect</h3><p>Bring GitHub threads and local AI findings into one PR-scoped session.</p><span class="step-icon">↘</span></article>
+          <article class="step"><span class="step-number">02</span><h3>Classify</h3><p>Separate actionable issues, stale context, and findings that need evidence.</p><span class="step-icon">◎</span></article>
+          <article class="step"><span class="step-number">03</span><h3>Validate</h3><p>Bind proof to the exact commit, files, and command that verified the repair.</p><span class="step-icon">⌁</span></article>
+          <article class="step"><span class="step-number">04</span><h3>Gate</h3><p>Get a fresh, machine-readable completion signal before calling the PR done.</p><span class="step-icon">✓</span></article>
+        </div>
+      </section>
+
+      <section class="feature-grid section-shell">
+        <article class="feature feature-dark"><span class="feature-kicker">01 / GitHub PR evidence</span><h3>Every decision has a trail.</h3><p>Replies, resolves, validations, and final-gate results remain inspectable and reproducible.</p><a href="https://github.com/RbBtSn0w/gh-address-cr#readme">Read the contract <span>↗</span></a></article>
+        <article class="feature feature-lime"><span class="feature-kicker">02 / Stacked pull requests</span><h3>Layer-aware by design.</h3><p>Revision and topology changes invalidate stale proof before they can create a misleading green check.</p><a href="https://github.com/RbBtSn0w/gh-address-cr">See the workflow <span>↗</span></a></article>
+        <article class="feature feature-paper"><span class="feature-kicker">03 / AI coding agents</span><h3>Your workflow, your state.</h3><p>A deterministic, local-first CLI keeps ownership clear while Codex, Claude, Copilot, or other agents supply structured evidence.</p><a href="https://github.com/RbBtSn0w/gh-address-cr">Get started <span>↗</span></a></article>
+      </section>
+
+      <section class="use-cases section-shell">
+        <div class="section-intro"><p class="eyebrow">Fits the way you ship</p><h2>One workflow.<br />Three clear wins.</h2></div>
+        <div class="use-case-list">
+          <article><span class="use-case-role">For maintainers</span><h3>Close review debt without losing context.</h3><p>Keep GitHub conversations useful and make every resolution explainable to the next reviewer.</p></article>
+          <article><span class="use-case-role">For agent builders</span><h3>Give “done” a machine-readable contract.</h3><p>Let agents focus on reasoning while the runtime owns state, side effects, evidence, and completion semantics.</p></article>
+          <article><span class="use-case-role">For stacked-PR teams</span><h3>Never reuse proof from the wrong revision.</h3><p>Refresh evidence when a lower layer changes, so a cascading rebase cannot quietly invalidate your gate.</p></article>
+        </div>
+      </section>
+
+      <section class="adoption section-shell" id="install">
+        <div class="adoption-copy"><p class="eyebrow">Start in one command</p><h2>Bring a clear<br />finish line to PRs.</h2><p>Use it alongside the coding agent and review producer you already have. The runtime owns state and GitHub side effects; agents return structured evidence.</p><a class="text-link" href="https://github.com/RbBtSn0w/gh-address-cr#60-second-quickstart">Read the quickstart <span>↗</span></a></div>
+        <div class="install-card"><div class="install-top"><span class="window-dots"><i></i><i></i><i></i></span><span>TERMINAL / 01</span><button class="copy-button" data-command="uv tool install gh-address-cr" type="button" aria-label="Copy runtime install command">Copy</button></div><code><span class="prompt">$</span> uv tool install gh-address-cr</code><p>Install the local runtime first. <a href="https://github.com/RbBtSn0w/gh-address-cr#60-second-quickstart">pipx is also supported ↗</a></p><div class="install-top install-second"><span>TERMINAL / 02</span><button class="copy-button" data-command="npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill" type="button" aria-label="Copy skill install command">Copy</button></div><code><span class="prompt">$</span> npx skills add<br />  github.com/RbBtSn0w/gh-address-cr<br />  --skill skill</code><p>Then run <strong>gh-address-cr agent manifest</strong> to verify the installed contract.</p></div>
+      </section>
+
+      <section class="faq section-shell" id="faq">
+        <div class="section-intro"><p class="eyebrow">Questions, answered</p><h2>Built for real<br />PR workflows.</h2></div>
+        <div class="faq-list">
+          <details open><summary>Does gh-address-cr perform the AI code review?</summary><p>No. It is the resolution and completion layer. Your preferred review producer or coding agent supplies findings; gh-address-cr tracks, validates, replies, resolves, and gates them.</p></details>
+          <details><summary>What happens when a pull request changes?</summary><p>Validation evidence is tied to the current commit and changed files. A new head revision or stacked-PR topology change makes stale proof ineligible until it is refreshed.</p></details>
+          <details><summary>Is it only for GitHub Copilot?</summary><p>No. The local-first CLI and structured agent protocol are designed to work with Codex, Claude, Copilot, and other agents that can return the documented evidence format.</p></details>
+          <details><summary>Can teams inspect what was done?</summary><p>Yes. PR-scoped sessions retain the evidence ledger and final-gate artifacts so the completion decision can be reviewed instead of inferred from a green check alone.</p></details>
+        </div>
+      </section>
+
+      <section class="closing section-shell"><div><p class="eyebrow">Make “done” mean something</p><h2>Ship with confidence,<br /><em>not just green checks.</em></h2></div><a class="button button-primary" href="https://github.com/RbBtSn0w/gh-address-cr">Start with GitHub <span>↗</span></a></section>
+    </main>
+    <footer class="site-footer section-shell"><span>© <span id="year"></span> gh-address-cr</span><span>Auditable review resolution for AI coding agents.</span><a href="https://github.com/RbBtSn0w/gh-address-cr">GitHub ↗</a></footer>
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation"><a href="#workflow">Workflow</a><a href="#principles">Principles</a><a href="https://github.com/RbBtSn0w/gh-address-cr">View on GitHub ↗</a></nav>
+    <script type="application/ld+json">
+      {
+        "@context":"https://schema.org",
+        "@type":"SoftwareApplication",
+        "name":"gh-address-cr",
+        "applicationCategory":"DeveloperApplication",
+        "operatingSystem":"macOS, Linux",
+        "description":"Open-source GitHub pull request review resolution workflow for AI coding agents.",
+        "url":"https://gh-address-cr.rbbtsn0w.me/",
+        "codeRepository":"https://github.com/RbBtSn0w/gh-address-cr",
+        "license":"https://opensource.org/license/mit",
+        "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}
+      }
+    </script>
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+        {"@type":"Question","name":"Does gh-address-cr perform the AI code review?","acceptedAnswer":{"@type":"Answer","text":"No. gh-address-cr is the resolution and completion layer. A review producer or coding agent supplies findings; gh-address-cr tracks, validates, replies, resolves, and gates them."}},
+        {"@type":"Question","name":"What happens when a pull request changes?","acceptedAnswer":{"@type":"Answer","text":"Validation evidence is tied to the current commit and changed files. A new head revision or stacked-PR topology change makes stale proof ineligible until it is refreshed."}},
+        {"@type":"Question","name":"Is gh-address-cr only for GitHub Copilot?","acceptedAnswer":{"@type":"Answer","text":"No. Its local-first CLI and structured agent protocol are designed to work with Codex, Claude, Copilot, and other compatible agents."}}
+      ]}
+    </script>
+    <script src="/script.js"></script>
+  </body>
+</html>

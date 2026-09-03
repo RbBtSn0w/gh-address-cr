@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gh-address-cr.rbbtsn0w.me/sitemap.xml
