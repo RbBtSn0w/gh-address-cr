@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-delay", type=float, default=5.0, help="Seconds between PyPI JSON fetch attempts.")
     parser.add_argument(
         "--formula-name",
-        help="Formula name without .rb extension (defaults to package-name).",
+        help="Formula name (optional .rb extension is stripped automatically, defaults to package-name).",
     )
     parser.add_argument("--conflicts-with", action="append", default=[], help="Formula name(s) this formula conflicts with.")
     parser.add_argument("--python-dependency", default=DEFAULT_PYTHON_DEPENDENCY, help="Homebrew Python dependency.")
