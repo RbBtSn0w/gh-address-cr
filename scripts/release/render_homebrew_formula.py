@@ -40,7 +40,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Formula output path.")
     parser.add_argument("--retries", type=int, default=1, help="PyPI JSON fetch attempts.")
     parser.add_argument("--retry-delay", type=float, default=5.0, help="Seconds between PyPI JSON fetch attempts.")
-    parser.add_argument("--formula-name", help="Formula file/target name (defaults to package-name).")
+    parser.add_argument(
+        "--formula-name",
+        help="Formula name without .rb extension (defaults to package-name).",
+    )
     parser.add_argument("--conflicts-with", action="append", default=[], help="Formula name(s) this formula conflicts with.")
     parser.add_argument("--python-dependency", default=DEFAULT_PYTHON_DEPENDENCY, help="Homebrew Python dependency.")
     parser.add_argument(
@@ -334,10 +337,15 @@ def render_formula(
     python_for_venv = python_dependency.replace("@", "")
     conflict_lines = ""
     if conflicts_with:
-        conflict_lines = "\n" + "\n".join(
-            f'  conflicts_with "{conflict}", because: "both install gh-address-cr binary"'
-            for conflict in conflicts_with
-        )
+        rendered_conflicts = []
+        for conflict in conflicts_with:
+            if not re.match(r"^[a-zA-Z0-9@_\-+./]+$", conflict):
+                raise SystemExit(f"invalid conflict formula name: {conflict}")
+            escaped = conflict.replace("\\", "\\\\").replace('"', '\\"')
+            rendered_conflicts.append(
+                f'  conflicts_with "{escaped}", because: "both install gh-address-cr binary"'
+            )
+        conflict_lines = "\n" + "\n".join(rendered_conflicts)
     return f'''class {class_name} < Formula
   include Language::Python::Virtualenv
 
