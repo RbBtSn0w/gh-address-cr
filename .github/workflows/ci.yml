@@ -275,15 +275,24 @@ jobs:
             Install or update the dedicated dev build directly from \`RbBtSn0w/homebrew-tap\`:
             
             \`\`\`bash
-            # 1. Update tap index and install/reinstall dev preview
+            # 1. Update tap index
             brew update
+            
+            # 2. If stable formula is currently linked, unlink it first (does not uninstall)
+            brew unlink gh-address-cr 2>/dev/null || true
+            
+            # 3. Install or reinstall dev preview build
             brew reinstall RbBtSn0w/tap/gh-address-cr-dev
             
-            # 2. Verify installation
+            # 4. Verify installation
             gh-address-cr --version
             gh-address-cr agent manifest
             \`\`\`
-            > **Note**: If you already have the stable formula linked, run \`brew unlink gh-address-cr\` first.
+            
+            > **Switch back to stable formula**:
+            > \`\`\`bash
+            > brew unlink gh-address-cr-dev && brew link gh-address-cr
+            > \`\`\`
             
             ---
             
