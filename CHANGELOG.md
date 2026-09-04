@@ -1,3 +1,9 @@
+## [3.14.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.13.1...v3.14.0) (2026-09-04)
+
+### Features
+
+* **ci:** add automated PR dev preview release workflow ([#266](https://github.com/RbBtSn0w/gh-address-cr/issues/266)) ([908d76a](https://github.com/RbBtSn0w/gh-address-cr/commit/908d76a2f9fbced22776bca71b85f81bbe738119))
+
 ## [3.13.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.13.0...v3.13.1) (2026-09-03)
 
 ### Bug Fixes
