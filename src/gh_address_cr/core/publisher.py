@@ -8,7 +8,9 @@ from typing import Any
 from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
-from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
+from gh_address_cr.core.reply_templates import (
+    KNOWN_REPLY_ATTRIBUTIONS,
+)
 from gh_address_cr.core.reply_templates import (
     clarify_reply as render_clarify_reply,
 )
@@ -343,7 +345,11 @@ def _reconcile_in_flight_reply(
         raw_latest_body = thread.get("latest_body")
         latest_body = raw_latest_body if isinstance(raw_latest_body, str) else ""
         latest_url = thread.get("latest_url")
-        if latest_author == publisher_login and REPLY_ATTRIBUTION in latest_body and latest_url:
+        if (
+            latest_author == publisher_login
+            and any(attr in latest_body for attr in KNOWN_REPLY_ATTRIBUTIONS)
+            and latest_url
+        ):
             return str(latest_url)
         return None
     return None

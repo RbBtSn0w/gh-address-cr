@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Formula output path.")
     parser.add_argument("--retries", type=int, default=1, help="PyPI JSON fetch attempts.")
     parser.add_argument("--retry-delay", type=float, default=5.0, help="Seconds between PyPI JSON fetch attempts.")
+    parser.add_argument(
+        "--formula-name",
+        help="Formula name (optional .rb extension is stripped automatically, defaults to package-name).",
+    )
+    parser.add_argument("--conflicts-with", action="append", default=[], help="Formula name(s) this formula conflicts with.")
     parser.add_argument("--python-dependency", default=DEFAULT_PYTHON_DEPENDENCY, help="Homebrew Python dependency.")
     parser.add_argument(
         "--project-metadata",
@@ -303,8 +308,13 @@ def resolve_dependency_resources(args: argparse.Namespace, root_payload: dict | 
 
 
 def formula_class_name(package_name: str) -> str:
+    if not re.match(r"^[a-zA-Z0-9@_\-+.]+$", package_name):
+        raise SystemExit(f"invalid formula name: {package_name}")
     parts = re.split(r"[-_.]+", package_name)
-    return "".join(part.capitalize() for part in parts if part)
+    class_name = "".join(part.capitalize() for part in parts if part)
+    if not re.match(r"^[A-Z][a-zA-Z0-9]*$", class_name):
+        raise SystemExit(f"invalid formula class name generated from: {package_name}")
+    return class_name
 
 
 def render_resources(resources: tuple[dict[str, str], ...]) -> str:
@@ -326,9 +336,21 @@ def render_formula(
     sha256: str,
     python_dependency: str,
     resources: tuple[dict[str, str], ...],
+    conflicts_with: tuple[str, ...] = (),
 ) -> str:
     resource_blocks = render_resources(resources)
     python_for_venv = python_dependency.replace("@", "")
+    conflict_lines = ""
+    if conflicts_with:
+        rendered_conflicts = []
+        for conflict in conflicts_with:
+            if not re.match(r"^[a-zA-Z0-9@_\-+./]+$", conflict):
+                raise SystemExit(f"invalid conflict formula name: {conflict}")
+            escaped = conflict.replace("\\", "\\\\").replace('"', '\\"')
+            rendered_conflicts.append(
+                f'  conflicts_with "{escaped}", because: "both install gh-address-cr binary"'
+            )
+        conflict_lines = "\n" + "\n".join(rendered_conflicts)
     return f'''class {class_name} < Formula
   include Language::Python::Virtualenv
 
@@ -338,7 +360,7 @@ def render_formula(
   sha256 "{sha256}"
   license "MIT"
 
-  depends_on "{python_dependency}"
+  depends_on "{python_dependency}"{conflict_lines}
 
 {resource_blocks}
 
@@ -399,12 +421,16 @@ def main() -> int:
         root_payload = None
     url, sha256 = resolve_source(args)
     resources = resolve_dependency_resources(args, root_payload)
+    target_name = args.formula_name or args.package_name
+    if target_name.endswith(".rb"):
+        target_name = target_name[:-3]
     formula = render_formula(
-        class_name=formula_class_name(args.package_name),
+        class_name=formula_class_name(target_name),
         url=url,
         sha256=sha256,
         python_dependency=args.python_dependency,
         resources=resources,
+        conflicts_with=tuple(args.conflicts_with),
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
