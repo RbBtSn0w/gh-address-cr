@@ -697,6 +697,30 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("class GhAddressCrPr42 < Formula", formula)
         self.assertIn('conflicts_with "gh-address-cr", because: "both install gh-address-cr binary"', formula)
 
+    def test_homebrew_formula_renderer_rejects_invalid_formula_name(self):
+        output = Path(self.temp_dir.name) / "invalid.rb"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(HOMEBREW_FORMULA_RENDERER),
+                "--version",
+                "1.2.3",
+                "--pypi-json",
+                str(PYPI_JSON_FIXTURE),
+                "--output",
+                str(output),
+                "--formula-name",
+                "bad;name\nclass Injected",
+            ],
+            text=True,
+            capture_output=True,
+            cwd=self.cwd,
+            env=self.env,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid formula name", result.stderr)
+
 
     def test_readme_documents_runtime_distribution_paths_separately_from_skill_install(self):
         text = (ROOT / "README.md").read_text(encoding="utf-8")

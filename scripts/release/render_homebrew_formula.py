@@ -308,8 +308,13 @@ def resolve_dependency_resources(args: argparse.Namespace, root_payload: dict | 
 
 
 def formula_class_name(package_name: str) -> str:
+    if not re.match(r"^[a-zA-Z0-9@_\-+.]+$", package_name):
+        raise SystemExit(f"invalid formula name: {package_name}")
     parts = re.split(r"[-_.]+", package_name)
-    return "".join(part.capitalize() for part in parts if part)
+    class_name = "".join(part.capitalize() for part in parts if part)
+    if not re.match(r"^[A-Z][a-zA-Z0-9]*$", class_name):
+        raise SystemExit(f"invalid formula class name generated from: {package_name}")
+    return class_name
 
 
 def render_resources(resources: tuple[dict[str, str], ...]) -> str:
