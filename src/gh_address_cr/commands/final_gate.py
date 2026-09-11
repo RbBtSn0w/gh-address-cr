@@ -148,7 +148,19 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
             print(str(exc), file=sys.stderr)
         return 2
     except core_stack_gate.StackContextDiscoveryError as exc:
+        from gh_address_cr.github.errors import GitHubAuthError
+
         message = f"Stack final gate failed to evaluate: {exc}"
+        is_auth = isinstance(getattr(exc, "__cause__", None), GitHubAuthError)
+        next_action = (
+            "Authenticate GitHub CLI with `gh auth login`, then rerun "
+            f"`{core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number)}`."
+            if is_auth
+            else (
+                "Restore GitHub stack context, then rerun "
+                f"`{core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number)}`."
+            )
+        )
         if machine_requested:
             emit_final_gate_machine_error(
                 parsed.repo,
@@ -156,13 +168,10 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
                 "STACK_CONTEXT_UNAVAILABLE",
                 message,
                 5,
-                waiting_on="stack_context",
+                waiting_on="github_auth" if is_auth else "stack_context",
                 completion_scope="stack_segment",
                 stack_merge_readiness="unknown",
-                next_action=(
-                    "Restore GitHub stack context, then rerun "
-                    f"`{core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number)}`."
-                ),
+                next_action=next_action,
                 commands={
                     "address": core_command_templates.address(parsed.repo, parsed.pr_number),
                     "final_gate_stack": core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number),
@@ -170,6 +179,8 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
             )
         else:
             print(message, file=sys.stderr)
+            if is_auth:
+                print("GitHub CLI `gh` is not authenticated. Run `gh auth login` before rerunning.", file=sys.stderr)
         return 5
     except Exception as exc:
         message = f"Stack final gate failed to evaluate: {exc}"

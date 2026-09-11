@@ -148,6 +148,22 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
                 self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
                 self.assertFalse(span.attributes[ERROR_EXPECTED])
 
+    def test_exit_code_four_records_authentication_failed(self) -> None:
+        """gh exit code 4 represents authentication failure and must map to authentication_failed."""
+        for stderr in ["", "generic failure", "HTTP 401 Unauthorized"]:
+            with self.subTest(stderr=stderr):
+                self.exporter.clear()
+                process = self._mock_process(returncode=4, stderr=stderr)
+                with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+                    run_traced(self.tracer, "gh-address-cr.cli", lambda: run_cmd(["gh", "api"], retries=1))
+
+                span = self._subprocess_span()
+                self.assertEqual(span.attributes[PROCESS_EXIT_CODE], 4)
+                self.assertEqual(span.attributes[ERROR_TYPE], "authentication_failed")
+                self.assertEqual(span.attributes[ERROR_CATEGORY], "dependency")
+                self.assertFalse(span.attributes[ERROR_EXPECTED])
+                self.assertEqual(span.status.status_code, StatusCode.ERROR)
+
     def test_exit_code_two_is_not_assumed_to_be_an_expected_user_error(self) -> None:
         process = self._mock_process(returncode=2, stderr="tool failed")
         with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):

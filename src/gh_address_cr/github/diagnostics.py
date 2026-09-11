@@ -8,6 +8,8 @@ from gh_address_cr.github.transient_failures import NETWORK_TRANSIENT_MARKERS
 
 AUTH_MARKERS = (
     "authentication",
+    "authenticate",
+    "unauthorized",
     "gh auth login",
     "bad credentials",
     "not logged into",
@@ -63,7 +65,7 @@ def classify_github_failure(
 ) -> dict[str, Any]:
     detail = (stderr or stdout or "").strip()
     text = detail.lower()
-    category = _stderr_category(text)
+    category = _stderr_category(text, returncode)
     diagnostics: dict[str, Any] = {
         "stderr_category": category,
         "severity": "blocking",
@@ -103,8 +105,8 @@ def _source_scope(category: str) -> str:
     return "github"
 
 
-def _stderr_category(text: str) -> str:
-    if any(marker in text for marker in AUTH_MARKERS):
+def _stderr_category(text: str, returncode: int | None = None) -> str:
+    if returncode == 4 or any(marker in text for marker in AUTH_MARKERS):
         return "auth"
     if "permission denied" in text and any(marker in text for marker in PERMISSION_MISMATCH_MARKERS):
         return "permission_mismatch"

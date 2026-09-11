@@ -146,6 +146,35 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(payload["completion_scope"], "stack_segment")
         self.assertEqual(payload["stack_merge_readiness"], "unknown")
 
+    def test_stack_discovery_failure_with_auth_cause_reports_github_auth_waiting_on(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core.stack_gate import StackContextDiscoveryError
+        from gh_address_cr.github.errors import GitHubAuthError
+
+        auth_exc = GitHubAuthError("Missing authentication.")
+        discovery_exc = StackContextDiscoveryError("Opening stack context could not be read.")
+        discovery_exc.__cause__ = auth_exc
+
+        stdout = io.StringIO()
+        with (
+            patch(
+                "gh_address_cr.commands.final_gate.core_stack_gate.run_stack_gate",
+                side_effect=discovery_exc,
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = handle_final_gate(
+                "octo/example",
+                "102",
+                ["--stack", "--machine", "--no-auto-clean"],
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(payload["reason_code"], "STACK_CONTEXT_UNAVAILABLE")
+        self.assertEqual(payload["waiting_on"], "github_auth")
+        self.assertIn("gh auth login", payload["next_action"])
+
     def test_passing_stack_gate_honors_auto_clean_and_no_auto_clean(self):
         from gh_address_cr.commands.final_gate import handle_final_gate
         from gh_address_cr.core.runtime_kernel.stack import project_stack_context

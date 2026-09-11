@@ -233,6 +233,15 @@ class NativeFoundationTests(unittest.TestCase):
 
         self.assertEqual(diagnostics["command"], ["gh", "pr", "view", "123"])
 
+    def test_returncode_four_is_classified_as_auth(self):
+        from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
+
+        for stderr in ["", "generic error", "HTTP 401 Unauthorized"]:
+            with self.subTest(stderr=stderr):
+                diagnostics = classify_github_failure(stderr, "", 4, ["gh", "api"])
+                self.assertEqual(diagnostics["stderr_category"], "auth")
+                self.assertEqual(github_waiting_on(diagnostics), "github_auth")
+
 
 if __name__ == "__main__":
     unittest.main()

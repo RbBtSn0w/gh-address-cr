@@ -238,9 +238,17 @@ def _classify_subprocess_error(result: subprocess.CompletedProcess[str]) -> tupl
         if diagnostic.startswith("failed to execute"):
             return "not_found", "dependency", False
         return "_OTHER", "dependency", False
+    if exit_code == 4:
+        return "authentication_failed", "dependency", False
     if "rate limit" in diagnostic or "rate_limit" in diagnostic or "http 429" in diagnostic:
         return "rate_limited", "rate_limit", False
-    if "not logged in" in diagnostic or "authentication" in diagnostic or "bad credentials" in diagnostic:
+    if (
+        "not logged in" in diagnostic
+        or "authentication" in diagnostic
+        or "authenticate" in diagnostic
+        or "bad credentials" in diagnostic
+        or "unauthorized" in diagnostic
+    ):
         return "authentication_failed", "dependency", False
     if "permission denied" in diagnostic or "forbidden" in diagnostic or "http 403" in diagnostic:
         return "permission_denied", "dependency", False
