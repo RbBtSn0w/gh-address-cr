@@ -1,3 +1,9 @@
+## [3.15.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.1...v3.15.2) (2026-09-11)
+
+### Bug Fixes
+
+* **ci:** fallback to direct merge when promotion pr is in clean status ([8ed0a4d](https://github.com/RbBtSn0w/gh-address-cr/commit/8ed0a4d9abcb3c6c0677ac0e6b0bda5e20428e88))
+
 ## [3.15.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.0...v3.15.1) (2026-09-11)
 
 ### Bug Fixes
