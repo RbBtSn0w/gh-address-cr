@@ -1,3 +1,9 @@
+## [3.15.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.0...v3.15.1) (2026-09-11)
+
+### Bug Fixes
+
+* **telemetry:** classify gh exit code 4 as authentication failure and fail-fast ([#267](https://github.com/RbBtSn0w/gh-address-cr/issues/267)) ([868ab91](https://github.com/RbBtSn0w/gh-address-cr/commit/868ab919718a79828629f4b7b0bf495f2f212c2b))
+
 ## [3.15.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.14.0...v3.15.0) (2026-09-07)
 
 ### Features
