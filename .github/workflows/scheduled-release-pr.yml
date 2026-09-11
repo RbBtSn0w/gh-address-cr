@@ -67,14 +67,17 @@ jobs:
 
           echo "Release PR #${pr} ready."
 
-          # Enable native GitHub auto-merge (idempotent if already enabled on existing PR)
+          # Enable native GitHub auto-merge (or merge directly if PR is already in clean status)
           echo "Enabling auto-merge on PR #${pr}..."
           if ! gh pr merge "$pr" --auto --merge 2>&1 | tee /tmp/merge.log; then
             if grep -Eqi "already|pull request is already" /tmp/merge.log; then
               echo "Auto-merge already active on PR #${pr}."
+            elif grep -Eqi "clean status" /tmp/merge.log; then
+              echo "PR #${pr} is already in clean status (no pending required checks). Merging directly..."
+              gh pr merge "$pr" --merge
             else
               echo "Failed to enable auto-merge on PR #${pr}." >&2
               exit 1
             fi
           fi
-          echo "Auto-merge configured for PR #${pr}."
+          echo "Release PR #${pr} processed successfully."
