@@ -30,7 +30,7 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-http>=1.30",
   "opentelemetry-sdk>=1.30",
   "packaging>=24",
-  "requests>=2.7",
+  "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
@@ -74,9 +74,9 @@ branch = true
 source = ["gh_address_cr"]
 
 [tool.coverage.report]
-# Ratchet target: raise as coverage improves. Measured baseline is ~84% (branch) after in-process CLI test routing.
+# Ratchet target: raise as coverage improves. Measured baseline is 85% (branch) after in-process CLI test routing.
 # Floor set a few points below to absorb cross-environment variance.
-fail_under = 80
+fail_under = 83
 skip_covered = false
 
 [tool.mypy]

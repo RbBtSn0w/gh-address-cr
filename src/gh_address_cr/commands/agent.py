@@ -486,7 +486,7 @@ def _normalize_disposition(parsed: argparse.Namespace) -> None:
 # `agent resolve` mode-preset flags closes. While open, legacy flags keep
 # working (aliased, with a visible notice); once closed, using one raises
 # RESOLVE_FLAG_DEPRECATED instead of silently aliasing.
-RESOLVE_DEPRECATION_WINDOW_OPEN = True
+RESOLVE_DEPRECATION_WINDOW_OPEN = False
 
 # spec 029 T028/data-model Entity 3: legacy flag -> axis-equivalent replacement text.
 _DEPRECATED_RESOLVE_FLAGS: tuple[tuple[str, str], ...] = (

@@ -276,31 +276,12 @@ def session_with_remote_threads(
     return _session_with_remote_threads(session, remote_threads, current_login=current_login)
 
 
-def _merge_single_remote_thread(
+def _extract_thread_severity_and_priority(
     thread: Mapping[str, Any],
-    thread_id: str,
-    existing_item: Mapping[str, Any] | None,
-    current_login: str | None = None,
-) -> dict[str, Any]:
-    item_id = f"github-thread:{thread_id}"
-    item = dict(existing_item) if isinstance(existing_item, Mapping) else {}
-    item.setdefault("item_id", item_id)
-    item.setdefault("item_kind", "github_thread")
-    item.setdefault("source", "github")
-    item["thread_id"] = thread_id
-    item["origin_ref"] = thread_id
-    item["path"] = thread.get("path") or item.get("path")
-    item["line"] = thread.get("line") or item.get("line")
-    item["url"] = thread.get("url") or item.get("url")
-    item["body"] = thread.get("body") or item.get("body")
-    if thread.get("first_author_login"):
-        item["first_author_login"] = thread.get("first_author_login")
-    if thread.get("latest_author_login"):
-        item["latest_author_login"] = thread.get("latest_author_login")
-    first_body = thread.get("first_body")
-    if first_body is None and thread.get("comment_source") == "first":
-        first_body = thread.get("body")
-    first_url = thread.get("first_url") or thread.get("url")
+    item: dict[str, Any],
+    first_body: Any,
+    first_url: Any,
+) -> None:
     raw_severity = thread.get("severity")
     detected_severity = severity_evidence(
         raw_severity,
@@ -320,6 +301,7 @@ def _merge_single_remote_thread(
         item["severity"] = first_scene_item_severity(item)
     else:
         apply_severity_evidence(item, None)
+
     priority_evidence = review_priority_evidence(
         thread.get("review_priority") or thread.get("priority"),
         source="github_payload",
@@ -334,6 +316,9 @@ def _merge_single_remote_thread(
         item["review_priority_evidence"] = priority_evidence
     elif first_body is not None:
         item.pop("review_priority_evidence", None)
+
+
+def _determine_merged_thread_state(thread: Mapping[str, Any], item: dict[str, Any]) -> None:
     is_resolved = thread_is_resolved(thread)
     is_outdated = is_stale_or_outdated_github_thread(thread)
     item["is_outdated"] = is_outdated
@@ -356,6 +341,11 @@ def _merge_single_remote_thread(
         item["state"] = "open"
         item["status"] = "OPEN"
         item["blocking"] = True
+
+
+def _apply_viewer_reply_evidence(
+    thread: Mapping[str, Any], item: dict[str, Any], current_login: str | None
+) -> None:
     if thread.get("viewer_replied") and thread.get("viewer_reply_url"):
         item["reply_evidence"] = {
             "reply_url": thread["viewer_reply_url"],
@@ -363,6 +353,38 @@ def _merge_single_remote_thread(
         }
         item["reply_url"] = thread["viewer_reply_url"]
         item["reply_posted"] = True
+
+
+def _merge_single_remote_thread(
+    thread: Mapping[str, Any],
+    thread_id: str,
+    existing_item: Mapping[str, Any] | None,
+    current_login: str | None = None,
+) -> dict[str, Any]:
+    item_id = f"github-thread:{thread_id}"
+    item = dict(existing_item) if isinstance(existing_item, Mapping) else {}
+    item.setdefault("item_id", item_id)
+    item.setdefault("item_kind", "github_thread")
+    item.setdefault("source", "github")
+    item["thread_id"] = thread_id
+    item["origin_ref"] = thread_id
+    item["path"] = thread.get("path") or item.get("path")
+    item["line"] = thread.get("line") or item.get("line")
+    item["url"] = thread.get("url") or item.get("url")
+    item["body"] = thread.get("body") or item.get("body")
+    if thread.get("first_author_login"):
+        item["first_author_login"] = thread.get("first_author_login")
+    if thread.get("latest_author_login"):
+        item["latest_author_login"] = thread.get("latest_author_login")
+
+    first_body = thread.get("first_body")
+    if first_body is None and thread.get("comment_source") == "first":
+        first_body = thread.get("body")
+    first_url = thread.get("first_url") or thread.get("url")
+
+    _extract_thread_severity_and_priority(thread, item, first_body, first_url)
+    _determine_merged_thread_state(thread, item)
+    _apply_viewer_reply_evidence(thread, item, current_login)
     return item
 
 

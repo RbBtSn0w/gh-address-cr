@@ -38,10 +38,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
             "--agent-id", "codex-1",
-            "--reject",
-            "--match-files",
+            "--disposition", "reject",
             "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -63,10 +62,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
-            "--clarify",
-            "--match-files",
+            "--disposition", "clarify",
             "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -87,10 +85,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
-            "--reject",
-            "--match-files",
+            "--disposition", "reject",
             "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
         self.assertEqual(result.returncode, 4)
@@ -115,9 +112,9 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
-            "--reject",
+            "--disposition", "reject",
             "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -129,8 +126,7 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
-            "--reject",
-            "--match-files",
+            "--disposition", "reject",
             "--files", "src/shared.py",
         )
 
@@ -150,11 +146,10 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
 
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
-            "--reject",
-            "--match-files",
+            "--disposition", "reject",
             "--files", "src/shared.py",
             "--commit", "abc123",
-            "--homogeneous-reason", self.REASON,
+            "--why", self.REASON,
         )
 
         self.assertEqual(result.returncode, 2)
@@ -166,14 +161,16 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
     def test_reject_and_clarify_mutually_exclusive(self):
         self._two_identical_threads()
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "--reject",
-            "--clarify",
-            "--match-files",
-            "--files", "src/shared.py",
-            "--homogeneous-reason", self.REASON,
-        )
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+            result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "--reject",
+                "--clarify",
+                "--files", "src/shared.py",
+                "--why", self.REASON,
+            )
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -189,7 +186,7 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
             "github-thread:abc",
-            "--reject",
+            "--disposition", "reject",
             "--why", self.REASON,
         )
 

@@ -121,23 +121,26 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
             ]
         )
 
-        reject_result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:legacy1",
-            "--reject",
-            "--why", "Style preference only; not a defect.",
-        )
-        self.assertEqual(reject_result.returncode, 0, reject_result.stdout + reject_result.stderr)
-        self.assertEqual(json.loads(reject_result.stdout)["item_id"], "github-thread:legacy1")
+        from unittest.mock import patch as mock_patch
 
-        clarify_result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:legacy2",
-            "--clarify",
-            "--why", "Needs the author's intent before this can be actioned.",
-        )
-        self.assertEqual(clarify_result.returncode, 0, clarify_result.stdout + clarify_result.stderr)
-        self.assertEqual(json.loads(clarify_result.stdout)["item_id"], "github-thread:legacy2")
+        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+            reject_result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:legacy1",
+                "--reject",
+                "--why", "Style preference only; not a defect.",
+            )
+            self.assertEqual(reject_result.returncode, 0, reject_result.stdout + reject_result.stderr)
+            self.assertEqual(json.loads(reject_result.stdout)["item_id"], "github-thread:legacy1")
+
+            clarify_result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:legacy2",
+                "--clarify",
+                "--why", "Needs the author's intent before this can be actioned.",
+            )
+            self.assertEqual(clarify_result.returncode, 0, clarify_result.stdout + clarify_result.stderr)
+            self.assertEqual(json.loads(clarify_result.stdout)["item_id"], "github-thread:legacy2")
 
     def test_stale_and_disposition_clarify_together_is_accepted(self):
         # The false-conflict case: --stale (condition axis) and
@@ -196,14 +199,17 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def test_legacy_reject_boolean_emits_deprecation_notice(self):
+        from unittest.mock import patch as mock_patch
+
         self.write_session(items=[github_thread("github-thread:notice1")])
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:notice1",
-            "--reject",
-            "--why", self.REASON,
-        )
+        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+            result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:notice1",
+                "--reject",
+                "--why", self.REASON,
+            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("deprecated", result.stderr.lower())
@@ -211,16 +217,19 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
         self.assertIn("--disposition reject", result.stderr)
 
     def test_match_files_and_homogeneous_reason_and_include_stale_emit_notices(self):
+        from unittest.mock import patch as mock_patch
+
         self.write_session(items=[github_thread("github-thread:notice2")])
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "--disposition", "reject",
-            "--files", "src/shared.py",
-            "--match-files",
-            "--homogeneous-reason", self.REASON,
-            "--include-stale",
-        )
+        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+            result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "--disposition", "reject",
+                "--files", "src/shared.py",
+                "--match-files",
+                "--homogeneous-reason", self.REASON,
+                "--include-stale",
+            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for flag in ("--match-files", "--homogeneous-reason", "--include-stale"):
@@ -230,6 +239,8 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
     def test_machine_summary_is_stable_between_legacy_and_axis_forms(self):
         # FR-010/N3: deprecation notice goes to stderr only; stdout JSON
         # shape and exit code are identical for equivalent invocations.
+        from unittest.mock import patch as mock_patch
+
         self.write_session(
             items=[
                 github_thread("github-thread:stable_legacy"),
@@ -237,12 +248,13 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
             ]
         )
 
-        legacy = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:stable_legacy",
-            "--reject",
-            "--why", self.REASON,
-        )
+        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+            legacy = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:stable_legacy",
+                "--reject",
+                "--why", self.REASON,
+            )
         axis = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
             "github-thread:stable_axis",

@@ -319,7 +319,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('"opentelemetry-api>=1.30"', text)
         self.assertIn('"opentelemetry-sdk>=1.30"', text)
         self.assertIn('"opentelemetry-exporter-otlp-proto-http>=1.30"', text)
-        self.assertIn('"requests>=2.7"', text)
+        self.assertIn('"requests>=2.31.0"', text)
         self.assertIn("Programming Language :: Python :: 3.10", text)
         self.assertIn("Operating System :: OS Independent", text)
         self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
