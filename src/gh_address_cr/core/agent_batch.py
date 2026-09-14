@@ -492,7 +492,7 @@ def issue_batch_action_request(
     write_json_atomic(batch_skeleton_path, batch_skeleton)
     session_store.save_session(repo, pr_number, session)
 
-    resolve_command = f"gh-address-cr agent resolve {repo} {pr_number} --batch --input {batch_skeleton_path}"
+    resolve_command = command_templates.resolve_batch(repo, pr_number, input_path=str(batch_skeleton_path))
     return {
         "status": "BATCH_ACTION_REQUESTED",
         "repo": repo,

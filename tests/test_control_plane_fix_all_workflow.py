@@ -64,7 +64,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/shared.py",
-            "--homogeneous-reason",
+            "--why",
             "Both threads report the same repeated nit and the shared patch addresses that repeated concern.",
             "--severity",
             "P3",
@@ -112,7 +112,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/shared.py",
-            "--homogeneous-reason",
+            "--why",
             "Both comments ask for the same repeated typo correction.",
             "--validation",
             "python3 -m unittest tests.test_shared=passed",
@@ -251,7 +251,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/shared.py",
-            "--homogeneous-reason",
+            "--why",
             "Both comments are covered by the same shared patch.",
             "--validation",
             "python3 -m unittest tests.test_shared=passed",
@@ -294,7 +294,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/shared.py",
-            "--homogeneous-reason",
+            "--why",
             "Both comments are covered by the same shared patch.",
             "--validation",
             "python3 -m unittest tests.test_shared=passed",
@@ -335,7 +335,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/shared.py",
-            "--homogeneous-reason",
+            "--why",
             "Both comments are covered by the same shared patch.",
             "--validation",
             "python3 -m unittest tests.test_shared=passed",
@@ -403,7 +403,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -463,7 +463,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 4)
         payload = json.loads(result.stdout)
@@ -534,7 +534,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path)
+            "agent", "resolve", self.repo, self.pr, "--input", str(batch_path)
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -578,6 +578,11 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
 
     def test_agent_fix_all_include_stale_routes_to_resolve_stale(self):
+        """Legacy compat window regression test: when RESOLVE_DEPRECATION_WINDOW_OPEN is True,
+
+        passing the legacy --include-stale flag routes to STALE_THREADS_REQUIRE_RESOLVE_STALE.
+        (Closed-window fast failure is tested in test_agent_resolve_guards.py).
+        """
         self.write_session(
             items=[
                 github_thread(
@@ -590,19 +595,20 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module(
-            "agent",
-            "resolve",
-            self.repo,
-            self.pr,
-            "--commit",
-            "abc123",
-            "--files",
-            "src/stale.py",
-            "--validation",
-            "python3 -m unittest tests.test_stale=passed",
-            "--include-stale",
-        )
+        with self.deprecation_window(True):
+            result = self.run_runtime_module(
+                "agent",
+                "resolve",
+                self.repo,
+                self.pr,
+                "--commit",
+                "abc123",
+                "--files",
+                "src/stale.py",
+                "--validation",
+                "python3 -m unittest tests.test_stale=passed",
+                "--include-stale",
+            )
 
         self.assertEqual(result.returncode, 4)
         payload = json.loads(result.stdout)
@@ -716,7 +722,6 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -755,7 +760,6 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -797,7 +801,6 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
         )
 
         self.assertEqual(result.returncode, 4)
@@ -834,7 +837,6 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/stale.py",
-            "--match-files",
         )
 
         self.assertEqual(result.returncode, 2)
@@ -854,7 +856,6 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "missingcommit123",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
         )
 
         self.assertEqual(result.returncode, 2)
@@ -908,7 +909,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             "abc123",
             "--files",
             "src/first.py,src/second.py",
-            "--homogeneous-reason",
+            "--why",
             "Both matched comments describe the same repeated formatting issue.",
             "--validation",
             "python3 -m unittest tests.test_shared=passed",

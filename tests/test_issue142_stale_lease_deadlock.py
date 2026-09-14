@@ -101,7 +101,6 @@ class Issue142StaleLeaseDeadlockTest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
             "--now",
             NOW.isoformat(),
         )
@@ -141,7 +140,6 @@ class Issue142StaleLeaseDeadlockTest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
             "--now",
             NOW.isoformat(),
         )
@@ -180,7 +178,6 @@ class Issue142StaleLeaseDeadlockTest(PythonScriptTestCase):
             "src/stale.py",
             "--validation",
             "python3 -m unittest tests.test_stale=passed",
-            "--match-files",
             "--now",
             NOW.isoformat(),
         )

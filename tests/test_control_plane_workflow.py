@@ -760,7 +760,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -1132,7 +1132,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
@@ -1193,7 +1193,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -1256,7 +1256,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         session = self.load_session()
@@ -1334,7 +1334,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(batch_path))
 
         self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
@@ -1351,7 +1351,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.write_session(items=[])
         missing_path = self.workspace_dir() / "missing-batch-action-response.json"
 
-        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--batch", "--input", str(missing_path))
+        result = self.run_runtime_module("agent", "resolve", self.repo, self.pr, "--input", str(missing_path))
 
         self.assertEqual(result.returncode, 2)
         payload = json.loads(result.stdout)
@@ -1444,7 +1444,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         )
 
         result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr, "--batch", "--input", str(batch_path), "--now", NOW.isoformat()
+            "agent", "resolve", self.repo, self.pr, "--input", str(batch_path), "--now", NOW.isoformat()
         )
 
         self.assertEqual(result.returncode, 5)

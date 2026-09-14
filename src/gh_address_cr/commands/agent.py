@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -486,7 +487,14 @@ def _normalize_disposition(parsed: argparse.Namespace) -> None:
 # `agent resolve` mode-preset flags closes. While open, legacy flags keep
 # working (aliased, with a visible notice); once closed, using one raises
 # RESOLVE_FLAG_DEPRECATED instead of silently aliasing.
-RESOLVE_DEPRECATION_WINDOW_OPEN = True
+RESOLVE_DEPRECATION_WINDOW_OPEN = False
+
+
+def is_resolve_deprecation_window_open() -> bool:
+    env_val = os.environ.get("GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN")
+    if env_val is not None:
+        return env_val.strip() in ("1", "true", "True")
+    return RESOLVE_DEPRECATION_WINDOW_OPEN
 
 # spec 029 T028/data-model Entity 3: legacy flag -> axis-equivalent replacement text.
 _DEPRECATED_RESOLVE_FLAGS: tuple[tuple[str, str], ...] = (
@@ -515,7 +523,7 @@ def _check_deprecated_resolve_flags(parsed: argparse.Namespace) -> None:
     detected = _detect_deprecated_resolve_flags(parsed)
     if not detected:
         return
-    if not RESOLVE_DEPRECATION_WINDOW_OPEN:
+    if not is_resolve_deprecation_window_open():
         names = ", ".join(flag for flag, _ in detected)
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
