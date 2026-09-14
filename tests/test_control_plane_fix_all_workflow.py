@@ -595,9 +595,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        from unittest.mock import patch as mock_patch
-
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent",
                 "resolve",

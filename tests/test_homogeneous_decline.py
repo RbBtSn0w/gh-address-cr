@@ -161,9 +161,7 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
     def test_reject_and_clarify_mutually_exclusive(self):
         self._two_identical_threads()
 
-        from unittest.mock import patch as mock_patch
-
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "--reject",

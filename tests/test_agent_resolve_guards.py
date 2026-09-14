@@ -121,9 +121,7 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
             ]
         )
 
-        from unittest.mock import patch as mock_patch
-
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             reject_result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:legacy1",
@@ -199,11 +197,9 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def test_legacy_reject_boolean_emits_deprecation_notice(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:notice1")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:notice1",
@@ -217,11 +213,9 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
         self.assertIn("--disposition reject", result.stderr)
 
     def test_match_files_and_homogeneous_reason_and_include_stale_emit_notices(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:notice2")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "--disposition", "reject",
@@ -239,8 +233,6 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
     def test_machine_summary_is_stable_between_legacy_and_axis_forms(self):
         # FR-010/N3: deprecation notice goes to stderr only; stdout JSON
         # shape and exit code are identical for equivalent invocations.
-        from unittest.mock import patch as mock_patch
-
         self.write_session(
             items=[
                 github_thread("github-thread:stable_legacy"),
@@ -248,7 +240,7 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
             ]
         )
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             legacy = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:stable_legacy",
@@ -290,11 +282,9 @@ class RemovalWindowFailLoudTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def test_legacy_flag_after_window_close_is_rejected(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:windowclosed")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", False):
+        with self.deprecation_window(False):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:windowclosed",
@@ -307,11 +297,9 @@ class RemovalWindowFailLoudTest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "RESOLVE_FLAG_DEPRECATED")
 
     def test_axis_form_still_works_after_window_close(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:windowclosedaxis")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", False):
+        with self.deprecation_window(False):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:windowclosedaxis",

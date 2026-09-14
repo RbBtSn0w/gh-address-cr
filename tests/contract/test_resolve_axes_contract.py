@@ -309,9 +309,7 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         # a single decline; no special item_id+alias conflict rule exists.
         self.write_session(items=[github_thread("github-thread:aliasreason")])
 
-        from unittest.mock import patch as mock_patch
-
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:aliasreason",
@@ -356,11 +354,9 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_AXIS_CONFLICT")
 
     def test_legacy_boolean_disagreeing_with_disposition_conflicts(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:legacyconflict")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", True):
+        with self.deprecation_window(True):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:legacyconflict",
