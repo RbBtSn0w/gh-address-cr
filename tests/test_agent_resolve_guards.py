@@ -121,23 +121,24 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
             ]
         )
 
-        reject_result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:legacy1",
-            "--reject",
-            "--why", "Style preference only; not a defect.",
-        )
-        self.assertEqual(reject_result.returncode, 0, reject_result.stdout + reject_result.stderr)
-        self.assertEqual(json.loads(reject_result.stdout)["item_id"], "github-thread:legacy1")
+        with self.deprecation_window(True):
+            reject_result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:legacy1",
+                "--reject",
+                "--why", "Style preference only; not a defect.",
+            )
+            self.assertEqual(reject_result.returncode, 0, reject_result.stdout + reject_result.stderr)
+            self.assertEqual(json.loads(reject_result.stdout)["item_id"], "github-thread:legacy1")
 
-        clarify_result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:legacy2",
-            "--clarify",
-            "--why", "Needs the author's intent before this can be actioned.",
-        )
-        self.assertEqual(clarify_result.returncode, 0, clarify_result.stdout + clarify_result.stderr)
-        self.assertEqual(json.loads(clarify_result.stdout)["item_id"], "github-thread:legacy2")
+            clarify_result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:legacy2",
+                "--clarify",
+                "--why", "Needs the author's intent before this can be actioned.",
+            )
+            self.assertEqual(clarify_result.returncode, 0, clarify_result.stdout + clarify_result.stderr)
+            self.assertEqual(json.loads(clarify_result.stdout)["item_id"], "github-thread:legacy2")
 
     def test_stale_and_disposition_clarify_together_is_accepted(self):
         # The false-conflict case: --stale (condition axis) and
@@ -198,12 +199,13 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
     def test_legacy_reject_boolean_emits_deprecation_notice(self):
         self.write_session(items=[github_thread("github-thread:notice1")])
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:notice1",
-            "--reject",
-            "--why", self.REASON,
-        )
+        with self.deprecation_window(True):
+            result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:notice1",
+                "--reject",
+                "--why", self.REASON,
+            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("deprecated", result.stderr.lower())
@@ -213,14 +215,15 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
     def test_match_files_and_homogeneous_reason_and_include_stale_emit_notices(self):
         self.write_session(items=[github_thread("github-thread:notice2")])
 
-        result = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "--disposition", "reject",
-            "--files", "src/shared.py",
-            "--match-files",
-            "--homogeneous-reason", self.REASON,
-            "--include-stale",
-        )
+        with self.deprecation_window(True):
+            result = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "--disposition", "reject",
+                "--files", "src/shared.py",
+                "--match-files",
+                "--homogeneous-reason", self.REASON,
+                "--include-stale",
+            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for flag in ("--match-files", "--homogeneous-reason", "--include-stale"):
@@ -237,12 +240,13 @@ class DeprecatedFlagNoticeTest(PythonScriptTestCase):
             ]
         )
 
-        legacy = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:stable_legacy",
-            "--reject",
-            "--why", self.REASON,
-        )
+        with self.deprecation_window(True):
+            legacy = self.run_runtime_module(
+                "agent", "resolve", self.repo, self.pr,
+                "github-thread:stable_legacy",
+                "--reject",
+                "--why", self.REASON,
+            )
         axis = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
             "github-thread:stable_axis",
@@ -278,11 +282,9 @@ class RemovalWindowFailLoudTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def test_legacy_flag_after_window_close_is_rejected(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:windowclosed")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", False):
+        with self.deprecation_window(False):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:windowclosed",
@@ -295,11 +297,9 @@ class RemovalWindowFailLoudTest(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "RESOLVE_FLAG_DEPRECATED")
 
     def test_axis_form_still_works_after_window_close(self):
-        from unittest.mock import patch as mock_patch
-
         self.write_session(items=[github_thread("github-thread:windowclosedaxis")])
 
-        with mock_patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", False):
+        with self.deprecation_window(False):
             result = self.run_runtime_module(
                 "agent", "resolve", self.repo, self.pr,
                 "github-thread:windowclosedaxis",

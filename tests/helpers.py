@@ -1,9 +1,11 @@
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +108,19 @@ class PythonScriptTestCase(unittest.TestCase):
             os.environ["GH_ADDRESS_CR_STATE_DIR"] = self.original_process_state_dir
         self.temp_dir.cleanup()
 
+    @contextlib.contextmanager
+    def deprecation_window(self, open: bool = True):
+        old_val = self.env.get("GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN")
+        self.env["GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN"] = "1" if open else "0"
+        with unittest.mock.patch("gh_address_cr.commands.agent.RESOLVE_DEPRECATION_WINDOW_OPEN", open):
+            try:
+                yield
+            finally:
+                if old_val is None:
+                    self.env.pop("GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN", None)
+                else:
+                    self.env["GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN"] = old_val
+
     def run_cmd(self, cmd, check=False, stdin=None):
         cmd = list(cmd)
         in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
@@ -185,7 +200,6 @@ class PythonScriptTestCase(unittest.TestCase):
             
             exit_code = 0
             try:
-                import subprocess
                 original_run = subprocess.run
 
                 def patched_run(*run_args, **run_kwargs):
