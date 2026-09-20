@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,7 @@ from gh_address_cr.core.leases import (
     calculate_lease_recovery_state,
     claim_lease,
     expire_leases,
+    release_claimed_lease,
     release_lease,
 )
 from gh_address_cr.core.models import ActionRequest
@@ -325,6 +328,58 @@ def issue_action_request(
         **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
         "next_action": f"Pass request_path to an agent with the {role} role, then fill response_skeleton_path.",
     }
+
+
+@contextmanager
+def claimed_fixer_lease(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    now: datetime | None = None,
+    github_client: Any | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Claim a fixer lease for a one-shot composition, releasing it if the body raises a WorkflowError.
+
+    The rollback belongs here, around the claim, and deliberately **not** inside
+    `submit_action_response`. The two-step `agent next` -> `agent submit` flow keeps
+    its lease across a rejected submit on purpose: the agent still holds the
+    `response_skeleton_path` and resubmits against the same `lease_id` once the
+    evidence is corrected. Releasing there would break that retry.
+
+    A one-shot `agent resolve` is the opposite case. It claims internally, so a
+    rejection hands the agent nothing to retry with while the lease keeps the item
+    locked until its TTL -- the #273 dead end, where `agent resolve` then answers
+    `LEASE_LOCKED_ITEM`, `agent next` answers `NO_ELIGIBLE_ITEM`, and
+    `agent reclaim` reports `expired_count=0`.
+
+    Only `WorkflowError` triggers the rollback. An unexpected exception leaves the
+    lease in place for `agent leases` to show, because an unmodelled failure is not
+    evidence that the claim is safe to undo.
+    """
+    requested = issue_action_request(
+        repo,
+        pr_number,
+        role="fixer",
+        agent_id=agent_id,
+        item_id=item_id,
+        now=now,
+        github_client=github_client,
+    )
+    try:
+        yield requested
+    except WorkflowError as exc:
+        # Any WorkflowError rolls back, not only ACTION_REJECTED, so record which one:
+        # a fixed "action_rejected" would mislabel the lease events `agent leases` shows.
+        release_claimed_lease(
+            repo,
+            pr_number,
+            lease_id=str(requested["lease_id"]),
+            now=now,
+            reason=f"action_rejected:{exc.reason_code}",
+        )
+        raise
 
 
 def submit_action_response(
