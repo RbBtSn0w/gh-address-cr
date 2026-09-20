@@ -207,6 +207,11 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
 
                 self.assertEqual(result["status"], "DECLINE_COMPLETE")
                 self.assertEqual(result["submit"]["publish"]["status"], "PUBLISH_COMPLETE")
+                # The nested submit payload must agree with the outer result: it
+                # previously kept submit_action_response's "run agent publish" text
+                # after the reply had already been posted (PR #274 review).
+                self.assertEqual(result["submit"]["next_action"], result["next_action"])
+                self.assertNotIn("agent publish", result["submit"]["next_action"])
                 self.assertEqual(len(client.replies), 1)
                 active = [
                     lease

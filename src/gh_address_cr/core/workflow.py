@@ -1036,8 +1036,13 @@ def decline_item(
         )
         submitted["publish"] = published
         if item_id in (published.get("published_items") or []):
+            # Mirror what submit_action_response writes on its own --publish path:
+            # a caller reading the nested `submit` object must not still be told to
+            # run `agent publish` after the reply was already posted.
+            published_next_action = "Accepted evidence was published. Rerun final-gate when all items are handled."
+            submitted["next_action"] = published_next_action
             result["status"] = "DECLINE_COMPLETE"
-            result["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+            result["next_action"] = published_next_action
     return result
 
 
