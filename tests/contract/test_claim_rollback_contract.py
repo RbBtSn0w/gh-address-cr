@@ -26,6 +26,29 @@ from tests.test_native_workflow import UnstackedGitHubClient, open_item, stale_g
 
 VALIDATION = [{"command": "unit-tests", "result": "passed", "duration_ms": 10}]
 WHY = "Declining with a rationale long enough to satisfy the evidence threshold." * 2
+REJECTION_CODE = "TEST_POST_CLAIM_REJECTION"
+
+
+def _reject_after_claim():
+    """Make submit_action_response raise, i.e. a rejection that lands after the claim.
+
+    The original trigger was `fast_fix_item(..., publish=True)` on a non-thread item,
+    but `_assert_item_publishable` now rejects that combination before any claim, so it
+    no longer reaches the rollback. Patching the submit step exercises the invariant
+    directly and keeps it independent of which validation happens to run late.
+    """
+    from gh_address_cr.core.errors import WorkflowError
+
+    return patch(
+        "gh_address_cr.core.agent_protocol.submit_action_response",
+        side_effect=WorkflowError(
+            status="ACTION_REJECTED",
+            reason_code=REJECTION_CODE,
+            waiting_on="action_response",
+            exit_code=5,
+            message="rejected after the lease was claimed",
+        ),
+    )
 
 
 class ClaimRollbackContractTest(unittest.TestCase):
@@ -45,38 +68,37 @@ class ClaimRollbackContractTest(unittest.TestCase):
             if lease.get("status") in {"active", "submitted"}
         }
 
-    def test_fast_fix_publish_rejection_releases_lease(self):
-        # The fix-path twin of #273: `--publish` is validated inside
-        # submit_action_response, after the fixer lease already exists.
+    def test_fast_fix_rejection_after_claim_releases_lease(self):
+        # The fix-path twin of #273: a rejection raised after `issue_action_request`
+        # has already claimed the fixer lease must not leave it behind.
         from gh_address_cr.core import workflow
         from gh_address_cr.core.errors import WorkflowError
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
-                manager = self._session("owner/repo", "601", open_item("local:1"))
+                manager = self._session("owner/repo", "601", github_thread("github-thread:R"))
 
-                with self.assertRaises(WorkflowError) as ctx:
+                with _reject_after_claim(), self.assertRaises(WorkflowError) as ctx:
                     workflow.fast_fix_item(
                         "owner/repo", "601",
-                        item_id="local:1",
+                        item_id="github-thread:R",
                         agent_id="fixer-1",
                         commit_hash="abc123",
                         files=["src/shared.py"],
                         validation_commands=VALIDATION,
                         summary="Fixed it",
                         why=WHY,
-                        publish=True,
                         github_client=UnstackedGitHubClient(),
                     )
 
-                self.assertEqual(ctx.exception.reason_code, "PUBLISH_UNSUPPORTED_RESPONSE")
+                self.assertEqual(ctx.exception.reason_code, REJECTION_CODE)
                 self.assertEqual(self._active_leases(manager), {})
                 # The rollback must record which rejection triggered it, not a fixed
                 # "action_rejected": it fires on any WorkflowError, so a fixed label
                 # would mislabel the lease events `agent leases` shows.
                 (lease,) = manager.load()["leases"].values()
                 self.assertEqual(lease["status"], "released")
-                self.assertEqual(lease["reason"], "action_rejected:PUBLISH_UNSUPPORTED_RESPONSE")
+                self.assertEqual(lease["reason"], f"action_rejected:{REJECTION_CODE}")
 
     def test_decline_publish_on_a_local_finding_is_rejected_before_any_claim(self):
         # Not a rollback case: decline_item's own --publish guard (#274) rejects
@@ -143,11 +165,9 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
-                item = github_thread("github-thread:X")
-                item["item_kind"] = "local_finding"
-                self._session("owner/repo", "604", item)
+                self._session("owner/repo", "604", github_thread("github-thread:X"))
 
-                with self.assertRaises(WorkflowError):
+                with _reject_after_claim(), self.assertRaises(WorkflowError):
                     workflow.fast_fix_item(
                         "owner/repo", "604",
                         item_id="github-thread:X",
@@ -157,7 +177,6 @@ class ClaimRollbackContractTest(unittest.TestCase):
                         validation_commands=VALIDATION,
                         summary="Fixed it",
                         why=WHY,
-                        publish=True,
                         github_client=UnstackedGitHubClient(),
                     )
 

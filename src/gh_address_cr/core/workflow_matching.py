@@ -30,18 +30,11 @@ from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.utils import coerce_now as _coerce_now
 from gh_address_cr.core.utils import get_session_items as _items
 from gh_address_cr.core.utils import normalize_string_list as _normalize_string_list
+from gh_address_cr.core.utils import publish_outcome_status
 
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
 FIX_ALL_STALE_ROUTE_REASON = "STALE_THREADS_REQUIRE_RESOLVE_STALE"
 
-MATCHING_THREAD_SUCCESS_STATUS = {
-    ("FAST_FIX_ALL", False): "FAST_FIX_ALL_ACCEPTED",
-    ("FAST_FIX_ALL", True): "FAST_FIX_ALL_COMPLETE",
-    ("STALE_RESOLUTION", False): "STALE_RESOLUTION_ACCEPTED",
-    ("STALE_RESOLUTION", True): "STALE_RESOLUTION_COMPLETE",
-    ("DECLINE_ALL", False): "DECLINE_ALL_ACCEPTED",
-    ("DECLINE_ALL", True): "DECLINE_ALL_COMPLETE",
-}
 MATCHING_THREAD_FAILURE_STATUS = {
     ("FAST_FIX_ALL", False): "FAST_FIX_ALL_NO_ACCEPTED",
     ("FAST_FIX_ALL", True): "FAST_FIX_ALL_PARTIAL",
@@ -630,7 +623,6 @@ def _finalize_matching_threads(
         "failed": failed,
         **extra_payload,
         "publish": publish_result,
-        "next_action": _matching_thread_next_action(repo, pr_number, publish=publish),
     }
     if failed:
         status = _matching_thread_failure_status(ctx, accepted_count=accepted_count)
@@ -644,7 +636,14 @@ def _finalize_matching_threads(
             message=next_action,
             payload=payload,
         )
-    payload["status"] = _matching_thread_success_status(ctx, publish=publish)
+    payload["status"] = _matching_thread_success_status(
+        ctx, publish=publish, published=publish_result, item_ids=item_ids
+    )
+    # Derived from the status, not the --publish flag: a publish that posted nothing
+    # reports _ACCEPTED, and must not tell the caller the evidence was published.
+    payload["next_action"] = _matching_thread_next_action(
+        repo, pr_number, publish=payload["status"].endswith("_COMPLETE")
+    )
     return payload
 
 
@@ -670,8 +669,10 @@ def _publish_matching_thread_responses(
     )
 
 
-def _matching_thread_success_status(ctx: _FastFixContext, *, publish: bool) -> str:
-    return MATCHING_THREAD_SUCCESS_STATUS[(ctx.status_prefix, publish)]
+def _matching_thread_success_status(
+    ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]
+) -> str:
+    return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids)
 
 
 def _matching_thread_failure_status(ctx: _FastFixContext, *, accepted_count: int) -> str:
