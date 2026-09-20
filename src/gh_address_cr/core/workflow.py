@@ -960,6 +960,20 @@ def decline_item(
             message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
             payload={"item_id": item_id},
         )
+    if publish:
+        # Publishing only covers GitHub review threads. Reject before
+        # record_classification/issue_action_request claim a fixer lease, or the
+        # rejection would leave the item locked behind that lease (#273).
+        target = _items(session_store.load_session(repo, pr_number)).get(item_id)
+        if isinstance(target, dict) and target.get("item_kind") != "github_thread":
+            raise WorkflowError(
+                status=protocol_codes.ACTION_REJECTED,
+                reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
+                waiting_on="action_response",
+                exit_code=5,
+                message="--publish is only supported for GitHub review-thread responses.",
+                payload={"item_id": item_id},
+            )
     classification = agent_protocol.record_classification(
         repo,
         pr_number,
@@ -995,11 +1009,10 @@ def decline_item(
         pr_number,
         response_path=response_path,
         now=now,
-        publish=publish,
         github_client=github_client,
     )
-    return {
-        "status": "DECLINE_COMPLETE" if publish else "DECLINE_ACCEPTED",
+    result = {
+        "status": "DECLINE_ACCEPTED",
         "repo": repo,
         "pr_number": str(pr_number),
         "item_id": item_id,
@@ -1009,6 +1022,28 @@ def decline_item(
         "submit": submitted,
         "next_action": submitted["next_action"],
     }
+    if publish:
+        # submit_action_response's --publish shortcut is fix-only; publish the
+        # accepted decline through the publisher directly, as the files path does.
+        from gh_address_cr.core import publisher
+
+        published = publisher.publish_github_thread_responses(
+            repo,
+            pr_number,
+            github_client=github_client,
+            agent_id="gh-address-cr-publisher",
+            now=now,
+        )
+        submitted["publish"] = published
+        if item_id in (published.get("published_items") or []):
+            # Mirror what submit_action_response writes on its own --publish path:
+            # a caller reading the nested `submit` object must not still be told to
+            # run `agent publish` after the reply was already posted.
+            published_next_action = "Accepted evidence was published. Rerun final-gate when all items are handled."
+            submitted["next_action"] = published_next_action
+            result["status"] = "DECLINE_COMPLETE"
+            result["next_action"] = published_next_action
+    return result
 
 
 def trivial_fix_item(
