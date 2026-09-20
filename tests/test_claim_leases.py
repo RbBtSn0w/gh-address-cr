@@ -194,7 +194,12 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
 
         self.assertEqual(recovery.recovery_outcome, "stop")
         self.assertEqual(recovery.reason_code, "LEASE_ACTIVE")
-        self.assertIsNone(recovery.resume_command)
+        # Still "stop" -- nothing is stale and no re-claim is warranted -- but the
+        # owner of a valid lease now gets the submit step rather than no command
+        # at all. An orphaned lease and a healthy in-flight one are indistinguishable
+        # in session state, so the same advice has to serve both (#273).
+        self.assertIn("agent submit", recovery.resume_command)
+        self.assertNotIn("agent next", recovery.resume_command)
 
     def test_falsy_lease_fields_fail_closed_without_collapsing_numeric_values(self):
         session = make_session()

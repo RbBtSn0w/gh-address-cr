@@ -78,6 +78,18 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.publish(repo, pr_number),
         }
 
+    if code == protocol_codes.LEASE_LOCKED_ITEM:
+        return {
+            "summary": (
+                "An active lease holds this item. Read `lease_recovery` on this payload before "
+                "retrying: `reason_code` `LEASE_ACTIVE` means you already own it and should submit "
+                "against the ActionRequest you hold, while `LEASE_RECOVERY_STOP` means another agent "
+                "or role owns it. `agent reclaim` only expires leases past their TTL, so it will not "
+                "free a still-valid one."
+            ),
+            "command": command_templates.leases(repo, pr_number),
+        }
+
     if code.startswith("MISSING_"):
         return {
             "summary": (
