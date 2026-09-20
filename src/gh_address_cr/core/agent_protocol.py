@@ -369,8 +369,16 @@ def claimed_fixer_lease(
     )
     try:
         yield requested
-    except WorkflowError:
-        release_claimed_lease(repo, pr_number, lease_id=str(requested["lease_id"]), now=now)
+    except WorkflowError as exc:
+        # Any WorkflowError rolls back, not only ACTION_REJECTED, so record which one:
+        # a fixed "action_rejected" would mislabel the lease events `agent leases` shows.
+        release_claimed_lease(
+            repo,
+            pr_number,
+            lease_id=str(requested["lease_id"]),
+            now=now,
+            reason=f"action_rejected:{exc.reason_code}",
+        )
         raise
 
 

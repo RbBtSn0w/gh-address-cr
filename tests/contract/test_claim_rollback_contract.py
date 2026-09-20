@@ -71,8 +71,18 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 self.assertEqual(ctx.exception.reason_code, "PUBLISH_UNSUPPORTED_RESPONSE")
                 self.assertEqual(self._active_leases(manager), {})
+                # The rollback must record which rejection triggered it, not a fixed
+                # "action_rejected": it fires on any WorkflowError, so a fixed label
+                # would mislabel the lease events `agent leases` shows.
+                (lease,) = manager.load()["leases"].values()
+                self.assertEqual(lease["status"], "released")
+                self.assertEqual(lease["reason"], "action_rejected:PUBLISH_UNSUPPORTED_RESPONSE")
 
-    def test_decline_publish_rejection_releases_lease(self):
+    def test_decline_publish_on_a_local_finding_is_rejected_before_any_claim(self):
+        # Not a rollback case: decline_item's own --publish guard (#274) rejects
+        # before issue_action_request, so no lease is ever minted. Pinned as its
+        # own case so a change to that ordering is visible, and named for what it
+        # asserts rather than for the rollback the other cases exercise.
         from gh_address_cr.core import workflow
         from gh_address_cr.core.errors import WorkflowError
 
