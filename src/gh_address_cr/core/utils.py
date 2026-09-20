@@ -177,3 +177,35 @@ def return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) ->
             item["claimed_at"] = None
             item["lease_expires_at"] = None
             item.pop("active_lease_id", None)
+
+
+def publish_outcome_status(
+    prefix: str,
+    *,
+    publish: bool,
+    published: Any = None,
+    item_ids: list[str] | None = None,
+) -> str:
+    """Derive ``<prefix>_ACCEPTED`` / ``<prefix>_COMPLETE`` from what publishing did.
+
+    Keyed on the publish *outcome*, not on the ``--publish`` flag. A run whose
+    publish was a no-op -- ``NO_PUBLISH_READY_ITEMS``, or a partial publish that
+    skipped these items -- reports ``_ACCEPTED``, so no caller can read
+    ``_COMPLETE`` for a reply that was never posted.
+
+    The flag-keyed form this replaces is why ``commands/agent.py`` had to
+    re-derive its own ``published`` boolean from ``published_count``: the status
+    alone was not trustworthy.
+
+    ``item_ids`` narrows the check to the items this call owns; pass ``None`` to
+    accept any published item as evidence.
+    """
+    if not publish:
+        return f"{prefix}_ACCEPTED"
+    payload = published if isinstance(published, dict) else {}
+    posted = {str(entry) for entry in payload.get("published_items") or []}
+    if not posted:
+        return f"{prefix}_ACCEPTED"
+    if item_ids is not None and not posted.intersection(str(item_id) for item_id in item_ids):
+        return f"{prefix}_ACCEPTED"
+    return f"{prefix}_COMPLETE"

@@ -54,6 +54,9 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     normalize_string_list as _normalize_string_list,
 )
+from gh_address_cr.core.utils import (
+    publish_outcome_status as _publish_outcome_status,
+)
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 from gh_address_cr.core.workflow_matching import FIX_ALL_STALE_ROUTE_REASON
 
@@ -154,9 +157,12 @@ def fast_fix_from_batch_input(
             agent_id="gh-address-cr-publisher",
             now=now,
         )
-        payload["status"] = "FAST_FIX_ALL_COMPLETE"
         payload["publish"] = published
-        payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+        payload["status"] = _publish_outcome_status(
+            "FAST_FIX_ALL", publish=True, published=published, item_ids=payload["item_ids"]
+        )
+        if payload["status"].endswith("_COMPLETE"):
+            payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
 
 
@@ -708,41 +714,53 @@ def fast_fix_item(
         severity_note=severity_note,
         review_priority=review_priority,
     )
-    classification, requested = _prepare_fast_fix_request(
+    _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
+    classification = agent_protocol.record_classification(
+        repo,
+        pr_number,
+        item_id=item_id,
+        classification="fix",
+        agent_id=agent_id,
+        note=why,
+    )
+    with agent_protocol.claimed_fixer_lease(
         repo,
         pr_number,
         item_id=item_id,
         agent_id=agent_id,
-        why=why,
-        review_priority_evidence=requested_priority_evidence,
         now=now,
         github_client=github_client,
-    )
-    response_path, response = _build_fast_fix_response(
-        repo,
-        pr_number,
-        requested=requested,
-        item_id=item_id,
-        agent_id=agent_id,
-        summary=summary,
-        why=why,
-        commit_hash=commit_hash,
-        files=files,
-        validation_commands=validation_commands,
-        normalized_severity=normalized_severity,
-        severity_note=severity_note,
-    )
-    submitted = agent_protocol.submit_action_response(
-        repo,
-        pr_number,
-        response_path=response_path,
-        now=now,
-        publish=publish,
-        github_client=github_client,
-    )
+    ) as requested:
+        _attach_review_priority_evidence(
+            repo, pr_number, item_id=item_id, review_priority_evidence=requested_priority_evidence
+        )
+        response_path, response = _build_fast_fix_response(
+            repo,
+            pr_number,
+            requested=requested,
+            item_id=item_id,
+            agent_id=agent_id,
+            summary=summary,
+            why=why,
+            commit_hash=commit_hash,
+            files=files,
+            validation_commands=validation_commands,
+            normalized_severity=normalized_severity,
+            severity_note=severity_note,
+        )
+        submitted = agent_protocol.submit_action_response(
+            repo,
+            pr_number,
+            response_path=response_path,
+            now=now,
+            publish=publish,
+            github_client=github_client,
+        )
 
     return {
-        "status": "FAST_FIX_COMPLETE" if publish else "FAST_FIX_ACCEPTED",
+        "status": _publish_outcome_status(
+            "FAST_FIX", publish=publish, published=submitted.get("publish"), item_ids=[item_id]
+        ),
         "repo": repo,
         "pr_number": str(pr_number),
         "item_id": item_id,
@@ -841,41 +859,20 @@ def _validate_fast_fix_inputs(
     return normalized_severity, requested_priority_evidence
 
 
-def _prepare_fast_fix_request(
+def _attach_review_priority_evidence(
     repo: str,
     pr_number: str,
     *,
     item_id: str,
-    agent_id: str,
-    why: str,
     review_priority_evidence: dict[str, Any] | None,
-    now: datetime | None,
-    github_client: Any | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    classification = agent_protocol.record_classification(
-        repo,
-        pr_number,
-        item_id=item_id,
-        classification="fix",
-        agent_id=agent_id,
-        note=why,
-    )
-    requested = agent_protocol.issue_action_request(
-        repo,
-        pr_number,
-        role="fixer",
-        agent_id=agent_id,
-        item_id=item_id,
-        now=now,
-        github_client=github_client,
-    )
-    if review_priority_evidence:
-        session = session_store.load_session(repo, pr_number)
-        item = _items(session).get(item_id)
-        if isinstance(item, dict):
-            item["review_priority_evidence"] = review_priority_evidence
-            session_store.save_session(repo, pr_number, session)
-    return classification, requested
+) -> None:
+    if not review_priority_evidence:
+        return
+    session = session_store.load_session(repo, pr_number)
+    item = _items(session).get(item_id)
+    if isinstance(item, dict):
+        item["review_priority_evidence"] = review_priority_evidence
+        session_store.save_session(repo, pr_number, session)
 
 
 def _build_fast_fix_response(
@@ -923,6 +920,29 @@ def _build_fast_fix_response(
     return response_path, response
 
 
+def _assert_item_publishable(repo: str, pr_number: str, *, item_id: str, publish: bool) -> None:
+    """Reject an unpublishable `--publish` target before any state is mutated.
+
+    Publishing only covers GitHub review threads. `submit_action_response` checks
+    the same thing, but only once the fixer lease exists, so the rejection arrives
+    after `issue_action_request` has already claimed and marked the item (#273).
+    Checking here keeps a doomed `--publish` free of any lease churn instead of
+    relying on a rollback to undo it.
+    """
+    if not publish:
+        return
+    item = _items(session_store.load_session(repo, pr_number)).get(item_id)
+    if isinstance(item, dict) and item.get("item_kind") != "github_thread":
+        raise WorkflowError(
+            status=protocol_codes.ACTION_REJECTED,
+            reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
+            waiting_on="action_response",
+            exit_code=5,
+            message="--publish is only supported for GitHub review-thread responses.",
+            payload={"item_id": item_id},
+        )
+
+
 def decline_item(
     repo: str,
     pr_number: str,
@@ -960,20 +980,7 @@ def decline_item(
             message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
             payload={"item_id": item_id},
         )
-    if publish:
-        # Publishing only covers GitHub review threads. Reject before
-        # record_classification/issue_action_request claim a fixer lease, or the
-        # rejection would leave the item locked behind that lease (#273).
-        target = _items(session_store.load_session(repo, pr_number)).get(item_id)
-        if isinstance(target, dict) and target.get("item_kind") != "github_thread":
-            raise WorkflowError(
-                status=protocol_codes.ACTION_REJECTED,
-                reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
-                waiting_on="action_response",
-                exit_code=5,
-                message="--publish is only supported for GitHub review-thread responses.",
-                payload={"item_id": item_id},
-            )
+    _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
     classification = agent_protocol.record_classification(
         repo,
         pr_number,
@@ -982,35 +989,34 @@ def decline_item(
         agent_id=agent_id,
         note=why,
     )
-    requested = agent_protocol.issue_action_request(
+    with agent_protocol.claimed_fixer_lease(
         repo,
         pr_number,
-        role="fixer",
-        agent_id=agent_id,
         item_id=item_id,
+        agent_id=agent_id,
         now=now,
         github_client=github_client,
-    )
-    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
-    response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
-    response = {
-        "schema_version": PROTOCOL_VERSION,
-        "request_id": request["request_id"],
-        "lease_id": request["lease_id"],
-        "agent_id": agent_id,
-        "item_id": item_id,
-        "resolution": resolution,
-        "note": why,
-        "reply_markdown": why,
-    }
-    write_json_atomic(response_path, response)
-    submitted = agent_protocol.submit_action_response(
-        repo,
-        pr_number,
-        response_path=response_path,
-        now=now,
-        github_client=github_client,
-    )
+    ) as requested:
+        request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+        response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
+        response = {
+            "schema_version": PROTOCOL_VERSION,
+            "request_id": request["request_id"],
+            "lease_id": request["lease_id"],
+            "agent_id": agent_id,
+            "item_id": item_id,
+            "resolution": resolution,
+            "note": why,
+            "reply_markdown": why,
+        }
+        write_json_atomic(response_path, response)
+        submitted = agent_protocol.submit_action_response(
+            repo,
+            pr_number,
+            response_path=response_path,
+            now=now,
+            github_client=github_client,
+        )
     result = {
         "status": "DECLINE_ACCEPTED",
         "repo": repo,
@@ -1035,7 +1041,9 @@ def decline_item(
             now=now,
         )
         submitted["publish"] = published
-        if item_id in (published.get("published_items") or []):
+        if _publish_outcome_status("DECLINE", publish=True, published=published, item_ids=[item_id]).endswith(
+            "_COMPLETE"
+        ):
             # Mirror what submit_action_response writes on its own --publish path:
             # a caller reading the nested `submit` object must not still be told to
             # run `agent publish` after the reply was already posted.
@@ -1087,7 +1095,9 @@ def trivial_fix_item(
         github_client=github_client,
         now=now,
     )
-    result["status"] = "TRIVIAL_FIX_COMPLETE" if publish else "TRIVIAL_FIX_ACCEPTED"
+    result["status"] = _publish_outcome_status(
+        "TRIVIAL_FIX", publish=publish, published=result["submit"].get("publish"), item_ids=[item_id]
+    )
     result["trivial_eligibility"] = "docs_or_typo"
     return result
 

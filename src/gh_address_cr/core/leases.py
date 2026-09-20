@@ -319,6 +319,42 @@ def release_self_stale_lease(session: Any, item_id: str, *, agent_id: str, now: 
     return released
 
 
+def release_claimed_lease(
+    repo: str,
+    pr_number: str,
+    *,
+    lease_id: str,
+    now: datetime | None = None,
+    reason: str = "action_rejected",
+) -> bool:
+    """Release a lease whose claiming action was rejected, returning its item to claimable.
+
+    A one-shot ``agent resolve`` composition claims the lease itself, so when the
+    action is rejected the agent holds no resume token and no response path: a
+    surviving lease locks the item until its TTL, and neither ``agent reclaim`` nor
+    ``agent next`` can free it (#273).
+
+    Releasing the lease alone is not enough. ``issue_action_request`` also sets
+    ``item["state"] = "claimed"``, which ``_item_is_open`` rejects, so the item is
+    returned to its claimable state as well -- otherwise the follow-up degrades from
+    ``LEASE_LOCKED_ITEM`` to ``NO_ELIGIBLE_ITEM`` instead of recovering.
+
+    Tolerant by design: a lease another layer already released or expired -- the
+    ``stale_request_context`` path in ``agent_protocol_leases`` does exactly that --
+    is left alone rather than raising ``LeaseSubmissionError`` and masking the
+    original rejection. Returns ``True`` only when this call released the lease.
+    """
+    current_time = _coerce_now(now)
+    session = session_store.load_session(repo, pr_number)
+    lease = _leases(session).get(lease_id)
+    if lease is None or _get(lease, "status") not in ACTIVE_LEASE_STATUSES:
+        return False
+    release_lease(session, lease_id, now=current_time, reason=reason)
+    _return_expired_items_to_open(session, [lease])
+    session_store.save_session(repo, pr_number, session)
+    return True
+
+
 def expire_leases(session: Any, *, now: datetime | None = None) -> list[Any]:
     now = _coerce_now(now)
     expired = []
