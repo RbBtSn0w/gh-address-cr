@@ -340,7 +340,7 @@ def claimed_fixer_lease(
     now: datetime | None = None,
     github_client: Any | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Claim a fixer lease for a one-shot composition, releasing it if the body raises.
+    """Claim a fixer lease for a one-shot composition, releasing it if the body raises a WorkflowError.
 
     The rollback belongs here, around the claim, and deliberately **not** inside
     `submit_action_response`. The two-step `agent next` -> `agent submit` flow keeps
