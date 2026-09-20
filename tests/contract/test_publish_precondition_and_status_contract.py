@@ -152,6 +152,46 @@ class PublishPreconditionTest(unittest.TestCase):
 
                 # Flag-keyed derivation reported FAST_FIX_COMPLETE here.
                 self.assertEqual(result["status"], "FAST_FIX_ACCEPTED")
+                # next_action comes from submit_action_response, which used to say
+                # "was published" whenever publish=True regardless of the outcome,
+                # contradicting the _ACCEPTED status above (PR #276 review).
+                self.assertNotIn("was published", result["next_action"])
+                self.assertNotIn("was published", result["submit"]["next_action"])
+                self.assertIn("agent publish", result["submit"]["next_action"])
+
+    def test_fast_fix_next_action_says_published_when_the_item_was_published(self):
+        # The other half: a real publish must still claim it, so the fix is not
+        # just "never say published".
+        from gh_address_cr.core import workflow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self._session("owner/repo", "705", github_thread("github-thread:P"))
+
+                with patch(
+                    "gh_address_cr.core.publisher.publish_github_thread_responses",
+                    return_value={
+                        "status": "PUBLISH_COMPLETE",
+                        "published_count": 1,
+                        "published_items": ["github-thread:P"],
+                    },
+                ):
+                    result = workflow.fast_fix_item(
+                        "owner/repo", "705",
+                        item_id="github-thread:P",
+                        agent_id="fixer-1",
+                        commit_hash="abc123",
+                        files=["src/shared.py"],
+                        validation_commands=VALIDATION,
+                        summary="Fixed it",
+                        why=WHY,
+                        publish=True,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(result["status"], "FAST_FIX_COMPLETE")
+                self.assertIn("was published", result["next_action"])
+                self.assertIn("was published", result["submit"]["next_action"])
 
     def test_matching_decline_next_action_follows_the_derived_status(self):
         # _finalize_matching_threads derives status from the publish outcome, so a

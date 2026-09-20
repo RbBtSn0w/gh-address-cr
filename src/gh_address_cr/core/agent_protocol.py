@@ -52,6 +52,9 @@ from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
 )
 from gh_address_cr.core.utils import (
+    publish_outcome_status,
+)
+from gh_address_cr.core.utils import (
     return_expired_items_to_open as _return_expired_items_to_open,
 )
 from gh_address_cr.core.utils import (
@@ -394,7 +397,15 @@ def submit_action_response(
         now=now,
     )
     payload["publish"] = published
-    payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+    # Only claim "published" when the publisher actually covered this item. A no-op
+    # publish (NO_PUBLISH_READY_ITEMS) or one that skipped it keeps the default
+    # "run agent publish" next_action, so callers that read this payload -- and the
+    # `fast_fix_item` result built on it -- agree with the outcome-derived status.
+    published_status = publish_outcome_status(
+        "SUBMIT", publish=True, published=published, item_ids=[str(prepared["item_id"])]
+    )
+    if published_status.endswith("_COMPLETE"):
+        payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
 
 
