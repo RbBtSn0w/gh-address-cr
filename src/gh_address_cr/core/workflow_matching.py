@@ -623,7 +623,6 @@ def _finalize_matching_threads(
         "failed": failed,
         **extra_payload,
         "publish": publish_result,
-        "next_action": _matching_thread_next_action(repo, pr_number, publish=publish),
     }
     if failed:
         status = _matching_thread_failure_status(ctx, accepted_count=accepted_count)
@@ -639,6 +638,11 @@ def _finalize_matching_threads(
         )
     payload["status"] = _matching_thread_success_status(
         ctx, publish=publish, published=publish_result, item_ids=item_ids
+    )
+    # Derived from the status, not the --publish flag: a publish that posted nothing
+    # reports _ACCEPTED, and must not tell the caller the evidence was published.
+    payload["next_action"] = _matching_thread_next_action(
+        repo, pr_number, publish=payload["status"].endswith("_COMPLETE")
     )
     return payload
 
@@ -668,7 +672,7 @@ def _publish_matching_thread_responses(
 def _matching_thread_success_status(
     ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]
 ) -> str:
-    return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids or None)
+    return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids)
 
 
 def _matching_thread_failure_status(ctx: _FastFixContext, *, accepted_count: int) -> str:

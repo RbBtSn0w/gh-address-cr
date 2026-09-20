@@ -70,6 +70,17 @@ class PublishOutcomeStatusTest(unittest.TestCase):
             "FAST_FIX_COMPLETE",
         )
 
+    def test_an_empty_item_list_owns_nothing_so_it_is_never_complete(self):
+        # An empty list means "this call owns no items", which is not the same as
+        # None ("any published item counts"). Collapsing [] to None reported
+        # COMPLETE off a session-wide publish for other, previously accepted items.
+        self.assertEqual(
+            self.publish_outcome_status(
+                "FAST_FIX_ALL", publish=True, published={"published_items": ["other"]}, item_ids=[]
+            ),
+            "FAST_FIX_ALL_ACCEPTED",
+        )
+
     def test_item_ids_none_accepts_any_published_item(self):
         self.assertEqual(
             self.publish_outcome_status("STALE_RESOLUTION", publish=True, published={"published_items": ["any"]}),
@@ -141,6 +152,68 @@ class PublishPreconditionTest(unittest.TestCase):
 
                 # Flag-keyed derivation reported FAST_FIX_COMPLETE here.
                 self.assertEqual(result["status"], "FAST_FIX_ACCEPTED")
+
+    def test_matching_decline_next_action_follows_the_derived_status(self):
+        # _finalize_matching_threads derives status from the publish outcome, so a
+        # no-op publish reports _ACCEPTED. next_action must agree with that, not
+        # with the --publish flag, or it claims evidence was published when the
+        # publisher posted nothing.
+        from gh_address_cr.core import workflow_matching
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self._session("owner/repo", "703", github_thread("github-thread:M"))
+
+                with patch(
+                    "gh_address_cr.core.publisher.publish_github_thread_responses",
+                    return_value=NO_OP_PUBLISH,
+                ):
+                    result = workflow_matching.decline_matching_threads(
+                        "owner/repo", "703",
+                        agent_id="fixer-1",
+                        files=["src/shared.py"],
+                        resolution="reject",
+                        homogeneous_reason="Shared style nit; declining with rationale.",
+                        publish=True,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(result["status"], "DECLINE_ALL_ACCEPTED")
+                self.assertNotIn("was published", result["next_action"])
+                self.assertIn("agent publish", result["next_action"])
+
+    def test_batch_that_accepted_nothing_is_not_complete_off_another_items_publish(self):
+        # The call-site half of the empty-list contract: `item_ids or None` turned
+        # "this batch owns no items" into "any published item counts", so a
+        # session-wide publish for other, earlier items reported FAST_FIX_ALL_COMPLETE.
+        import json
+        from pathlib import Path
+
+        from gh_address_cr.core import workflow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            batch_path = Path(tmp) / "batch.json"
+            batch_path.write_text(json.dumps({"items": []}), encoding="utf-8")
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                with (
+                    patch(
+                        "gh_address_cr.core.agent_batch.submit_batch_action_response",
+                        return_value={"accepted_count": 0, "item_ids": [], "next_action": "n/a"},
+                    ),
+                    patch(
+                        "gh_address_cr.core.publisher.publish_github_thread_responses",
+                        return_value={
+                            "status": "PUBLISH_COMPLETE",
+                            "published_count": 1,
+                            "published_items": ["github-thread:earlier"],
+                        },
+                    ),
+                ):
+                    result = workflow.fast_fix_from_batch_input(
+                        "owner/repo", "704", batch_path=batch_path, publish=True
+                    )
+
+                self.assertEqual(result["status"], "FAST_FIX_ALL_ACCEPTED")
 
 
 if __name__ == "__main__":

@@ -159,7 +159,7 @@ def fast_fix_from_batch_input(
         )
         payload["publish"] = published
         payload["status"] = _publish_outcome_status(
-            "FAST_FIX_ALL", publish=True, published=published, item_ids=payload["item_ids"] or None
+            "FAST_FIX_ALL", publish=True, published=published, item_ids=payload["item_ids"]
         )
         if payload["status"].endswith("_COMPLETE"):
             payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
