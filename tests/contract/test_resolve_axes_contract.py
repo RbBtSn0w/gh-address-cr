@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from tests.helpers import PythonScriptTestCase
 from tests.test_control_plane_workflow import github_thread
-from tests.test_native_workflow import UnstackedGitHubClient, stale_github_thread_item
+from tests.test_native_workflow import UnstackedGitHubClient, open_item, stale_github_thread_item
 
 DISPOSITIONS = ("fix", "trivial", "reject", "clarify")
 SELECTIONS = ("single", "files", "batch")
@@ -164,6 +164,143 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
                 self.assertEqual(result.counts["unresolved_github_threads_count"], 0)
                 self.assertEqual(result.counts["blocking_items_count"], 0)
                 self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
+
+    def _assert_single_decline_with_publish(self, resolution):
+        # #273: single-item decline accepts --publish like the files path does.
+        # Its submit shortcut is fix-only, so decline_item publishes through the
+        # publisher after submit instead of tripping PUBLISH_UNSUPPORTED_RESPONSE
+        # after claiming a lease.
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply/single-decline"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "512"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(
+                    repo, pr_number, github_thread("github-thread:THREAD_SINGLE_PUB")
+                )
+                client = FakeGitHubClient()
+
+                result = workflow.decline_item(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_SINGLE_PUB",
+                    agent_id="fixer-1",
+                    resolution=resolution,
+                    why="Style preference only; not a defect.",
+                    publish=True,
+                    github_client=client,
+                )
+
+                self.assertEqual(result["status"], "DECLINE_COMPLETE")
+                self.assertEqual(result["submit"]["publish"]["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(len(client.replies), 1)
+                active = [
+                    lease
+                    for lease in manager.load().get("leases", {}).values()
+                    if lease.get("status") in {"active", "submitted"}
+                ]
+                self.assertEqual(active, [])
+
+    def test_single_reject_with_publish_posts_reply(self):
+        self._assert_single_decline_with_publish("reject")
+
+    def test_single_clarify_with_publish_posts_reply(self):
+        self._assert_single_decline_with_publish("clarify")
+
+    def test_single_decline_publish_on_local_finding_rejected_without_lease(self):
+        # --publish only covers GitHub review threads; a local finding must be
+        # refused before a fixer lease is claimed, not reported as published.
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.errors import WorkflowError
+
+        repo = "owner/repo"
+        pr_number = "513"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(repo, pr_number, open_item("local:1"))
+
+                with self.assertRaises(WorkflowError) as ctx:
+                    workflow.decline_item(
+                        repo,
+                        pr_number,
+                        item_id="local:1",
+                        agent_id="fixer-1",
+                        resolution="reject",
+                        why="Not applicable to this change.",
+                        publish=True,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(ctx.exception.reason_code, "PUBLISH_UNSUPPORTED_RESPONSE")
+                self.assertEqual(manager.load().get("leases", {}), {})
+
+    def _assert_files_decline_with_publish(self, resolution):
+        # #273 follow-up: the files-selection path takes --publish for reject and
+        # clarify (it publishes via publisher, not the fix-only submit shortcut).
+        from gh_address_cr.core import workflow_matching
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply/files-decline"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "511"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(
+                    repo, pr_number, github_thread("github-thread:THREAD_FILES_PUB")
+                )
+                client = FakeGitHubClient()
+
+                result = workflow_matching.decline_matching_threads(
+                    repo,
+                    pr_number,
+                    agent_id="fixer-1",
+                    files=["src/shared.py"],
+                    resolution=resolution,
+                    homogeneous_reason="Shared style nit; declining with rationale.",
+                    publish=True,
+                    github_client=client,
+                )
+
+                self.assertEqual(result["accepted_count"], 1)
+                self.assertEqual(result["publish"]["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(len(client.replies), 1)
+                active = [
+                    lease
+                    for lease in manager.load().get("leases", {}).values()
+                    if lease.get("status") in {"active", "submitted"}
+                ]
+                self.assertEqual(active, [])
+
+    def test_files_reject_with_publish_posts_reply(self):
+        self._assert_files_decline_with_publish("reject")
+
+    def test_files_clarify_with_publish_posts_reply(self):
+        self._assert_files_decline_with_publish("clarify")
 
     def test_decline_second_agent_hits_lease_locked(self):
         # An item already leased by another agent blocks a second agent's
