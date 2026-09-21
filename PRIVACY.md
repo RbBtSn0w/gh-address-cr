@@ -37,7 +37,12 @@ post replies or resolve threads directly.
 The CLI exports process-level OpenTelemetry traces by default to the public
 Cloudflare Worker at
 `https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces`. The service name
-is `gh-address-cr`. The client contains no API key or backend credential.
+is `gh-address-cr`. The client contains no API key or backend credential. Development and
+PR-preview builds (a `.devN` or local `+sha` version) send the same anonymous,
+bounded trace to the development gateway,
+`https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces`,
+instead; published releases, including beta and rc pre-releases, use the
+production gateway. No additional data is collected for any channel.
 Ambient OTLP headers, credential providers, proxy credentials, and `.netrc`
 credentials are not inherited by the gateway exporter.
 The distributable client always uses the stable service name `gh-address-cr`.

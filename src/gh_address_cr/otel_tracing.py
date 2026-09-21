@@ -30,6 +30,7 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.sdk.version import __version__ as otel_sdk_version
 from opentelemetry.trace import NoOpTracer, Span, SpanKind, Status, StatusCode, Tracer, get_current_span
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from packaging.version import InvalidVersion, Version
 
 from gh_address_cr import __version__
 from gh_address_cr.core.otel_semconv import (
@@ -43,6 +44,9 @@ SERVICE_NAMESPACE_VALUE = "com.hamiltonsnow"
 # host-local hint into service identity or deployment environment attributes.
 TELEMETRY_ENVIRONMENT_VARIABLE = "GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT"
 OTLP_TRACES_ENDPOINT = "https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces"
+# Dev and PR-preview builds report here by default so synthetic and pre-merge traffic
+# never reaches the production dataset (specs/032-otel-release-channel-endpoint).
+DEVELOPMENT_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
 GATEWAY_ORIGINS = {
     "https://telemetry-gateway-development.hamiltonsnow.workers.dev",
     "https://telemetry-gateway-staging.hamiltonsnow.workers.dev",
@@ -124,7 +128,22 @@ def initialize_telemetry() -> Tracer:
     return _tracer
 
 
-def _traces_endpoint(environ: Mapping[str, str]) -> str:
+def release_channel(version: str) -> str:
+    """Classify a build as ``development`` or ``production`` from its PEP 440 version.
+
+    Only dev releases (``.devN``) and local versions (``+sha``, how PR previews are
+    stamped) leave production; published pre-releases such as ``-beta.N`` are real
+    user-facing builds. An unparseable version falls back to production so a parsing
+    defect can never silently drop stable-release telemetry.
+    """
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        return "production"
+    return "development" if parsed.is_devrelease or parsed.local else "production"
+
+
+def _traces_endpoint(environ: Mapping[str, str], version: str | None = None) -> str:
     signal_endpoint = environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
     if signal_endpoint:
         return signal_endpoint
@@ -135,7 +154,8 @@ def _traces_endpoint(environ: Mapping[str, str]) -> str:
         if not path.endswith("/v1/traces"):
             path = f"{path}/v1/traces" if path else "/v1/traces"
         return urlunsplit(parsed._replace(path=path))
-    return OTLP_TRACES_ENDPOINT
+    channel_version = __version__ if version is None else version
+    return DEVELOPMENT_TRACES_ENDPOINT if release_channel(channel_version) == "development" else OTLP_TRACES_ENDPOINT
 
 
 def _gateway_headers(endpoint: str) -> dict[str, str]:

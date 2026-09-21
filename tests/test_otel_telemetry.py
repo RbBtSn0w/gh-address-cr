@@ -238,6 +238,89 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
                 self.assertEqual(exporter_type.call_args.kwargs["endpoint"], expected)
                 self.assertEqual(exporter_type.call_args.kwargs["headers"], expected_headers)
 
+    def test_release_channel_only_routes_dev_and_local_versions_off_production(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        cases = [
+            ("3.15.2", "production"),
+            ("3.16.0-beta.1", "production"),
+            ("3.16.0b1", "production"),
+            ("3.16.0rc1", "production"),
+            ("3.15.2.dev279+5dc8a44", "development"),
+            ("3.13.1.dev266+b3bddc8", "development"),
+            ("3.15.2.dev279", "development"),
+            ("3.15.2+local", "development"),
+            ("not-a-version", "production"),
+            ("", "production"),
+        ]
+        for version, expected in cases:
+            with self.subTest(version=version):
+                self.assertEqual(otel_tracing.release_channel(version), expected)
+
+    def test_default_endpoint_follows_release_channel_without_explicit_configuration(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        development = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
+        cases = [
+            ("3.15.2", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.16.0-beta.1", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.15.2.dev279+5dc8a44", development),
+            ("not-a-version", otel_tracing.OTLP_TRACES_ENDPOINT),
+        ]
+        for version, expected in cases:
+            with self.subTest(version=version):
+                self.assertEqual(otel_tracing._traces_endpoint({}, version=version), expected)
+                self.assertEqual(
+                    otel_tracing._gateway_headers(expected),
+                    otel_tracing._SAFE_EXPORT_HEADERS,
+                )
+
+    def test_explicit_endpoint_overrides_the_release_channel_default(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        dev_version = "3.15.2.dev279+5dc8a44"
+        self.assertEqual(
+            otel_tracing._traces_endpoint(
+                {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://traces.example/custom"}, version=dev_version
+            ),
+            "https://traces.example/custom",
+        )
+        self.assertEqual(
+            otel_tracing._traces_endpoint(
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev"},
+                version=dev_version,
+            ),
+            otel_tracing.OTLP_TRACES_ENDPOINT,
+        )
+
+    def test_initialization_uses_release_channel_endpoint_for_dev_builds(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        provider = MagicMock()
+        provider.get_tracer.return_value = MagicMock()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(otel_tracing, "__version__", "3.15.2.dev279+5dc8a44"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
+            patch.object(otel_tracing, "BatchSpanProcessor"),
+        ):
+            otel_tracing.initialize_telemetry()
+            otel_tracing._reset_telemetry_for_tests()
+
+        self.assertEqual(
+            exporter_type.call_args.kwargs["endpoint"],
+            "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces",
+        )
+        self.assertEqual(exporter_type.call_args.kwargs["headers"], otel_tracing._SAFE_EXPORT_HEADERS)
+
+    def test_checked_in_version_routes_to_production(self) -> None:
+        # A stable-looking checked-in version must never route off production, or
+        # released builds would silently stop reporting to the production dataset.
+        from gh_address_cr import __version__, otel_tracing
+
+        self.assertEqual(otel_tracing.release_channel(__version__), "production")
+
     def test_initialization_does_not_inherit_ambient_otlp_credentials(self) -> None:
         from gh_address_cr import otel_tracing
 

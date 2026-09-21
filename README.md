@@ -152,6 +152,17 @@ Gateway by default:
 https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
 
+Development and PR-preview builds (a `.devN` or local `+sha` version) default to
+the development Gateway instead, so pre-merge traffic never reaches the
+production dataset:
+
+```text
+https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+```
+
+Published releases, including `beta` and `rc` pre-releases, report to the
+production Gateway. An unrecognized version string also falls back to production.
+
 For controlled environment canaries, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` may
 target the exact HTTPS development or staging Gateway origin. The client adds
 the anonymous admission profile only for these three allowlisted origins; it
@@ -240,8 +251,8 @@ bodies, local paths, standard streams, or hashes of those values.
 
 Endpoint precedence follows the standard OTLP variables:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then
-`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the documented
-application default. Requests to the approved gateway carry
+`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the release-channel
+default described above. Requests to the approved gateway carry
 `otel-gateway-profile: anonymous-client-v1`; custom Collector endpoints do not
 inherit that header.
 
