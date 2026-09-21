@@ -192,7 +192,7 @@ def _reenter_own_fixer_lease(
 
     request_path = Path(str(request_path))
     skeleton_path = request_path.with_name(f"action-response-skeleton-{request_id}.json")
-    request = _read_request_file(request_path)
+    request = _read_request_file(request_path, request_id=request_id, lease_id=str(lease["lease_id"]))
     if request is None:
         # The request itself is gone (or unreadable), so it has to be rebuilt.
         request = _rebuild_fixer_request(repo, pr_number, session, item=item, lease=lease, github_client=github_client)
@@ -230,18 +230,27 @@ def _reenter_own_fixer_lease(
     }
 
 
-def _read_request_file(path: Path) -> dict[str, Any] | None:
-    """The request on disk, or None when it is missing or not a usable ActionRequest.
+def _read_request_file(path: Path, *, request_id: str, lease_id: str) -> dict[str, Any] | None:
+    """The request on disk if it is this lease's, else None.
 
-    Validity is `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
-    accepts as readable cannot drift from what submit will accept. "Any JSON object" is
-    not enough: `{}` parses, then skeleton generation indexes required keys and raises
-    KeyError instead of rebuilding.
+    Two conditions, both of which must hold for re-entry to hand the file back:
+
+    - It is a usable ActionRequest. Validity is `ActionRequest.from_dict`, the parser
+      submit itself uses, so what re-entry accepts cannot drift from what submit does.
+      "Any JSON object" is not enough: `{}` parses, then skeleton generation indexes
+      required keys and raises KeyError instead of rebuilding.
+    - It carries this lease's `request_id` and `lease_id`. A file can be a perfectly valid
+      ActionRequest and still belong to another lease; returning it, with a skeleton named
+      for the current request_id, points the agent at the wrong request.
+
+    Anything else is treated as lost, so the caller rebuilds under the lease's own ids.
     """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         ActionRequest.from_dict(payload)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
+        return None
+    if str(payload.get("request_id")) != request_id or str(payload.get("lease_id")) != lease_id:
         return None
     return payload
 

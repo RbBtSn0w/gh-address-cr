@@ -292,6 +292,36 @@ class OwnerReentryTest(unittest.TestCase):
                         self.assertEqual(rebuilt["request_id"], original["request_id"])
                         self.assertEqual(rebuilt["lease_id"], original["lease_id"])
 
+    def test_a_request_file_that_belongs_to_another_lease_is_rebuilt(self):
+        # A file can be a perfectly valid ActionRequest and still not be *this* lease's.
+        # Handing it back, with a skeleton named for the current request_id, points the
+        # agent at the wrong request and the submit then fails with a mismatched context.
+        # Being parseable is not enough: the identity has to match the lease.
+        from gh_address_cr.core import agent_protocol
+
+        for index, field in enumerate(("request_id", "lease_id")):
+            with self.subTest(mismatched=field):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        pr = str(1040 + index)
+                        _session("owner/repo", pr)
+                        first = _claim("owner/repo", pr)
+                        original = json.loads(Path(first["request_path"]).read_text(encoding="utf-8"))
+                        foreign = dict(original)
+                        foreign[field] = f"{field}_from_another_lease"
+                        Path(first["request_path"]).write_text(json.dumps(foreign), encoding="utf-8")
+
+                        again = agent_protocol.issue_action_request(
+                            "owner/repo", pr, role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                        )
+
+                        rebuilt = json.loads(Path(again["request_path"]).read_text(encoding="utf-8"))
+                        self.assertEqual(rebuilt["request_id"], original["request_id"])
+                        self.assertEqual(rebuilt["lease_id"], original["lease_id"])
+                        skeleton = json.loads(Path(again["response_skeleton_path"]).read_text(encoding="utf-8"))
+                        self.assertEqual(skeleton["request_id"], original["request_id"])
+                        self.assertEqual(skeleton["lease_id"], original["lease_id"])
+
     def test_the_reentry_payload_carries_handling_boundary_like_a_fresh_claim(self):
         # The normal claim path returns `handling_boundary` at the top level when the
         # item has one; callers read it without opening the request file. Re-entry must
