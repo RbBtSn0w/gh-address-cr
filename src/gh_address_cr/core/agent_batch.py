@@ -997,6 +997,13 @@ def _batch_recovery_payload(
         # --batch` skips accepted items and reuses the leases that are still active).
         payload["recovery_action"] = "regenerate_batch_response_skeleton"
         payload["accepted_item_ids"] = list(accepted_item_ids)
+        # `agent next --batch` regenerates the runtime-owned skeleton at a fixed path, not
+        # at the caller's batch_path, so the structured submit command must point there.
+        # Leaving `commands.resolve_batch` on the file just rejected would send a reader
+        # of structured fields straight back into the same STALE_LEASE.
+        regenerated_resolve_command = command_templates.resolve_batch(repo, pr_number, input_path=str(skeleton_path))
+        payload["commands"]["resolve_batch"] = regenerated_resolve_command
+        payload["batch_response_skeleton_path"] = str(skeleton_path)
         # `to_summary` lets a payload `remediation` override the per-code default, and
         # STALE_LEASE's default is the generic fallback (`address --lean`), which would
         # contradict the recovery_message below for an agent reading structured fields.
@@ -1011,7 +1018,7 @@ def _batch_recovery_payload(
             f"BatchActionResponse rejected after {len(accepted_item_ids)} item(s) were already accepted "
             f"({', '.join(accepted_item_ids)}). Do not resubmit the same file: its accepted rows will fail with "
             f"STALE_LEASE. Run `{batch_next_command}` to regenerate a skeleton for the items still outstanding "
-            "-- their active leases were kept -- then submit that."
+            f"-- their active leases were kept -- then submit that with `{regenerated_resolve_command}`."
         )
         return payload
     if target_path.is_file():

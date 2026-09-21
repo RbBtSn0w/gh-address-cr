@@ -178,6 +178,36 @@ class BatchPartialAcceptanceRecoveryTest(unittest.TestCase):
                 self.assertNotIn("address owner/repo", summary["remediation"]["command"])
                 self.assertNotIn("--lean", summary["remediation"]["command"])
 
+    def test_structured_submit_command_points_at_the_regenerated_skeleton(self):
+        # `agent next --batch` rewrites the runtime-owned skeleton at a fixed path, so
+        # `commands.resolve_batch` must point there. The agent may well have submitted a
+        # copy from elsewhere; pointing the command at that file would send a reader of
+        # structured fields straight back into STALE_LEASE (PR #278 review). Submit a
+        # copy so the two paths differ and the assertion can tell them apart.
+        import shutil
+
+        from gh_address_cr.core import agent_batch
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.paths import SessionPaths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                _, skeleton_path = self._claim_and_fill("owner/repo", "905")
+                submitted_copy = Path(tmp) / "my-batch-copy.json"
+                shutil.copy(skeleton_path, submitted_copy)
+                self.assertNotEqual(submitted_copy, skeleton_path)
+
+                with self._fail_on_second_row(), self.assertRaises(WorkflowError) as ctx:
+                    agent_batch.submit_batch_action_response("owner/repo", "905", batch_path=submitted_copy)
+
+                runtime_skeleton = str(SessionPaths("owner/repo", "905").workspace_dir / "batch-response-skeleton.json")
+                payload = ctx.exception.payload
+                self.assertIn(runtime_skeleton, payload["commands"]["resolve_batch"])
+                self.assertNotIn(str(submitted_copy), payload["commands"]["resolve_batch"])
+                self.assertEqual(payload["batch_response_skeleton_path"], runtime_skeleton)
+                # The human-readable text agrees with the structured field.
+                self.assertIn(payload["commands"]["resolve_batch"], str(ctx.exception))
+
     def test_the_recommended_recovery_actually_recovers(self):
         # Asserting the text mentions `agent next --batch` is not enough: the advice is
         # only worth giving if running it yields a submittable batch for the rest.
