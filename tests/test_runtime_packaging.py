@@ -405,6 +405,19 @@ class RuntimePackagingTest(PythonScriptTestCase):
         ):
             self.assertIn(command, text)
 
+    def test_ci_workflow_routes_synthetic_smoke_telemetry_to_development_gateway(self):
+        # Installed-CLI smoke runs hit placeholder repos without gh auth; sending them to
+        # the production gateway fires the production auth/error alerts.
+        text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+        header = text.split("\njobs:", 1)[0]
+        self.assertRegex(
+            header,
+            r"(?m)^env:\n  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "
+            r"https://telemetry-gateway-development\.hamiltonsnow\.workers\.dev/v1/traces$",
+        )
+        self.assertNotIn("DISABLE_TELEMETRY", header)
+
     def test_ci_installs_project_dependencies_before_source_tests(self):
         text = CI_WORKFLOW.read_text(encoding="utf-8")
 
