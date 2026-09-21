@@ -472,5 +472,124 @@ class ReentryBoundaryTest(unittest.TestCase):
                 self.assertNotEqual(again["lease_id"], first["lease_id"])
 
 
+class ReentryStateSpaceTest(unittest.TestCase):
+    """Every state the request and skeleton files can be in, against one invariant.
+
+    > What re-entry returns must be submittable -- observationally equivalent to a
+    > fresh claim, minus the new lease.
+
+    The targeted tests above each explain why one cell matters. This table exists so
+    the *set* of cells is the thing under test: the defects found on this path were all
+    one predicate applied unevenly, and were found one at a time because nothing
+    asserted the space was covered. A new cell belongs here, not in a new one-off test.
+    """
+
+    CORRUPTIONS = {
+        "request_missing": lambda req, skel, original: req.unlink(),
+        "request_not_json": lambda req, skel, original: req.write_text("{ not json", encoding="utf-8"),
+        "request_json_list": lambda req, skel, original: req.write_text("[]", encoding="utf-8"),
+        "request_json_null": lambda req, skel, original: req.write_text("null", encoding="utf-8"),
+        "request_json_scalar": lambda req, skel, original: req.write_text("42", encoding="utf-8"),
+        "request_empty_object": lambda req, skel, original: req.write_text("{}", encoding="utf-8"),
+        "request_partial_object": lambda req, skel, original: req.write_text(
+            json.dumps({"request_id": original["request_id"]}), encoding="utf-8"
+        ),
+        "request_foreign_request_id": lambda req, skel, original: req.write_text(
+            json.dumps({**original, "request_id": "req_from_another_lease"}), encoding="utf-8"
+        ),
+        "request_foreign_lease_id": lambda req, skel, original: req.write_text(
+            json.dumps({**original, "lease_id": "lease_from_another_lease"}), encoding="utf-8"
+        ),
+        "request_intact": lambda req, skel, original: None,
+        "skeleton_missing": lambda req, skel, original: skel.unlink(),
+        "skeleton_not_json": lambda req, skel, original: skel.write_text("{ not json", encoding="utf-8"),
+        "skeleton_empty_object": lambda req, skel, original: skel.write_text("{}", encoding="utf-8"),
+        "skeleton_foreign_ids": lambda req, skel, original: skel.write_text(
+            json.dumps({"request_id": "req_other", "lease_id": "lease_other"}), encoding="utf-8"
+        ),
+        "both_missing": lambda req, skel, original: (req.unlink(), skel.unlink()),
+    }
+
+    def test_every_file_state_yields_a_submittable_request(self):
+        from gh_address_cr.core import agent_protocol
+        from gh_address_cr.core.models import ActionRequest
+
+        for index, (name, corrupt) in enumerate(sorted(self.CORRUPTIONS.items())):
+            with self.subTest(state=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        pr = str(2000 + index)
+                        manager = _session("owner/repo", pr)
+                        first = _claim("owner/repo", pr)
+                        request_path = Path(first["request_path"])
+                        skeleton_path = Path(first["response_skeleton_path"])
+                        original = json.loads(request_path.read_text(encoding="utf-8"))
+                        corrupt(request_path, skeleton_path, original)
+
+                        again = agent_protocol.issue_action_request(
+                            "owner/repo", pr, role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                        )
+
+                        self.assertEqual(again["lease_id"], first["lease_id"])
+                        self.assertLessEqual(set(first), set(again), "payload shape differs from a fresh claim")
+
+                        lease = manager.load()["leases"][first["lease_id"]]
+                        request = json.loads(Path(again["request_path"]).read_text(encoding="utf-8"))
+                        ActionRequest.from_dict(request)
+                        self.assertEqual(request["request_id"], lease["request_id"])
+                        self.assertEqual(request["lease_id"], lease["lease_id"])
+                        self.assertEqual(ActionRequest.from_dict(request).stable_hash(), lease["request_hash"])
+
+                        skeleton = json.loads(Path(again["response_skeleton_path"]).read_text(encoding="utf-8"))
+                        self.assertEqual(skeleton["request_id"], request["request_id"])
+                        self.assertEqual(skeleton["lease_id"], request["lease_id"])
+
+                        # The invariant that subsumes the rest: it submits.
+                        response_path = Path(tmp) / "response.json"
+                        response_path.write_text(
+                            json.dumps(
+                                {
+                                    "schema_version": request["schema_version"],
+                                    "request_id": request["request_id"],
+                                    "lease_id": request["lease_id"],
+                                    "agent_id": "agent-a",
+                                    "item_id": "github-thread:X",
+                                    "resolution": "clarify",
+                                    "note": "Not a defect; declining with rationale.",
+                                    "reply_markdown": "Not a defect; declining with rationale.",
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                        accepted = agent_protocol.submit_action_response("owner/repo", pr, response_path=response_path)
+                        self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
+
+    def test_a_skeleton_the_agent_filled_in_survives_re_entry(self):
+        # The predicate rejects an *unusable* skeleton, not a modified one. Regenerating
+        # on any difference would silently destroy the evidence the agent had written.
+        from gh_address_cr.core import agent_protocol
+
+        for index, also_lose_request in enumerate((False, True)):
+            with self.subTest(request_lost=also_lose_request):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        pr = str(2100 + index)
+                        _session("owner/repo", pr)
+                        first = _claim("owner/repo", pr)
+                        skeleton_path = Path(first["response_skeleton_path"])
+                        filled = json.loads(skeleton_path.read_text(encoding="utf-8"))
+                        filled["note"] = "evidence the agent already wrote"
+                        skeleton_path.write_text(json.dumps(filled), encoding="utf-8")
+                        if also_lose_request:
+                            Path(first["request_path"]).unlink()
+
+                        again = agent_protocol.issue_action_request(
+                            "owner/repo", pr, role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                        )
+
+                        kept = json.loads(Path(again["response_skeleton_path"]).read_text(encoding="utf-8"))
+                        self.assertEqual(kept["note"], "evidence the agent already wrote")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -192,7 +192,8 @@ def _reenter_own_fixer_lease(
 
     request_path = Path(str(request_path))
     skeleton_path = request_path.with_name(f"action-response-skeleton-{request_id}.json")
-    request = _read_request_file(request_path, request_id=request_id, lease_id=str(lease["lease_id"]))
+    identity = {"request_id": request_id, "lease_id": str(lease["lease_id"])}
+    request = _payload_for_lease(request_path, **identity, validate=ActionRequest.from_dict)
     if request is None:
         # The request itself is gone (or unreadable), so it has to be rebuilt.
         request = _rebuild_fixer_request(repo, pr_number, session, item=item, lease=lease, github_client=github_client)
@@ -203,10 +204,10 @@ def _reenter_own_fixer_lease(
         # keep the lease's copy in step with what is now on disk.
         lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
         session_store.save_session(repo, pr_number, session)
-    if not skeleton_path.is_file():
-        # Derived from whatever request is on disk. When only the skeleton was lost the
-        # request, and the hash the lease stores for it, must stay exactly as they are:
-        # rebuilding the request here moved the lease's hash without rewriting the file,
+    if _payload_for_lease(skeleton_path, **identity) is None:
+        # Derived from the request now on disk. Regenerating the skeleton does not touch
+        # the request or the hash the lease stores for it: when only the skeleton was
+        # lost, rebuilding the request here moved that hash without rewriting the file,
         # and the two then disagreed on submit.
         write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
 
@@ -230,24 +231,41 @@ def _reenter_own_fixer_lease(
     }
 
 
-def _read_request_file(path: Path, *, request_id: str, lease_id: str) -> dict[str, Any] | None:
-    """The request on disk if it is this lease's, else None.
+def _payload_for_lease(
+    path: Path,
+    *,
+    request_id: str,
+    lease_id: str,
+    validate: Any | None = None,
+) -> dict[str, Any] | None:
+    """The JSON object on disk when it belongs to this lease, else None.
 
-    Two conditions, both of which must hold for re-entry to hand the file back:
+    One predicate for the request and for its response skeleton. Applying it to the
+    request only was an asymmetry, not a decision: a corrupt or foreign skeleton was
+    handed back untouched while the request beside it would have been rebuilt.
 
-    - It is a usable ActionRequest. Validity is `ActionRequest.from_dict`, the parser
-      submit itself uses, so what re-entry accepts cannot drift from what submit does.
-      "Any JSON object" is not enough: `{}` parses, then skeleton generation indexes
-      required keys and raises KeyError instead of rebuilding.
-    - It carries this lease's `request_id` and `lease_id`. A file can be a perfectly valid
-      ActionRequest and still belong to another lease; returning it, with a skeleton named
-      for the current request_id, points the agent at the wrong request.
+    Usable means all of:
 
-    Anything else is treated as lost, so the caller rebuilds under the lease's own ids.
+    - it parses, and is an object;
+    - it passes `validate`, when one is given. For the request that is
+      `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
+      accepts cannot drift from what submit accepts. "Any JSON object" is not enough:
+      `{}` parses, then skeleton generation indexes required keys and raises KeyError
+      instead of rebuilding. A skeleton has no such parser -- it is deliberately
+      incomplete until the agent fills it in -- so it is checked on identity alone;
+    - it carries this lease's `request_id` and `lease_id`. A file can be perfectly
+      valid and still belong to another lease, and handing that back points the agent
+      at the wrong request.
+
+    A skeleton the agent has already filled in still matches, so re-entry keeps it;
+    only an unusable one is regenerated and the agent's evidence is never discarded.
     """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        ActionRequest.from_dict(payload)
+        if not isinstance(payload, dict):
+            return None
+        if validate is not None:
+            validate(payload)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
         return None
     if str(payload.get("request_id")) != request_id or str(payload.get("lease_id")) != lease_id:
