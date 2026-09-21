@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# CI smoke runs exercise the installed CLI against placeholder repos without gh
+# auth. Route their spans to the development Gateway so synthetic failures never
+# reach the production dataset or its alerts.
+env:
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+
 jobs:
   lint-and-test:
     permissions:
