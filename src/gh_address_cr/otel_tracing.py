@@ -131,16 +131,21 @@ def initialize_telemetry() -> Tracer:
 def release_channel(version: str) -> str:
     """Classify a build as ``development`` or ``production`` from its PEP 440 version.
 
-    Only dev releases (``.devN``) and local versions (``+sha``, how PR previews are
-    stamped) leave production; published pre-releases such as ``-beta.N`` are real
-    user-facing builds. An unparseable version falls back to production so a parsing
-    defect can never silently drop stable-release telemetry.
+    Only dev releases (``.devN``) leave production. PR previews are stamped
+    ``<base>.devN+<sha>``, so ``.devN`` identifies them; the local segment is not
+    consulted. Reading it too is what let a pre-release with a local segment
+    (``3.16.0-beta.1+abc``) match two rules with opposite answers, and it would route a
+    repackaged release carrying ``+internal`` away from production. Published
+    pre-releases such as ``-beta.N`` are real user-facing builds.
+
+    An unparseable version falls back to production. Routing a real build away from
+    production silently loses its telemetry, so when unsure this chooses production.
     """
     try:
         parsed = Version(version)
     except InvalidVersion:
         return "production"
-    return "development" if parsed.is_devrelease or parsed.local else "production"
+    return "development" if parsed.is_devrelease else "production"
 
 
 def _traces_endpoint(environ: Mapping[str, str], version: str | None = None) -> str:

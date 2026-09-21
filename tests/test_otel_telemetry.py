@@ -238,7 +238,11 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
                 self.assertEqual(exporter_type.call_args.kwargs["endpoint"], expected)
                 self.assertEqual(exporter_type.call_args.kwargs["headers"], expected_headers)
 
-    def test_release_channel_only_routes_dev_and_local_versions_off_production(self) -> None:
+    def test_release_channel_only_routes_dev_releases_off_production(self) -> None:
+        # The channel is a function of the dev-release flag alone (spec 032). A local
+        # version segment is not consulted: preview builds are `<base>.devN+<sha>`, so
+        # `.devN` already identifies them, and treating `+...` as a signal is what made
+        # `3.16.0-beta.1+abc` match two rules with opposite answers.
         from gh_address_cr import otel_tracing
 
         cases = [
@@ -249,7 +253,13 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             ("3.15.2.dev279+5dc8a44", "development"),
             ("3.13.1.dev266+b3bddc8", "development"),
             ("3.15.2.dev279", "development"),
-            ("3.15.2+local", "development"),
+            # A local segment alone never leaves production: routing a real build away
+            # silently loses its telemetry, and a repackaged release may carry one.
+            ("3.15.2+local", "production"),
+            ("3.15.2+internal", "production"),
+            # The reviewed ambiguity: a pre-release that also has a local segment.
+            ("3.16.0-beta.1+abc", "production"),
+            ("3.16.0rc1+local", "production"),
             ("not-a-version", "production"),
             ("", "production"),
         ]
@@ -265,6 +275,8 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             ("3.15.2", otel_tracing.OTLP_TRACES_ENDPOINT),
             ("3.16.0-beta.1", otel_tracing.OTLP_TRACES_ENDPOINT),
             ("3.15.2.dev279+5dc8a44", development),
+            ("3.16.0-beta.1+abc", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.15.2+internal", otel_tracing.OTLP_TRACES_ENDPOINT),
             ("not-a-version", otel_tracing.OTLP_TRACES_ENDPOINT),
         ]
         for version, expected in cases:

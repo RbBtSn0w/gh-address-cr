@@ -152,7 +152,7 @@ Gateway by default:
 https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
 
-Development and PR-preview builds (a `.devN` or local `+sha` version) default to
+Development and PR-preview builds (a `.devN` development-release version) default to
 the development Gateway instead, so pre-merge traffic never reaches the
 production dataset:
 
@@ -161,7 +161,8 @@ https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
 ```
 
 Published releases, including `beta` and `rc` pre-releases, report to the
-production Gateway. An unrecognized version string also falls back to production.
+production Gateway, and a local version segment (`+...`) does not change that: only a
+`.devN` release is routed away. An unrecognized version string also falls back to production.
 
 For controlled environment canaries, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` may
 target the exact HTTPS development or staging Gateway origin. The client adds
