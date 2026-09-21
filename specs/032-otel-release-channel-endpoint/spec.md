@@ -32,11 +32,20 @@ and agent environments leaking.
 ## Requirements
 
 - Derive a release channel from the installed `__version__` using PEP 440:
-  - `development`: dev release (`.devN`) or any local version segment (`+sha`),
-    which is how PR preview builds are versioned;
+  - `development`: dev release (`.devN`) only. PR preview builds are versioned
+    `<base>.devN+<sha>`, so the `.devN` alone identifies them; the `+<sha>` is
+    not needed and is deliberately not a signal;
   - `production`: everything else, including final releases and published
     pre-releases (`a`, `b`, `rc`, `-beta.N`). Pre-releases are real user-facing
     builds distributed through normal channels, so they report to production.
+  - A local version segment (`+...`) never changes the channel on its own. A
+    version that is both a pre-release and carries a local segment, for example
+    `3.16.0-beta.1+abc`, is `production`: there is no rule under which it could
+    also be `development`, so the mapping is a function of the dev-release flag
+    alone. This follows the plan's stated failure direction: routing a real
+    build away from production silently loses its telemetry, and a local
+    segment is not evidence that a build is synthetic (a repackaged release may
+    carry one).
 - When no endpoint is configured, use the approved gateway origin for the
   channel: `production` -> `https://telemetry-gateway.hamiltonsnow.workers.dev`,
   `development` -> `https://telemetry-gateway-development.hamiltonsnow.workers.dev`,
@@ -56,7 +65,9 @@ and agent environments leaking.
 
 - A table-driven test maps representative versions to channels, including the
   formats this repository actually publishes: `3.15.2` and `3.16.0-beta.1`
-  (production), `3.15.2.dev279+5dc8a44` and `3.13.1.dev266+b3bddc8` (development).
+  (production), `3.15.2.dev279+5dc8a44` and `3.13.1.dev266+b3bddc8` (development),
+  and the boundaries that follow from the rule above: `3.16.0-beta.1+abc` and
+  `3.15.2+internal` (production: a local segment alone is not a dev release).
 - Explicit endpoint variables and the opt-out keep their existing precedence.
 - The repository's own `__version__` classifies as `production` on `main`, and a
   contract test fails if a stable-looking version would route off production.

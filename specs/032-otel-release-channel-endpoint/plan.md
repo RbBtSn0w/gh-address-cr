@@ -7,7 +7,7 @@
 | Authoritative state owner | Package `__version__` is the only input; telemetry never becomes workflow truth |
 | External inputs | `__version__`, `OTEL_EXPORTER_OTLP_*` env, `DISABLE_TELEMETRY`/`DO_NOT_TRACK` |
 | Projection | One pure function `release_channel(version) -> production | development` and one default-endpoint table |
-| Policy | Only dev/local versions leave production; unparseable version -> production; explicit endpoint and opt-out always win |
+| Policy | Only dev releases (`.devN`) leave production; unparseable version -> production; explicit endpoint and opt-out always win |
 | Side-effect boundary | Only which approved gateway origin the existing traces-only exporter targets |
 | Artifact truth | Honeycomb data per environment is operational evidence, never final-gate evidence |
 | Recovery/replay | Export stays fail-open; rollback is reverting the default table to production, or the existing opt-out |
@@ -17,8 +17,10 @@
 ## Design Notes
 
 - Channel derivation uses `packaging.version.Version` (already a runtime
-  dependency). `is_devrelease` or a `local` segment -> development; everything
-  else, including `-beta.N` builds published from `develop`, -> production.
+  dependency). `is_devrelease` -> development; everything else, including `-beta.N`
+  builds published from `develop` and any version whose only non-final marker is a
+  `local` segment, -> production. A local segment is not consulted: preview builds
+  are `<base>.devN+<sha>` and `.devN` already identifies them.
   Pre-releases are deliberately not routed away: they are user-facing builds and
   their failures are real signal.
 - Failure direction is deliberate. Routing a stable build to a non-production
