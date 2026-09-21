@@ -424,6 +424,36 @@ class ReentryBoundaryTest(unittest.TestCase):
 
                 self.assertEqual(ctx.exception.reason_code, "LEASE_LOCKED_ITEM")
 
+    def test_re_entry_needs_item_mode_and_the_guidance_says_so(self):
+        # Without `--item-id`, `_next_item` skips the item as already leased and re-entry
+        # is never reached, so a bare `agent next --role fixer` answers NO_ELIGIBLE_ITEM.
+        # Pinned together with the guidance, because the risk here is not the behaviour
+        # but documenting a recovery command that cannot perform the recovery.
+        from gh_address_cr.core import agent_protocol, protocol_codes
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.remediation import remediation_for
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                _session("owner/repo", "1050")
+                first = _claim("owner/repo", "1050")
+
+                with self.assertRaises(WorkflowError) as ctx:
+                    agent_protocol.issue_action_request("owner/repo", "1050", role="fixer", agent_id="agent-a")
+                self.assertEqual(ctx.exception.reason_code, protocol_codes.NO_ELIGIBLE_ITEM)
+
+                # The item-mode form is what actually re-enters.
+                again = agent_protocol.issue_action_request(
+                    "owner/repo", "1050", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+                self.assertEqual(again["lease_id"], first["lease_id"])
+
+                summary = remediation_for(protocol_codes.LEASE_LOCKED_ITEM, repo="owner/repo", pr_number="1050")[
+                    "summary"
+                ]
+                self.assertIn("--item-id", summary)
+                self.assertIn("NO_ELIGIBLE_ITEM", summary)
+
     def test_an_expired_lease_is_not_re_entered(self):
         # Re-entry runs after expire_leases, so an expired lease yields a fresh claim
         # (the normal path), never a resurrected old request.
