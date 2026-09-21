@@ -405,18 +405,77 @@ class RuntimePackagingTest(PythonScriptTestCase):
         ):
             self.assertIn(command, text)
 
+    DEV_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
+
+    @staticmethod
+    def _workflow_env_bindings(text):
+        """Every `env:` mapping in a workflow, as (scope, variable, value) triples.
+
+        Text-matching one region of the file only guards that region. A job- or step-level
+        `env:` block overrides the top-level one, so a check that stops at `jobs:` passes
+        while a job quietly re-points the endpoint at production, or turns telemetry off.
+        Reading every block covers the workflow whatever level the override is written at.
+
+        Standard library only: the project installs no YAML parser (`pip install -e .`), so
+        depending on PyYAML here would pass locally and fail in CI. A block is the mapping
+        indented under an `env:` key, ending at the first line indented no deeper than it.
+        """
+        bindings = []
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            match = re.match(r"^(\s*)(?:-\s+)?env:\s*$", line)
+            if not match:
+                continue
+            key_indent = len(match.group(1))
+            for entry in lines[index + 1 :]:
+                if not entry.strip() or entry.lstrip().startswith("#"):
+                    continue
+                if len(entry) - len(entry.lstrip()) <= key_indent:
+                    break
+                pair = re.match(r"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$", entry)
+                if pair:
+                    bindings.append((f"env@line{index + 1}", pair.group(1), pair.group(2).strip("\"'")))
+        return bindings
+
+    def test_env_binding_extractor_sees_overrides_at_every_level(self):
+        # The extractor is the thing the CI guard below trusts, so pin it first.
+        workflow = (
+            "name: x\n"
+            "env:\n"
+            "  TOP: one\n"
+            "jobs:\n"
+            "  build:\n"
+            "    env:\n"
+            "      JOB_LEVEL: two\n"
+            "    steps:\n"
+            "      - name: s\n"
+            "        env:\n"
+            "          STEP_LEVEL: three\n"
+            "        run: echo\n"
+            "      - name: t\n"
+            "        run: echo\n"
+        )
+
+        found = {(name, value) for _, name, value in self._workflow_env_bindings(workflow)}
+
+        self.assertEqual(found, {("TOP", "one"), ("JOB_LEVEL", "two"), ("STEP_LEVEL", "three")})
+
     def test_ci_workflow_routes_synthetic_smoke_telemetry_to_development_gateway(self):
         # Installed-CLI smoke runs hit placeholder repos without gh auth; sending them to
         # the production gateway fires the production auth/error alerts.
-        text = CI_WORKFLOW.read_text(encoding="utf-8")
+        bindings = self._workflow_env_bindings(CI_WORKFLOW.read_text(encoding="utf-8"))
 
-        header = text.split("\njobs:", 1)[0]
-        self.assertRegex(
-            header,
-            r"(?m)^env:\n  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "
-            r"https://telemetry-gateway-development\.hamiltonsnow\.workers\.dev/v1/traces$",
-        )
-        self.assertNotIn("DISABLE_TELEMETRY", header)
+        endpoints = [(scope, value) for scope, name, value in bindings if name == "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
+        self.assertTrue(endpoints, "no env block sets OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        # Every binding, at any level, must point at development. One production override
+        # anywhere defeats the routing for that job's smoke runs.
+        for scope, value in endpoints:
+            with self.subTest(scope=scope):
+                self.assertEqual(value, self.DEV_TRACES_ENDPOINT)
+
+        # Turning telemetry off anywhere would hide the very routing this guards.
+        disabled = [(scope, name) for scope, name, _ in bindings if name in {"DISABLE_TELEMETRY", "DO_NOT_TRACK"}]
+        self.assertEqual(disabled, [])
 
     def test_ci_installs_project_dependencies_before_source_tests(self):
         text = CI_WORKFLOW.read_text(encoding="utf-8")
