@@ -208,6 +208,66 @@ class OwnerReentryTest(unittest.TestCase):
                 # copy untouched would have left the two out of step.
                 self.assertNotEqual(original_hash, disk_hash)
 
+    def test_only_the_skeleton_missing_leaves_the_request_and_its_hash_alone(self):
+        # The request file survives, so there is nothing to rebuild: the skeleton is
+        # derived from the request already on disk. Rebuilding the request here moved the
+        # lease's hash without rewriting the file, and the two then disagreed on submit
+        # (PR #279 review).
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _session("owner/repo", "1010")
+                first = _claim("owner/repo", "1010")
+                request = json.loads(Path(first["request_path"]).read_text(encoding="utf-8"))
+                before_bytes = Path(first["request_path"]).read_bytes()
+                before_hash = manager.load()["leases"][first["lease_id"]]["request_hash"]
+                Path(first["response_skeleton_path"]).unlink()
+
+                again = agent_protocol.issue_action_request(
+                    "owner/repo", "1010", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+
+                self.assertTrue(Path(again["response_skeleton_path"]).is_file())
+                self.assertEqual(Path(first["request_path"]).read_bytes(), before_bytes)
+                self.assertEqual(manager.load()["leases"][first["lease_id"]]["request_hash"], before_hash)
+
+                # And the response written against that request still submits.
+                response = {
+                    "schema_version": request["schema_version"],
+                    "request_id": request["request_id"],
+                    "lease_id": request["lease_id"],
+                    "agent_id": "agent-a",
+                    "item_id": "github-thread:X",
+                    "resolution": "clarify",
+                    "note": "Not a defect; declining with rationale.",
+                    "reply_markdown": "Not a defect; declining with rationale.",
+                }
+                response_path = Path(tmp) / "response.json"
+                response_path.write_text(json.dumps(response), encoding="utf-8")
+                accepted = agent_protocol.submit_action_response("owner/repo", "1010", response_path=response_path)
+                self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
+
+    def test_a_corrupt_request_file_is_rebuilt_rather_than_handed_back(self):
+        # `is_file()` alone treats a truncated or garbled request as present and returns
+        # it, so the agent gets a file it cannot read. Unreadable means rebuild.
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                _session("owner/repo", "1011")
+                first = _claim("owner/repo", "1011")
+                original = json.loads(Path(first["request_path"]).read_text(encoding="utf-8"))
+                Path(first["request_path"]).write_text("{ not json", encoding="utf-8")
+
+                again = agent_protocol.issue_action_request(
+                    "owner/repo", "1011", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+
+                rebuilt = json.loads(Path(again["request_path"]).read_text(encoding="utf-8"))
+                self.assertEqual(rebuilt["request_id"], original["request_id"])
+                self.assertEqual(rebuilt["lease_id"], original["lease_id"])
+
     def test_intact_request_files_are_returned_untouched(self):
         # Re-entry must not rewrite a request the agent still has: rewriting would move
         # its hash for no reason and churn the file the agent is reading.

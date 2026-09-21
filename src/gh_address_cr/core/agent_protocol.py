@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -191,18 +192,23 @@ def _reenter_own_fixer_lease(
 
     request_path = Path(str(request_path))
     skeleton_path = request_path.with_name(f"action-response-skeleton-{request_id}.json")
-    if not request_path.is_file() or not skeleton_path.is_file():
+    request = _read_request_file(request_path)
+    if request is None:
+        # The request itself is gone (or unreadable), so it has to be rebuilt.
         request = _rebuild_fixer_request(repo, pr_number, session, item=item, lease=lease, github_client=github_client)
         request["response_skeleton_path"] = str(skeleton_path)
-        if not request_path.is_file():
-            write_json_atomic(request_path, request)
-        if not skeleton_path.is_file():
-            write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
+        write_json_atomic(request_path, request)
         # The stack revision binding is part of the hash, so a rebuilt request can hash
         # differently from the original. Submit recomputes the hash from the file, but
         # keep the lease's copy in step with what is now on disk.
         lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
         session_store.save_session(repo, pr_number, session)
+    if not skeleton_path.is_file():
+        # Derived from whatever request is on disk. When only the skeleton was lost the
+        # request, and the hash the lease stores for it, must stay exactly as they are:
+        # rebuilding the request here moved the lease's hash without rewriting the file,
+        # and the two then disagreed on submit.
+        write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
 
     return {
         "status": "ACTION_REQUESTED",
@@ -218,6 +224,15 @@ def _reenter_own_fixer_lease(
             "then fill response_skeleton_path."
         ),
     }
+
+
+def _read_request_file(path: Path) -> dict[str, Any] | None:
+    """The request on disk, or None when it is missing or unreadable."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _rebuild_fixer_request(
