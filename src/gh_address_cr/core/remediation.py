@@ -82,10 +82,13 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
         return {
             "summary": (
                 "An active lease holds this item. Read `lease_recovery` on this payload before "
-                "retrying: `reason_code` `LEASE_ACTIVE` means you already own it and should submit "
-                "against the ActionRequest you hold, while `LEASE_RECOVERY_STOP` means another agent "
-                "or role owns it. `agent reclaim` only expires leases past their TTL, so it will not "
-                "free a still-valid one."
+                "retrying: `reason_code` `LEASE_RECOVERY_STOP` means another agent or role owns it. "
+                "`LEASE_ACTIVE` means you own it but cannot be handed the request back -- a fixer's "
+                "own active lease is re-entered by `agent next --role fixer` and never reaches this "
+                "error, so this is a non-fixer role, a lease you already submitted against, or a "
+                "lease with no request on record; submit against the ActionRequest you hold. "
+                "`agent reclaim` only expires leases past their TTL, so it will not free a "
+                "still-valid one."
             ),
             "command": command_templates.leases(repo, pr_number),
         }
