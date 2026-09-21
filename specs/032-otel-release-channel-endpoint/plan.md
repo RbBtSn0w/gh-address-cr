@@ -49,5 +49,5 @@
 | Risk | Mitigation |
 |---|---|
 | Stable release misclassified and routed off production | Table test over real published formats; repo-version contract test; unparseable -> production |
-| Privacy expectation shifts for dev/pre-release users | Same anonymous profile and fields, documented in `PRIVACY.md`; opt-out unchanged |
+| Privacy expectation shifts for dev-build users | Same anonymous profile and fields, documented in `PRIVACY.md`; opt-out unchanged |
 | Pre-release noise in production alerts | Alert semantics are handled separately (per-version, deduplicated); beta versions remain distinguishable by `service.version` |
