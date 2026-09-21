@@ -79,6 +79,9 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
         }
 
     if code == protocol_codes.LEASE_LOCKED_ITEM:
+        # Generated, not hand-written: a command spelled out in prose drifts from the real
+        # one and loses its `gh-address-cr` prefix, which is not copy-pasteable.
+        item_mode_next = command_templates.next_fixer_for_item(repo, pr_number, "<item_id>", agent_id="<agent_id>")
         return {
             "summary": (
                 "An active lease holds this item. Read `lease_recovery` on this payload before "
@@ -86,10 +89,10 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
                 "`LEASE_ACTIVE` means you own it but cannot be handed the request back, so this is a "
                 "non-fixer role, a lease you already submitted against, or a lease with no request on "
                 "record; submit against the ActionRequest you hold. A fixer re-enters its own active "
-                "lease with the item-mode form `agent next <owner/repo> <pr_number> --role fixer "
-                "--agent-id <id> --item-id <item_id>`; without `--item-id` that item is skipped as "
-                "already leased and the command answers `NO_ELIGIBLE_ITEM` instead. `agent reclaim` "
-                "only expires leases past their TTL, so it will not free a still-valid one."
+                f"lease with the item-mode form `{item_mode_next}`; without `--item-id` that item is "
+                "skipped as already leased and the command answers `NO_ELIGIBLE_ITEM` instead. "
+                f"`{command_templates.reclaim(repo, pr_number)}` only expires leases past their TTL, "
+                "so it will not free a still-valid one."
             ),
             "command": command_templates.leases(repo, pr_number),
         }

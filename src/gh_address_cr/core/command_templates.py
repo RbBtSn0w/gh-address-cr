@@ -244,6 +244,10 @@ def publish(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "agent", "publish", repo, pr_number)
 
 
+def reclaim(repo: str, pr_number: str) -> str:
+    return shell_command("gh-address-cr", "agent", "reclaim", repo, pr_number)
+
+
 def leases(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "agent", "leases", repo, pr_number)
 

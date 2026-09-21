@@ -23,6 +23,7 @@ would break `models.LEASE_RECOVERY_OUTCOMES` validation for older readers.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -139,6 +140,64 @@ class LeaseRemediationTest(unittest.TestCase):
                 # Must explain why a non-expired lease was left alone.
                 self.assertIn("TTL", remediation["summary"])
                 self.assertIn("agent leases", remediation["command"])
+
+
+class RemediationCommandsAreRunnableTest(unittest.TestCase):
+    """Every command a remediation names must be runnable exactly as written.
+
+    Prose-spelled commands drift: the item-mode `agent next` in the LEASE_LOCKED_ITEM
+    text and the `agent reclaim` in the reclaim payload were both written by hand and
+    both lost the `gh-address-cr` prefix, so an agent copy-pasting either got nothing.
+    Generating them from `command_templates` is the fix; this is the guard.
+    """
+
+    CLI_START = re.compile(r"^(agent|final-gate|address|review|threads|adapter|active-pr|findings)\s")
+
+    CODES = (
+        "RESPONSE_FILE_NOT_FOUND",
+        "NO_ACTIVE_PR_SCOPE",
+        "MISSING_CLASSIFICATION",
+        "MISSING_CLASSIFICATION_NOTE",
+        "MISSING_ANYTHING",
+        "UNREGISTERED_CODE",
+    )
+
+    def _bare_commands(self, text):
+        return [span for span in re.findall(r"`([^`]+)`", text) if self.CLI_START.match(span)]
+
+    def test_no_remediation_names_a_command_without_its_entrypoint(self):
+        from gh_address_cr.core import protocol_codes
+        from gh_address_cr.core.remediation import remediation_for
+
+        codes = list(self.CODES) + [
+            protocol_codes.LEASE_LOCKED_ITEM,
+            protocol_codes.MISSING_PUBLISH_REPLY,
+            protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH,
+        ]
+        for code in codes:
+            with self.subTest(reason_code=code):
+                remediation = remediation_for(code, repo="owner/repo", pr_number="801")
+                self.assertEqual(self._bare_commands(remediation["summary"]), [])
+                self.assertTrue(remediation["command"].startswith("gh-address-cr "))
+
+    def test_the_reclaim_success_payload_names_runnable_commands_too(self):
+        # The success path carries its own remediation, and is reached with exit 0, so it
+        # never passes through remediation_for and needs its own guard.
+        from gh_address_cr.core import leases
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "806")
+                session = manager.create(status="WAITING_FOR_FIX")
+                item = github_thread("github-thread:A")
+                session["items"] = {item["item_id"]: item}
+                manager.save(session)
+
+                remediation = leases.reclaim_leases("owner/repo", "806")["remediation"]
+
+                self.assertEqual(self._bare_commands(remediation["summary"]), [])
+                self.assertTrue(remediation["command"].startswith("gh-address-cr "))
 
 
 if __name__ == "__main__":

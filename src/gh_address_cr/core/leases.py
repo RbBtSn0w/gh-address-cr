@@ -411,15 +411,14 @@ def _reclaim_remediation(repo: str, pr_number: str, *, expired_count: int) -> di
     if expired_count:
         return {
             "summary": (
-                f"Reclaimed {expired_count} expired lease(s). "
-                "Request work again; the items they held are claimable."
+                f"Reclaimed {expired_count} expired lease(s). Request work again; the items they held are claimable."
             ),
             "command": command_templates.address(repo, pr_number),
         }
     return {
         "summary": (
-            "No lease had expired, so nothing was reclaimed. `agent reclaim` only expires leases "
-            "whose TTL has passed -- it does not release a still-valid one. If an item is still "
+            f"No lease had expired, so nothing was reclaimed. `{command_templates.reclaim(repo, pr_number)}` "
+            "only expires leases whose TTL has passed -- it does not release a still-valid one. If an item is still "
             "blocked, inspect the holder and its `lease_recovery` state instead of retrying."
         ),
         "command": command_templates.leases(repo, pr_number),
