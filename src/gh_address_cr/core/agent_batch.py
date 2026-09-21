@@ -664,7 +664,13 @@ def submit_batch_action_response(
         }:
             for _, prepared in prepared_rows:
                 release_irrecoverable_request_lease(session, prepared, now=now)
-        _augment_batch_recovery_error(exc, session_paths, batch_path=batch_path, agent_id=_batch_agent_id(batch))
+        _augment_batch_recovery_error(
+            exc,
+            session_paths,
+            batch_path=batch_path,
+            agent_id=_batch_agent_id(batch),
+            accepted_item_ids=_accepted_item_ids(session, batch),
+        )
         session_store.save_session(repo, pr_number, session)
         raise
 
@@ -889,17 +895,50 @@ def _batch_agent_id(batch: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def _accepted_item_ids(session: dict[str, Any], batch: dict[str, Any] | None) -> list[str]:
+    """Item ids in this batch file whose lease was already accepted.
+
+    Batch submit is not atomic: `accept_action_response_submission` runs per row and
+    appends to the evidence ledger, so a failure on a later row leaves the earlier
+    ones accepted and persisted. That is a recoverable state rather than damage --
+    `agent next --batch` skips accepted items and reuses the still-active leases --
+    but the recovery text must not deny it happened.
+
+    Read from the batch file's own lease ids rather than from the rows this call got
+    as far as preparing. A resubmit of the same file fails while preparing its first
+    row -- its lease is already accepted -- so no row was prepared, yet that is the
+    rejection the agent sees and the one that must not say nothing was accepted.
+    """
+    if not isinstance(batch, dict):
+        return []
+    rows = batch.get("items")
+    if not isinstance(rows, list):
+        return []
+    leases = session.get("leases", {})
+    accepted: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lease = leases.get(str(row.get("lease_id") or ""))
+        if isinstance(lease, dict) and lease.get("status") == "accepted":
+            accepted.append(str(lease.get("item_id") or row.get("item_id") or ""))
+    return [item_id for item_id in accepted if item_id]
+
+
 def _augment_batch_recovery_error(
     exc: WorkflowError,
     session_paths: SessionPaths,
     *,
     batch_path: str | Path | None = None,
     agent_id: str | None = None,
+    accepted_item_ids: list[str] | None = None,
 ) -> WorkflowError:
     if exc.status != protocol_codes.BATCH_ACTION_REJECTED:
         return exc
     original_message = str(exc)
-    recovery = _batch_recovery_payload(session_paths, batch_path=batch_path, agent_id=agent_id)
+    recovery = _batch_recovery_payload(
+        session_paths, batch_path=batch_path, agent_id=agent_id, accepted_item_ids=accepted_item_ids
+    )
     recovery_message = str(recovery.pop("recovery_message"))
     payload = dict(recovery)
     payload.update(exc.payload)
@@ -931,6 +970,7 @@ def _batch_recovery_payload(
     *,
     batch_path: str | Path | None = None,
     agent_id: str | None = None,
+    accepted_item_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     skeleton_path = session_paths.workspace_dir / "batch-response-skeleton.json"
     target_path = Path(batch_path) if batch_path is not None else skeleton_path
@@ -950,6 +990,37 @@ def _batch_recovery_payload(
     }
     if agent_id:
         payload["agent_id"] = agent_id
+    if accepted_item_ids:
+        # Earlier rows were accepted and persisted before this one failed, so the file
+        # just submitted can no longer be resubmitted as-is: its accepted rows now fail
+        # with STALE_LEASE. Say so, and point at the path that recovers (`agent next
+        # --batch` skips accepted items and reuses the leases that are still active).
+        payload["recovery_action"] = "regenerate_batch_response_skeleton"
+        payload["accepted_item_ids"] = list(accepted_item_ids)
+        # `agent next --batch` regenerates the runtime-owned skeleton at a fixed path, not
+        # at the caller's batch_path, so the structured submit command must point there.
+        # Leaving `commands.resolve_batch` on the file just rejected would send a reader
+        # of structured fields straight back into the same STALE_LEASE.
+        regenerated_resolve_command = command_templates.resolve_batch(repo, pr_number, input_path=str(skeleton_path))
+        payload["commands"]["resolve_batch"] = regenerated_resolve_command
+        payload["batch_response_skeleton_path"] = str(skeleton_path)
+        # `to_summary` lets a payload `remediation` override the per-code default, and
+        # STALE_LEASE's default is the generic fallback (`address --lean`), which would
+        # contradict the recovery_message below for an agent reading structured fields.
+        payload["remediation"] = {
+            "summary": (
+                "Part of this batch was already accepted, so the file just submitted cannot be resubmitted. "
+                "Regenerate the skeleton for the outstanding items; their active leases were kept."
+            ),
+            "command": batch_next_command,
+        }
+        payload["recovery_message"] = (
+            f"BatchActionResponse rejected after {len(accepted_item_ids)} item(s) were already accepted "
+            f"({', '.join(accepted_item_ids)}). Do not resubmit the same file: its accepted rows will fail with "
+            f"STALE_LEASE. Run `{batch_next_command}` to regenerate a skeleton for the items still outstanding "
+            f"-- their active leases were kept -- then submit that with `{regenerated_resolve_command}`."
+        )
+        return payload
     if target_path.is_file():
         payload["batch_response_skeleton_path"] = str(target_path)
         payload["recovery_message"] = (
