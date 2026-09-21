@@ -472,6 +472,60 @@ class ReentryBoundaryTest(unittest.TestCase):
                 self.assertNotEqual(again["lease_id"], first["lease_id"])
 
 
+class ReentryLedgerContractTest(unittest.TestCase):
+    """`evidence-ledger.md`: "`request_issued` when an `ActionRequest` is written".
+
+    Re-entry has two shapes and the ledger must follow which one happened: handing back
+    an intact request writes nothing and records nothing, while rebuilding a lost one
+    writes an ActionRequest and so must record it. The ledger is what final-gate and the
+    audit summary read, and agents are told in `evidence-ledger.md` to expect the event.
+    """
+
+    def _events(self, manager):
+        ledger_path = Path(manager.load()["ledger_path"])
+        if not ledger_path.is_file():
+            return []
+        return [
+            json.loads(line)["event_type"]
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def test_rebuilding_a_lost_request_records_that_it_was_issued(self):
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _session("owner/repo", "1060")
+                first = _claim("owner/repo", "1060")
+                Path(first["request_path"]).unlink()
+                Path(first["response_skeleton_path"]).unlink()
+                before = self._events(manager)
+
+                agent_protocol.issue_action_request(
+                    "owner/repo", "1060", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+
+                self.assertIn("request_issued", self._events(manager)[len(before) :])
+
+    def test_handing_back_an_intact_request_records_nothing(self):
+        # Nothing was written, so recording an issue would claim a side effect that did
+        # not happen and inflate the evidence trail on every re-entry.
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _session("owner/repo", "1061")
+                _claim("owner/repo", "1061")
+                before = self._events(manager)
+
+                agent_protocol.issue_action_request(
+                    "owner/repo", "1061", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+
+                self.assertEqual(self._events(manager)[len(before) :], [])
+
+
 class ReentryStateSpaceTest(unittest.TestCase):
     """Every state the request and skeleton files can be in, against one invariant.
 
