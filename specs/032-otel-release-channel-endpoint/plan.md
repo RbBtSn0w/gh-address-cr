@@ -6,8 +6,8 @@
 |---|---|
 | Authoritative state owner | Package `__version__` is the only input; telemetry never becomes workflow truth |
 | External inputs | `__version__`, `OTEL_EXPORTER_OTLP_*` env, `DISABLE_TELEMETRY`/`DO_NOT_TRACK` |
-| Projection | One pure function `release_channel(version) -> production | staging | development` and one default-endpoint table |
-| Policy | Channel table above; unparseable version -> production; explicit endpoint and opt-out always win |
+| Projection | One pure function `release_channel(version) -> production | development` and one default-endpoint table |
+| Policy | Only dev/local versions leave production; unparseable version -> production; explicit endpoint and opt-out always win |
 | Side-effect boundary | Only which approved gateway origin the existing traces-only exporter targets |
 | Artifact truth | Honeycomb data per environment is operational evidence, never final-gate evidence |
 | Recovery/replay | Export stays fail-open; rollback is reverting the default table to production, or the existing opt-out |
@@ -17,9 +17,10 @@
 ## Design Notes
 
 - Channel derivation uses `packaging.version.Version` (already a runtime
-  dependency). `is_devrelease` or a `local` segment -> development;
-  `is_prerelease` -> staging; otherwise production. `-beta.N` is normalized by
-  `Version`, so semantic-release develop builds classify as staging.
+  dependency). `is_devrelease` or a `local` segment -> development; everything
+  else, including `-beta.N` builds published from `develop`, -> production.
+  Pre-releases are deliberately not routed away: they are user-facing builds and
+  their failures are real signal.
 - Failure direction is deliberate. Routing a stable build to a non-production
   origin silently loses production telemetry; routing a dev build to production
   is the current behavior. When unsure, choose production.
@@ -49,4 +50,4 @@
 |---|---|
 | Stable release misclassified and routed off production | Table test over real published formats; repo-version contract test; unparseable -> production |
 | Privacy expectation shifts for dev/pre-release users | Same anonymous profile and fields, documented in `PRIVACY.md`; opt-out unchanged |
-| Pre-release staging data lacks a consumer | Staging is documented as a review surface; no alerts attach to it |
+| Pre-release noise in production alerts | Alert semantics are handled separately (per-version, deduplicated); beta versions remain distinguishable by `service.version` |

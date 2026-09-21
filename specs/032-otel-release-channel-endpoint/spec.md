@@ -32,14 +32,16 @@ and agent environments leaking.
 ## Requirements
 
 - Derive a release channel from the installed `__version__` using PEP 440:
-  - `production`: final release (no dev, pre-release, or local segment);
-  - `staging`: pre-release (`a`, `b`, `rc`, including `-beta.N` forms);
-  - `development`: dev release or any local version segment (`+sha`).
+  - `development`: dev release (`.devN`) or any local version segment (`+sha`),
+    which is how PR preview builds are versioned;
+  - `production`: everything else, including final releases and published
+    pre-releases (`a`, `b`, `rc`, `-beta.N`). Pre-releases are real user-facing
+    builds distributed through normal channels, so they report to production.
 - When no endpoint is configured, use the approved gateway origin for the
   channel: `production` -> `https://telemetry-gateway.hamiltonsnow.workers.dev`,
-  `staging` -> `https://telemetry-gateway-staging.hamiltonsnow.workers.dev`,
   `development` -> `https://telemetry-gateway-development.hamiltonsnow.workers.dev`,
-  each with `/v1/traces`.
+  each with `/v1/traces`. The staging origin stays allowlisted but is never a
+  default; it remains available through the explicit endpoint variables.
 - Precedence, highest first: telemetry opt-out (`DISABLE_TELEMETRY`,
   `DO_NOT_TRACK`) disables export; `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`;
   `OTEL_EXPORTER_OTLP_ENDPOINT`; the channel default.
@@ -53,14 +55,14 @@ and agent environments leaking.
 ## Success Criteria
 
 - A table-driven test maps representative versions to channels, including the
-  formats this repository actually publishes: `3.15.2`, `3.15.2.dev279+5dc8a44`,
-  `3.13.1.dev266+b3bddc8`, `3.16.0-beta.1`, `3.16.0rc1`.
+  formats this repository actually publishes: `3.15.2` and `3.16.0-beta.1`
+  (production), `3.15.2.dev279+5dc8a44` and `3.13.1.dev266+b3bddc8` (development).
 - Explicit endpoint variables and the opt-out keep their existing precedence.
 - The repository's own `__version__` classifies as `production` on `main`, and a
   contract test fails if a stable-looking version would route off production.
 - Canary evidence per channel: one span from a dev build reaches only the
-  `development` Honeycomb environment, one from a pre-release only `staging`, and
-  one from a stable build only `production`.
+  `development` Honeycomb environment, and one from a stable or pre-release build
+  only `production`.
 - `PRIVACY.md` and `README.md` describe channel routing and still contain
   `DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`.
 
