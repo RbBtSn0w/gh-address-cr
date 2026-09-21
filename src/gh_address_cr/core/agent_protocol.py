@@ -203,6 +203,24 @@ def _reenter_own_fixer_lease(
         # differently from the original. Submit recomputes the hash from the file, but
         # keep the lease's copy in step with what is now on disk.
         lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
+        # `evidence-ledger.md` promises agents a `request_issued` event whenever an
+        # ActionRequest is written. Only the rebuild writes one; handing back an intact
+        # request records nothing, or every re-entry would claim a side effect that did
+        # not happen. `rebuilt` keeps the trail honest about which of the two occurred.
+        _ledger(session).append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=str(lease["lease_id"]),
+            agent_id=agent_id,
+            role=role,
+            event_type="request_issued",
+            payload={
+                "request_id": request_id,
+                "request_path": str(request_path),
+                "response_skeleton_path": str(skeleton_path),
+                "rebuilt": True,
+            },
+        )
         session_store.save_session(repo, pr_number, session)
     if _payload_for_lease(skeleton_path, **identity) is None:
         # Derived from the request now on disk. Regenerating the skeleton does not touch
