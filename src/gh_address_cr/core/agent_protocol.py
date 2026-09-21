@@ -523,7 +523,15 @@ def claimed_fixer_lease(
     Only `WorkflowError` triggers the rollback. An unexpected exception leaves the
     lease in place for `agent leases` to show, because an unmodelled failure is not
     evidence that the claim is safe to undo.
+
+    And only a lease *this* call created is rolled back. `issue_action_request` re-enters
+    an active fixer lease the agent already holds rather than minting a second one, so a
+    one-shot composition run on an item the agent claimed earlier through `agent next`
+    would otherwise release that lease on failure -- destroying exactly the retry handle
+    the two-step flow is documented above to preserve.
     """
+    preexisting = active_fixer_lease_for_item(session_store.load_session(repo, pr_number), item_id, agent_id=agent_id)
+    preexisting_lease_id = str(preexisting["lease_id"]) if isinstance(preexisting, dict) else None
     requested = issue_action_request(
         repo,
         pr_number,
@@ -536,6 +544,9 @@ def claimed_fixer_lease(
     try:
         yield requested
     except WorkflowError as exc:
+        if str(requested["lease_id"]) == preexisting_lease_id:
+            # Re-entered, not claimed: the agent held this lease before the call and keeps it.
+            raise
         # Any WorkflowError rolls back, not only ACTION_REJECTED, so record which one:
         # a fixed "action_rejected" would mislabel the lease events `agent leases` shows.
         release_claimed_lease(
