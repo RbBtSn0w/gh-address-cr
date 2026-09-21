@@ -411,6 +411,12 @@ class RuntimePackagingTest(PythonScriptTestCase):
     def _workflow_env_bindings(text):
         """Every `env:` mapping in a workflow, as (scope, variable, value) triples.
 
+        `scope` is `env@lineN/indentK`. The indent is what tells levels apart: a
+        workflow-level `env:` sits at column 0, a job-level one at 4, a step-level one
+        deeper. Without it a guard cannot tell "set globally" from "set somewhere", and a
+        single job carrying the right endpoint would satisfy a check meant to prove the
+        whole workflow is routed.
+
         Text-matching one region of the file only guards that region. A job- or step-level
         `env:` block overrides the top-level one, so a check that stops at `jobs:` passes
         while a job quietly re-points the endpoint at production, or turns telemetry off.
@@ -434,7 +440,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
                     break
                 pair = re.match(r"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$", entry)
                 if pair:
-                    bindings.append((f"env@line{index + 1}", pair.group(1), pair.group(2).strip("\"'")))
+                    bindings.append(
+                        (f"env@line{index + 1}/indent{key_indent}", pair.group(1), pair.group(2).strip("\"'"))
+                    )
         return bindings
 
     def test_env_binding_extractor_sees_overrides_at_every_level(self):
@@ -457,8 +465,15 @@ class RuntimePackagingTest(PythonScriptTestCase):
         )
 
         found = {(name, value) for _, name, value in self._workflow_env_bindings(workflow)}
-
         self.assertEqual(found, {("TOP", "one"), ("JOB_LEVEL", "two"), ("STEP_LEVEL", "three")})
+
+        indent_of = {
+            name: int(re.search(r"indent(\d+)$", scope).group(1))
+            for scope, name, _ in self._workflow_env_bindings(workflow)
+        }
+        self.assertEqual(indent_of["TOP"], 0)
+        self.assertLess(indent_of["TOP"], indent_of["JOB_LEVEL"])
+        self.assertLess(indent_of["JOB_LEVEL"], indent_of["STEP_LEVEL"])
 
     def test_ci_workflow_routes_synthetic_smoke_telemetry_to_development_gateway(self):
         # Installed-CLI smoke runs hit placeholder repos without gh auth; sending them to
@@ -467,6 +482,13 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
         endpoints = [(scope, value) for scope, name, value in bindings if name == "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
         self.assertTrue(endpoints, "no env block sets OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        # Routing has to be set for the whole workflow. A job- or step-level binding only
+        # routes that scope, so with the workflow-level one gone every other job's smoke
+        # runs fall back to the production default while this test stayed green.
+        self.assertTrue(
+            any(scope.endswith("/indent0") for scope, _ in endpoints),
+            "the endpoint is not bound at workflow level, so jobs without their own binding are not routed",
+        )
         # Every binding, at any level, must point at development. One production override
         # anywhere defeats the routing for that job's smoke runs.
         for scope, value in endpoints:
