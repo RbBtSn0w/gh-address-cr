@@ -210,6 +210,9 @@ def _reenter_own_fixer_lease(
         # and the two then disagreed on submit.
         write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
 
+    # Same shape as a fresh claim: callers read the top-level handling_boundary without
+    # opening the request file.
+    handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
     return {
         "status": "ACTION_REQUESTED",
         "repo": repo,
@@ -219,6 +222,7 @@ def _reenter_own_fixer_lease(
         "lease_id": str(lease["lease_id"]),
         "resume_token": _get(lease, "resume_token"),
         "item_id": item_id,
+        **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
         "next_action": (
             f"You already hold this {role} lease. Pass request_path to an agent with the {role} role, "
             "then fill response_skeleton_path."
@@ -227,12 +231,19 @@ def _reenter_own_fixer_lease(
 
 
 def _read_request_file(path: Path) -> dict[str, Any] | None:
-    """The request on disk, or None when it is missing or unreadable."""
+    """The request on disk, or None when it is missing or not a usable ActionRequest.
+
+    Validity is `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
+    accepts as readable cannot drift from what submit will accept. "Any JSON object" is
+    not enough: `{}` parses, then skeleton generation indexes required keys and raises
+    KeyError instead of rebuilding.
+    """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        ActionRequest.from_dict(payload)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
         return None
-    return payload if isinstance(payload, dict) else None
+    return payload
 
 
 def _rebuild_fixer_request(

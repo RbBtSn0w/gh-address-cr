@@ -211,8 +211,7 @@ class OwnerReentryTest(unittest.TestCase):
     def test_only_the_skeleton_missing_leaves_the_request_and_its_hash_alone(self):
         # The request file survives, so there is nothing to rebuild: the skeleton is
         # derived from the request already on disk. Rebuilding the request here moved the
-        # lease's hash without rewriting the file, and the two then disagreed on submit
-        # (PR #279 review).
+        # lease's hash without rewriting the file, and the two then disagreed on submit.
         from gh_address_cr.core import agent_protocol
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -267,6 +266,51 @@ class OwnerReentryTest(unittest.TestCase):
                 rebuilt = json.loads(Path(again["request_path"]).read_text(encoding="utf-8"))
                 self.assertEqual(rebuilt["request_id"], original["request_id"])
                 self.assertEqual(rebuilt["lease_id"], original["lease_id"])
+
+    def test_a_structurally_invalid_request_file_is_rebuilt_not_a_keyerror(self):
+        # `{}` is valid JSON but not an ActionRequest. Accepting any JSON object as
+        # readable let it through to skeleton generation, which indexes required keys
+        # and raised KeyError. Structurally invalid means unreadable, i.e. rebuild.
+        from gh_address_cr.core import agent_protocol
+
+        for index, garbage in enumerate(("{}", '{"request_id": "x"}', "[]", "null")):
+            with self.subTest(garbage=garbage):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        pr = str(1020 + index)
+                        _session("owner/repo", pr)
+                        first = _claim("owner/repo", pr)
+                        original = json.loads(Path(first["request_path"]).read_text(encoding="utf-8"))
+                        Path(first["request_path"]).write_text(garbage, encoding="utf-8")
+                        Path(first["response_skeleton_path"]).unlink()
+
+                        again = agent_protocol.issue_action_request(
+                            "owner/repo", pr, role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                        )
+
+                        rebuilt = json.loads(Path(again["request_path"]).read_text(encoding="utf-8"))
+                        self.assertEqual(rebuilt["request_id"], original["request_id"])
+                        self.assertEqual(rebuilt["lease_id"], original["lease_id"])
+
+    def test_the_reentry_payload_carries_handling_boundary_like_a_fresh_claim(self):
+        # The normal claim path returns `handling_boundary` at the top level when the
+        # item has one; callers read it without opening the request file. Re-entry must
+        # return the same shape.
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                _session("owner/repo", "1030")
+                first = _claim("owner/repo", "1030")
+                # Precondition: a GitHub-thread fixer item really does have one, so the
+                # assertion below is not vacuous.
+                self.assertIn("handling_boundary", first)
+
+                again = agent_protocol.issue_action_request(
+                    "owner/repo", "1030", role="fixer", agent_id="agent-a", item_id="github-thread:X"
+                )
+
+                self.assertEqual(again.get("handling_boundary"), first["handling_boundary"])
 
     def test_intact_request_files_are_returned_untouched(self):
         # Re-entry must not rewrite a request the agent still has: rewriting would move
