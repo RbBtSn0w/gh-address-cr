@@ -42,15 +42,26 @@ class PublishOutcomeStatusTest(unittest.TestCase):
         self.publish_outcome_status = staticmethod(publish_outcome_status).__func__
 
     def test_without_publish_it_is_always_accepted(self):
-        self.assertEqual(self.publish_outcome_status("FAST_FIX", publish=False), "FAST_FIX_ACCEPTED")
         self.assertEqual(
-            self.publish_outcome_status("FAST_FIX", publish=False, published={"published_items": ["x"]}),
+            self.publish_outcome_status("FAST_FIX", publish=False, published=None, item_ids=["a"]),
+            "FAST_FIX_ACCEPTED",
+        )
+        self.assertEqual(
+            self.publish_outcome_status(
+                "FAST_FIX", publish=False, published={"published_items": ["a"]}, item_ids=["a"]
+            ),
             "FAST_FIX_ACCEPTED",
         )
 
     def test_a_no_op_publish_is_not_complete(self):
-        self.assertEqual(self.publish_outcome_status("DECLINE_ALL", publish=True, published=NO_OP_PUBLISH), "DECLINE_ALL_ACCEPTED")
-        self.assertEqual(self.publish_outcome_status("DECLINE_ALL", publish=True, published=None), "DECLINE_ALL_ACCEPTED")
+        self.assertEqual(
+            self.publish_outcome_status("DECLINE_ALL", publish=True, published=NO_OP_PUBLISH, item_ids=["a"]),
+            "DECLINE_ALL_ACCEPTED",
+        )
+        self.assertEqual(
+            self.publish_outcome_status("DECLINE_ALL", publish=True, published=None, item_ids=["a"]),
+            "DECLINE_ALL_ACCEPTED",
+        )
 
     def test_publish_that_skipped_these_items_is_not_complete(self):
         # A session-wide publish can post for other items; that is not evidence
@@ -70,21 +81,40 @@ class PublishOutcomeStatusTest(unittest.TestCase):
             "FAST_FIX_COMPLETE",
         )
 
+    def test_partial_coverage_of_what_the_call_owns_is_not_complete(self):
+        # The cell the single-item callers could never reach, and so never exposed:
+        # with several items owned, "any one published" read as done, and the caller
+        # was told its evidence was published while some threads had no reply posted.
+        self.assertEqual(
+            self.publish_outcome_status(
+                "DECLINE_ALL", publish=True, published={"published_items": ["a"]}, item_ids=["a", "b", "c"]
+            ),
+            "DECLINE_ALL_ACCEPTED",
+        )
+        # Unrelated items publishing alongside does not make up the difference.
+        self.assertEqual(
+            self.publish_outcome_status(
+                "DECLINE_ALL", publish=True, published={"published_items": ["a", "z"]}, item_ids=["a", "b"]
+            ),
+            "DECLINE_ALL_ACCEPTED",
+        )
+        # Every owned item covered, with extras alongside, is complete.
+        self.assertEqual(
+            self.publish_outcome_status(
+                "DECLINE_ALL", publish=True, published={"published_items": ["a", "b", "z"]}, item_ids=["a", "b"]
+            ),
+            "DECLINE_ALL_COMPLETE",
+        )
+
     def test_an_empty_item_list_owns_nothing_so_it_is_never_complete(self):
-        # An empty list means "this call owns no items", which is not the same as
-        # None ("any published item counts"). Collapsing [] to None reported
-        # COMPLETE off a session-wide publish for other, previously accepted items.
+        # An empty list means "this call owns no items". Collapsing it to a
+        # permissive mode reported COMPLETE off a session-wide publish for other,
+        # previously accepted items.
         self.assertEqual(
             self.publish_outcome_status(
                 "FAST_FIX_ALL", publish=True, published={"published_items": ["other"]}, item_ids=[]
             ),
             "FAST_FIX_ALL_ACCEPTED",
-        )
-
-    def test_item_ids_none_accepts_any_published_item(self):
-        self.assertEqual(
-            self.publish_outcome_status("STALE_RESOLUTION", publish=True, published={"published_items": ["any"]}),
-            "STALE_RESOLUTION_COMPLETE",
         )
 
 
@@ -110,7 +140,8 @@ class PublishPreconditionTest(unittest.TestCase):
 
                 with self.assertRaises(WorkflowError) as ctx:
                     workflow.fast_fix_item(
-                        "owner/repo", "701",
+                        "owner/repo",
+                        "701",
                         item_id="local:1",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -138,7 +169,8 @@ class PublishPreconditionTest(unittest.TestCase):
                     return_value=NO_OP_PUBLISH,
                 ):
                     result = workflow.fast_fix_item(
-                        "owner/repo", "702",
+                        "owner/repo",
+                        "702",
                         item_id="github-thread:A",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -177,7 +209,8 @@ class PublishPreconditionTest(unittest.TestCase):
                     },
                 ):
                     result = workflow.fast_fix_item(
-                        "owner/repo", "705",
+                        "owner/repo",
+                        "705",
                         item_id="github-thread:P",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -209,7 +242,8 @@ class PublishPreconditionTest(unittest.TestCase):
                     return_value=NO_OP_PUBLISH,
                 ):
                     result = workflow_matching.decline_matching_threads(
-                        "owner/repo", "703",
+                        "owner/repo",
+                        "703",
                         agent_id="fixer-1",
                         files=["src/shared.py"],
                         resolution="reject",
@@ -254,6 +288,51 @@ class PublishPreconditionTest(unittest.TestCase):
                     )
 
                 self.assertEqual(result["status"], "FAST_FIX_ALL_ACCEPTED")
+
+    def test_a_partially_published_multi_item_decline_is_not_reported_as_complete(self):
+        # The end-to-end form of the same cell, through a path that really owns several
+        # items. Before, this said DECLINE_ALL_COMPLETE and "evidence was published"
+        # while one of the two threads had no reply posted.
+        from gh_address_cr.core import workflow_matching
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                from gh_address_cr.core.session import SessionManager
+
+                manager = SessionManager("owner/repo", "706")
+                session = manager.create(status="WAITING_FOR_FIX")
+                session["items"] = {}
+                for index in (1, 2):
+                    item = github_thread(f"github-thread:T{index}")
+                    item["path"] = "src/shared.py"
+                    item["line"] = 10 + index
+                    session["items"][item["item_id"]] = item
+                manager.save(session)
+
+                with patch(
+                    "gh_address_cr.core.publisher.publish_github_thread_responses",
+                    return_value={
+                        "status": "PUBLISH_COMPLETE",
+                        "published_count": 1,
+                        "published_items": ["github-thread:T1"],
+                    },
+                ):
+                    result = workflow_matching.decline_matching_threads(
+                        "owner/repo",
+                        "706",
+                        agent_id="fixer-1",
+                        files=["src/shared.py"],
+                        resolution="reject",
+                        homogeneous_reason="Shared style nit; declining with rationale.",
+                        publish=True,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(sorted(result["item_ids"]), ["github-thread:T1", "github-thread:T2"])
+                self.assertEqual(result["status"], "DECLINE_ALL_ACCEPTED")
+                self.assertNotIn("was published", result["next_action"])
+                # The recovery is to publish again, which picks up what is still ready.
+                self.assertIn("agent publish", result["next_action"])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol_evidence import required_evidence_for
+from gh_address_cr.core.agent_protocol_leases import active_fixer_lease_for_item
 from gh_address_cr.core.agent_protocol_submission import (
     accept_action_response_submission,
     handling_boundary_summary_or_none,
@@ -147,6 +149,162 @@ def record_classification(
     }
 
 
+def _reenter_own_fixer_lease(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    role: str,
+    agent_id: str,
+    item_id: str | None,
+    github_client: Any | None,
+) -> dict[str, Any] | None:
+    """Hand an agent back the request for the fixer lease it already holds.
+
+    `agent next --batch` already does this (`_reconcile_existing_lease`); the
+    single-item path instead raised LEASE_LOCKED_ITEM at the lease's own owner. When
+    an agent loses its request files the lease stays active, so it could neither submit
+    nor claim again and had to wait out the TTL.
+
+    Only the owner is re-entered: `active_fixer_lease_for_item` matches on agent *and*
+    role and only `active` status, so another agent, another role, and a `submitted`
+    lease (evidence already sent) all fall through to LEASE_LOCKED_ITEM unchanged.
+    Runs after `expire_leases`, so an expired lease is never resurrected.
+
+    The request keeps its original request_id and lease_id. Submit re-reads the request
+    file and requires response.request_id to match, so a fresh id would strand any
+    response the agent already wrote.
+    """
+    if role != "fixer" or not item_id:
+        return None
+    lease = active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
+    if lease is None:
+        return None
+    item = _items(session).get(item_id)
+    if not isinstance(item, dict):
+        return None
+    request_id = str(lease.get("request_id") or "")
+    request_path = lease.get("request_path")
+    if not request_id or not request_path:
+        # No request identity to hand back; leave it to the lock path rather than
+        # invent one that no response could match.
+        return None
+
+    request_path = Path(str(request_path))
+    skeleton_path = request_path.with_name(f"action-response-skeleton-{request_id}.json")
+    identity = {"request_id": request_id, "lease_id": str(lease["lease_id"])}
+    request = _payload_for_lease(request_path, **identity, validate=ActionRequest.from_dict)
+    if request is None:
+        # The request itself is gone (or unreadable), so it has to be rebuilt.
+        request = _rebuild_fixer_request(repo, pr_number, session, item=item, lease=lease, github_client=github_client)
+        request["response_skeleton_path"] = str(skeleton_path)
+        write_json_atomic(request_path, request)
+        # The stack revision binding is part of the hash, so a rebuilt request can hash
+        # differently from the original. Submit recomputes the hash from the file, but
+        # keep the lease's copy in step with what is now on disk.
+        lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
+        session_store.save_session(repo, pr_number, session)
+    if _payload_for_lease(skeleton_path, **identity) is None:
+        # Derived from the request now on disk. Regenerating the skeleton does not touch
+        # the request or the hash the lease stores for it: when only the skeleton was
+        # lost, rebuilding the request here moved that hash without rewriting the file,
+        # and the two then disagreed on submit.
+        write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
+
+    # Same shape as a fresh claim: callers read the top-level handling_boundary without
+    # opening the request file.
+    handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
+    return {
+        "status": "ACTION_REQUESTED",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "request_path": str(request_path),
+        "response_skeleton_path": str(skeleton_path),
+        "lease_id": str(lease["lease_id"]),
+        "resume_token": _get(lease, "resume_token"),
+        "item_id": item_id,
+        **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
+        "next_action": (
+            f"You already hold this {role} lease. Pass request_path to an agent with the {role} role, "
+            "then fill response_skeleton_path."
+        ),
+    }
+
+
+def _payload_for_lease(
+    path: Path,
+    *,
+    request_id: str,
+    lease_id: str,
+    validate: Any | None = None,
+) -> dict[str, Any] | None:
+    """The JSON object on disk when it belongs to this lease, else None.
+
+    One predicate for the request and for its response skeleton. Applying it to the
+    request only was an asymmetry, not a decision: a corrupt or foreign skeleton was
+    handed back untouched while the request beside it would have been rebuilt.
+
+    Usable means all of:
+
+    - it parses, and is an object;
+    - it passes `validate`, when one is given. For the request that is
+      `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
+      accepts cannot drift from what submit accepts. "Any JSON object" is not enough:
+      `{}` parses, then skeleton generation indexes required keys and raises KeyError
+      instead of rebuilding. A skeleton has no such parser -- it is deliberately
+      incomplete until the agent fills it in -- so it is checked on identity alone;
+    - it carries this lease's `request_id` and `lease_id`. A file can be perfectly
+      valid and still belong to another lease, and handing that back points the agent
+      at the wrong request.
+
+    A skeleton the agent has already filled in still matches, so re-entry keeps it;
+    only an unusable one is regenerated and the agent's evidence is never discarded.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if validate is not None:
+            validate(payload)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
+        return None
+    if str(payload.get("request_id")) != request_id or str(payload.get("lease_id")) != lease_id:
+        return None
+    return payload
+
+
+def _rebuild_fixer_request(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    item: dict[str, Any],
+    lease: dict[str, Any],
+    github_client: Any | None,
+) -> dict[str, Any]:
+    """Rebuild a lost fixer ActionRequest under the lease's existing request/lease ids."""
+    request_item = request_item_projection(item)
+    request_item["state"] = "claimed"
+    stack_context = refresh_stack_context_for_request(repo, str(pr_number), session, github_client=github_client)
+    request = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": str(lease["request_id"]),
+        "session_id": session["session_id"],
+        "lease_id": str(lease["lease_id"]),
+        "agent_role": "fixer",
+        "item": request_item,
+        "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
+        "required_evidence": required_evidence_for(item, "fixer"),
+        "repository_context": repository_context_for_stack(repo, pr_number, stack_context.to_dict()),
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
+        "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+    }
+    handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
+    if handling_boundary is not None:
+        request["handling_boundary"] = handling_boundary
+    return request
+
+
 def issue_action_request(
     repo: str,
     pr_number: str,
@@ -165,6 +323,11 @@ def issue_action_request(
 
     item_id, item = _next_item(session, role, item_id=item_id)
     if item is None:
+        reentered = _reenter_own_fixer_lease(
+            repo, pr_number, session, role=role, agent_id=agent_id, item_id=item_id, github_client=github_client
+        )
+        if reentered is not None:
+            return reentered
         locked_lease = _active_lease_for_item(session, item_id) if item_id else None
         if item_id and locked_lease is not None:
             lease_id = str(locked_lease.get("lease_id") or "")
@@ -360,7 +523,15 @@ def claimed_fixer_lease(
     Only `WorkflowError` triggers the rollback. An unexpected exception leaves the
     lease in place for `agent leases` to show, because an unmodelled failure is not
     evidence that the claim is safe to undo.
+
+    And only a lease *this* call created is rolled back. `issue_action_request` re-enters
+    an active fixer lease the agent already holds rather than minting a second one, so a
+    one-shot composition run on an item the agent claimed earlier through `agent next`
+    would otherwise release that lease on failure -- destroying exactly the retry handle
+    the two-step flow is documented above to preserve.
     """
+    preexisting = active_fixer_lease_for_item(session_store.load_session(repo, pr_number), item_id, agent_id=agent_id)
+    preexisting_lease_id = str(preexisting["lease_id"]) if isinstance(preexisting, dict) else None
     requested = issue_action_request(
         repo,
         pr_number,
@@ -373,6 +544,9 @@ def claimed_fixer_lease(
     try:
         yield requested
     except WorkflowError as exc:
+        if str(requested["lease_id"]) == preexisting_lease_id:
+            # Re-entered, not claimed: the agent held this lease before the call and keeps it.
+            raise
         # Any WorkflowError rolls back, not only ACTION_REJECTED, so record which one:
         # a fixed "action_rejected" would mislabel the lease events `agent leases` shows.
         release_claimed_lease(

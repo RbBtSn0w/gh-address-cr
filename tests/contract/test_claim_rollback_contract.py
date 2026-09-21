@@ -80,7 +80,8 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 with _reject_after_claim(), self.assertRaises(WorkflowError) as ctx:
                     workflow.fast_fix_item(
-                        "owner/repo", "601",
+                        "owner/repo",
+                        "601",
                         item_id="github-thread:R",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -100,6 +101,48 @@ class ClaimRollbackContractTest(unittest.TestCase):
                 self.assertEqual(lease["status"], "released")
                 self.assertEqual(lease["reason"], f"action_rejected:{REJECTION_CODE}")
 
+    def test_a_lease_the_call_did_not_create_is_not_released(self):
+        # issue_action_request re-enters a lease the agent already holds instead of
+        # minting a second one, so the rollback must distinguish "claimed here" from
+        # "re-entered". Otherwise a failed one-shot resolve destroys the lease the agent
+        # acquired through `agent next` -- the retry handle the two-step flow keeps on
+        # purpose, and which this context manager's docstring promises not to touch.
+        from gh_address_cr.core import agent_protocol, workflow
+        from gh_address_cr.core.errors import WorkflowError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._session("owner/repo", "606", github_thread("github-thread:H"))
+                agent_protocol.record_classification(
+                    "owner/repo",
+                    "606",
+                    item_id="github-thread:H",
+                    classification="fix",
+                    agent_id="fixer-1",
+                    note=WHY,
+                )
+                held = agent_protocol.issue_action_request(
+                    "owner/repo", "606", role="fixer", agent_id="fixer-1", item_id="github-thread:H"
+                )
+
+                with _reject_after_claim(), self.assertRaises(WorkflowError):
+                    workflow.fast_fix_item(
+                        "owner/repo",
+                        "606",
+                        item_id="github-thread:H",
+                        agent_id="fixer-1",
+                        commit_hash="abc123",
+                        files=["src/shared.py"],
+                        validation_commands=VALIDATION,
+                        summary="Fixed it",
+                        why=WHY,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                lease = manager.load()["leases"][held["lease_id"]]
+                self.assertEqual(lease["status"], "active")
+                self.assertIsNone(lease.get("reason"))
+
     def test_decline_publish_on_a_local_finding_is_rejected_before_any_claim(self):
         # Not a rollback case: decline_item's own --publish guard (#274) rejects
         # before issue_action_request, so no lease is ever minted. Pinned as its
@@ -114,7 +157,8 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 with self.assertRaises(WorkflowError) as ctx:
                     workflow.decline_item(
-                        "owner/repo", "602",
+                        "owner/repo",
+                        "602",
                         item_id="local:1",
                         agent_id="fixer-1",
                         resolution="reject",
@@ -139,7 +183,8 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 with self.assertRaises(WorkflowError) as ctx:
                     workflow.trivial_fix_item(
-                        "owner/repo", "603",
+                        "owner/repo",
+                        "603",
                         item_id="local:1",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -169,7 +214,8 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 with _reject_after_claim(), self.assertRaises(WorkflowError):
                     workflow.fast_fix_item(
-                        "owner/repo", "604",
+                        "owner/repo",
+                        "604",
                         item_id="github-thread:X",
                         agent_id="fixer-1",
                         commit_hash="abc123",
@@ -182,7 +228,8 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
                 # Same agent, same item: previously LEASE_LOCKED_ITEM.
                 requested = agent_protocol.issue_action_request(
-                    "owner/repo", "604",
+                    "owner/repo",
+                    "604",
                     role="fixer",
                     agent_id="fixer-1",
                     item_id="github-thread:X",
@@ -197,18 +244,18 @@ class ClaimRollbackContractTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
-                manager = self._session(
-                    "owner/repo", "605", stale_github_thread_item("github-thread:Y")
-                )
+                manager = self._session("owner/repo", "605", stale_github_thread_item("github-thread:Y"))
                 agent_protocol.record_classification(
-                    "owner/repo", "605",
+                    "owner/repo",
+                    "605",
                     item_id="github-thread:Y",
                     classification="reject",
                     agent_id="fixer-1",
                     note=WHY,
                 )
                 requested = agent_protocol.issue_action_request(
-                    "owner/repo", "605",
+                    "owner/repo",
+                    "605",
                     role="fixer",
                     agent_id="fixer-1",
                     item_id="github-thread:Y",

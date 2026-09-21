@@ -183,29 +183,34 @@ def publish_outcome_status(
     prefix: str,
     *,
     publish: bool,
-    published: Any = None,
-    item_ids: list[str] | None = None,
+    published: Any,
+    item_ids: list[str],
 ) -> str:
     """Derive ``<prefix>_ACCEPTED`` / ``<prefix>_COMPLETE`` from what publishing did.
 
-    Keyed on the publish *outcome*, not on the ``--publish`` flag. A run whose
-    publish was a no-op -- ``NO_PUBLISH_READY_ITEMS``, or a partial publish that
-    skipped these items -- reports ``_ACCEPTED``, so no caller can read
-    ``_COMPLETE`` for a reply that was never posted.
+    Keyed on the publish *outcome*, not on the ``--publish`` flag. The flag-keyed form
+    this replaces is why ``commands/agent.py`` had to re-derive its own ``published``
+    boolean from ``published_count``: the status alone was not trustworthy.
 
-    The flag-keyed form this replaces is why ``commands/agent.py`` had to
-    re-derive its own ``published`` boolean from ``published_count``: the status
-    alone was not trustworthy.
+    ``_COMPLETE`` requires publishing to have covered **every** item this call owns, not
+    merely one of them. A caller that owns several -- the batch and files-selection
+    paths do -- would otherwise report COMPLETE, and tell the agent its evidence was
+    published, while some of its threads had no reply posted. Partial coverage reports
+    ``_ACCEPTED``, whose next action is to publish again, which is the correct recovery:
+    the items still publish-ready are picked up on the next run.
 
-    ``item_ids`` narrows the check to the items this call owns; pass ``None`` to
-    accept any published item as evidence.
+    ``item_ids`` is required and is never empty for a call that owns work. Passing an
+    empty list means this call owns nothing, so there is nothing publishing could have
+    completed. There is deliberately no "any published item counts" mode: that leniency
+    is what made partial coverage read as success.
     """
     if not publish:
         return f"{prefix}_ACCEPTED"
     payload = published if isinstance(published, dict) else {}
     posted = {str(entry) for entry in payload.get("published_items") or []}
-    if not posted:
+    owned = {str(item_id) for item_id in item_ids}
+    if not posted or not owned:
         return f"{prefix}_ACCEPTED"
-    if item_ids is not None and not posted.intersection(str(item_id) for item_id in item_ids):
+    if not owned.issubset(posted):
         return f"{prefix}_ACCEPTED"
     return f"{prefix}_COMPLETE"
