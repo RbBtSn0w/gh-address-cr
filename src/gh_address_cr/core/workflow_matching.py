@@ -689,7 +689,9 @@ def _publish_matching_thread_responses(
     )
 
 
-def _matching_thread_success_status(ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]) -> str:
+def _matching_thread_success_status(
+    ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]
+) -> str:
     return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids)
 
 
