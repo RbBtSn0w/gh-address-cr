@@ -420,6 +420,10 @@ def _process_fast_fix_matches(
     item_ids: list[str] = []
     for batch_items in _chunks(matches, MAX_PARALLEL_CLAIMS):
         batch_responses: list[dict[str, Any]] = []
+        # Lease ids already in the session before this chunk's claims. A returned lease
+        # id in this set was re-entered, not created, and belongs to whoever held it
+        # (spec 033 FR-002); only the difference is this chunk's to roll back.
+        leases_before = set(session_store.load_session(repo, pr_number).get("leases", {}))
         for item in batch_items:
             try:
                 batch_responses.append(
@@ -438,18 +442,34 @@ def _process_fast_fix_matches(
                 failed.append(_fast_fix_failed_row(str(item["item_id"]), exc))
         if not batch_responses:
             continue
-        batch_path = _write_fast_fix_batch_file(
-            repo,
-            pr_number,
-            batch_responses,
-            ctx,
-            agent_id=agent_id,
-            commit_hash=commit_hash,
-            severity_note=severity_note,
-        )
-        batch_result = agent_batch.submit_batch_action_response(
-            repo, pr_number, batch_path=batch_path, now=current_time
-        )
+        try:
+            batch_path = _write_fast_fix_batch_file(
+                repo,
+                pr_number,
+                batch_responses,
+                ctx,
+                agent_id=agent_id,
+                commit_hash=commit_hash,
+                severity_note=severity_note,
+            )
+            batch_result = agent_batch.submit_batch_action_response(
+                repo, pr_number, batch_path=batch_path, now=current_time
+            )
+        except WorkflowError as exc:
+            # One-shot (spec 033 FR-001): the caller holds no skeleton to retry with, so
+            # a rejected submit must not leave this chunk's leases behind. Rows an earlier
+            # part of the same submit already accepted are terminal, and
+            # release_claimed_lease leaves them alone.
+            for row in batch_responses:
+                if str(row["lease_id"]) not in leases_before:
+                    leases.release_claimed_lease(
+                        repo,
+                        pr_number,
+                        lease_id=str(row["lease_id"]),
+                        now=current_time,
+                        reason=f"action_rejected:{exc.reason_code}",
+                    )
+            raise
         accepted_count += int(batch_result.get("accepted_count") or 0)
         item_ids.extend(str(item_id) for item_id in batch_result.get("item_ids") or [])
         batches.append(batch_result)
@@ -669,9 +689,7 @@ def _publish_matching_thread_responses(
     )
 
 
-def _matching_thread_success_status(
-    ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]
-) -> str:
+def _matching_thread_success_status(ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]) -> str:
     return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids)
 
 
