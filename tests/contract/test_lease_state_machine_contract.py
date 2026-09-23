@@ -137,6 +137,39 @@ class ClaimTableTest(unittest.TestCase):
         self.assertEqual(L._get(session["leases"]["L0"], "status"), "expired")
 
 
+class SessionLeasesShapeTest(unittest.TestCase):
+    """The rollbacks read `load_session(...).get("leases", {})` and iterate it.
+
+    That is only safe because `load_session` normalizes a non-dict `leases` (an explicit
+    `null`, a list) to `{}`. The rollback code does not add its own `or {}` guard, since
+    that branch could never run; this test is what makes relying on the normalization
+    safe instead of assumed.
+    """
+
+    def test_load_session_returns_a_dict_for_any_malformed_leases_value(self):
+        import json
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        from gh_address_cr.core import session as session_store
+        from gh_address_cr.core.session import SessionManager
+
+        for malformed in (None, [], "oops", 0):
+            with self.subTest(leases=malformed):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        SessionManager("owner/repo", "900").save(
+                            SessionManager("owner/repo", "900").create(status="WAITING_FOR_FIX")
+                        )
+                        path = next(Path(tmp).rglob("session.json"))
+                        raw = json.loads(path.read_text(encoding="utf-8"))
+                        raw["leases"] = malformed
+                        path.write_text(json.dumps(raw), encoding="utf-8")
+
+                        self.assertEqual(session_store.load_session("owner/repo", "900")["leases"], {})
+
+
 class EntryPointInventoryTest(unittest.TestCase):
     """Every lease-creating call site under src/ is in the inventory, and only those."""
 
