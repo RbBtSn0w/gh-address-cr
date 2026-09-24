@@ -6,13 +6,13 @@ these tables with a drift assertion.
 
 ## Transaction outcome table
 
-| Condition inside reserved write transaction | Commit | Revision | Evidence / outbox | Stable outcome |
+| Condition at the transaction boundary | Commit | Revision | Evidence / outbox | Stable outcome |
 |---|---:|---:|---|---|
 | Policy accepts transition | all canonical rows | N+1 | committed in same transaction | success |
 | Expected revision differs | none | N | none | stale revision |
 | Lease/item policy rejects | none | N | none | existing deterministic conflict/rejection |
-| Writer wait exceeds bound | none | unchanged | none | retryable persistence busy |
-| Schema/integrity invalid | none | unchanged | none | non-retryable persistence invalid |
+| Writer wait exceeds bound | none | N | none | retryable persistence busy |
+| Schema/integrity invalid | none | N | none | non-retryable persistence invalid |
 | Unexpected error before commit | none | N | none | internal failure |
 | Process terminates before commit | none after recovery | N | none | old revision |
 | Process terminates after commit | all visible after recovery | N+1 | all visible | committed revision |
