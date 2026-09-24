@@ -10,7 +10,6 @@ from gh_address_cr.core.leases import (
     claim_lease,
     expire_leases,
     reclaim_lease,
-    reject_lease,
     release_lease,
     submit_lease,
 )
@@ -97,24 +96,11 @@ class ClaimLeaseLifecycleTest(unittest.TestCase):
         expire_leases(session, now=NOW + timedelta(seconds=2))
         self.assertEqual(expired.status, "expired")
 
-        rejected = claim_lease(
-            session,
-            make_item("item-reject", path="src/reject.py"),
-            agent_id="agent-d",
-            role="fixer",
-            request_hash="req-reject",
-            lease_id="lease-reject",
-            now=NOW,
-        )
-        reject_lease(session, "lease-reject", now=NOW + timedelta(seconds=4), reason="invalid evidence")
-        self.assertEqual(rejected.status, "rejected")
-
         event_types = [event["event_type"] for event in session["lease_events"]]
         self.assertIn("lease_released", event_types)
         self.assertIn("lease_submitted", event_types)
         self.assertIn("lease_accepted", event_types)
         self.assertIn("lease_expired", event_types)
-        self.assertIn("lease_rejected", event_types)
 
     def test_reclaim_expired_lease_preserves_accepted_evidence(self):
         session = make_session()

@@ -269,5 +269,155 @@ class ClaimRollbackContractTest(unittest.TestCase):
                 self.assertEqual(self._active_leases(manager), {})
 
 
+def _threads_on_one_file(*indexes):
+    items = {}
+    for index in indexes:
+        item = github_thread(f"github-thread:T{index}")
+        item["path"] = "src/shared.py"
+        item["line"] = 10 * index
+        items[item["item_id"]] = item
+    return items
+
+
+def _multi_item_session(repo, pr_number, items):
+    from gh_address_cr.core.session import SessionManager
+
+    manager = SessionManager(repo, pr_number)
+    session = manager.create(status="WAITING_FOR_FIX")
+    session["items"] = items
+    manager.save(session)
+    return manager
+
+
+def _leases_by_item(manager):
+    return {lease["item_id"]: lease for lease in manager.load().get("leases", {}).values()}
+
+
+class BatchFastFixRollbackTest(unittest.TestCase):
+    """spec 033 FR-001/FR-002 for `agent resolve --commit --files` (one-shot, many items).
+
+    It claims one lease per matched thread, then submits them as one batch. The caller
+    holds no skeleton afterwards, so a rejected submit must not leave the leases behind.
+    """
+
+    def _resolve(self, repo, pr_number):
+        from gh_address_cr.core import agent_batch, workflow_matching
+        from gh_address_cr.core.errors import WorkflowError
+
+        rejection = WorkflowError(
+            status="BATCH_ACTION_REJECTED",
+            reason_code=REJECTION_CODE,
+            waiting_on="batch_action_response",
+            exit_code=5,
+            message="batch rejected after the leases were claimed",
+        )
+        with (
+            patch.object(agent_batch, "submit_batch_action_response", side_effect=rejection),
+            self.assertRaises(WorkflowError) as ctx,
+        ):
+            workflow_matching.fast_fix_matching_threads(
+                repo,
+                pr_number,
+                agent_id="fixer-1",
+                commit_hash="abc123",
+                files=["src/shared.py"],
+                validation_commands=VALIDATION,
+                homogeneous_reason=WHY,
+                github_client=UnstackedGitHubClient(),
+            )
+        return ctx.exception
+
+    def test_a_rejected_batch_releases_every_lease_it_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _multi_item_session("owner/repo", "620", _threads_on_one_file(1, 2))
+
+                error = self._resolve("owner/repo", "620")
+
+                self.assertEqual(error.reason_code, REJECTION_CODE)
+                leases = _leases_by_item(manager)
+                self.assertEqual(set(leases), {"github-thread:T1", "github-thread:T2"})
+                for item_id, lease in leases.items():
+                    with self.subTest(item=item_id):
+                        self.assertEqual(lease["status"], "released")
+                        self.assertEqual(lease["reason"], f"action_rejected:{REJECTION_CODE}")
+                        # The claim marker is reset too, or the item reads as claimed.
+                        self.assertEqual(manager.load()["items"][item_id]["state"], "open")
+
+    def test_the_rollback_leaves_a_lease_the_agent_already_held(self):
+        # FR-002. The batch path passes item_id, so issue_action_request can re-enter a
+        # lease the agent already holds instead of minting one. Today the matcher skips a
+        # claimed item, so this needs a session whose claim marker was reset while the lease
+        # stayed active; it pins the rule for the day the matcher includes such an item.
+        from gh_address_cr.core import agent_protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _multi_item_session("owner/repo", "621", _threads_on_one_file(1, 2))
+                agent_protocol.record_classification(
+                    "owner/repo", "621", item_id="github-thread:T1", classification="fix", agent_id="fixer-1", note=WHY
+                )
+                held = agent_protocol.issue_action_request(
+                    "owner/repo", "621", role="fixer", agent_id="fixer-1", item_id="github-thread:T1"
+                )
+                session = manager.load()
+                session["items"]["github-thread:T1"]["state"] = "open"
+                manager.save(session)
+
+                self._resolve("owner/repo", "621")
+
+                leases = _leases_by_item(manager)
+                self.assertEqual(leases["github-thread:T1"]["lease_id"], held["lease_id"])
+                self.assertEqual(leases["github-thread:T1"]["status"], "active")
+                self.assertEqual(leases["github-thread:T2"]["status"], "released")
+
+
+class OrchestratorStepRollbackTest(unittest.TestCase):
+    """spec 033 FR-001 for `agent orchestrate step` (orchestrated).
+
+    The step issues the core lease, then grants the orchestrator's shadow lease. When two
+    items share a file the shadow grant is refused; the core lease must not be left behind.
+    """
+
+    @staticmethod
+    def _run(handler, *args):
+        import contextlib
+        import io
+        import json
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = handler(list(args))
+        lines = [line for line in out.getvalue().splitlines() if line.startswith("{")]
+        return code, json.loads(lines[-1]) if lines else {}
+
+    def test_a_refused_shadow_lease_does_not_strand_the_core_lease(self):
+        from gh_address_cr.core import agent_protocol
+        from gh_address_cr.orchestrator import harness
+        from gh_address_cr.orchestrator.session import load_orchestration_session
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = _multi_item_session("owner/repo", "622", _threads_on_one_file(1, 2))
+                for item_id in ("github-thread:T1", "github-thread:T2"):
+                    agent_protocol.record_classification(
+                        "owner/repo", "622", item_id=item_id, classification="fix", agent_id="triage", note=WHY
+                    )
+                self._run(harness.handle_start, "owner/repo", "622")
+                self.assertEqual(self._run(harness.handle_step, "owner/repo", "622")[1].get("status"), "DISPATCHED")
+
+                code, payload = self._run(harness.handle_step, "owner/repo", "622")
+
+                self.assertEqual((code, payload.get("reason_code")), (2, "LEASE_CONFLICT"))
+                leases = _leases_by_item(manager)
+                shadow = set(load_orchestration_session("owner/repo", "622").active_leases)
+                active = {item for item, lease in leases.items() if lease["status"] in {"active", "submitted"}}
+                # Every core lease still active must be one the orchestrator shadows.
+                self.assertEqual(active - shadow, set())
+                refused = next(item for item in leases if item not in shadow)
+                self.assertEqual(leases[refused]["status"], "released")
+                self.assertEqual(manager.load()["items"][refused]["state"], "open")
+
+
 if __name__ == "__main__":
     unittest.main()

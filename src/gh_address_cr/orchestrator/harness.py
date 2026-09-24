@@ -13,6 +13,7 @@ from gh_address_cr.core import agent_protocol, protocol_codes
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as core_session
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.leases import release_claimed_lease
 from gh_address_cr.orchestrator.session import (
     ExpiredLeaseError,
     LeaseConflictError,
@@ -523,6 +524,16 @@ def handle_step(args: List[str]) -> int:
         sys.stdout.write(json.dumps(payload) + "\n")
         return 0
     except LeaseConflictError as e:
+        # The core lease was issued before the shadow grant was refused. Left in place it
+        # would lock the item behind a lease the orchestrator does not shadow and no one
+        # holds (spec 033 FR-001). Release it so RETRY can actually retry.
+        #
+        # It is always this step's own lease (FR-002): the step names no item, and
+        # issue_action_request only re-enters an existing lease when one is named. If the
+        # step ever gains an item mode, compare against the lease ids that existed before.
+        release_claimed_lease(
+            repo, pr, lease_id=str(action_result["lease_id"]), reason="action_rejected:LEASE_CONFLICT"
+        )
         _output_signal("FAILED", "LEASE_CONFLICT", "RETRY", f"Lease conflict: {e}")
         return 2
 

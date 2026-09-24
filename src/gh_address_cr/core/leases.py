@@ -249,24 +249,6 @@ def accept_lease(session: Any, lease_id: str, *, now: datetime | None = None) ->
     return lease
 
 
-def reject_lease(
-    session: Any,
-    lease_id: str,
-    *,
-    now: datetime | None = None,
-    reason: str | None = None,
-) -> Any:
-    now = _coerce_now(now)
-    lease = _find_lease(session, lease_id)
-    if _get(lease, "status") not in ACTIVE_LEASE_STATUSES:
-        raise LeaseSubmissionError("STALE_LEASE", lease_id)
-    _set(lease, "status", "rejected")
-    _set(lease, "completed_at", now)
-    _set(lease, "reason", reason)
-    _append_lease_event(session, lease, "lease_rejected", now=now, reason=reason)
-    return lease
-
-
 def release_lease(
     session: Any,
     lease_id: str,
