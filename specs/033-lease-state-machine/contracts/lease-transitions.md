@@ -10,9 +10,9 @@ deliberate contract change: edit this file and the test together.
 | Status | Meaning | Counts as leased |
 |---|---|---|
 | `active` | Claimed; the holder may submit | yes |
-| `submitted` | Evidence sent, awaiting acceptance | yes |
+| `submitted` | Transient: set and accepted in the same call, never at rest (FR-008) | yes |
 | `accepted` | Terminal. Evidence accepted | no |
-| `rejected` | Terminal. Rejected by the runtime | no |
+| `rejected` | Terminal. Reserved: no code writes it (see below) | no |
 | `expired` | Terminal. TTL passed | no |
 | `released` | Terminal. Given up by its holder or rolled back | no |
 
@@ -24,30 +24,32 @@ deliberate contract change: edit this file and the test together.
 Rows are the lease's current status, columns the operation. A cell is the resulting
 status, or the error raised.
 
-| from \ via | `submit` | `accept` | `reject` | `release` | `expire` (TTL passed) |
-|---|---|---|---|---|---|
-| `active` | `submitted` | `STALE_LEASE` | `rejected` | `released` | `expired` |
-| `submitted` | `DUPLICATE_SUBMISSION` | `accepted` | `rejected` | `released` | `expired` |
-| `accepted` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `accepted` (no-op) |
-| `rejected` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `rejected` (no-op) |
-| `expired` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `expired` (no-op) |
-| `released` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `released` (no-op) |
+| from \ via | `submit` | `accept` | `release` | `expire` (TTL passed) |
+|---|---|---|---|---|
+| `active` | `submitted` | `STALE_LEASE` | `released` | `expired` |
+| `submitted` | `DUPLICATE_SUBMISSION` | `accepted` | `released` | `expired` |
+| `accepted` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `accepted` (no-op) |
+| `rejected` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `rejected` (no-op) |
+| `expired` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `expired` (no-op) |
+| `released` | `STALE_LEASE` | `STALE_LEASE` | `STALE_LEASE` | `released` (no-op) |
 
 Consequences worth stating:
 
 - `accepted` is reachable only through `submitted`; an `active` lease cannot be accepted.
-- **`rejected` is unreachable in production.** `reject_lease` has no caller in `src`, so no
-  runtime path produces a `rejected` lease; only a test constructing one does. The status
-  stays in the table because code still reads it (`STALE_LEASE` handling, recovery
-  outcomes), but a maintainer should not assume a `rejected` lease can exist in a real
-  session. Whether to remove it or to use it (for example instead of `released` when a
-  rollback follows a rejected submit) is undecided and out of scope here.
+- **No operation produces `rejected`.** Its only writer, `reject_lease`, had no caller in
+  `src` and was deleted. The status stays in `TERMINAL_LEASE_STATUSES` because recovery and
+  submission code still read it (FR-007 keeps the set of statuses unchanged), so a session
+  holding one is still handled as terminal; but no session written by this runtime contains
+  one. Removing the status, or giving it a writer, is a separate decision.
 - `expire` is not an error on a terminal lease. It is the only operation that is safe to
   call unconditionally, which is why `claim` and `issue_action_request` both call it first.
-- **A `submitted` lease expires like an `active` one.** Evidence that was sent but not yet
-  accepted can lose its lease when the TTL passes. This is current behaviour, recorded
-  here so a later decision to protect it is a visible edit (see Open Questions in
-  `spec.md`).
+- **`submitted` is never at rest.** The only caller of `submit_lease`
+  (`accept_action_response_submission`) calls `accept_lease` on the same lease as the very
+  next statement, and `accept_lease` cannot fail on a lease just set to `submitted`. So the
+  `submitted` row describes the operations in isolation: its `expire` cell in particular is
+  reachable only by constructing such a lease. There is no "evidence sent but not yet
+  accepted" state for a lease to expire in. `SubmittedIsTransientTest` pins the adjacency
+  and checks that a submission, accepted or rejected, leaves no lease in `submitted`.
 
 ## Table 2: claim
 
@@ -82,7 +84,6 @@ Consequences:
 | `claim` | `issue_action_request`, `agent_batch._lease_new_github_thread` | The only two lease creators in `core/`; the orchestrator adds a shadow lease on top (see below) |
 | `submit`, `accept` | `accept_action_response_submission` | Always together, in that order, in one call |
 | `release` | `_release_active_triage_lease`, `release_irrecoverable_request_lease`, `release_self_stale_lease`, `release_claimed_lease` | Each releases a lease it has a specific claim to (below) |
-| `reject` | none in `src` | Defined but unreferenced; only `tests/test_claim_leases.py` calls it |
 | `expire` | `expire_leases` from `claim_lease`, `issue_action_request`, `issue_batch_action_request`, `reclaim_leases` | Time-driven; needs no ownership |
 
 ### Release ownership (FR-002)

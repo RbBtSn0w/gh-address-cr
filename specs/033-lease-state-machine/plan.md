@@ -12,8 +12,11 @@ and the test reads them back from the markdown so the document and the code cann
 drift. The inventory is compared in both directions with an AST scan of `src/`, so a new
 lease-creating call site fails the build until it is classified.
 
-Behaviour changes are limited to the two violations of FR-001. Nothing else about
-leases, TTLs, statuses, commands, reason codes or exit codes changes (FR-007).
+Behaviour changes are limited to the two violations of FR-001 plus removal of the
+unreferenced `reject_lease` writer. Nothing else about leases, TTLs, the public status
+set, commands, reason codes or exit codes changes (FR-007). This plan proves sequential
+transition correctness; it does not claim cross-process atomicity or session/ledger crash
+consistency (FR-009).
 
 ## Technical Context
 
@@ -25,7 +28,7 @@ leases, TTLs, statuses, commands, reason codes or exit codes changes (FR-007).
 **Project Type**: single Python CLI runtime plus packaged skill payload  
 **Constraints**: no public CLI, reason-code or exit-code change; no new lease status;
 `src/` carries zero in-code lint suppressions  
-**Scale/Scope**: 6 statuses, 5 transition operations, 3 claimant kinds, 11 call sites
+**Scale/Scope**: 6 statuses, 4 transition operations, 3 claimant kinds, 11 call sites
 
 ## Constitution Check
 
@@ -41,7 +44,9 @@ leases, TTLs, statuses, commands, reason codes or exit codes changes (FR-007).
   ever releases a lease that has not been accepted (`release_claimed_lease` ignores
   terminal leases).
 - **IV. Packaged skill boundary — PASS**: contracts live under `specs/`, code under `src/`.
-  `skill/` is unchanged.
+  The one `skill/` change corrects an existing agent-facing statement:
+  `references/evidence-ledger.md` promised a `lease_rejected` event that no runtime path
+  ever emitted, and its only emitter (`reject_lease`, unreferenced) is deleted here.
 - **V. Testable contracts — PASS**: every table cell and every inventory row is asserted;
   each fix is preceded by a failing test.
 - **VI. Claim leases — PASS**: this plan is the "lease policies" Article VI asks for,
@@ -87,6 +92,11 @@ and returning a lease id is not evidence of having created it.
 | `orchestrated` | `LeaseConflictError` from the shadow grant | release the core lease created by the step |
 | `two-step`, `batch-claim` after hand-over | any | none: the agent holds the skeleton |
 | any | an unexpected exception | none: an unmodelled failure is not evidence the claim is safe to undo (same rule as `claimed_fixer_lease`) |
+
+The last row is intentionally narrower than a blanket "no stranded leases" promise.
+Unexpected failures may occur after an effect that cannot be inferred safely from the
+exception type. The runtime keeps the lease available for owner recovery, inspection, or
+TTL expiry. FR-001 covers the modeled failure boundaries named in this table.
 
 ### Side-effect plan
 
@@ -141,3 +151,17 @@ two items on the same file (`context_key` is the path) while the core `claim_lea
 them when their hunks do not overlap. Releasing the core lease makes the conflict a clean
 `RETRY` instead of a lock. Whether the shadow should be as strict as it is, or should defer
 to the core's conflict keys, is recorded as an open question rather than changed here.
+
+## Deferred Atomic Persistence Work
+
+This PR deliberately does not add a file lock, session revision/CAS protocol, SQLite
+store, or session/ledger transaction. Choosing one changes persistence ownership,
+recovery, replay, and compatibility semantics and therefore needs its own Architecture
+Preflight and executable concurrency/crash contracts. That follow-up must cover at least:
+
+- two processes claiming the same item (exactly one succeeds);
+- two processes claiming different items (neither update is lost);
+- concurrent claim/release and re-entry/rollback without resurrection;
+- explicit `created` versus `re-entered` acquisition provenance;
+- reconciliation after a crash between session and ledger writes; and
+- one conflict policy for the core lease and orchestrator shadow/reference.

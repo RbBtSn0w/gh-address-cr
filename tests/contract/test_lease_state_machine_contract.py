@@ -5,7 +5,7 @@ document and the test cannot drift apart: changing either without the other fail
 
 Three checks:
 
-- the 30-cell transition table (`lease-transitions.md`, Table 1);
+- the 24-cell transition table (`lease-transitions.md`, Table 1);
 - the claim table (Table 2);
 - the entry-point inventory (`lease-entry-points.md`), compared in both directions with
   what an AST scan of `src/` actually finds.
@@ -47,6 +47,11 @@ def _table(markdown: str, heading: str) -> list[list[str]]:
     return rows[1:]
 
 
+def _called_name(call: ast.Call) -> str | None:
+    func = call.func
+    return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+
+
 def _cell(text: str) -> str:
     """A table cell as a plain value: the `(no-op)` annotation and the backticks removed.
 
@@ -71,7 +76,6 @@ class TransitionTableTest(unittest.TestCase):
             s, "L0", agent_id="a", role="fixer", item_id="it", request_hash="h", now=NOW + timedelta(seconds=1)
         ),
         "accept": lambda s: L.accept_lease(s, "L0", now=NOW + timedelta(seconds=1)),
-        "reject": lambda s: L.reject_lease(s, "L0", now=NOW + timedelta(seconds=1), reason="r"),
         "release": lambda s: L.release_lease(s, "L0", now=NOW + timedelta(seconds=1), reason="r"),
         "expire (TTL passed)": lambda s: L.expire_leases(s, now=NOW + timedelta(hours=2)),
     }
@@ -135,6 +139,102 @@ class ClaimTableTest(unittest.TestCase):
         )
 
         self.assertEqual(L._get(session["leases"]["L0"], "status"), "expired")
+
+
+class SubmittedIsTransientTest(unittest.TestCase):
+    """No lease is ever at rest in `submitted` (spec 033 FR-008).
+
+    `submit_lease` is called only where the very next statement is `accept_lease` on the
+    same lease, so nothing can fail or be saved in between. The transition table still has
+    a `submitted` row, but a session on disk never contains one; "evidence sent but not yet
+    accepted" is not a state this runtime has. If a later change splits the two calls, a
+    submitted lease becomes observable and can expire, and this test is where that decision
+    has to be made visibly.
+    """
+
+    def test_every_submit_is_immediately_followed_by_an_accept_of_the_same_lease(self):
+        sites = []
+        for path in sorted(SRC.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for block_owner in ast.walk(tree):
+                for field in ("body", "orelse", "finalbody"):
+                    block = getattr(block_owner, field, None)
+                    if not isinstance(block, list):
+                        continue
+                    for index, statement in enumerate(block):
+                        call = getattr(statement, "value", None)
+                        if not (isinstance(call, ast.Call) and _called_name(call) == "submit_lease"):
+                            continue
+                        following = block[index + 1] if index + 1 < len(block) else None
+                        next_call = getattr(following, "value", None)
+                        sites.append(
+                            (
+                                f"{path.relative_to(SRC)}:{statement.lineno}",
+                                isinstance(next_call, ast.Call)
+                                and _called_name(next_call) == "accept_lease"
+                                and ast.dump(next_call.args[1]) == ast.dump(call.args[1]),
+                            )
+                        )
+
+        self.assertTrue(sites, "no submit_lease call found; the scan is broken")
+        self.assertEqual([site for site, paired in sites if not paired], [])
+
+    def test_a_submission_leaves_no_lease_in_submitted(self):
+        # Accepted and rejected outcomes alike: nothing persists in the in-between state.
+        import json
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        from gh_address_cr.core import agent_protocol
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.session import SessionManager
+        from tests.test_control_plane_workflow import github_thread
+
+        for agent_in_response in ("fixer-1", "someone-else"):
+            with self.subTest(response_agent=agent_in_response):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                        manager = SessionManager("owner/repo", "910")
+                        session = manager.create(status="WAITING_FOR_FIX")
+                        item = github_thread("github-thread:S")
+                        session["items"] = {item["item_id"]: item}
+                        manager.save(session)
+                        agent_protocol.record_classification(
+                            "owner/repo",
+                            "910",
+                            item_id=item["item_id"],
+                            classification="clarify",
+                            agent_id="fixer-1",
+                            note="n",
+                        )
+                        claimed = agent_protocol.issue_action_request(
+                            "owner/repo", "910", role="fixer", agent_id="fixer-1", item_id=item["item_id"]
+                        )
+                        request = json.loads(Path(claimed["request_path"]).read_text(encoding="utf-8"))
+                        response_path = Path(tmp) / "response.json"
+                        response_path.write_text(
+                            json.dumps(
+                                {
+                                    "schema_version": request["schema_version"],
+                                    "request_id": request["request_id"],
+                                    "lease_id": request["lease_id"],
+                                    "agent_id": agent_in_response,
+                                    "item_id": item["item_id"],
+                                    "resolution": "clarify",
+                                    "note": "Not a defect; declining with rationale.",
+                                    "reply_markdown": "Not a defect; declining with rationale.",
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                        try:
+                            agent_protocol.submit_action_response("owner/repo", "910", response_path=response_path)
+                        except WorkflowError:
+                            pass
+
+                        statuses = {lease["status"] for lease in manager.load()["leases"].values()}
+                        self.assertNotIn("submitted", statuses)
 
 
 class SessionLeasesShapeTest(unittest.TestCase):

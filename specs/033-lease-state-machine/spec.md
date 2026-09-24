@@ -47,9 +47,10 @@ inject a failure after the claim and assert no active lease for that item remain
 
 **Acceptance Scenarios**:
 
-1. **Given** an item and a one-shot command that claims then fails, **When** the command
-   returns its error, **Then** no lease created by that command is `active` or
-   `submitted`, and the item is claimable again.
+1. **Given** an item and a one-shot command that claims then reaches a modeled,
+   recoverable post-claim failure, **When** the command returns its error, **Then** no
+   lease created by that command is `active` or `submitted`, and the item is claimable
+   again.
 2. **Given** an agent that claimed through `agent next` and then runs a one-shot command
    on the same item which fails, **When** the command returns, **Then** the lease the
    agent already held is unchanged.
@@ -87,9 +88,11 @@ owner, and assert the returned request submits.
 
 ### Edge Cases
 
-- A lease is `submitted` when its TTL passes: it becomes `expired` (see the transition
-  table). Whether a submitted lease should be protected from expiry is an open question
-  recorded below, not a decision this spec makes.
+- `submitted` is transient. `submit_lease` is always followed immediately by
+  `accept_lease` on the same lease in one call, so no session on disk ever holds a
+  `submitted` lease and "evidence sent but not yet accepted" is not a state the runtime has.
+  The table's `submitted` row describes the operations in isolation; its `expire` cell is
+  unreachable in production (FR-008).
 - `expire_leases` on a terminal lease is a no-op, not an error.
 - The orchestrator keeps its own in-memory shadow lease per item. A conflict granting the
   shadow lease must not strand the core lease that was already issued.
@@ -100,9 +103,12 @@ owner, and assert the returned request submits.
 
 ### Functional Requirements
 
-- **FR-001 (I1, no stranded leases)**: A command that creates a lease and then fails
-  MUST release every lease it created before returning, unless it is a two-step flow that
-  hands the agent the request and skeleton to retry with.
+- **FR-001 (I1, no stranded leases on modeled failures)**: A command that creates a
+  lease and then returns a modeled, recoverable post-claim failure MUST release every
+  lease it created before returning, unless it is a two-step flow that hands the agent
+  the request and skeleton to retry with. An unexpected exception is not automatically
+  safe to roll back because the runtime may not know which effects completed; it retains
+  the lease for inspection, owner recovery, or TTL expiry instead of guessing.
 - **FR-002 (I2, creator-only rollback)**: A rollback MUST release only a lease its own
   call created. A lease the caller held before the call MUST be left unchanged.
 - **FR-003 (I3, submittable hand-back)**: Whatever the runtime hands an agent for a lease
@@ -126,6 +132,14 @@ owner, and assert the returned request submits.
   is not listed.
 - **FR-007**: This feature MUST NOT change lease TTLs, the set of statuses, or any public
   CLI, reason code or exit code.
+- **FR-008 (submitted is transient)**: `submit_lease` MUST be followed, as the very next
+  statement, by `accept_lease` on the same lease, so no lease is ever at rest in
+  `submitted`. Splitting the two is a contract change that makes a submitted lease
+  observable and expirable, and must be decided explicitly.
+- **FR-009 (bounded correctness claim)**: This feature defines and verifies sequential
+  lease transitions and composition-level rollback ownership. It MUST NOT be described
+  as cross-process claim atomicity or crash consistency for `session.json` and the
+  evidence ledger; those require a transactional persistence boundary not added here.
 
 ### Constitution Alignment *(mandatory)*
 
@@ -166,9 +180,10 @@ owner, and assert the returned request submits.
 
 ### Measurable Outcomes
 
-- **SC-001**: Every lease-creating entry point satisfies FR-001 or is a documented
-  two-step flow, verified by one failure-injection test per entry point.
-- **SC-002**: The 30-cell transition table (6 statuses x 5 operations) and the 6-cell
+- **SC-001**: Every lease-creating entry point satisfies FR-001 for each modeled failure
+  it returns, or is a documented two-step flow, verified by one failure-injection test
+  per protected failure boundary.
+- **SC-002**: The 24-cell transition table (6 statuses x 4 operations) and the 6-cell
   claim table (one per status of the item's existing lease) are each asserted by a test
   that fails on any change to them.
 - **SC-003**: Adding a lease-creating call site without listing it in the inventory fails
@@ -185,9 +200,8 @@ owner, and assert the returned request submits.
   2. `workflow_matching.py` `_process_fast_fix_matches` (`agent resolve --commit --files`):
      a failure of the batch submit leaves every claimed lease active, and the command is
      one-shot so the caller has no skeleton to retry with.
-- **Open question, not decided here**: should a `submitted` lease be exempt from TTL
-  expiry? Today it expires, so evidence that was sent but not yet accepted can lose its
-  lease. The behaviour is recorded in the table so a later change is a visible edit.
+- **Withdrawn**: an earlier draft asked whether a `submitted` lease should be exempt from
+  TTL expiry. The question does not arise: no lease is ever at rest in `submitted` (FR-008).
 - **Open question, not decided here**: the orchestrator's shadow lease and the core lease
   disagree on what conflicts. The shadow refuses two items on the same file (its
   `context_key` is the path); `claim_lease` allows them when their hunks do not overlap.
@@ -197,3 +211,12 @@ owner, and assert the returned request submits.
   at a time into an append-only ledger, and a later failure leaves earlier rows accepted.
   The recovery text is truthful (#278). Making it atomic needs a decision about what
   happens to already-written ledger entries.
+- **Required follow-up architecture work**: claims are currently implemented as
+  load/mutate/atomic-replace of `session.json`. Atomic replacement prevents torn JSON but
+  does not prevent two processes from reading the same revision and overwriting one
+  another. A later architecture spec must define one transactional lease mutation
+  boundary (including cross-process serialization or compare-and-swap), make acquisition
+  provenance explicit (`created` versus `re-entered`), derive item claim markers from one
+  canonical owner, reconcile the orchestrator shadow policy with core conflict policy,
+  and define session/ledger crash recovery. Until that work lands, this spec proves the
+  sequential state machine only.
