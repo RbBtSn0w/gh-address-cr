@@ -35,8 +35,8 @@
   effects, reply evidence, loop safety, and final-gate evaluation inside
   deterministic code instead of Markdown instructions? Does each PR session
   have exactly one versioned authoritative persistence boundary, with artifacts
-  treated as projections? If authority changes, does the plan define an atomic,
-  fail-loud migration that prohibits dual-primary operation?
+  treated as projections? If authority changes, does the plan define an atomic
+  migration that fails loudly and prohibits dual-primary operation?
 - **First-principles runtime kernel**: Does the plan define external facts or
   event inputs, projections, policy/status-to-action decisions, command
   planning, outbox execution, execution evidence, and replay or contract tests?
