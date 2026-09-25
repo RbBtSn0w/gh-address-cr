@@ -8,6 +8,7 @@ from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import json_ready as _io_json_ready
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
+from gh_address_cr.core.side_effect_outbox import persist_side_effect_attempt
 from gh_address_cr.evidence.ledger import EvidenceLedger, SessionEvidenceLedger
 
 
@@ -85,27 +86,11 @@ def get_session_ledger(session: dict[str, Any]) -> EvidenceLedger:
     repo = str(session["repo"])
     pr_number = str(session["pr_number"])
 
-    def flush_side_effect(records: list[dict[str, Any]]) -> None:
-        persistence = session.get("persistence")
-        expected_revision = persistence.get("revision") if isinstance(persistence, dict) else None
-        result = session_store.transact_session(
-            repo,
-            pr_number,
-            lambda current: None,
-            operation="side_effect_attempt",
-            expected_revision=expected_revision if isinstance(expected_revision, int) else None,
-            evidence=records,
-        )
-        session["persistence"] = {
-            "schema_version": result.schema_version,
-            "revision": result.revision,
-        }
-
     return SessionEvidenceLedger(
         session.get("ledger_path")
         or session_store.default_ledger_path(repo, pr_number),
         session,
-        flush=flush_side_effect,
+        flush=lambda records: persist_side_effect_attempt(session, records),
     )
 
 
