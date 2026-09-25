@@ -29,7 +29,12 @@ def persist_side_effect_attempt(session: dict[str, Any], records: list[dict[str,
         None,
     )
     if attempt.status == "in_flight":
-        if existing is not None and existing["status"] != "failed":
+        retryable_unknown = bool(
+            existing is not None
+            and existing["status"] == "unknown"
+            and existing["retry_boundary"] == "idempotent"
+        )
+        if existing is not None and existing["status"] != "failed" and not retryable_unknown:
             raise ValueError("An existing side-effect command requires reconciliation before retry.")
         if existing is not None:
             in_flight = store.mark_outbox_in_flight(command_id)
