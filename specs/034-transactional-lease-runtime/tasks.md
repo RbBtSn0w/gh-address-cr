@@ -49,20 +49,20 @@ shim or dual-primary mode to proceed around it.
 
 **Owning branch**: `feat/034b-crash-consistent-outbox` (base A)
 
-- [ ] B001 Write child-process kill tests for every checkpoint in the transaction,
+- [x] B001 Write child-process kill tests for every checkpoint in the transaction,
   outbox, and artifact materialization contracts.
-- [ ] B002 Route all remaining session/evidence mutation paths through A's
+- [x] B002 Route all remaining session/evidence mutation paths through A's
   repository and remove independent append/save production calls.
-- [ ] B003 Persist outbox plans with their state transition and record execution
+- [x] B003 Persist outbox plans with their state transition and record execution
   results in later transactions.
-- [ ] B004 Implement `in_flight -> unknown` restart recovery, external
+- [x] B004 Implement `in_flight -> unknown` restart recovery, external
   reconciliation, and effect-specific idempotent retry.
-- [ ] B005 Implement dirty projection tracking and deterministic rebuild without
+- [x] B005 Implement dirty projection tracking and deterministic rebuild without
   artifact-backed truth.
-- [ ] B006 Point final-gate and PR-session recovery at canonical state plus current
+- [x] B006 Point final-gate and PR-session recovery at canonical state plus current
   GitHub facts.
-- [ ] B007 Add bounded recovery/outbox/materialization OTel events and privacy tests.
-- [ ] B008 Update versioned machine/status-to-action docs and tests for any exposed
+- [x] B007 Add bounded recovery/outbox/materialization OTel events and privacy tests.
+- [x] B008 Update versioned machine/status-to-action docs and tests for any exposed
   recovery reasons.
 - [ ] B009 Run focused crash/replay gates, complete repository gates, and affected
   PR-session final-gate with compact completion evidence.
