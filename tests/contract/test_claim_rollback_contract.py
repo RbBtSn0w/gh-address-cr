@@ -143,6 +143,54 @@ class ClaimRollbackContractTest(unittest.TestCase):
                 self.assertEqual(lease["status"], "active")
                 self.assertIsNone(lease.get("reason"))
 
+    def test_matching_commands_exclude_threads_claimed_by_another_agent(self):
+        from gh_address_cr.core import agent_protocol, workflow_matching
+        from gh_address_cr.core.errors import WorkflowError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self._session("owner/repo", "607", github_thread("github-thread:L"))
+                agent_protocol.record_classification(
+                    "owner/repo",
+                    "607",
+                    item_id="github-thread:L",
+                    classification="fix",
+                    agent_id="other-agent",
+                    note=WHY,
+                )
+                agent_protocol.issue_action_request(
+                    "owner/repo",
+                    "607",
+                    role="fixer",
+                    agent_id="other-agent",
+                    item_id="github-thread:L",
+                )
+
+                with self.assertRaises(WorkflowError) as fast_fix_error:
+                    workflow_matching.fast_fix_matching_threads(
+                        "owner/repo",
+                        "607",
+                        agent_id="fixer-1",
+                        commit_hash="abc123",
+                        files=["src/shared.py"],
+                        validation_commands=VALIDATION,
+                        homogeneous_reason=WHY,
+                        github_client=UnstackedGitHubClient(),
+                    )
+                with self.assertRaises(WorkflowError) as decline_error:
+                    workflow_matching.decline_matching_threads(
+                        "owner/repo",
+                        "607",
+                        agent_id="fixer-1",
+                        files=["src/shared.py"],
+                        resolution="reject",
+                        homogeneous_reason=WHY,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+        self.assertEqual(fast_fix_error.exception.reason_code, "NO_MATCHING_GITHUB_THREADS")
+        self.assertEqual(decline_error.exception.reason_code, "NO_MATCHING_GITHUB_THREADS")
+
     def test_decline_publish_on_a_local_finding_is_rejected_before_any_claim(self):
         # Not a rollback case: decline_item's own --publish guard (#274) rejects
         # before issue_action_request, so no lease is ever minted. Pinned as its
@@ -345,10 +393,9 @@ class BatchFastFixRollbackTest(unittest.TestCase):
                         self.assertEqual(manager.load()["items"][item_id]["state"], "open")
 
     def test_the_rollback_leaves_a_lease_the_agent_already_held(self):
-        # FR-002. The batch path passes item_id, so issue_action_request can re-enter a
-        # lease the agent already holds instead of minting one. Today the matcher skips a
-        # claimed item, so this needs a session whose claim marker was reset while the lease
-        # stayed active; it pins the rule for the day the matcher includes such an item.
+        # FR-002. The matcher may include a claimed item only when the named agent
+        # already owns its fixer lease. Re-entering that lease must not make it part of
+        # this call's rollback ownership.
         from gh_address_cr.core import agent_protocol
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -360,9 +407,6 @@ class BatchFastFixRollbackTest(unittest.TestCase):
                 held = agent_protocol.issue_action_request(
                     "owner/repo", "621", role="fixer", agent_id="fixer-1", item_id="github-thread:T1"
                 )
-                session = manager.load()
-                session["items"]["github-thread:T1"]["state"] = "open"
-                manager.save(session)
 
                 self._resolve("owner/repo", "621")
 

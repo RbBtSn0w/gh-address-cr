@@ -274,7 +274,7 @@ class TestOrchestratorHarness(unittest.TestCase):
         self.assertEqual(handle_agent_orchestrate("start", [self.repo, self.pr]), 0)
         runtime_session = session_file(self.repo, self.pr)
         runtime_session.unlink()
-        (runtime_session.parent / "runtime.sqlite3").unlink()
+        (runtime_session.parent / "runtime.sqlite3").unlink(missing_ok=True)
 
         exit_code = handle_agent_orchestrate("stop", [self.repo, self.pr])
 

@@ -210,9 +210,10 @@ class RuntimeStore:
                 "UPDATE store_metadata SET latest_revision = ?, updated_at = ? WHERE singleton = 1",
                 (next_revision, _utc_now()),
             )
+            committed_payload = self._load_snapshot(connection).payload
             connection.commit()
             result = TransactionResult(
-                payload=self._load_snapshot_from_new_connection(),
+                payload=committed_payload,
                 revision=next_revision,
                 value=value,
                 operation=operation,
@@ -332,13 +333,6 @@ class RuntimeStore:
         connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
-
-    def _load_snapshot_from_new_connection(self) -> dict[str, Any]:
-        connection = self._connect()
-        try:
-            return self._load_snapshot(connection).payload
-        finally:
-            connection.close()
 
     @staticmethod
     def _create_schema(connection: sqlite3.Connection) -> None:

@@ -370,6 +370,34 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 self.assertEqual(reopened.revision, expected_revision)
                 self.assertEqual(reopened.payload["status"], expected_status)
 
+    def test_post_commit_reload_failure_cannot_change_commit_truth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            original_connect = store._connect
+            connect_count = 0
+
+            def connect_once(database_path=None):
+                nonlocal connect_count
+                connect_count += 1
+                if connect_count > 1:
+                    raise sqlite3.OperationalError("post-commit reload unavailable")
+                return original_connect(database_path)
+
+            with patch.object(store, "_connect", side_effect=connect_once):
+                committed = store.transact(
+                    lambda payload: payload.update(status="ACTIVE"),
+                    operation="status_update",
+                )
+
+            reopened = RuntimeStore(workspace).load()
+
+        self.assertEqual(connect_count, 1)
+        self.assertEqual(committed.revision, 2)
+        self.assertEqual(committed.payload["status"], "ACTIVE")
+        self.assertEqual(reopened.payload["status"], "ACTIVE")
+
     def test_transaction_and_migration_telemetry_is_bounded_and_private(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
