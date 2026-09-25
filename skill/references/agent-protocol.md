@@ -135,6 +135,12 @@ A `WorkflowError` summary carries `commands` (the runnable template menu) and a 
 
 `remediation.summary` is the next step for this `reason_code`; `remediation.command` is the template to run. Read these before opening `references/status-action-map.md` — that map is a curated subset and does not cover every code the runtime emits. Every `WorkflowError` unregistered `reason_code` still resolves to a generic remediation pointing back at `commands`, never an absent or empty field.
 
+An interrupted GitHub reply is recovered from the canonical outbox before a
+new side effect is attempted. If the runtime cannot prove whether the prior
+reply happened, publish returns `PUBLISH_RECONCILE_REQUIRED` with
+`waiting_on=reply_reconciliation`. This is a fail-closed machine state: reconcile
+the existing GitHub reply into evidence instead of blindly retrying publish.
+
 A handful of terminal failure paths — orchestration crashes and other cases that never construct a `WorkflowError` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
 
 ## Untrusted Content Envelope
