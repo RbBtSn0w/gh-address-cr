@@ -630,6 +630,53 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(committed.payload["status"], "ACTIVE")
         self.assertEqual(reopened.payload["status"], "ACTIVE")
 
+    def test_session_load_recovers_in_flight_outbox_and_dirty_artifacts(self):
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+            os.environ["GH_ADDRESS_CR_STATE_DIR"] = tmp
+            try:
+                manager = SessionManager("owner/repo", "126")
+                session = manager.create(status="ACTIVE")
+                manager.save(session)
+                store = RuntimeStore(manager.workspace_path)
+                planned = store.transact(
+                    lambda payload: None,
+                    operation="outbox_plan",
+                    outbox=[
+                        {
+                            "command_id": "command-recover-on-load",
+                            "effect_type": "github_reply",
+                            "idempotency_key": "reply-recover-on-load",
+                            "operation_category": "github_reply",
+                            "retry_boundary": "reconcile_only",
+                        }
+                    ],
+                )
+                store.mark_outbox_in_flight("command-recover-on-load")
+                manager.session_path.unlink(missing_ok=True)
+                manager.ledger_path.unlink(missing_ok=True)
+
+                loaded = manager.load()
+
+                command = store.load_outbox()[0]
+                materializations = store.load_materializations()
+                session_exists = manager.session_path.is_file()
+                ledger_exists = manager.ledger_path.is_file()
+            finally:
+                if previous is None:
+                    os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+                else:
+                    os.environ["GH_ADDRESS_CR_STATE_DIR"] = previous
+
+        self.assertEqual(planned.revision, 2)
+        self.assertEqual(command["status"], "unknown")
+        self.assertEqual(loaded["persistence"]["revision"], 4)
+        self.assertTrue(session_exists)
+        self.assertTrue(ledger_exists)
+        self.assertTrue(all(row["status"] == "current" for row in materializations))
+
     def test_transaction_and_migration_telemetry_is_bounded_and_private(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

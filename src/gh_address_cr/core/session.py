@@ -143,11 +143,17 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
             reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
             raise SessionError(reason_code, str(exc)) from exc
     try:
-        snapshot = (
-            store.load()
-            if store.database_path.exists()
-            else store.open_or_migrate(session_path=path, ledger_path=default_ledger_path(repo, pr_number))
+        if not store.database_path.exists():
+            store.open_or_migrate(
+                session_path=path,
+                ledger_path=default_ledger_path(repo, pr_number),
+            )
+        store.recover()
+        store.recover_artifacts(
+            session_path=path,
+            ledger_path=default_ledger_path(repo, pr_number),
         )
+        snapshot = store.load()
     except (PersistenceBusyError, PersistenceInvalidError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
     payload = snapshot.payload
