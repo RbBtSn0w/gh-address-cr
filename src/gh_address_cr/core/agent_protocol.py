@@ -234,6 +234,7 @@ def _reenter_own_fixer_lease(
     handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
     return {
         "status": "ACTION_REQUESTED",
+        "acquisition": "reentered",
         "repo": repo,
         "pr_number": str(pr_number),
         "request_path": str(request_path),
@@ -453,10 +454,20 @@ def issue_action_request(
         session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
     )
     request["response_skeleton_path"] = str(response_skeleton_path)
-    try:
-        lease = claim_lease(
-            session,
-            item,
+    def commit_claim(current: dict[str, Any]) -> Any:
+        current_item = current.get("items", {}).get(item_id)
+        if not isinstance(current_item, dict):
+            raise LeaseConflictError("ITEM_NOT_CLAIMABLE", item_id)
+        local_metadata = session.get("metadata")
+        if isinstance(local_metadata, dict):
+            current["metadata"] = dict(local_metadata)
+        local_classification = item.get("classification_evidence")
+        if isinstance(local_classification, dict) and not has_classification_evidence(current_item):
+            current_item["classification_evidence"] = dict(local_classification)
+            current_item["decision"] = item.get("decision")
+        committed_lease = claim_lease(
+            current,
+            current_item,
             agent_id=agent_id,
             role=role,
             request_hash=request_hash,
@@ -466,11 +477,21 @@ def issue_action_request(
             request_path=str(request_path),
             resume_token=f"resume:{request_id}",
             allow_same_agent_github_thread_file_overlap=bool(
-                role == "fixer" and item.get("item_kind") == "github_thread"
+                role == "fixer" and current_item.get("item_kind") == "github_thread"
             ),
         )
+        current_item["state"] = "claimed"
+        current_item["active_lease_id"] = lease_id
+        return committed_lease
+
+    try:
+        committed = session_store.transact_session(
+            repo,
+            pr_number,
+            commit_claim,
+            operation="lease_claim",
+        )
     except LeaseConflictError as exc:
-        session_store.save_session(repo, pr_number, session)
         raise WorkflowError(
             status="LEASE_REJECTED",
             reason_code=exc.reason_code,
@@ -480,8 +501,9 @@ def issue_action_request(
             payload={"item_id": item_id},
         ) from exc
 
-    item["state"] = "claimed"
-    item["active_lease_id"] = lease_id
+    session = committed.payload
+    item = session["items"][item_id]
+    lease = committed.value
     write_json_atomic(request_path, request)
     response_skeleton = response_skeleton_for_request(request, agent_id=agent_id, item=item)
     write_json_atomic(response_skeleton_path, response_skeleton)
@@ -499,9 +521,9 @@ def issue_action_request(
             "response_skeleton_path": str(response_skeleton_path),
         },
     )
-    session_store.save_session(repo, pr_number, session)
     return {
         "status": "ACTION_REQUESTED",
+        "acquisition": "created",
         "repo": repo,
         "pr_number": str(pr_number),
         "request_path": str(request_path),

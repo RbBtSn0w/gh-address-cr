@@ -14,7 +14,7 @@
 - [x] T005 Define canonical entities, projections, transition/recovery tables, and
   artifact/telemetry boundaries.
 - [x] T006 Apply the PR stacking dependency gate and define A -> B -> C ownership.
-- [ ] T007 Obtain review and approval for the Constitution Principle I amendment
+- [x] T007 Obtain review and approval for the Constitution Principle I amendment
   and persistence-boundary v1 contract.
 
 **Checkpoint**: T007 blocks all implementation tasks. Do not create a compatibility
@@ -24,26 +24,26 @@ shim or dual-primary mode to proceed around it.
 
 **Owning branch**: `feat/034a-atomic-runtime-store`
 
-- [ ] A001 Amend Constitution Principle I with version rationale and review all
+- [x] A001 Amend Constitution Principle I with version rationale and review all
   dependent templates/guidance.
-- [ ] A002 Write failing executable schema, legacy migration, and projection
+- [x] A002 Write failing executable schema, legacy migration, and projection
   authority contracts.
-- [ ] A003 Write failing multi-process same-item and overlapping-conflict races,
+- [x] A003 Write failing multi-process same-item and overlapping-conflict races,
   bounded busy timeout, and stale-revision CAS tests.
-- [ ] A004 Implement the versioned SQLite store and transaction repository without
+- [x] A004 Implement the versioned SQLite store and transaction repository without
   network/artifact IO inside write transactions.
-- [ ] A005 Migrate lease/item/session/evidence state exactly once and preserve
+- [x] A005 Migrate lease/item/session/evidence state exactly once and preserve
   stable event identities; create and verify the immutable legacy-v1 recovery
   bundle before replacing compatibility projections.
-- [ ] A006 Route all lease transitions through the transaction API; return explicit
+- [x] A006 Route all lease transitions through the transaction API; return explicit
   `created`/`reentered` provenance and derive item claim projection.
-- [ ] A007 Materialize revision-stamped JSON/JSONL compatibility artifacts and
+- [x] A007 Materialize revision-stamped JSON/JSONL compatibility artifacts and
   prove external edits do not mutate truth.
-- [ ] A008 Add bounded privacy-safe transaction/migration OTel events and fail-open
+- [x] A008 Add bounded privacy-safe transaction/migration OTel events and fail-open
   exporter tests.
-- [ ] A009 Update README, persistence contract documentation, and skill guidance
+- [x] A009 Update README, persistence contract documentation, and skill guidance
   only where public recovery/authority behavior changes.
-- [ ] A010 Run focused gates, then the complete repository Completion Standard.
+- [x] A010 Run focused gates, then the complete repository Completion Standard.
 
 ## Phase B — Crash-Consistent Evidence, Outbox, and Recovery
 

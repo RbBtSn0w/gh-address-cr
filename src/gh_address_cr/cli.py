@@ -374,12 +374,9 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
 
 
 def load_session_payload(repo: str, pr_number: str) -> dict:
-    path = workspace_root(repo, pr_number) / "session.json"
-    if not path.exists():
-        return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        return session_store.load_session(repo, pr_number)
+    except session_store.SessionError:
         return {}
 
 

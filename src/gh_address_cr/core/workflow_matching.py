@@ -808,6 +808,7 @@ def _matches_fast_fix_thread(
     if item_path not in files:
         return False
     stale = is_stale_github_thread_item(item)
+    claim_candidate = is_claimable_github_thread(item) or str(item.get("state") or "").lower() == "claimed"
     if stale_only:
         if not stale:
             return False
@@ -816,7 +817,7 @@ def _matches_fast_fix_thread(
         return is_claimable_github_thread(item)
     if stale and not include_stale:
         return False
-    return is_claimable_github_thread(item)
+    return claim_candidate
 
 
 def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:

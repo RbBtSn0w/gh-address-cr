@@ -25,11 +25,11 @@ point. The defects fixed under #273 were each found at an entry point nobody had
 
 | Location | Function | Class | Protection |
 |---|---|---|---|
-| `core/agent_protocol.py` | `issue_action_request` | `creator` | Re-entry returns the holder's own lease instead of a second one (FR-003) |
+| `core/agent_protocol.py` | `commit_claim` | `creator` | Runs the existing claim policy inside the SQLite writer reservation; re-entry returns the holder's own lease instead of a second one (FR-003) |
 | `core/agent_protocol.py` | `claimed_fixer_lease` | `creator` | The rollback wrapper; releases only a lease it created (FR-002) |
-| `core/agent_batch.py` | `_lease_new_github_thread` | `creator` | `issue_batch_action_request` rolls the batch back on any exception |
+| `core/agent_batch.py` | `commit_batch` | `creator` | Runs batch selection and claim policy inside one SQLite writer reservation |
+| `core/agent_batch.py` | `_lease_new_github_thread` | `creator` | Pure in-transaction claim helper; post-commit failure compensates only `created` leases |
 | `commands/agent.py` | `handle_agent_next` | `two-step` | Exempt by design |
-| `core/agent_batch.py` | `issue_batch_action_request` | `batch-claim` | Whole-batch rollback during the claim phase |
 | `core/leases.py` | `reclaim_lease` | `unreferenced` | None needed while unreferenced. A thin `expire_leases` + `claim_lease` wrapper, redundant since `claim_lease` already expires first |
 | `core/workflow.py` | `fast_fix_item` | `one-shot` | `claimed_fixer_lease` |
 | `core/workflow.py` | `decline_item` | `one-shot` | `claimed_fixer_lease` |

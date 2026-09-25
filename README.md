@@ -120,6 +120,16 @@ Use the same value for `review`, `address`, `agent next`, `agent submit`,
 view. If the configured directory is unavailable, the runtime returns
 `STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
+Each PR workspace uses `runtime.sqlite3` as its authoritative, versioned runtime
+store. On first open, an existing `session.json` and `evidence.jsonl` are imported
+once and preserved in an immutable `legacy-v1-recovery/` bundle. JSON and JSONL
+files in the live workspace are compatibility projections after migration;
+`session.json` carries its source revision and `evidence.jsonl.meta.json` carries
+the JSONL projection revision without changing the existing JSONL row format.
+editing or deleting them does not change runtime truth. Unsupported schemas,
+recovery-bundle divergence, stale revisions, and bounded writer contention fail
+explicitly instead of falling back to uncoordinated file writes.
+
 Completion means the latest final gate reports:
 
 - zero unresolved review threads

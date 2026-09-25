@@ -1401,9 +1401,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
         second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
-        session = self.load_session()
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(self.repo, self.pr)
+        session = manager.load()
         session["leases"][second_request["lease_id"]]["expires_at"] = (NOW - timedelta(seconds=1)).isoformat()
-        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        manager.save(session)
         batch_path = self.workspace_dir() / "expired-batch-action-response.json"
         batch_path.write_text(
             json.dumps(

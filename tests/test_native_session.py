@@ -27,6 +27,85 @@ class NativeSessionTests(unittest.TestCase):
                 self.assertEqual(loaded["items"]["local:1"]["blocking"], True)
                 self.assertEqual(Path(loaded["ledger_path"]).name, "evidence.jsonl")
                 self.assertEqual(manager.session_path.name, "session.json")
+                self.assertTrue((manager.workspace_path / "runtime.sqlite3").is_file())
+                self.assertEqual(loaded["persistence"], {"schema_version": 1, "revision": 1})
+
+    def test_session_json_is_a_projection_and_cannot_overwrite_runtime_truth(self):
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "123")
+                manager.save(manager.create(status="ACTIVE"))
+                projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+                projection["status"] = "EXTERNALLY_EDITED"
+                manager.session_path.write_text(json.dumps(projection), encoding="utf-8")
+
+                loaded = manager.load()
+
+        self.assertEqual(loaded["status"], "ACTIVE")
+
+    def test_cli_summary_loader_reads_runtime_truth_instead_of_session_projection(self):
+        from gh_address_cr.cli import load_session_payload
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "123")
+                session = manager.create(status="ACTIVE")
+                session["handoff"] = {"last_consumed_sha256": "canonical"}
+                manager.save(session)
+                projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+                projection["handoff"] = {"last_consumed_sha256": "forged"}
+                manager.session_path.write_text(json.dumps(projection), encoding="utf-8")
+
+                loaded = load_session_payload("owner/repo", "123")
+
+        self.assertEqual(loaded["handoff"]["last_consumed_sha256"], "canonical")
+
+    def test_stale_session_snapshot_cannot_replace_a_newer_revision(self):
+        from gh_address_cr.core.session import SessionError, SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "123")
+                manager.save(manager.create(status="ACTIVE"))
+                first = manager.load()
+                stale = manager.load()
+                first["status"] = "WAITING_FOR_FIX"
+                manager.save(first)
+                stale["status"] = "STALE_WRITE"
+
+                with self.assertRaises(SessionError) as context:
+                    manager.save(stale)
+
+                current = manager.load()
+
+        self.assertEqual(context.exception.reason_code, "STALE_REVISION")
+        self.assertEqual(current["status"], "WAITING_FOR_FIX")
+        self.assertEqual(current["persistence"]["revision"], 2)
+
+    def test_transaction_reloads_current_state_under_the_writer_reservation(self):
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "123")
+                manager.save(manager.create(status="ACTIVE"))
+                stale = manager.load()
+                stale["status"] = "STALE_LOCAL_COPY"
+
+                result = manager.transact(
+                    lambda current: current.update(status="WAITING_FOR_FIX") or "updated",
+                    operation="status_update",
+                )
+
+                current = manager.load()
+
+        self.assertEqual(result.value, "updated")
+        self.assertEqual(result.revision, 2)
+        self.assertEqual(current["status"], "WAITING_FOR_FIX")
+        self.assertEqual(stale["status"], "STALE_LOCAL_COPY")
 
     def test_session_manager_rejects_invalid_json_with_reason_code(self):
         from gh_address_cr.core.session import SessionError, SessionManager
@@ -62,17 +141,20 @@ class NativeSessionTests(unittest.TestCase):
                 self.assertEqual(summary["reason_code"], "INVALID_SESSION_JSON")
                 self.assertEqual(summary["waiting_on"], "session")
 
-    def test_save_session_uses_atomic_json_writer(self):
+    def test_save_session_materializes_a_revision_stamped_json_projection(self):
         from gh_address_cr.core.session import SessionManager
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = SessionManager("owner/repo", "123")
                 manager.save(manager.create(status="ACTIVE"))
-                manager.save(manager.create(status="WAITING_FOR_FIX"))
+                session = manager.load()
+                session["status"] = "WAITING_FOR_FIX"
+                manager.save(session)
 
                 payload = json.loads(manager.session_path.read_text(encoding="utf-8"))
                 self.assertEqual(payload["status"], "WAITING_FOR_FIX")
+                self.assertEqual(payload["persistence"], {"schema_version": 1, "revision": 2})
                 self.assertEqual(list(manager.session_path.parent.glob("*.tmp")), [])
 
     def test_state_dir_reports_actionable_error_when_directory_is_not_writable(self):

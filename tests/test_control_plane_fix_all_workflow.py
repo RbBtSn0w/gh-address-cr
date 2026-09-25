@@ -928,7 +928,11 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertIn("agent leases", payload["failed"][0]["next_action"])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
-        self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+        self.assertEqual(
+            session["items"]["github-thread:def"]["active_lease_id"],
+            "lease-existing",
+        )
 
     def test_agent_resolve_item_reports_active_batch_lease_owner(self):
         self.write_session(

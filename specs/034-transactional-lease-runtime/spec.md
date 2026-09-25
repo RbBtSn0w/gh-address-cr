@@ -2,8 +2,8 @@
 
 **Feature Branch**: `feat/034-transactional-lease-runtime`
 **Created**: 2026-09-24
-**Status**: Proposed — architecture complete; implementation blocked on the
-constitution amendment named in `plan.md`
+**Status**: Accepted — Constitution 2.2.0 landed; Phase A implementation and
+local Completion Standard are complete on `feat/034a-atomic-runtime-store`
 **Input**: The explicit follow-up boundary in Spec 033 / PR #285: cross-process
 atomic claim, `session.json` / evidence-ledger crash consistency, and core/shadow
 lease convergence.

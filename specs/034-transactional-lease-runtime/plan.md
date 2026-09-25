@@ -13,9 +13,9 @@ Legacy files become rebuildable compatibility projections. The orchestrator
 then projects worker dispatch from canonical leases instead of granting a
 second lease with independent conflict and TTL policy.
 
-This document is the umbrella architecture and rollout plan. It does not
-authorize implementation while the Constitution still names `session.json` as
-the authoritative runtime owner.
+This document is the umbrella architecture and rollout plan. Constitution 2.2.0
+now authorizes the versioned persistence boundary; Phase A owns the initial
+implementation and must keep B/C behavior out of its branch.
 
 ## Current Verified Baseline
 
@@ -171,9 +171,9 @@ copy/backup boundary. WAL remains a future measured decision, not a fallback.
 
 ## Constitution Check
 
-- **Control plane ownership — BLOCKED pending amendment**: the design has one
-  deterministic owner, but Constitution Principle I currently names
-  `session.json` specifically. Code must not start until that text is amended.
+- **Control plane ownership — PASS**: Constitution 2.2.0 requires one versioned
+  authoritative store, treats compatibility artifacts as projections, and
+  prohibits dual-primary migration.
 - **First-principles kernel — PASS**: typed inputs, canonical projection, policy
   tables, transaction/outbox boundary, execution evidence, and replay are explicit.
 - **Public CLI — PASS with versioned persistence contract**: no planned command or
@@ -302,12 +302,10 @@ Only after the layer's focused tests pass:
 8. For PR-session handling, run `final-gate` and retain its compact completion
    line with telemetry coverage and report artifacts.
 
-## Implementation Gate and Current Stop Condition
+## Implementation Gate and Current Status
 
-Architecture artifacts are reviewable and internally consistent. Implementation
-must stop here because the selected persistence decision conflicts with the
-current file-specific state owner in Constitution Principle I. Required next
-decision: approve and land a governance amendment that names the versioned runtime
-store rather than `session.json`, and approve the persistence-boundary v1 contract.
-No file lock shim, SQLite/JSON dual-primary mode, hidden fallback, or local Phase A
-patch may be used to bypass that gate.
+Constitution 2.2.0 and the persistence-boundary v1 contract are approved. Phase A
+is complete locally on its owning branch: claims serialize under the writer
+reservation, compatibility artifacts are projection-only, and the complete
+repository Completion Standard passes. No file-lock shim, SQLite/JSON
+dual-primary mode, or hidden fallback is permitted.
