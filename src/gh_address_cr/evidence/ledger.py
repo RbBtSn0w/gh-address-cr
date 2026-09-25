@@ -6,7 +6,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+_PENDING_EVIDENCE_KEY = "_pending_evidence_records"
 
 
 def _canonical_json(value: Any) -> str:
@@ -333,3 +335,57 @@ class EvidenceLedger:
                 continue
             latest_status = attempt.status
         return latest_status
+
+
+class SessionEvidenceLedger(EvidenceLedger):
+    """Buffer evidence on a loaded session until its canonical transaction commits."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        session: dict[str, Any],
+        *,
+        flush: Callable[[list[dict[str, Any]]], None] | None = None,
+    ):
+        super().__init__(path)
+        self.session = session
+        self.flush = flush
+
+    def append(self, record: EvidenceRecord) -> EvidenceRecord:
+        pending = self.session.setdefault(_PENDING_EVIDENCE_KEY, [])
+        if not isinstance(pending, list):
+            raise ValueError("Session pending evidence must be a list.")
+        pending.append(record.to_json())
+        return record
+
+    def record_side_effect_attempt(
+        self,
+        *,
+        attempt: SideEffectAttempt,
+        lease_id: str | None,
+        agent_id: str,
+        role: str = "publisher",
+        timestamp: str | None = None,
+    ) -> EvidenceRecord:
+        record = super().record_side_effect_attempt(
+            attempt=attempt,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            role=role,
+            timestamp=timestamp,
+        )
+        if self.flush is not None:
+            pending = self.session.get(_PENDING_EVIDENCE_KEY)
+            if not isinstance(pending, list) or not pending:
+                raise ValueError("Side-effect evidence was not buffered.")
+            self.flush([dict(pending.pop())])
+            if not pending:
+                self.session.pop(_PENDING_EVIDENCE_KEY, None)
+        return record
+
+
+def take_pending_evidence(session: dict[str, Any]) -> list[dict[str, Any]]:
+    pending = session.pop(_PENDING_EVIDENCE_KEY, [])
+    if not isinstance(pending, list):
+        raise ValueError("Session pending evidence must be a list.")
+    return [dict(record) for record in pending if isinstance(record, dict)]

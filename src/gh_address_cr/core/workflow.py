@@ -46,9 +46,6 @@ from gh_address_cr.core.utils import (
     get_session_items as _items,
 )
 from gh_address_cr.core.utils import (
-    get_session_ledger as _ledger,
-)
-from gh_address_cr.core.utils import (
     json_ready as _json_ready,
 )
 from gh_address_cr.core.utils import (
@@ -59,6 +56,7 @@ from gh_address_cr.core.utils import (
 )
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 from gh_address_cr.core.workflow_matching import FIX_ALL_STALE_ROUTE_REASON
+from gh_address_cr.evidence.ledger import EvidenceRecord
 
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
@@ -88,6 +86,31 @@ TRIVIAL_SENSITIVE_MARKERS = (
     "performance",
     "memory",
 )
+
+
+def _replace_session_with_evidence(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    record: EvidenceRecord,
+    *,
+    operation: str,
+) -> None:
+    persistence = session.get("persistence")
+    expected_revision = persistence.get("revision") if isinstance(persistence, dict) else None
+
+    def replace(current: dict[str, Any]) -> None:
+        current.clear()
+        current.update(session)
+
+    session_store.transact_session(
+        repo,
+        pr_number,
+        replace,
+        operation=operation,
+        expected_revision=expected_revision if isinstance(expected_revision, int) else None,
+        evidence=[record.to_json()],
+    )
 TRIVIAL_POSITIVE_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])("
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_POSITIVE_MARKERS)
@@ -326,7 +349,7 @@ def record_evidence_profile(
             message="Session evidence_profiles must be a JSON object.",
         )
     profiles[profile_name] = profile
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id="",
         lease_id=None,
@@ -336,7 +359,7 @@ def record_evidence_profile(
         payload={"name": profile_name, "commit_hash": normalized_commit, "files": normalized_files},
         timestamp=timestamp,
     )
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="evidence_profile")
     return {
         "status": "EVIDENCE_PROFILE_RECORDED",
         "repo": repo,
@@ -425,7 +448,7 @@ def record_reply_evidence(
     timestamp = _format_timestamp(_coerce_now(now))
     payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
     idempotency_key = f"reply_evidence:{resolved_item_id}:{normalized_reply}"
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id=resolved_item_id,
         lease_id=None,
@@ -444,7 +467,7 @@ def record_reply_evidence(
     item["reply_posted"] = True
     item["reply_url"] = normalized_reply
     item["reply_evidence"] = {"reply_url": normalized_reply, "author_login": normalized_login}
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="reply_evidence")
     return {
         "status": "REPLY_EVIDENCE_RECORDED",
         "repo": repo,
@@ -582,7 +605,7 @@ def record_validation_evidence(
     timestamp = _format_timestamp(_coerce_now(now))
     payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
     idempotency_key = f"validation_evidence:{resolved_item_id}:{normalized_commit}"
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id=resolved_item_id,
         lease_id=None,
@@ -609,7 +632,7 @@ def record_validation_evidence(
     if why and why.strip():
         fix_reply["why"] = why.strip()
     item["validation_reconcile"] = fix_reply
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="validation_evidence")
     return {
         "status": "VALIDATION_EVIDENCE_RECORDED",
         "repo": repo,

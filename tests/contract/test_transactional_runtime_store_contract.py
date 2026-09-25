@@ -18,7 +18,7 @@ from gh_address_cr.core.runtime_store import (
     RuntimeStore,
     StaleRevisionError,
 )
-from gh_address_cr.evidence.ledger import EvidenceRecord
+from gh_address_cr.evidence.ledger import EvidenceLedger, EvidenceRecord
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
 
@@ -117,13 +117,35 @@ def _race_batch_action_request(
 
 def _crash_transaction(workspace: str, stage: str) -> None:
     store = RuntimeStore(Path(workspace))
+    evidence = EvidenceRecord.new(
+        session_id="owner/repo#123",
+        item_id="finding-1",
+        lease_id=None,
+        agent_id="agent-a",
+        role="fixer",
+        event_type="status_changed",
+        payload={"status": "COMMITTED_AFTER_CRASH"},
+        timestamp="2026-09-24T12:30:00Z",
+    )
+    outbox = {
+        "command_id": "command-crash-contract",
+        "effect_type": "github_reply",
+        "idempotency_key": "reply-crash-contract",
+        "operation_category": "reply",
+        "retry_boundary": "idempotent",
+    }
 
     def mutation(payload: dict) -> None:
         payload["status"] = "COMMITTED_AFTER_CRASH"
         if stage == "before_commit":
             os._exit(17)
 
-    store.transact(mutation, operation="crash_contract")
+    store.transact(
+        mutation,
+        operation="crash_contract",
+        evidence=[evidence.to_json()],
+        outbox=[outbox],
+    )
     os._exit(23)
 
 
@@ -369,6 +391,216 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
 
                 self.assertEqual(reopened.revision, expected_revision)
                 self.assertEqual(reopened.payload["status"], expected_status)
+                self.assertEqual(len(store.load_evidence()), 0 if stage == "before_commit" else 1)
+                self.assertEqual(len(store.load_outbox()), 0 if stage == "before_commit" else 1)
+
+    def test_outbox_plan_commits_with_state_and_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            store.bootstrap(_session())
+            evidence = EvidenceRecord.new(
+                session_id="owner/repo#123",
+                item_id="finding-1",
+                lease_id=None,
+                agent_id="agent-a",
+                role="fixer",
+                event_type="status_changed",
+                payload={"status": "ACTIVE"},
+                timestamp="2026-09-24T12:30:00Z",
+            )
+
+            committed = store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+                evidence=[evidence.to_json()],
+                outbox=[
+                    {
+                        "command_id": "command-1",
+                        "effect_type": "github_reply",
+                        "idempotency_key": "reply-1",
+                        "operation_category": "reply",
+                        "retry_boundary": "idempotent",
+                    }
+                ],
+            )
+
+            records = store.load_evidence()
+            commands = store.load_outbox()
+
+        self.assertEqual(committed.revision, 2)
+        self.assertEqual([record["record_id"] for record in records], [evidence.record_id])
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0]["status"], "planned")
+        self.assertEqual(commands[0]["planned_revision"], 2)
+
+    def test_restart_classifies_in_flight_outbox_as_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            store.bootstrap(_session())
+            store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+                outbox=[
+                    {
+                        "command_id": "command-1",
+                        "effect_type": "github_reply",
+                        "idempotency_key": "reply-1",
+                        "operation_category": "reply",
+                        "retry_boundary": "idempotent",
+                    }
+                ],
+            )
+            store.mark_outbox_in_flight("command-1")
+
+            recovered = RuntimeStore(Path(tmp)).recover()
+
+            commands = store.load_outbox()
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(commands[0]["status"], "unknown")
+        self.assertEqual(commands[0]["attempt_count"], 1)
+
+    def test_outbox_success_requires_a_later_transaction_with_result_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            store.bootstrap(_session())
+            store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+                outbox=[
+                    {
+                        "command_id": "command-1",
+                        "effect_type": "github_reply",
+                        "idempotency_key": "reply-1",
+                        "operation_category": "reply",
+                        "retry_boundary": "idempotent",
+                    }
+                ],
+            )
+            store.mark_outbox_in_flight("command-1")
+            result = EvidenceRecord.new(
+                session_id="owner/repo#123",
+                item_id="finding-1",
+                lease_id=None,
+                agent_id="agent-a",
+                role="publisher",
+                event_type="reply_posted",
+                payload={"result": "recorded"},
+                timestamp="2026-09-24T12:31:00Z",
+            )
+
+            committed = store.record_outbox_result(
+                "command-1",
+                status="succeeded",
+                evidence=[result.to_json()],
+                external_result_reference="comment-1",
+            )
+
+            command = store.load_outbox()[0]
+            records = store.load_evidence()
+
+        self.assertEqual(committed.revision, 4)
+        self.assertEqual(command["status"], "succeeded")
+        self.assertEqual(command["external_result_reference"], "comment-1")
+        self.assertEqual([record["record_id"] for record in records], [result.record_id])
+
+    def test_unknown_outbox_retries_only_when_effect_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            store.bootstrap(_session())
+            store.transact(
+                lambda payload: None,
+                operation="status_update",
+                outbox=[
+                    {
+                        "command_id": "command-1",
+                        "effect_type": "github_reply",
+                        "idempotency_key": "reply-1",
+                        "operation_category": "reply",
+                        "retry_boundary": "reconcile_only",
+                    }
+                ],
+            )
+            store.mark_outbox_in_flight("command-1")
+            store.recover()
+
+            with self.assertRaises(PersistenceInvalidError):
+                store.mark_outbox_in_flight("command-1")
+
+            command = store.load_outbox()[0]
+
+        self.assertEqual(command["status"], "unknown")
+
+    def test_dirty_or_missing_artifacts_rebuild_from_canonical_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_path = workspace / "session.json"
+            ledger_path = workspace / "evidence.jsonl"
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            store.materialize_compatibility_artifacts(session_path=session_path, ledger_path=ledger_path)
+            session_path.write_text('{"status":"FORGED"}', encoding="utf-8")
+            ledger_path.unlink()
+            store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+            )
+
+            rebuilt = store.recover_artifacts(session_path=session_path, ledger_path=ledger_path)
+
+            projection = json.loads(session_path.read_text(encoding="utf-8"))
+            materializations = store.load_materializations()
+            ledger_exists = ledger_path.is_file()
+
+        self.assertEqual(rebuilt, 3)
+        self.assertEqual(projection["status"], "ACTIVE")
+        self.assertEqual(projection["persistence"]["revision"], 2)
+        self.assertTrue(ledger_exists)
+        self.assertTrue(all(row["status"] == "current" for row in materializations))
+        self.assertTrue(all(row["source_revision"] == 2 for row in materializations))
+
+    def test_stale_session_write_leaves_no_orphan_evidence_projection(self):
+        from gh_address_cr.core.session import SessionError, SessionManager
+        from gh_address_cr.core.utils import get_session_ledger
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+            os.environ["GH_ADDRESS_CR_STATE_DIR"] = tmp
+            try:
+                manager = SessionManager("owner/repo", "125")
+                initial = manager.create(status="WAITING_FOR_FIX")
+                manager.save(initial)
+                stale = manager.load()
+                current = manager.load()
+                current["status"] = "ACTIVE"
+                manager.save(current)
+
+                get_session_ledger(stale).append_event(
+                    session_id=str(stale["session_id"]),
+                    item_id="finding-1",
+                    lease_id=None,
+                    agent_id="agent-a",
+                    role="fixer",
+                    event_type="status_changed",
+                    payload={"status": "STALE"},
+                    timestamp="2026-09-24T12:32:00Z",
+                )
+                stale["status"] = "STALE"
+                with self.assertRaises(SessionError) as context:
+                    manager.save(stale)
+
+                store = RuntimeStore(manager.workspace_path)
+                records = store.load_evidence()
+                projected_records = EvidenceLedger(manager.ledger_path).load()
+            finally:
+                if previous is None:
+                    os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+                else:
+                    os.environ["GH_ADDRESS_CR_STATE_DIR"] = previous
+
+        self.assertEqual(context.exception.reason_code, "STALE_REVISION")
+        self.assertEqual(records, [])
+        self.assertEqual(projected_records, [])
 
     def test_post_commit_reload_failure_cannot_change_commit_truth(self):
         with tempfile.TemporaryDirectory() as tmp:
