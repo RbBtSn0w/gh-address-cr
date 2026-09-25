@@ -149,6 +149,53 @@ def _crash_transaction(workspace: str, stage: str) -> None:
     os._exit(23)
 
 
+def _crash_outbox(workspace: str, stage: str) -> None:
+    store = RuntimeStore(Path(workspace))
+    command = {
+        "command_id": "command-kill-matrix",
+        "effect_type": "github_resolve",
+        "idempotency_key": "resolve-kill-matrix",
+        "operation_category": "github_resolve",
+        "retry_boundary": "idempotent",
+    }
+    store.transact(lambda payload: None, operation="outbox_plan", outbox=[command])
+    if stage == "planned":
+        os._exit(41)
+    store.mark_outbox_in_flight("command-kill-matrix")
+    if stage == "in_flight":
+        os._exit(42)
+    evidence = EvidenceRecord.new(
+        session_id="owner/repo#123",
+        item_id="finding-1",
+        lease_id=None,
+        agent_id="agent-a",
+        role="publisher",
+        event_type="thread_resolved",
+        payload={"result": "recorded"},
+        timestamp="2026-09-24T12:40:00Z",
+    )
+    store.record_outbox_result(
+        "command-kill-matrix",
+        status="succeeded",
+        evidence=[evidence.to_json()],
+        external_result_reference="thread-1",
+    )
+    os._exit(43)
+
+
+def _crash_artifact_materialization(workspace: str) -> None:
+    store = RuntimeStore(Path(workspace))
+
+    def terminate_before_write(*args, **kwargs):
+        os._exit(51)
+
+    with patch("gh_address_cr.core.runtime_store.write_json_atomic", side_effect=terminate_before_write):
+        store.materialize_compatibility_artifacts(
+            session_path=Path(workspace) / "session.json",
+            ledger_path=Path(workspace) / "evidence.jsonl",
+        )
+
+
 class TransactionalRuntimeStoreContractTests(unittest.TestCase):
     def test_schema_contains_every_phase_a_canonical_table(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -394,6 +441,56 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 self.assertEqual(len(store.load_evidence()), 0 if stage == "before_commit" else 1)
                 self.assertEqual(len(store.load_outbox()), 0 if stage == "before_commit" else 1)
 
+    @unittest.skipIf(os.name == "nt", "crash contract uses fork and os._exit")
+    def test_process_exit_at_each_outbox_checkpoint_recovers_honestly(self):
+        context = multiprocessing.get_context("fork")
+        for stage, expected_exit, expected_status, expected_revision in (
+            ("planned", 41, "planned", 2),
+            ("in_flight", 42, "unknown", 4),
+            ("succeeded", 43, "succeeded", 4),
+        ):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                store = RuntimeStore(Path(tmp))
+                store.bootstrap(_session())
+                worker = context.Process(target=_crash_outbox, args=(tmp, stage))
+                worker.start()
+                worker.join(timeout=10)
+                self.assertEqual(worker.exitcode, expected_exit)
+
+                store.recover()
+                command = store.load_outbox()[0]
+                snapshot = store.load()
+
+                self.assertEqual(command["status"], expected_status)
+                self.assertEqual(snapshot.revision, expected_revision)
+
+    @unittest.skipIf(os.name == "nt", "crash contract uses fork and os._exit")
+    def test_process_exit_during_materialization_rebuilds_from_canonical_state(self):
+        context = multiprocessing.get_context("fork")
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+            )
+            worker = context.Process(target=_crash_artifact_materialization, args=(tmp,))
+            worker.start()
+            worker.join(timeout=10)
+            self.assertEqual(worker.exitcode, 51)
+            self.assertTrue(all(row["status"] == "materializing" for row in store.load_materializations()))
+
+            repaired = store.recover_artifacts(
+                session_path=workspace / "session.json",
+                ledger_path=workspace / "evidence.jsonl",
+            )
+            projection = json.loads((workspace / "session.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(repaired, 3)
+        self.assertEqual(projection["status"], "ACTIVE")
+        self.assertEqual(projection["persistence"]["revision"], 2)
+
     def test_outbox_plan_commits_with_state_and_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = RuntimeStore(Path(tmp))
@@ -558,6 +655,34 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertTrue(ledger_exists)
         self.assertTrue(all(row["status"] == "current" for row in materializations))
         self.assertTrue(all(row["source_revision"] == 2 for row in materializations))
+
+    def test_artifact_write_failure_is_diagnostic_without_changing_canonical_truth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_path = workspace / "session.json"
+            ledger_path = workspace / "evidence.jsonl"
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            store.materialize_compatibility_artifacts(session_path=session_path, ledger_path=ledger_path)
+            store.transact(
+                lambda payload: payload.update(status="ACTIVE"),
+                operation="status_update",
+            )
+
+            with patch(
+                "gh_address_cr.core.runtime_store.write_json_atomic",
+                side_effect=OSError("injected projection failure"),
+            ):
+                with self.assertRaisesRegex(OSError, "injected projection failure"):
+                    store.recover_artifacts(session_path=session_path, ledger_path=ledger_path)
+
+            snapshot = store.load()
+            materializations = store.load_materializations()
+
+        self.assertEqual(snapshot.payload["status"], "ACTIVE")
+        self.assertEqual(snapshot.revision, 2)
+        self.assertTrue(all(row["status"] == "failed" for row in materializations))
+        self.assertTrue(all(row["error_type"] == "OSError" for row in materializations))
 
     def test_stale_session_write_leaves_no_orphan_evidence_projection(self):
         from gh_address_cr.core.session import SessionError, SessionManager

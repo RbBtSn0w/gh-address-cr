@@ -490,47 +490,97 @@ class RuntimeStore:
         return repairs
 
     def materialize_compatibility_artifacts(self, *, session_path: Path, ledger_path: Path) -> None:
-        self.materialize_session_projection(session_path=session_path)
         snapshot = self.load()
         ledger_metadata_path = ledger_path.with_name(f"{ledger_path.name}.meta.json")
-
-        ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(prefix=f"{ledger_path.name}.", suffix=".tmp", dir=ledger_path.parent)
+        artifacts = (
+            ("session_json", session_path),
+            ("evidence_jsonl", ledger_path),
+            ("evidence_jsonl_metadata", ledger_metadata_path),
+        )
+        self._record_materialization_status(
+            snapshot.revision,
+            tuple(kind for kind, _ in artifacts),
+            status="materializing",
+        )
         try:
+            self._write_session_projection(snapshot, session_path=session_path)
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f"{ledger_path.name}.", suffix=".tmp", dir=ledger_path.parent
+            )
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 for record in self.load_evidence():
                     handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
                     handle.write("\n")
             os.replace(temporary_name, ledger_path)
-        except Exception:
-            if os.path.exists(temporary_name):
+            write_json_atomic(
+                ledger_metadata_path,
+                {
+                    "format_version": 1,
+                    "schema_version": SCHEMA_VERSION,
+                    "revision": snapshot.revision,
+                },
+            )
+            self._record_materializations(snapshot.revision, artifacts)
+        except Exception as exc:
+            if "temporary_name" in locals() and os.path.exists(temporary_name):
                 os.unlink(temporary_name)
+            self._record_materialization_status(
+                snapshot.revision,
+                tuple(kind for kind, _ in artifacts),
+                status="failed",
+                error_type=type(exc).__name__,
+            )
             raise
-
-        write_json_atomic(
-            ledger_metadata_path,
-            {
-                "format_version": 1,
-                "schema_version": SCHEMA_VERSION,
-                "revision": snapshot.revision,
-            },
-        )
-
-        self._record_materializations(
-            snapshot.revision,
-            (
-                ("session_json", session_path),
-                ("evidence_jsonl", ledger_path),
-                ("evidence_jsonl_metadata", ledger_metadata_path),
-            ),
-        )
 
     def materialize_session_projection(self, *, session_path: Path) -> None:
         snapshot = self.load()
+        self._record_materialization_status(
+            snapshot.revision,
+            ("session_json",),
+            status="materializing",
+        )
+        try:
+            self._write_session_projection(snapshot, session_path=session_path)
+            self._record_materializations(snapshot.revision, (("session_json", session_path),))
+        except Exception as exc:
+            self._record_materialization_status(
+                snapshot.revision,
+                ("session_json",),
+                status="failed",
+                error_type=type(exc).__name__,
+            )
+            raise
+
+    @staticmethod
+    def _write_session_projection(snapshot: StoreSnapshot, *, session_path: Path) -> None:
         projection = json_ready(snapshot.payload)
         projection["persistence"] = {"schema_version": SCHEMA_VERSION, "revision": snapshot.revision}
         write_json_atomic(session_path, projection)
-        self._record_materializations(snapshot.revision, (("session_json", session_path),))
+
+    def _record_materialization_status(
+        self,
+        revision: int,
+        artifact_kinds: tuple[str, ...],
+        *,
+        status: str,
+        error_type: str | None = None,
+    ) -> None:
+        connection = self._connect()
+        try:
+            for kind in artifact_kinds:
+                connection.execute(
+                    "INSERT INTO artifact_materializations "
+                    "(artifact_kind, source_revision, format_version, status, content_hash, last_attempt_at, error_type) "
+                    "VALUES (?, ?, ?, ?, NULL, ?, ?) "
+                    "ON CONFLICT(artifact_kind) DO UPDATE SET source_revision=excluded.source_revision, "
+                    "format_version=excluded.format_version, status=excluded.status, content_hash=NULL, "
+                    "last_attempt_at=excluded.last_attempt_at, error_type=excluded.error_type",
+                    (kind, revision, 1, status, _utc_now(), error_type),
+                )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _record_materializations(self, revision: int, artifacts: tuple[tuple[str, Path], ...]) -> None:
         connection = self._connect()
