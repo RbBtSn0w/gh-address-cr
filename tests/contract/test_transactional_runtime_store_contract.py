@@ -824,6 +824,76 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         for forbidden in ("owner/repo", "finding-1", "runtime.sqlite3", str(workspace), "SELECT", "INSERT"):
             self.assertNotIn(forbidden, serialized)
 
+    def test_recovery_outbox_and_materialization_telemetry_is_bounded_and_private(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            session_path = workspace / "session.json"
+            ledger_path = workspace / "evidence.jsonl"
+
+            with patch("gh_address_cr.otel_tracing.add_current_span_event") as emit:
+                store.transact(
+                    lambda payload: None,
+                    operation="outbox_plan",
+                    outbox=[
+                        {
+                            "command_id": "sensitive-command-id",
+                            "effect_type": "github_reply",
+                            "idempotency_key": "sensitive-idempotency-key",
+                            "operation_category": "github_reply",
+                            "retry_boundary": "reconcile_only",
+                        }
+                    ],
+                )
+                store.mark_outbox_in_flight("sensitive-command-id")
+                store.recover()
+                store.materialize_compatibility_artifacts(
+                    session_path=session_path,
+                    ledger_path=ledger_path,
+                )
+                store.recover_artifacts(session_path=session_path, ledger_path=ledger_path)
+
+        events = [(call.args[0], call.args[1]) for call in emit.call_args_list]
+        self.assertIn(
+            ("persistence.transaction", "outbox_plan", "committed"),
+            [
+                (name, attributes["persistence.operation"], attributes["persistence.outcome"])
+                for name, attributes in events
+            ],
+        )
+        self.assertIn(
+            ("outbox.execution", "outbox_execute", "in_flight"),
+            [
+                (name, attributes["persistence.operation"], attributes["persistence.outcome"])
+                for name, attributes in events
+            ],
+        )
+        self.assertIn(
+            ("persistence.recovery", "outbox_recovery", "recovered"),
+            [
+                (name, attributes["persistence.operation"], attributes["persistence.outcome"])
+                for name, attributes in events
+            ],
+        )
+        self.assertIn(
+            ("artifact.materialization", "artifact_write", "current"),
+            [
+                (name, attributes["persistence.operation"], attributes["persistence.outcome"])
+                for name, attributes in events
+            ],
+        )
+        serialized = json.dumps(events, sort_keys=True)
+        for forbidden in (
+            "owner/repo",
+            "finding-1",
+            "sensitive-command-id",
+            "sensitive-idempotency-key",
+            "runtime.sqlite3",
+            str(workspace),
+        ):
+            self.assertNotIn(forbidden, serialized)
+
     def test_telemetry_failure_does_not_change_commit_truth(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = RuntimeStore(Path(tmp))

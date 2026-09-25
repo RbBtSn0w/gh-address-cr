@@ -19,10 +19,17 @@ from gh_address_cr.evidence.ledger import EvidenceRecord, payload_hash
 SCHEMA_VERSION = 1
 _LEASE_DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _SAFE_OPERATIONS = {
+    "artifact_recovery",
+    "artifact_write",
     "bootstrap",
     "legacy_import",
     "lease_claim",
     "lease_release",
+    "outbox_attempt",
+    "outbox_execute",
+    "outbox_plan",
+    "outbox_recovery",
+    "outbox_result",
     "session_update",
     "status_update",
 }
@@ -400,6 +407,7 @@ class RuntimeStore:
         operation: str,
         unknown_requires_idempotency: bool = False,
     ) -> StoreSnapshot:
+        started_at = time.monotonic()
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -434,6 +442,12 @@ class RuntimeStore:
             raise
         finally:
             connection.close()
+        _emit_persistence_event(
+            "outbox.execution",
+            operation=operation,
+            outcome="in_flight",
+            contention=_contention_bucket(started_at),
+        )
         return self.load()
 
     def load_materializations(self) -> list[dict[str, Any]]:
@@ -522,6 +536,12 @@ class RuntimeStore:
                 },
             )
             self._record_materializations(snapshot.revision, artifacts)
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="current",
+                contention="none",
+            )
         except Exception as exc:
             if "temporary_name" in locals() and os.path.exists(temporary_name):
                 os.unlink(temporary_name)
@@ -530,6 +550,12 @@ class RuntimeStore:
                 tuple(kind for kind, _ in artifacts),
                 status="failed",
                 error_type=type(exc).__name__,
+            )
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="failed",
+                contention="none",
             )
             raise
 
@@ -543,12 +569,24 @@ class RuntimeStore:
         try:
             self._write_session_projection(snapshot, session_path=session_path)
             self._record_materializations(snapshot.revision, (("session_json", session_path),))
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="current",
+                contention="none",
+            )
         except Exception as exc:
             self._record_materialization_status(
                 snapshot.revision,
                 ("session_json",),
                 status="failed",
                 error_type=type(exc).__name__,
+            )
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="failed",
+                contention="none",
             )
             raise
 
