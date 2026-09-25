@@ -454,6 +454,9 @@ def issue_action_request(
         session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
     )
     request["response_skeleton_path"] = str(response_skeleton_path)
+    local_classification = item.get("classification_evidence")
+    local_decision = item.get("decision")
+
     def commit_claim(current: dict[str, Any]) -> Any:
         current_item = current.get("items", {}).get(item_id)
         if not isinstance(current_item, dict):
@@ -461,10 +464,9 @@ def issue_action_request(
         local_metadata = session.get("metadata")
         if isinstance(local_metadata, dict):
             current["metadata"] = dict(local_metadata)
-        local_classification = item.get("classification_evidence")
         if isinstance(local_classification, dict) and not has_classification_evidence(current_item):
             current_item["classification_evidence"] = dict(local_classification)
-            current_item["decision"] = item.get("decision")
+            current_item["decision"] = local_decision
         committed_lease = claim_lease(
             current,
             current_item,

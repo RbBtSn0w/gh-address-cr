@@ -174,8 +174,12 @@ class RuntimeStore:
         expected_revision: int | None,
         operation: str,
     ) -> StoreSnapshot:
+        def replace_payload(current: dict[str, Any]) -> None:
+            current.clear()
+            current.update(payload)
+
         result = self.transact(
-            lambda current: current.clear() or current.update(payload),
+            replace_payload,
             expected_revision=expected_revision,
             operation=operation,
         )
@@ -727,9 +731,7 @@ def _sha256(path: Path) -> str:
 
 
 def _is_busy(exc: sqlite3.OperationalError) -> bool:
-    return getattr(exc, "sqlite_errorcode", None) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED} or "locked" in str(
-        exc
-    ).lower()
+    return getattr(exc, "sqlite_errorcode", None) in {5, 6} or "locked" in str(exc).lower()
 
 
 def _coerce_lease_datetimes(lease: dict[str, Any]) -> None:
@@ -757,8 +759,8 @@ def _derive_item_claim_projection(
         active_by_item[item_id] = lease
 
     for item_id, item in items.items():
-        lease = active_by_item.get(item_id)
-        if lease is None:
+        active_lease = active_by_item.get(item_id)
+        if active_lease is None:
             if item.get("state") == "claimed":
                 state, status = returned_claimable_state(item)
                 item["state"] = state
@@ -769,10 +771,10 @@ def _derive_item_claim_projection(
             item.pop("active_lease_id", None)
             continue
         item["state"] = "claimed"
-        item["active_lease_id"] = str(lease["lease_id"])
-        item["claimed_by"] = lease.get("agent_id")
-        item["claimed_at"] = lease.get("created_at")
-        item["lease_expires_at"] = lease.get("expires_at")
+        item["active_lease_id"] = str(active_lease["lease_id"])
+        item["claimed_by"] = active_lease.get("agent_id")
+        item["claimed_at"] = active_lease.get("created_at")
+        item["lease_expires_at"] = active_lease.get("expires_at")
 
 
 def _contention_bucket(started_at: float) -> str:
