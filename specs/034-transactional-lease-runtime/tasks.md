@@ -64,7 +64,7 @@ shim or dual-primary mode to proceed around it.
 - [x] B007 Add bounded recovery/outbox/materialization OTel events and privacy tests.
 - [x] B008 Update versioned machine/status-to-action docs and tests for any exposed
   recovery reasons.
-- [ ] B009 Run focused crash/replay gates, complete repository gates, and affected
+- [x] B009 Run focused crash/replay gates, complete repository gates, and affected
   PR-session final-gate with compact completion evidence.
 
 ## Phase C — Core/Shadow Lease Convergence
