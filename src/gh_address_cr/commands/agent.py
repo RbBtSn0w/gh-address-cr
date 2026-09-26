@@ -105,6 +105,8 @@ def build_agent_manifest() -> dict:
             "evidence_record.v1",
             "evidence_profile.v1",
             "gate_report.v1",
+            "dispatch_receipt.v1",
+            "worker_packet.v2",
             "work_item_boundary.v1",
             "workflow_decision.v1",
         ],

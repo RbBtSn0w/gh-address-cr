@@ -71,20 +71,20 @@ shim or dual-primary mode to proceed around it.
 
 **Owning branch**: `feat/034c-orchestrator-lease-convergence` (base B)
 
-- [ ] C001 Write failing contracts proving there is one lease authority and no
+- [x] C001 Write failing contracts proving there is one lease authority and no
   independent shadow conflict/TTL/status/release policy.
-- [ ] C002 Define/version the worker dispatch receipt if its serialized shape is
+- [x] C002 Define/version the worker dispatch receipt if its serialized shape is
   public.
-- [ ] C003 Replace shadow grant/release with volatile dispatch projection and
+- [x] C003 Replace shadow grant/release with volatile dispatch projection and
   canonical pre-action reconciliation.
-- [ ] C004 Remove duplicate same-file conflict, TTL, terminal-state, and force-
+- [x] C004 Remove duplicate same-file conflict, TTL, terminal-state, and force-
   release logic plus obsolete rollback branches.
-- [ ] C005 Add restart, stale dispatch, non-overlapping hunk, expiry, and release
+- [x] C005 Add restart, stale dispatch, non-overlapping hunk, expiry, and release
   replay tests.
-- [ ] C006 Add bounded privacy-safe orchestrator reconciliation OTel events.
-- [ ] C007 Update orchestrator and packaged-skill guidance if the worker recovery
+- [x] C006 Add bounded privacy-safe orchestrator reconciliation OTel events.
+- [x] C007 Update orchestrator and packaged-skill guidance if the worker recovery
   action changes.
-- [ ] C008 Run focused orchestrator gates, complete repository gates, and affected
+- [x] C008 Run focused orchestrator gates, complete repository gates, and affected
   PR-session final-gate with compact completion evidence.
 
 ## Stack and Review Discipline

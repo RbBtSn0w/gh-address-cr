@@ -90,6 +90,16 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
   - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
+Advanced orchestration emits `worker-packet.v2`. Its
+`dispatch_receipt` uses `dispatch-receipt.v1` and contains the canonical
+`lease_id`, request binding, committed runtime revision, and an opaque delivery
+token. The orchestration session is a volatile delivery projection: it does not
+grant, expire, release, or resolve conflicts for leases. Before start, status,
+step, resume, and submit actions, the runtime reconciles that projection from
+canonical lease state. Pass the receipt's delivery token to `agent orchestrate
+submit --token`; canonical submission still validates the runtime lease and
+request binding.
+
 ## Telemetry Coverage
 
 Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`.
