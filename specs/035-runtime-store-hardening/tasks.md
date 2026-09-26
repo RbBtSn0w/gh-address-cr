@@ -10,22 +10,24 @@ commit and pass after the fix; paste both outputs in the PR description.
 **Owning branch**: `fix/035a-atomic-store-init` (base `develop`)
 
 - [x] A001 Land this spec; set Spec 034 status to "Superseded in part by 035".
-- [ ] A002 Add `scripts/benchmark_runtime_store.py` (profiles S/M/L, CR-loop
+- [x] A002 Add `scripts/benchmark_runtime_store.py` (profiles S/M/L, CR-loop
   degradation ratio) and `tests/test_runtime_store_benchmark.py` (S smoke).
-- [ ] A003 Record `main` and `develop` baselines in `validation.md` before any runtime change.
-- [ ] A004 Write failing tests in `tests/contract/test_runtime_store_init_contract.py`:
-  `test_concurrent_bootstrap_never_clobbers_committed_revision` (R2),
+- [x] A003 Record `main` and `develop` baselines in `validation.md` before any runtime change.
+- [x] A004 Write failing tests in `tests/contract/test_runtime_store_init_contract.py`:
+  `test_late_initializer_cannot_replace_committed_store` (R2),
+  `test_concurrent_bootstrap_never_clobbers_committed_revision`,
   `test_concurrent_legacy_migration_is_exactly_once` (R3),
   `test_crash_inside_initialize_leaves_uninitialized_store_that_retries_cleanly`,
   `test_save_session_refuses_to_bootstrap_over_legacy_session`,
   `test_crash_at_every_bundle_checkpoint_recovers` (R1),
   `test_tampered_complete_bundle_still_fails_fast`,
   `test_incomplete_bundle_quarantine_emits_bounded_event`.
-- [ ] A005 Implement in-place `_initialize` behind `bootstrap` / `open_or_migrate`, plus
+- [x] A005 Implement in-place `_initialize` behind `bootstrap` / `open_or_migrate`, plus
   `is_initialized`; remove temp-db publication.
-- [ ] A006 Route `core/session.py` load/save/transact through `is_initialized`; enforce FR-003.
-- [ ] A007 Implement atomic bundle build, `write_json_durable`, and deterministic quarantine.
-- [ ] A008 Run completion gates, benchmark M profile, and compare with A003.
+- [x] A006 Route `core/session.py` load/save/transact through `is_initialized`; enforce FR-003.
+- [x] A007 Implement atomic bundle build, `write_json_durable`, and deterministic quarantine.
+- [x] A008 Run completion gates, benchmark M profile, and compare with A003
+  (final-gate pending a PR session; see validation.md).
 
 ## 035b — Outbox ownership, outbox authority, schema v2, persistence spans
 
