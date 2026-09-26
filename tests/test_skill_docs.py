@@ -913,3 +913,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("address owner/repo 101", normalized_workflow)
         self.assertIn("gh stack sync", normalized_workflow)
         self.assertIn("atomic", normalized_workflow)
+
+    def test_publish_reconciliation_recovery_is_published(self):
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+
+        self.assertIn("PUBLISH_RECONCILE_REQUIRED", protocol_text)
+        self.assertIn("waiting_on=reply_reconciliation", protocol_text)
+        self.assertIn("PUBLISH_RECONCILE_REQUIRED", status_text)
+        self.assertIn("do not retry `agent publish` blindly", status_text)
+        self.assertIn("agent evidence add", status_text)

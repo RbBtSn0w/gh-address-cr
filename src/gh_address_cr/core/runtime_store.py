@@ -19,10 +19,17 @@ from gh_address_cr.evidence.ledger import EvidenceRecord, payload_hash
 SCHEMA_VERSION = 1
 _LEASE_DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _SAFE_OPERATIONS = {
+    "artifact_recovery",
+    "artifact_write",
     "bootstrap",
     "legacy_import",
     "lease_claim",
     "lease_release",
+    "outbox_attempt",
+    "outbox_execute",
+    "outbox_plan",
+    "outbox_recovery",
+    "outbox_result",
     "session_update",
     "status_update",
 }
@@ -173,6 +180,8 @@ class RuntimeStore:
         *,
         expected_revision: int | None,
         operation: str,
+        evidence: list[dict[str, Any]] | None = None,
+        outbox: list[dict[str, Any]] | None = None,
     ) -> StoreSnapshot:
         def replace_payload(current: dict[str, Any]) -> None:
             current.clear()
@@ -182,6 +191,8 @@ class RuntimeStore:
             replace_payload,
             expected_revision=expected_revision,
             operation=operation,
+            evidence=evidence,
+            outbox=outbox,
         )
         return StoreSnapshot(payload=result.payload, revision=result.revision)
 
@@ -192,6 +203,7 @@ class RuntimeStore:
         expected_revision: int | None = None,
         operation: str,
         evidence: list[dict[str, Any]] | None = None,
+        outbox: list[dict[str, Any]] | None = None,
     ) -> TransactionResult:
         started_at = time.monotonic()
         connection = self._connect()
@@ -206,6 +218,8 @@ class RuntimeStore:
             normalized = json_ready(current.payload)
             self._write_session(connection, normalized, revision=next_revision)
             self._write_evidence(connection, evidence or [], revision=next_revision)
+            self._write_outbox(connection, outbox or [], revision=next_revision)
+            connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
             connection.execute(
                 "UPDATE store_metadata SET latest_revision = ?, updated_at = ? WHERE singleton = 1",
                 (next_revision, _utc_now()),
@@ -263,48 +277,348 @@ class RuntimeStore:
             connection.close()
         return [json.loads(row[0]) for row in rows]
 
+    def load_outbox(self) -> list[dict[str, Any]]:
+        connection = self._connect()
+        try:
+            self._validate_schema(connection)
+            columns = (
+                "command_id",
+                "session_id",
+                "effect_type",
+                "idempotency_key",
+                "planned_revision",
+                "operation_category",
+                "status",
+                "attempt_count",
+                "retry_boundary",
+                "error_type",
+                "external_result_reference",
+            )
+            rows = connection.execute(
+                f"SELECT {', '.join(columns)} FROM outbox_commands ORDER BY rowid"
+            ).fetchall()
+        finally:
+            connection.close()
+        return [dict(zip(columns, row, strict=True)) for row in rows]
+
+    def mark_outbox_in_flight(self, command_id: str) -> StoreSnapshot:
+        return self._transition_outbox(
+            "status = 'in_flight', attempt_count = attempt_count + 1, "
+            "error_type = NULL, external_result_reference = NULL",
+            command_id=command_id,
+            allowed_statuses=("planned", "failed", "unknown"),
+            operation="outbox_execute",
+            unknown_requires_idempotency=True,
+        )
+
+    def record_outbox_result(
+        self,
+        command_id: str,
+        *,
+        status: str,
+        evidence: list[dict[str, Any]],
+        external_result_reference: str | None = None,
+        error_type: str | None = None,
+    ) -> StoreSnapshot:
+        if status not in {"succeeded", "failed"}:
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Outbox result must be succeeded or failed.")
+        if status == "succeeded" and (not evidence or not external_result_reference):
+            raise PersistenceInvalidError(
+                "PERSISTENCE_INVALID",
+                "A successful outbox result requires evidence and an external result reference.",
+            )
+        connection = self._connect()
+        started_at = time.monotonic()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._validate_schema(connection)
+            current = self._load_snapshot(connection)
+            next_revision = current.revision + 1
+            cursor = connection.execute(
+                "UPDATE outbox_commands SET status = ?, error_type = ?, external_result_reference = ? "
+                "WHERE command_id = ? AND status IN ('in_flight', 'unknown')",
+                (status, error_type, external_result_reference, command_id),
+            )
+            if cursor.rowcount != 1:
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID",
+                    "Outbox command is missing or cannot record the requested result.",
+                )
+            self._write_session(connection, current.payload, revision=next_revision)
+            self._write_evidence(connection, evidence, revision=next_revision)
+            connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
+            connection.execute(
+                "UPDATE store_metadata SET latest_revision = ?, updated_at = ? WHERE singleton = 1",
+                (next_revision, _utc_now()),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        _emit_persistence_event(
+            "outbox.execution",
+            operation="outbox_result",
+            outcome=status,
+            contention=_contention_bucket(started_at),
+        )
+        return self.load()
+
+    def recover(self) -> int:
+        connection = self._connect()
+        started_at = time.monotonic()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._validate_schema(connection)
+            current = self._load_snapshot(connection)
+            cursor = connection.execute(
+                "UPDATE outbox_commands SET status = 'unknown' WHERE status = 'in_flight'"
+            )
+            recovered = int(cursor.rowcount)
+            if recovered:
+                next_revision = current.revision + 1
+                self._write_session(connection, current.payload, revision=next_revision)
+                connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
+                connection.execute(
+                    "UPDATE store_metadata SET latest_revision = ?, updated_at = ? WHERE singleton = 1",
+                    (next_revision, _utc_now()),
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        _emit_persistence_event(
+            "persistence.recovery",
+            operation="outbox_recovery",
+            outcome="recovered" if recovered else "no_change",
+            contention=_contention_bucket(started_at),
+        )
+        return recovered
+
+    def _transition_outbox(
+        self,
+        assignment: str,
+        *,
+        command_id: str,
+        allowed_statuses: tuple[str, ...],
+        operation: str,
+        unknown_requires_idempotency: bool = False,
+    ) -> StoreSnapshot:
+        started_at = time.monotonic()
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._validate_schema(connection)
+            current = self._load_snapshot(connection)
+            placeholders = ", ".join("?" for _ in allowed_statuses)
+            retry_clause = (
+                " AND (status != 'unknown' OR retry_boundary = 'idempotent')"
+                if unknown_requires_idempotency
+                else ""
+            )
+            cursor = connection.execute(
+                f"UPDATE outbox_commands SET {assignment} "
+                f"WHERE command_id = ? AND status IN ({placeholders}){retry_clause}",
+                (command_id, *allowed_statuses),
+            )
+            if cursor.rowcount != 1:
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID",
+                    "Outbox command is missing or cannot enter the requested state.",
+                )
+            next_revision = current.revision + 1
+            self._write_session(connection, current.payload, revision=next_revision)
+            connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
+            connection.execute(
+                "UPDATE store_metadata SET latest_revision = ?, updated_at = ? WHERE singleton = 1",
+                (next_revision, _utc_now()),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        _emit_persistence_event(
+            "outbox.execution",
+            operation=operation,
+            outcome="in_flight",
+            contention=_contention_bucket(started_at),
+        )
+        return self.load()
+
+    def load_materializations(self) -> list[dict[str, Any]]:
+        connection = self._connect()
+        try:
+            self._validate_schema(connection)
+            columns = (
+                "artifact_kind",
+                "source_revision",
+                "format_version",
+                "status",
+                "content_hash",
+                "last_attempt_at",
+                "error_type",
+            )
+            rows = connection.execute(
+                f"SELECT {', '.join(columns)} FROM artifact_materializations ORDER BY artifact_kind"
+            ).fetchall()
+        finally:
+            connection.close()
+        return [dict(zip(columns, row, strict=True)) for row in rows]
+
+    def recover_artifacts(self, *, session_path: Path, ledger_path: Path) -> int:
+        snapshot = self.load()
+        paths = {
+            "session_json": session_path,
+            "evidence_jsonl": ledger_path,
+            "evidence_jsonl_metadata": ledger_path.with_name(f"{ledger_path.name}.meta.json"),
+        }
+        rows = {row["artifact_kind"]: row for row in self.load_materializations()}
+        repairs = 0
+        for kind, path in paths.items():
+            row = rows.get(kind)
+            if row is not None and int(row["source_revision"]) > snapshot.revision:
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID",
+                    "Artifact revision is newer than canonical runtime state.",
+                )
+            if (
+                row is None
+                or int(row["source_revision"]) < snapshot.revision
+                or row["status"] != "current"
+                or not path.is_file()
+            ):
+                repairs += 1
+        if repairs:
+            self.materialize_compatibility_artifacts(session_path=session_path, ledger_path=ledger_path)
+        _emit_persistence_event(
+            "artifact.materialization",
+            operation="artifact_recovery",
+            outcome="rebuilt" if repairs else "current",
+            contention="none",
+        )
+        return repairs
+
     def materialize_compatibility_artifacts(self, *, session_path: Path, ledger_path: Path) -> None:
-        self.materialize_session_projection(session_path=session_path)
         snapshot = self.load()
         ledger_metadata_path = ledger_path.with_name(f"{ledger_path.name}.meta.json")
-
-        ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(prefix=f"{ledger_path.name}.", suffix=".tmp", dir=ledger_path.parent)
+        artifacts = (
+            ("session_json", session_path),
+            ("evidence_jsonl", ledger_path),
+            ("evidence_jsonl_metadata", ledger_metadata_path),
+        )
+        self._record_materialization_status(
+            snapshot.revision,
+            tuple(kind for kind, _ in artifacts),
+            status="materializing",
+        )
         try:
+            self._write_session_projection(snapshot, session_path=session_path)
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f"{ledger_path.name}.", suffix=".tmp", dir=ledger_path.parent
+            )
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 for record in self.load_evidence():
                     handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
                     handle.write("\n")
             os.replace(temporary_name, ledger_path)
-        except Exception:
-            if os.path.exists(temporary_name):
+            write_json_atomic(
+                ledger_metadata_path,
+                {
+                    "format_version": 1,
+                    "schema_version": SCHEMA_VERSION,
+                    "revision": snapshot.revision,
+                },
+            )
+            self._record_materializations(snapshot.revision, artifacts)
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="current",
+                contention="none",
+            )
+        except Exception as exc:
+            if "temporary_name" in locals() and os.path.exists(temporary_name):
                 os.unlink(temporary_name)
+            self._record_materialization_status(
+                snapshot.revision,
+                tuple(kind for kind, _ in artifacts),
+                status="failed",
+                error_type=type(exc).__name__,
+            )
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="failed",
+                contention="none",
+            )
             raise
-
-        write_json_atomic(
-            ledger_metadata_path,
-            {
-                "format_version": 1,
-                "schema_version": SCHEMA_VERSION,
-                "revision": snapshot.revision,
-            },
-        )
-
-        self._record_materializations(
-            snapshot.revision,
-            (
-                ("session_json", session_path),
-                ("evidence_jsonl", ledger_path),
-                ("evidence_jsonl_metadata", ledger_metadata_path),
-            ),
-        )
 
     def materialize_session_projection(self, *, session_path: Path) -> None:
         snapshot = self.load()
+        self._record_materialization_status(
+            snapshot.revision,
+            ("session_json",),
+            status="materializing",
+        )
+        try:
+            self._write_session_projection(snapshot, session_path=session_path)
+            self._record_materializations(snapshot.revision, (("session_json", session_path),))
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="current",
+                contention="none",
+            )
+        except Exception as exc:
+            self._record_materialization_status(
+                snapshot.revision,
+                ("session_json",),
+                status="failed",
+                error_type=type(exc).__name__,
+            )
+            _emit_persistence_event(
+                "artifact.materialization",
+                operation="artifact_write",
+                outcome="failed",
+                contention="none",
+            )
+            raise
+
+    @staticmethod
+    def _write_session_projection(snapshot: StoreSnapshot, *, session_path: Path) -> None:
         projection = json_ready(snapshot.payload)
         projection["persistence"] = {"schema_version": SCHEMA_VERSION, "revision": snapshot.revision}
         write_json_atomic(session_path, projection)
-        self._record_materializations(snapshot.revision, (("session_json", session_path),))
+
+    def _record_materialization_status(
+        self,
+        revision: int,
+        artifact_kinds: tuple[str, ...],
+        *,
+        status: str,
+        error_type: str | None = None,
+    ) -> None:
+        connection = self._connect()
+        try:
+            for kind in artifact_kinds:
+                connection.execute(
+                    "INSERT INTO artifact_materializations "
+                    "(artifact_kind, source_revision, format_version, status, content_hash, last_attempt_at, error_type) "
+                    "VALUES (?, ?, ?, ?, NULL, ?, ?) "
+                    "ON CONFLICT(artifact_kind) DO UPDATE SET source_revision=excluded.source_revision, "
+                    "format_version=excluded.format_version, status=excluded.status, content_hash=NULL, "
+                    "last_attempt_at=excluded.last_attempt_at, error_type=excluded.error_type",
+                    (kind, revision, 1, status, _utc_now(), error_type),
+                )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _record_materializations(self, revision: int, artifacts: tuple[tuple[str, Path], ...]) -> None:
         connection = self._connect()
@@ -597,6 +911,36 @@ class RuntimeStore:
                     record.payload_hash,
                     revision,
                     encoded,
+                ),
+            )
+
+    @staticmethod
+    def _write_outbox(connection: sqlite3.Connection, commands: list[dict[str, Any]], *, revision: int) -> None:
+        session_row = connection.execute("SELECT session_id FROM sessions ORDER BY rowid LIMIT 1").fetchone()
+        if session_row is None:
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime store has no session row.")
+        session_id = str(session_row[0])
+        required = {"command_id", "effect_type", "idempotency_key", "operation_category"}
+        for command in commands:
+            missing = sorted(required.difference(command))
+            if missing:
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID",
+                    f"Outbox command is missing required fields: {', '.join(missing)}.",
+                )
+            connection.execute(
+                "INSERT INTO outbox_commands "
+                "(command_id, session_id, effect_type, idempotency_key, planned_revision, "
+                "operation_category, status, attempt_count, retry_boundary, error_type, "
+                "external_result_reference) VALUES (?, ?, ?, ?, ?, ?, 'planned', 0, ?, NULL, NULL)",
+                (
+                    str(command["command_id"]),
+                    session_id,
+                    str(command["effect_type"]),
+                    str(command["idempotency_key"]),
+                    revision,
+                    str(command["operation_category"]),
+                    command.get("retry_boundary"),
                 ),
             )
 

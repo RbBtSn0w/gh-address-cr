@@ -8,7 +8,8 @@ from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import json_ready as _io_json_ready
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
-from gh_address_cr.evidence.ledger import EvidenceLedger
+from gh_address_cr.core.side_effect_outbox import persist_side_effect_attempt
+from gh_address_cr.evidence.ledger import EvidenceLedger, SessionEvidenceLedger
 
 
 def get_field(obj: Any, field: str, default: Any = None) -> Any:
@@ -82,8 +83,14 @@ def get_session_items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def get_session_ledger(session: dict[str, Any]) -> EvidenceLedger:
-    return EvidenceLedger(
-        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
+    repo = str(session["repo"])
+    pr_number = str(session["pr_number"])
+
+    return SessionEvidenceLedger(
+        session.get("ledger_path")
+        or session_store.default_ledger_path(repo, pr_number),
+        session,
+        flush=lambda records: persist_side_effect_attempt(session, records),
     )
 
 

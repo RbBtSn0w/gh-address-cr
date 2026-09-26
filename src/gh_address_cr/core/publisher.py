@@ -24,6 +24,7 @@ from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revisi
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
+from gh_address_cr.core.side_effect_outbox import reconcile_side_effect_no_effect
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
 )
@@ -171,6 +172,11 @@ def _execute_single_publish_plan(
                     ),
                     payload={"item_id": item_id},
                 )
+            reconcile_side_effect_no_effect(
+                session,
+                effect_type="github_reply",
+                idempotency_key=reply_key,
+            )
             # Nothing was ever posted, so falling through to the normal post-reply path
             # below (which re-records a fresh in_flight attempt) is safe.
         else:
@@ -254,6 +260,17 @@ def _execute_single_publish_plan(
 
     existing_resolve = ledger.successful_side_effect_url(resolve_key, "github_resolve")
     if not existing_resolve and not item.get("thread_resolved"):
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type="github_resolve",
+            idempotency_key=resolve_key,
+            status="in_flight",
+            timestamp=timestamp,
+        )
         try:
             client.resolve_thread(repo, str(pr_number), thread_id)
         except GitHubError as exc:

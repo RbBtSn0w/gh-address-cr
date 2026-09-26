@@ -473,6 +473,57 @@ class FinalGateTestCase(unittest.TestCase):
             },
         }
 
+    def test_gatekeeper_uses_canonical_session_and_current_github_facts(self):
+        from gh_address_cr.core.session import SessionManager
+
+        class GitHubFacts:
+            @staticmethod
+            def viewer_login():
+                return "agent-login"
+
+            @staticmethod
+            def list_threads(_repo, _pr_number):
+                return [
+                    {"id": "THREAD_DONE", "isResolved": True},
+                    {"id": "THREAD_OPEN", "isResolved": False},
+                ]
+
+            @staticmethod
+            def list_pending_reviews(_repo, _pr_number, _current_login):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                os.environ,
+                {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                clear=False,
+            ):
+                manager = SessionManager("octo/example", "77")
+                canonical = manager.create()
+                canonical["items"] = self.passing_session()["items"]
+                manager.save(canonical)
+
+                stale_projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+                stale_projection["items"]["local-finding:STALE"] = {
+                    "item_id": "local-finding:STALE",
+                    "item_kind": "local_finding",
+                    "state": "open",
+                    "blocking": True,
+                }
+                manager.session_path.write_text(json.dumps(stale_projection), encoding="utf-8")
+
+                result = gate.Gatekeeper(github_client=GitHubFacts()).run(
+                    "octo/example",
+                    "77",
+                    require_existing_session=True,
+                )
+
+                self.assertEqual(result.reason_code, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS")
+                self.assertEqual(result.counts["unresolved_remote_threads_count"], 1)
+                self.assertEqual(result.counts["blocking_local_items_count"], 0)
+                repaired = json.loads(manager.session_path.read_text(encoding="utf-8"))
+                self.assertNotIn("local-finding:STALE", repaired["items"])
+
     def test_machine_summary_fields_are_stable_on_success(self):
         result = self.evaluate(
             self.passing_session(),

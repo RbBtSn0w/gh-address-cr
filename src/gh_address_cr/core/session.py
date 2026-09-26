@@ -14,6 +14,7 @@ from gh_address_cr.core.runtime_store import (
     StaleRevisionError,
     TransactionResult,
 )
+from gh_address_cr.evidence.ledger import take_pending_evidence
 
 DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _WRITABLE_STATE_DIRECTORIES: set[Path] = set()
@@ -116,6 +117,8 @@ class SessionManager:
         *,
         operation: str,
         expected_revision: int | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        outbox: list[dict[str, Any]] | None = None,
     ) -> TransactionResult:
         return transact_session(
             self.repo,
@@ -123,6 +126,8 @@ class SessionManager:
             mutation,
             operation=operation,
             expected_revision=expected_revision,
+            evidence=evidence,
+            outbox=outbox,
         )
 
 
@@ -138,11 +143,17 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
             reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
             raise SessionError(reason_code, str(exc)) from exc
     try:
-        snapshot = (
-            store.load()
-            if store.database_path.exists()
-            else store.open_or_migrate(session_path=path, ledger_path=default_ledger_path(repo, pr_number))
+        if not store.database_path.exists():
+            store.open_or_migrate(
+                session_path=path,
+                ledger_path=default_ledger_path(repo, pr_number),
+            )
+        store.recover()
+        store.recover_artifacts(
+            session_path=path,
+            ledger_path=default_ledger_path(repo, pr_number),
         )
+        snapshot = store.load()
     except (PersistenceBusyError, PersistenceInvalidError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
     payload = snapshot.payload
@@ -163,6 +174,7 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
 def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     path = session_file(repo, pr_number)
     store = RuntimeStore(workspace_dir(repo, pr_number))
+    evidence = take_pending_evidence(payload)
     try:
         if store.database_path.exists():
             persistence = payload.get("persistence")
@@ -175,11 +187,18 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
                 payload,
                 expected_revision=int(persistence["revision"]),
                 operation="session_update",
+                evidence=evidence,
             )
         else:
-            snapshot = store.bootstrap(payload)
+            snapshot = store.bootstrap(payload, evidence=evidence)
         payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
-        store.materialize_session_projection(session_path=path)
+        if evidence:
+            store.materialize_compatibility_artifacts(
+                session_path=path,
+                ledger_path=default_ledger_path(repo, pr_number),
+            )
+        else:
+            store.materialize_session_projection(session_path=path)
     except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
 
@@ -191,6 +210,8 @@ def transact_session(
     *,
     operation: str,
     expected_revision: int | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    outbox: list[dict[str, Any]] | None = None,
 ) -> TransactionResult:
     store = RuntimeStore(workspace_dir(repo, pr_number))
     if not store.database_path.exists():
@@ -200,10 +221,18 @@ def transact_session(
             mutation,
             expected_revision=expected_revision,
             operation=operation,
+            evidence=evidence,
+            outbox=outbox,
         )
         payload = result.payload
         payload["persistence"] = {"schema_version": result.schema_version, "revision": result.revision}
-        store.materialize_session_projection(session_path=session_file(repo, pr_number))
+        if evidence:
+            store.materialize_compatibility_artifacts(
+                session_path=session_file(repo, pr_number),
+                ledger_path=default_ledger_path(repo, pr_number),
+            )
+        else:
+            store.materialize_session_projection(session_path=session_file(repo, pr_number))
         return TransactionResult(
             payload=payload,
             revision=result.revision,
