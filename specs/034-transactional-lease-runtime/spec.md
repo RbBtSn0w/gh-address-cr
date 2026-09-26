@@ -2,9 +2,11 @@
 
 **Feature Branch**: `feat/034-transactional-lease-runtime`
 **Created**: 2026-09-24
-**Status**: Complete — Constitution 2.2.0 and Phases A/B/C landed on `develop`
-through PRs #287, #288, #290, and #292; all implementation tasks and required
-completion gates passed
+**Status**: Superseded in part by
+[Spec 035](../035-runtime-store-hardening/spec.md) — Phases A/B/C landed on
+`develop` through PRs #287, #288, #290, and #292, but the post-merge audit found
+FR-007, FR-008, FR-009, FR-014, SC-002, and SC-003 not fully met (see
+[035 validation](../035-runtime-store-hardening/validation.md))
 **Input**: The explicit follow-up boundary in Spec 033 / PR #285: cross-process
 atomic claim, `session.json` / evidence-ledger crash consistency, and core/shadow
 lease convergence.
