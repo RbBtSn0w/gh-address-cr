@@ -22,17 +22,26 @@
 
 ## Implementation Entry
 
-- [ ] CHK008 Constitution Principle I amendment is approved and landed.
-- [ ] CHK009 Persistence-boundary v1 and migration/downgrade semantics are approved.
-- [ ] CHK010 Phase A branch topology is authorized before code or native Stack
+- [x] CHK008 Constitution Principle I amendment is approved and landed.
+- [x] CHK009 Persistence-boundary v1 and migration/downgrade semantics are approved.
+- [x] CHK010 Phase A branch topology is authorized before code or native Stack
   mutations begin.
 
 ## Completion Evidence
 
-- [ ] CHK011 Each layer records focused failing-then-passing tests.
-- [ ] CHK012 Each layer completes install, lint, unit, CLI, agent manifest, and
+- [x] CHK011 Each layer records focused failing-then-passing tests.
+- [x] CHK012 Each layer completes install, lint, unit, CLI, agent manifest, and
   plugin payload gates.
-- [ ] CHK013 Affected PR-session layers complete final-gate and retain compact
+- [x] CHK013 Affected PR-session layers complete final-gate and retain compact
   completion evidence with telemetry coverage and report artifacts.
-- [ ] CHK014 Every changed upper Stack layer is revalidated after lower-layer
+- [x] CHK014 Every changed upper Stack layer is revalidated after lower-layer
   revision changes.
+
+## Closure Evidence
+
+- Constitution 2.2.0 and the persistence-boundary approval landed in PR #287.
+- Phase A landed in PR #288, Phase B in PR #290, and Phase C in PR #292.
+- Each implementation PR passed its focused and complete repository gates before
+  merge; affected PR-session work retained compact `final-gate` evidence.
+- The completed A -> B -> C Stack is now represented by its squash-merge commits
+  on `develop`; no Phase D is required by this specification.
