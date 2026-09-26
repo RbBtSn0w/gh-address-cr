@@ -167,7 +167,7 @@ def _resolve_fast_fix_matches(
         )
 
     self_leased_item_ids: set[str] = set()
-    if stale_only and agent_id:
+    if agent_id:
         self_leased_item_ids = {
             str(lease.get("item_id"))
             for lease in (session.get("leases") or {}).values()
@@ -583,7 +583,12 @@ def decline_matching_threads(
         resolution=resolution,
     )
     matches, normalized_file_set = _resolve_fast_fix_matches(
-        repo, pr_number, ctx, include_stale=include_stale, stale_only=stale_only
+        repo,
+        pr_number,
+        ctx,
+        include_stale=include_stale,
+        stale_only=stale_only,
+        agent_id=agent_id,
     )
     _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=stale_only)
 
@@ -808,6 +813,8 @@ def _matches_fast_fix_thread(
     if item_path not in files:
         return False
     stale = is_stale_github_thread_item(item)
+    claimed_by_self = str(item.get("state") or "").lower() == "claimed" and self_leased
+    claim_candidate = is_claimable_github_thread(item) or claimed_by_self
     if stale_only:
         if not stale:
             return False
@@ -816,7 +823,7 @@ def _matches_fast_fix_thread(
         return is_claimable_github_thread(item)
     if stale and not include_stale:
         return False
-    return is_claimable_github_thread(item)
+    return claim_candidate
 
 
 def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:

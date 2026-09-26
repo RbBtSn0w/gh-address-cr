@@ -1448,7 +1448,10 @@ else:
         first_summary = json.loads(first.stdout)
         self.assertEqual(first_summary["status"], "BLOCKED")
 
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(self.repo, self.pr)
+        session = manager.load()
         item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         item = session["items"][item_id]
         item["status"] = "CLOSED"
@@ -1456,7 +1459,7 @@ else:
         item["blocking"] = False
         item["handled"] = True
         item["validation_evidence"] = [{"command": "manual fixture", "result": "passed"}]
-        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        manager.save(session)
 
         second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertEqual(second.returncode, 0, second.stderr)

@@ -85,6 +85,27 @@ class BatchClaimRollbackTest(unittest.TestCase):
                 self.assertEqual(retry["status"], "BATCH_ACTION_REQUESTED")
                 self.assertGreater(retry["lease_count"], 0)
 
+    def test_batch_claim_reports_created_then_reentered_provenance(self):
+        from gh_address_cr.core import agent_batch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self._session("owner/repo", "906", count=1)
+
+                created = agent_batch.issue_batch_action_request(
+                    "owner/repo", "906", agent_id="agent-1"
+                )
+                reentered = agent_batch.issue_batch_action_request(
+                    "owner/repo", "906", agent_id="agent-1"
+                )
+
+        self.assertEqual(created["leased_items"][0]["acquisition"], "created")
+        self.assertEqual(reentered["leased_items"][0]["acquisition"], "reentered")
+        self.assertEqual(
+            created["leased_items"][0]["lease_id"],
+            reentered["leased_items"][0]["lease_id"],
+        )
+
 
 class BatchPartialAcceptanceRecoveryTest(unittest.TestCase):
     def _claim_and_fill(self, repo, pr_number):

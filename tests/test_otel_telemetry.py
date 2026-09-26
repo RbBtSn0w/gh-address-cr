@@ -343,20 +343,27 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             "OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x-api-key=trace-secret",
             "OTEL_PYTHON_EXPORTER_OTLP_HTTP_TRACES_CREDENTIAL_PROVIDER": "invalid.module:provider",
         }
+        export_session = MagicMock()
+        export_session.trust_env = True
 
         with (
             patch.dict(os.environ, ambient_credentials, clear=True),
             patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing.requests, "Session", return_value=export_session),
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
             patch.object(otel_tracing, "BatchSpanProcessor") as processor_type,
         ):
             otel_tracing.initialize_telemetry()
 
-        exporter = processor_type.call_args.args[0]
-        request_headers = {key.lower(): value for key, value in exporter._session.headers.items()}
+        exporter_type.assert_called_once()
+        processor_type.assert_called_once()
+        self.assertIs(processor_type.call_args.args[0], exporter_type.return_value)
+        request_headers = {key.lower(): value for key, value in exporter_type.call_args.kwargs["headers"].items()}
         self.assertNotIn("authorization", request_headers)
         self.assertNotIn("x-api-key", request_headers)
         self.assertEqual(request_headers["otel-gateway-profile"], "anonymous-client-v1")
-        self.assertFalse(exporter._session.trust_env)
+        self.assertIs(exporter_type.call_args.kwargs["session"], export_session)
+        self.assertFalse(export_session.trust_env)
 
     def test_shutdown_flushes_provider_once(self) -> None:
         from gh_address_cr import otel_tracing

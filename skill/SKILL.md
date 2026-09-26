@@ -87,6 +87,14 @@ Keep the same value for `review`, `address`, `agent next`, `agent submit`,
 session. `STATE_DIR_NOT_WRITABLE` means the runtime could not initialize that
 directory: choose a permitted location and rerun the same command.
 
+The runtime owns one versioned `runtime.sqlite3` store per PR workspace. Existing
+JSON/JSONL state is imported once; afterward those files are compatibility
+projections, not supported write inputs. Do not edit `session.json` to repair a
+session. `evidence.jsonl.meta.json` records the JSONL projection's source
+revision without changing its row format. Follow the returned recovery action for `STALE_REVISION`,
+`PERSISTENCE_BUSY`, or `PERSISTENCE_INVALID`, and keep the generated
+`legacy-v1-recovery/` bundle intact.
+
 ## Execution Ladder
 
 1. Run the selected public main entrypoint.

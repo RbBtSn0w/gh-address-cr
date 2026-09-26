@@ -863,7 +863,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
         self.assertEqual(payload["reason_code"], "COMMIT_FILES_UNAVAILABLE")
 
-    def test_agent_fix_all_reports_partial_when_one_matched_thread_is_leased(self):
+    def test_agent_fix_all_excludes_a_thread_leased_by_another_agent(self):
         self.write_session(
             items=[
                 open_item(
@@ -917,18 +917,20 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             NOW.isoformat(),
         )
 
-        self.assertEqual(result.returncode, 5)
+        self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_PARTIAL")
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_ACCEPTED")
         self.assertEqual(payload["accepted_count"], 1)
-        self.assertEqual(payload["failed_count"], 1)
+        self.assertEqual(payload["failed_count"], 0)
         self.assertEqual(payload["item_ids"], ["github-thread:abc"])
-        self.assertEqual(payload["failed"][0]["item_id"], "github-thread:def")
-        self.assertEqual(payload["failed"][0]["reason_code"], "LEASE_LOCKED_ITEM")
-        self.assertIn("agent leases", payload["failed"][0]["next_action"])
+        self.assertEqual(payload["failed"], [])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
-        self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+        self.assertEqual(
+            session["items"]["github-thread:def"]["active_lease_id"],
+            "lease-existing",
+        )
 
     def test_agent_resolve_item_reports_active_batch_lease_owner(self):
         self.write_session(

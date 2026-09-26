@@ -70,6 +70,8 @@ class OwnerReentryTest(unittest.TestCase):
                     "owner/repo", "1001", role="fixer", agent_id="agent-a", item_id="github-thread:X"
                 )
 
+                self.assertEqual(first["acquisition"], "created")
+                self.assertEqual(again["acquisition"], "reentered")
                 self.assertEqual(again["lease_id"], first["lease_id"])
                 self.assertEqual(again["request_path"], first["request_path"])
                 self.assertEqual(again["resume_token"], first["resume_token"])

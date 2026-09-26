@@ -3,13 +3,21 @@ from __future__ import annotations
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from gh_address_cr.core import paths
-from gh_address_cr.core.io import JsonIOError, read_json_object, write_json_atomic
+from gh_address_cr.core.io import JsonIOError, read_json_object
+from gh_address_cr.core.runtime_store import (
+    PersistenceBusyError,
+    PersistenceInvalidError,
+    RuntimeStore,
+    StaleRevisionError,
+    TransactionResult,
+)
 
 DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _WRITABLE_STATE_DIRECTORIES: set[Path] = set()
+T = TypeVar("T")
 
 
 class SessionError(RuntimeError):
@@ -102,18 +110,43 @@ class SessionManager:
     def save(self, payload: dict[str, Any]) -> None:
         save_session(self.repo, self.pr_number, payload)
 
+    def transact(
+        self,
+        mutation: Callable[[dict[str, Any]], T],
+        *,
+        operation: str,
+        expected_revision: int | None = None,
+    ) -> TransactionResult:
+        return transact_session(
+            self.repo,
+            self.pr_number,
+            mutation,
+            operation=operation,
+            expected_revision=expected_revision,
+        )
+
 
 def load_session(repo: str, pr_number: str) -> dict[str, Any]:
     path = session_file(repo, pr_number)
-    if not path.exists():
+    store = RuntimeStore(workspace_dir(repo, pr_number))
+    if not store.database_path.exists() and not path.exists():
         raise SessionError("SESSION_NOT_FOUND", f"No session exists for {repo} PR {pr_number}. Run review first.")
+    if not store.database_path.exists():
+        try:
+            read_json_object(path)
+        except JsonIOError as exc:
+            reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
+            raise SessionError(reason_code, str(exc)) from exc
     try:
-        payload = read_json_object(path)
-    except JsonIOError as exc:
-        reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
-        raise SessionError(reason_code, str(exc)) from exc
-    if not isinstance(payload, dict):
-        raise SessionError("INVALID_SESSION_SHAPE", f"Session at {path} must be a JSON object.")
+        snapshot = (
+            store.load()
+            if store.database_path.exists()
+            else store.open_or_migrate(session_path=path, ledger_path=default_ledger_path(repo, pr_number))
+        )
+    except (PersistenceBusyError, PersistenceInvalidError) as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
+    payload = snapshot.payload
+    payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
     payload.setdefault("session_id", f"{repo}#{pr_number}")
     payload.setdefault("repo", repo)
     payload.setdefault("pr_number", str(pr_number))
@@ -129,7 +162,57 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
 
 def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     path = session_file(repo, pr_number)
-    write_json_atomic(path, payload)
+    store = RuntimeStore(workspace_dir(repo, pr_number))
+    try:
+        if store.database_path.exists():
+            persistence = payload.get("persistence")
+            if not isinstance(persistence, dict) or not isinstance(persistence.get("revision"), int):
+                raise SessionError(
+                    "UNVERSIONED_SESSION_WRITE",
+                    "Existing runtime state must be loaded before it can be saved.",
+                )
+            snapshot = store.replace(
+                payload,
+                expected_revision=int(persistence["revision"]),
+                operation="session_update",
+            )
+        else:
+            snapshot = store.bootstrap(payload)
+        payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
+        store.materialize_session_projection(session_path=path)
+    except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
+
+
+def transact_session(
+    repo: str,
+    pr_number: str,
+    mutation: Callable[[dict[str, Any]], T],
+    *,
+    operation: str,
+    expected_revision: int | None = None,
+) -> TransactionResult:
+    store = RuntimeStore(workspace_dir(repo, pr_number))
+    if not store.database_path.exists():
+        load_session(repo, pr_number)
+    try:
+        result = store.transact(
+            mutation,
+            expected_revision=expected_revision,
+            operation=operation,
+        )
+        payload = result.payload
+        payload["persistence"] = {"schema_version": result.schema_version, "revision": result.revision}
+        store.materialize_session_projection(session_path=session_file(repo, pr_number))
+        return TransactionResult(
+            payload=payload,
+            revision=result.revision,
+            schema_version=result.schema_version,
+            value=result.value,
+            operation=result.operation,
+        )
+    except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
 
 
 def cache_pull_request_context(session: dict[str, Any], stack_context: dict[str, Any]) -> None:
