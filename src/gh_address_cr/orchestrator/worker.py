@@ -39,25 +39,28 @@ def parse_and_validate_response(
 
 def build_worker_packet(
     run_id: str,
-    lease_token: str,
+    delivery_token: str,
     role: str,
     session_id: str,
     item: Dict[str, Any],
     response_path: str,
     action_request: Dict[str, Any] | None = None,
+    dispatch_receipt: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     request_payload = action_request or {
         "request_id": f"req-{uuid4().hex}",
         "session_id": session_id,
-        "lease_id": lease_token,
+        "lease_id": str((dispatch_receipt or {}).get("lease_id") or ""),
         "agent_role": role,
         "item": request_item_projection(item),
         "allowed_actions": ["fix", "clarify", "defer"],
         "required_evidence": ["files", "validation_commands", "note", "fix_reply"],
     }
     return {
+        "schema_version": "worker-packet.v2",
         "orchestration_run_id": run_id,
-        "lease_token": lease_token,
+        "delivery_token": delivery_token,
+        "dispatch_receipt": dispatch_receipt or {},
         "role_requested": role,
         "action_request": request_payload,
         "relevant_file_context": f"{item.get('path', 'unknown')}:{item.get('line', '0')}",

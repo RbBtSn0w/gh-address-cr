@@ -30,18 +30,11 @@ from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.utils import coerce_now as _coerce_now
 from gh_address_cr.core.utils import get_session_items as _items
 from gh_address_cr.core.utils import normalize_string_list as _normalize_string_list
+from gh_address_cr.core.utils import publish_outcome_status
 
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
 FIX_ALL_STALE_ROUTE_REASON = "STALE_THREADS_REQUIRE_RESOLVE_STALE"
 
-MATCHING_THREAD_SUCCESS_STATUS = {
-    ("FAST_FIX_ALL", False): "FAST_FIX_ALL_ACCEPTED",
-    ("FAST_FIX_ALL", True): "FAST_FIX_ALL_COMPLETE",
-    ("STALE_RESOLUTION", False): "STALE_RESOLUTION_ACCEPTED",
-    ("STALE_RESOLUTION", True): "STALE_RESOLUTION_COMPLETE",
-    ("DECLINE_ALL", False): "DECLINE_ALL_ACCEPTED",
-    ("DECLINE_ALL", True): "DECLINE_ALL_COMPLETE",
-}
 MATCHING_THREAD_FAILURE_STATUS = {
     ("FAST_FIX_ALL", False): "FAST_FIX_ALL_NO_ACCEPTED",
     ("FAST_FIX_ALL", True): "FAST_FIX_ALL_PARTIAL",
@@ -174,7 +167,7 @@ def _resolve_fast_fix_matches(
         )
 
     self_leased_item_ids: set[str] = set()
-    if stale_only and agent_id:
+    if agent_id:
         self_leased_item_ids = {
             str(lease.get("item_id"))
             for lease in (session.get("leases") or {}).values()
@@ -427,6 +420,10 @@ def _process_fast_fix_matches(
     item_ids: list[str] = []
     for batch_items in _chunks(matches, MAX_PARALLEL_CLAIMS):
         batch_responses: list[dict[str, Any]] = []
+        # Lease ids already in the session before this chunk's claims. A returned lease
+        # id in this set was re-entered, not created, and belongs to whoever held it
+        # (spec 033 FR-002); only the difference is this chunk's to roll back.
+        leases_before = set(session_store.load_session(repo, pr_number).get("leases", {}))
         for item in batch_items:
             try:
                 batch_responses.append(
@@ -445,18 +442,34 @@ def _process_fast_fix_matches(
                 failed.append(_fast_fix_failed_row(str(item["item_id"]), exc))
         if not batch_responses:
             continue
-        batch_path = _write_fast_fix_batch_file(
-            repo,
-            pr_number,
-            batch_responses,
-            ctx,
-            agent_id=agent_id,
-            commit_hash=commit_hash,
-            severity_note=severity_note,
-        )
-        batch_result = agent_batch.submit_batch_action_response(
-            repo, pr_number, batch_path=batch_path, now=current_time
-        )
+        try:
+            batch_path = _write_fast_fix_batch_file(
+                repo,
+                pr_number,
+                batch_responses,
+                ctx,
+                agent_id=agent_id,
+                commit_hash=commit_hash,
+                severity_note=severity_note,
+            )
+            batch_result = agent_batch.submit_batch_action_response(
+                repo, pr_number, batch_path=batch_path, now=current_time
+            )
+        except WorkflowError as exc:
+            # One-shot (spec 033 FR-001): the caller holds no skeleton to retry with, so
+            # a rejected submit must not leave this chunk's leases behind. Rows an earlier
+            # part of the same submit already accepted are terminal, and
+            # release_claimed_lease leaves them alone.
+            for row in batch_responses:
+                if str(row["lease_id"]) not in leases_before:
+                    leases.release_claimed_lease(
+                        repo,
+                        pr_number,
+                        lease_id=str(row["lease_id"]),
+                        now=current_time,
+                        reason=f"action_rejected:{exc.reason_code}",
+                    )
+            raise
         accepted_count += int(batch_result.get("accepted_count") or 0)
         item_ids.extend(str(item_id) for item_id in batch_result.get("item_ids") or [])
         batches.append(batch_result)
@@ -570,7 +583,12 @@ def decline_matching_threads(
         resolution=resolution,
     )
     matches, normalized_file_set = _resolve_fast_fix_matches(
-        repo, pr_number, ctx, include_stale=include_stale, stale_only=stale_only
+        repo,
+        pr_number,
+        ctx,
+        include_stale=include_stale,
+        stale_only=stale_only,
+        agent_id=agent_id,
     )
     _enforce_fast_fix_routing(repo, pr_number, matches, normalized_file_set, ctx, stale_only=stale_only)
 
@@ -630,7 +648,6 @@ def _finalize_matching_threads(
         "failed": failed,
         **extra_payload,
         "publish": publish_result,
-        "next_action": _matching_thread_next_action(repo, pr_number, publish=publish),
     }
     if failed:
         status = _matching_thread_failure_status(ctx, accepted_count=accepted_count)
@@ -644,7 +661,14 @@ def _finalize_matching_threads(
             message=next_action,
             payload=payload,
         )
-    payload["status"] = _matching_thread_success_status(ctx, publish=publish)
+    payload["status"] = _matching_thread_success_status(
+        ctx, publish=publish, published=publish_result, item_ids=item_ids
+    )
+    # Derived from the status, not the --publish flag: a publish that posted nothing
+    # reports _ACCEPTED, and must not tell the caller the evidence was published.
+    payload["next_action"] = _matching_thread_next_action(
+        repo, pr_number, publish=payload["status"].endswith("_COMPLETE")
+    )
     return payload
 
 
@@ -670,8 +694,10 @@ def _publish_matching_thread_responses(
     )
 
 
-def _matching_thread_success_status(ctx: _FastFixContext, *, publish: bool) -> str:
-    return MATCHING_THREAD_SUCCESS_STATUS[(ctx.status_prefix, publish)]
+def _matching_thread_success_status(
+    ctx: _FastFixContext, *, publish: bool, published: Any, item_ids: list[str]
+) -> str:
+    return publish_outcome_status(ctx.status_prefix, publish=publish, published=published, item_ids=item_ids)
 
 
 def _matching_thread_failure_status(ctx: _FastFixContext, *, accepted_count: int) -> str:
@@ -738,28 +764,33 @@ def _submit_decline_thread(
         agent_id=agent_id,
         note=reply,
     )
-    requested = agent_protocol.issue_action_request(
+    # `_process_decline_matches` swallows a per-thread WorkflowError into `failed`
+    # and moves on, so without this rollback a rejected decline would leave the
+    # thread locked behind an orphan lease while the command reports partial
+    # success (#273 class).
+    with agent_protocol.claimed_fixer_lease(
         repo,
         pr_number,
-        role="fixer",
-        agent_id=agent_id,
         item_id=item_id,
+        agent_id=agent_id,
         now=current_time,
-    )
-    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
-    response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
-    response = {
-        "schema_version": PROTOCOL_VERSION,
-        "request_id": request["request_id"],
-        "lease_id": request["lease_id"],
-        "agent_id": agent_id,
-        "item_id": item_id,
-        "resolution": ctx.resolution,
-        "note": reply,
-        "reply_markdown": reply,
-    }
-    write_json_atomic(response_path, response)
-    submitted = agent_protocol.submit_action_response(repo, pr_number, response_path=response_path, now=current_time)
+    ) as requested:
+        request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+        response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
+        response = {
+            "schema_version": PROTOCOL_VERSION,
+            "request_id": request["request_id"],
+            "lease_id": request["lease_id"],
+            "agent_id": agent_id,
+            "item_id": item_id,
+            "resolution": ctx.resolution,
+            "note": reply,
+            "reply_markdown": reply,
+        }
+        write_json_atomic(response_path, response)
+        submitted = agent_protocol.submit_action_response(
+            repo, pr_number, response_path=response_path, now=current_time
+        )
     return {
         "item_id": item_id,
         "request_id": request["request_id"],
@@ -782,6 +813,8 @@ def _matches_fast_fix_thread(
     if item_path not in files:
         return False
     stale = is_stale_github_thread_item(item)
+    claimed_by_self = str(item.get("state") or "").lower() == "claimed" and self_leased
+    claim_candidate = is_claimable_github_thread(item) or claimed_by_self
     if stale_only:
         if not stale:
             return False
@@ -790,7 +823,7 @@ def _matches_fast_fix_thread(
         return is_claimable_github_thread(item)
     if stale and not include_stale:
         return False
-    return is_claimable_github_thread(item)
+    return claim_candidate
 
 
 def _has_homogeneous_thread_bodies(items: list[dict[str, Any]]) -> bool:

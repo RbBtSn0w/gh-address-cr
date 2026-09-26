@@ -102,6 +102,30 @@ class Issue78ActiveScopeTests(PythonScriptTestCase):
             "gh-address-cr final-gate octo/example 77",
         )
 
+    def test_implicit_scope_recovers_from_canonical_store_when_session_projection_is_missing(self):
+        self._write_session()
+        session_store.SessionManager("octo/example", "77").session_path.unlink()
+
+        args, error = maybe_prepend_implicit_scope(["--lean"])
+
+        self.assertIsNone(error)
+        self.assertEqual(args[:2], ["octo/example", "77"])
+        self.assertTrue(session_store.SessionManager("octo/example", "77").session_path.is_file())
+
+    def test_implicit_scope_ignores_stale_session_projection_status(self):
+        self._write_session()
+        manager = session_store.SessionManager("octo/example", "77")
+        projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+        projection["status"] = "PASSED"
+        manager.session_path.write_text(json.dumps(projection), encoding="utf-8")
+
+        args, error = maybe_prepend_implicit_scope(["--lean"])
+
+        self.assertIsNone(error)
+        self.assertEqual(args[:2], ["octo/example", "77"])
+        repaired = json.loads(manager.session_path.read_text(encoding="utf-8"))
+        self.assertEqual(repaired["status"], "ACTIVE")
+
     def test_zero_argument_high_level_command_prefers_current_branch_pr_over_cached_session(self):
         self._write_session("octo/cached", "12")
         current_pr = {

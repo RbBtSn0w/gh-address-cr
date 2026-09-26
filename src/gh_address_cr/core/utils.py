@@ -8,7 +8,8 @@ from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import json_ready as _io_json_ready
 from gh_address_cr.core.severity import first_scene_item_severity, normalize_severity
-from gh_address_cr.evidence.ledger import EvidenceLedger
+from gh_address_cr.core.side_effect_outbox import persist_side_effect_attempt
+from gh_address_cr.evidence.ledger import EvidenceLedger, SessionEvidenceLedger
 
 
 def get_field(obj: Any, field: str, default: Any = None) -> Any:
@@ -82,8 +83,14 @@ def get_session_items(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def get_session_ledger(session: dict[str, Any]) -> EvidenceLedger:
-    return EvidenceLedger(
-        session.get("ledger_path") or session_store.default_ledger_path(str(session["repo"]), str(session["pr_number"]))
+    repo = str(session["repo"])
+    pr_number = str(session["pr_number"])
+
+    return SessionEvidenceLedger(
+        session.get("ledger_path")
+        or session_store.default_ledger_path(repo, pr_number),
+        session,
+        flush=lambda records: persist_side_effect_attempt(session, records),
     )
 
 
@@ -177,3 +184,40 @@ def return_expired_items_to_open(session: dict[str, Any], expired: list[Any]) ->
             item["claimed_at"] = None
             item["lease_expires_at"] = None
             item.pop("active_lease_id", None)
+
+
+def publish_outcome_status(
+    prefix: str,
+    *,
+    publish: bool,
+    published: Any,
+    item_ids: list[str],
+) -> str:
+    """Derive ``<prefix>_ACCEPTED`` / ``<prefix>_COMPLETE`` from what publishing did.
+
+    Keyed on the publish *outcome*, not on the ``--publish`` flag. The flag-keyed form
+    this replaces is why ``commands/agent.py`` had to re-derive its own ``published``
+    boolean from ``published_count``: the status alone was not trustworthy.
+
+    ``_COMPLETE`` requires publishing to have covered **every** item this call owns, not
+    merely one of them. A caller that owns several -- the batch and files-selection
+    paths do -- would otherwise report COMPLETE, and tell the agent its evidence was
+    published, while some of its threads had no reply posted. Partial coverage reports
+    ``_ACCEPTED``, whose next action is to publish again, which is the correct recovery:
+    the items still publish-ready are picked up on the next run.
+
+    ``item_ids`` is required and is never empty for a call that owns work. Passing an
+    empty list means this call owns nothing, so there is nothing publishing could have
+    completed. There is deliberately no "any published item counts" mode: that leniency
+    is what made partial coverage read as success.
+    """
+    if not publish:
+        return f"{prefix}_ACCEPTED"
+    payload = published if isinstance(published, dict) else {}
+    posted = {str(entry) for entry in payload.get("published_items") or []}
+    owned = {str(item_id) for item_id in item_ids}
+    if not posted or not owned:
+        return f"{prefix}_ACCEPTED"
+    if not owned.issubset(posted):
+        return f"{prefix}_ACCEPTED"
+    return f"{prefix}_COMPLETE"

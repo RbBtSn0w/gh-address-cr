@@ -120,6 +120,16 @@ Use the same value for `review`, `address`, `agent next`, `agent submit`,
 view. If the configured directory is unavailable, the runtime returns
 `STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
+Each PR workspace uses `runtime.sqlite3` as its authoritative, versioned runtime
+store. On first open, an existing `session.json` and `evidence.jsonl` are imported
+once and preserved in an immutable `legacy-v1-recovery/` bundle. JSON and JSONL
+files in the live workspace are compatibility projections after migration;
+`session.json` carries its source revision and `evidence.jsonl.meta.json` carries
+the JSONL projection revision without changing the existing JSONL row format.
+editing or deleting them does not change runtime truth. Unsupported schemas,
+recovery-bundle divergence, stale revisions, and bounded writer contention fail
+explicitly instead of falling back to uncoordinated file writes.
+
 Completion means the latest final gate reports:
 
 - zero unresolved review threads
@@ -151,6 +161,18 @@ Gateway by default:
 ```text
 https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
+
+Development and PR-preview builds (a `.devN` development-release version) default to
+the development Gateway instead, so pre-merge traffic never reaches the
+production dataset:
+
+```text
+https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+```
+
+Published releases, including `beta` and `rc` pre-releases, report to the
+production Gateway, and a local version segment (`+...`) does not change that: only a
+`.devN` release is routed away. An unrecognized version string also falls back to production.
 
 For controlled environment canaries, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` may
 target the exact HTTPS development or staging Gateway origin. The client adds
@@ -240,8 +262,8 @@ bodies, local paths, standard streams, or hashes of those values.
 
 Endpoint precedence follows the standard OTLP variables:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then
-`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the documented
-application default. Requests to the approved gateway carry
+`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the release-channel
+default described above. Requests to the approved gateway carry
 `otel-gateway-profile: anonymous-client-v1`; custom Collector endpoints do not
 inherit that header.
 
@@ -326,7 +348,12 @@ not suppress later operations.
 `agent orchestrate` remains an optional advanced surface. The default supported
 path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
-PR handling.
+PR handling. Its versioned `worker-packet.v2` contains a
+`dispatch-receipt.v1` projection that references the canonical runtime
+`lease_id`, request binding, and committed revision. The orchestration session
+owns delivery only: lease conflict, expiry, status, and release decisions remain
+in the runtime store. The `--token` accepted by `agent orchestrate submit` is the
+opaque delivery token from that receipt, not a second lease.
 
 ## Architecture and Packaging
 

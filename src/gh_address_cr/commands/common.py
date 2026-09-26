@@ -88,7 +88,7 @@ def active_cached_sessions() -> list[tuple[str, str, Path]]:
             for pr_dir in sorted(path for path in owner_dir.iterdir() if path.is_dir() and path.name.startswith("pr-")):
                 pr_number = pr_dir.name.removeprefix("pr-")
                 session_path = pr_dir / "session.json"
-                if pr_number and cached_session_is_active(session_path):
+                if pr_number and cached_session_is_active(session_path, repo=repo, pr_number=pr_number):
                     sessions.append((repo, pr_number, session_path))
         return sessions
     except OSError:
@@ -97,7 +97,16 @@ def active_cached_sessions() -> list[tuple[str, str, Path]]:
         return []
 
 
-def cached_session_is_active(session_path: Path) -> bool:
+def cached_session_is_active(session_path: Path, *, repo: str | None = None, pr_number: str | None = None) -> bool:
+    database_path = session_path.parent / "runtime.sqlite3"
+    if database_path.is_file() and repo and pr_number:
+        from gh_address_cr.core.session import SessionError, SessionManager
+
+        try:
+            payload = SessionManager(repo, pr_number).load()
+        except (OSError, SessionError):
+            return False
+        return payload.get("status") == "ACTIVE"
     if not session_path.is_file():
         return False
     try:

@@ -90,6 +90,16 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
   - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
+Advanced orchestration emits `worker-packet.v2`. Its
+`dispatch_receipt` uses `dispatch-receipt.v1` and contains the canonical
+`lease_id`, request binding, committed runtime revision, and an opaque delivery
+token. The orchestration session is a volatile delivery projection: it does not
+grant, expire, release, or resolve conflicts for leases. Before start, status,
+step, resume, and submit actions, the runtime reconciles that projection from
+canonical lease state. Pass the receipt's delivery token to `agent orchestrate
+submit --token`; canonical submission still validates the runtime lease and
+request binding.
+
 ## Telemetry Coverage
 
 Coverage labels are `complete`, `partial`, `runtime-only`, and `unavailable`.
@@ -134,6 +144,12 @@ A `WorkflowError` summary carries `commands` (the runnable template menu) and a 
 ```
 
 `remediation.summary` is the next step for this `reason_code`; `remediation.command` is the template to run. Read these before opening `references/status-action-map.md` — that map is a curated subset and does not cover every code the runtime emits. Every `WorkflowError` unregistered `reason_code` still resolves to a generic remediation pointing back at `commands`, never an absent or empty field.
+
+An interrupted GitHub reply is recovered from the canonical outbox before a
+new side effect is attempted. If the runtime cannot prove whether the prior
+reply happened, publish returns `PUBLISH_RECONCILE_REQUIRED` with
+`waiting_on=reply_reconciliation`. This is a fail-closed machine state: reconcile
+the existing GitHub reply into evidence instead of blindly retrying publish.
 
 A handful of terminal failure paths — orchestration crashes and other cases that never construct a `WorkflowError` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
 

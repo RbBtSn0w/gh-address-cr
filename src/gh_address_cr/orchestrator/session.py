@@ -1,7 +1,7 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from gh_address_cr.core import session as core_session
@@ -13,14 +13,11 @@ STATE_PAUSED = "PAUSED"
 STATE_COMPLETED = "COMPLETED"
 STATE_FAILED = "FAILED"
 
-LEASE_TTL_MINUTES = 15
+ORCHESTRATION_SCHEMA_VERSION = 2
+DISPATCH_RECEIPT_SCHEMA_VERSION = "dispatch-receipt.v1"
 
 
-class LeaseConflictError(Exception):
-    pass
-
-
-class ExpiredLeaseError(Exception):
+class DispatchValidationError(Exception):
     pass
 
 
@@ -29,31 +26,29 @@ class OrchestrationSessionError(Exception):
 
 
 @dataclass
-class LeaseRecord:
+class DispatchReceipt:
     item_id: str
     assigned_role: str
     agent_id: str
-    lease_token: str
-    expires_at: datetime
-    context_key: str = ""
+    lease_id: str
+    request_id: str
+    runtime_revision: int
+    delivery_token: str
     retry_count: int = 0
     waiting_for_human: bool = False
     handoff_reason: Optional[str] = None
     artifact_path: Optional[str] = None
 
-    def is_expired(self, now: Optional[datetime] = None) -> bool:
-        if now is None:
-            now = datetime.now(timezone.utc)
-        return now >= self.expires_at
-
     def to_dict(self) -> dict:
         return {
+            "schema_version": DISPATCH_RECEIPT_SCHEMA_VERSION,
             "item_id": self.item_id,
             "assigned_role": self.assigned_role,
             "agent_id": self.agent_id,
-            "lease_token": self.lease_token,
-            "expires_at": self.expires_at.isoformat(),
-            "context_key": self.context_key,
+            "lease_id": self.lease_id,
+            "request_id": self.request_id,
+            "runtime_revision": self.runtime_revision,
+            "delivery_token": self.delivery_token,
             "retry_count": self.retry_count,
             "waiting_for_human": self.waiting_for_human,
             "handoff_reason": self.handoff_reason,
@@ -61,14 +56,17 @@ class LeaseRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "LeaseRecord":
+    def from_dict(cls, data: dict) -> "DispatchReceipt":
+        if data.get("schema_version") != DISPATCH_RECEIPT_SCHEMA_VERSION:
+            raise OrchestrationSessionError("Unsupported dispatch receipt schema version.")
         return cls(
             item_id=data["item_id"],
             assigned_role=data["assigned_role"],
             agent_id=data["agent_id"],
-            lease_token=data["lease_token"],
-            expires_at=datetime.fromisoformat(data["expires_at"]),
-            context_key=data.get("context_key", ""),
+            lease_id=data["lease_id"],
+            request_id=data["request_id"],
+            runtime_revision=int(data["runtime_revision"]),
+            delivery_token=data["delivery_token"],
             retry_count=data.get("retry_count", 0),
             waiting_for_human=data.get("waiting_for_human", False),
             handoff_reason=data.get("handoff_reason"),
@@ -86,7 +84,7 @@ class OrchestrationSession:
     completed: bool = False
     completed_at: Optional[str] = None
     completed_reason: Optional[str] = None
-    active_leases: Dict[str, LeaseRecord] = field(default_factory=dict)
+    active_dispatches: Dict[str, DispatchReceipt] = field(default_factory=dict)
     queued_items: List[str] = field(default_factory=list)
     retry_counts: Dict[str, int] = field(default_factory=dict)
     audit_warnings: List[str] = field(default_factory=list)
@@ -123,67 +121,66 @@ class OrchestrationSession:
             self._append_audit_warning(event_type, exc)
             return False
 
-    def grant_lease(self, item_id: str, role: str, agent_id: str = "agent", context_key: str = "") -> LeaseRecord:
-        now = self._utc_now()
-
-        # Check for context_key overlap across all active leases
-        if context_key:
-            for existing in self.active_leases.values():
-                if existing.context_key == context_key and not existing.is_expired(now):
-                    raise LeaseConflictError(
-                        f"Cannot grant lease for {item_id}: overlapping context key '{context_key}' locked by {existing.item_id}."
-                    )
-
-        if item_id in self.active_leases:
-            existing = self.active_leases[item_id]
-            if not existing.is_expired(now):
-                raise LeaseConflictError(f"Item {item_id} already has an active lease.")
-            self.release_lease(item_id, existing.lease_token, force=True)
-
-        token = f"lease-{uuid.uuid4().hex}"
-        expires = now + timedelta(minutes=LEASE_TTL_MINUTES)
-
-        lease = LeaseRecord(
+    def project_dispatch(
+        self,
+        *,
+        item_id: str,
+        role: str,
+        agent_id: str,
+        lease_id: str,
+        request_id: str,
+        runtime_revision: int,
+    ) -> DispatchReceipt:
+        receipt = DispatchReceipt(
             item_id=item_id,
             assigned_role=role,
             agent_id=agent_id,
-            lease_token=token,
-            expires_at=expires,
-            context_key=context_key,
+            lease_id=lease_id,
+            request_id=request_id,
+            runtime_revision=runtime_revision,
+            delivery_token=f"dispatch-{uuid.uuid4().hex}",
         )
-        self.active_leases[item_id] = lease
-        self.log_audit_event("LEASE_GRANTED", {"item_id": item_id, "role": role, "agent_id": agent_id, "token": token})
-        return lease
+        self.active_dispatches[item_id] = receipt
+        self.log_audit_event("DISPATCH_PROJECTED", {"item_id": item_id, "role": role})
+        return receipt
 
-    def release_lease(self, item_id: str, token: str, force: bool = False) -> None:
-        if item_id not in self.active_leases:
+    def validate_dispatch(self, item_id: str, delivery_token: str, runtime_state: dict) -> DispatchReceipt:
+        receipt = self.active_dispatches.get(item_id)
+        if receipt is None or receipt.delivery_token != delivery_token:
+            raise DispatchValidationError("Dispatch token does not match the active projection.")
+        lease = runtime_state.get("leases", {}).get(receipt.lease_id)
+        if not isinstance(lease, dict):
+            raise DispatchValidationError("Canonical lease no longer exists.")
+        if str(lease.get("status") or "").lower() not in {"active", "submitted"}:
+            raise DispatchValidationError("Canonical lease is no longer active.")
+        if str(lease.get("item_id") or "") != item_id:
+            raise DispatchValidationError("Canonical lease item binding changed.")
+        if str(lease.get("request_id") or "") != receipt.request_id:
+            raise DispatchValidationError("Canonical request binding changed.")
+        return receipt
+
+    def remove_dispatch(self, item_id: str, delivery_token: str) -> None:
+        receipt = self.active_dispatches.get(item_id)
+        if receipt is None:
             return
+        if receipt.delivery_token != delivery_token:
+            raise DispatchValidationError("Dispatch token does not match the active projection.")
+        del self.active_dispatches[item_id]
+        self.log_audit_event("DISPATCH_REMOVED", {"item_id": item_id})
 
-        existing = self.active_leases[item_id]
-        if existing.lease_token != token and not force:
-            raise LeaseConflictError("Invalid lease token for release.")
-
-        del self.active_leases[item_id]
-        self.log_audit_event("LEASE_RELEASED", {"item_id": item_id, "token": token, "forced": force})
-
-    def validate_lease_for_submission(self, item_id: str, token: str) -> None:
-        if item_id not in self.active_leases:
-            raise ExpiredLeaseError(f"No active lease found for {item_id}.")
-
-        lease = self.active_leases[item_id]
-        if lease.lease_token != token:
-            raise LeaseConflictError("Token mismatch during submission.")
-
-        if lease.is_expired(self._utc_now()):
-            self.release_lease(item_id, lease.lease_token, force=True)
-            raise ExpiredLeaseError("Lease expired before submission.")
-
-    def handle_verifier_reject(self, item_id: str, token: str) -> None:
-        self.release_lease(item_id, token, force=True)
-        self.log_audit_event("VERIFIER_REJECT", {"item_id": item_id})
+    def reconcile_dispatches(self, runtime_state: dict, *, runtime_revision: int) -> dict[str, int]:
+        removed = 0
+        for item_id, receipt in list(self.active_dispatches.items()):
+            try:
+                self.validate_dispatch(item_id, receipt.delivery_token, runtime_state)
+            except DispatchValidationError:
+                del self.active_dispatches[item_id]
+                removed += 1
+        return {"retained": len(self.active_dispatches), "removed": removed, "runtime_revision": runtime_revision}
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": ORCHESTRATION_SCHEMA_VERSION,
             "run_id": self.run_id,
             "repo": self.repo,
             "pr_number": self.pr_number,
@@ -192,7 +189,7 @@ class OrchestrationSession:
             "completed": self.completed,
             "completed_at": self.completed_at,
             "completed_reason": self.completed_reason,
-            "active_leases": {k: v.to_dict() for k, v in self.active_leases.items()},
+            "active_dispatches": {k: v.to_dict() for k, v in self.active_dispatches.items()},
             "queued_items": self.queued_items,
             "retry_counts": self.retry_counts,
             "audit_warnings": self.audit_warnings,
@@ -200,6 +197,9 @@ class OrchestrationSession:
 
     @classmethod
     def from_dict(cls, data: dict) -> "OrchestrationSession":
+        schema_version = int(data.get("schema_version") or 1)
+        if schema_version not in {1, ORCHESTRATION_SCHEMA_VERSION}:
+            raise OrchestrationSessionError("Unsupported orchestration schema version.")
         session = cls(
             run_id=data.get("run_id", f"run-{uuid.uuid4().hex}"),
             repo=data["repo"],
@@ -213,7 +213,14 @@ class OrchestrationSession:
             retry_counts=data.get("retry_counts", {}),
             audit_warnings=data.get("audit_warnings", []),
         )
-        session.active_leases = {k: LeaseRecord.from_dict(v) for k, v in data.get("active_leases", {}).items()}
+        if schema_version == ORCHESTRATION_SCHEMA_VERSION:
+            session.active_dispatches = {
+                k: DispatchReceipt.from_dict(v) for k, v in data.get("active_dispatches", {}).items()
+            }
+        elif data.get("active_leases"):
+            session.audit_warnings.append(
+                "ORCHESTRATION_V1_RECONCILE_REQUIRED: legacy shadow leases were discarded; runtime reconciliation is required"
+            )
         return session
 
 
