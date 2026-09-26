@@ -291,7 +291,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "injected import crash"):
                     store.open_or_migrate(session_path=session_path, ledger_path=ledger_path)
 
-            self.assertFalse(store.database_path.exists())
+            self.assertFalse(store.is_initialized())
             self.assertTrue((workspace / "legacy-v1-recovery" / "manifest.json").is_file())
             self.assertEqual(list(workspace.glob("runtime.*.sqlite3.tmp")), [])
 

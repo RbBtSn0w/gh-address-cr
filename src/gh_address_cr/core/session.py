@@ -134,16 +134,17 @@ class SessionManager:
 def load_session(repo: str, pr_number: str) -> dict[str, Any]:
     path = session_file(repo, pr_number)
     store = RuntimeStore(workspace_dir(repo, pr_number))
-    if not store.database_path.exists() and not path.exists():
-        raise SessionError("SESSION_NOT_FOUND", f"No session exists for {repo} PR {pr_number}. Run review first.")
-    if not store.database_path.exists():
-        try:
-            read_json_object(path)
-        except JsonIOError as exc:
-            reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
-            raise SessionError(reason_code, str(exc)) from exc
     try:
-        if not store.database_path.exists():
+        if not store.is_initialized():
+            if not path.exists():
+                raise SessionError(
+                    "SESSION_NOT_FOUND", f"No session exists for {repo} PR {pr_number}. Run review first."
+                )
+            try:
+                read_json_object(path)
+            except JsonIOError as exc:
+                reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
+                raise SessionError(reason_code, str(exc)) from exc
             store.open_or_migrate(
                 session_path=path,
                 ledger_path=default_ledger_path(repo, pr_number),
@@ -176,7 +177,7 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     store = RuntimeStore(workspace_dir(repo, pr_number))
     evidence = take_pending_evidence(payload)
     try:
-        if store.database_path.exists():
+        if store.is_initialized():
             persistence = payload.get("persistence")
             if not isinstance(persistence, dict) or not isinstance(persistence.get("revision"), int):
                 raise SessionError(
@@ -189,8 +190,13 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
                 operation="session_update",
                 evidence=evidence,
             )
+        elif path.exists():
+            raise SessionError(
+                "PERSISTENCE_INVALID",
+                "A legacy session exists but has not been migrated. Load the session to import it before saving.",
+            )
         else:
-            snapshot = store.bootstrap(payload, evidence=evidence)
+            snapshot = store.bootstrap(payload, evidence=evidence, require_new=True)
         payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
         if evidence:
             store.materialize_compatibility_artifacts(
@@ -214,9 +220,9 @@ def transact_session(
     outbox: list[dict[str, Any]] | None = None,
 ) -> TransactionResult:
     store = RuntimeStore(workspace_dir(repo, pr_number))
-    if not store.database_path.exists():
-        load_session(repo, pr_number)
     try:
+        if not store.is_initialized():
+            load_session(repo, pr_number)
         result = store.transact(
             mutation,
             expected_revision=expected_revision,

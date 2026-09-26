@@ -7,21 +7,24 @@ import shutil
 import sqlite3
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
 from gh_address_cr.core.github_thread_state import returned_claimable_state
-from gh_address_cr.core.io import json_ready, write_json_atomic
+from gh_address_cr.core.io import fsync_directory, fsync_file, json_ready, write_json_atomic, write_json_durable
 from gh_address_cr.evidence.ledger import EvidenceRecord, payload_hash
 
 SCHEMA_VERSION = 1
+RECOVERY_BUNDLE_NAME = "legacy-v1-recovery"
 _LEASE_DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _SAFE_OPERATIONS = {
     "artifact_recovery",
     "artifact_write",
     "bootstrap",
+    "bundle_quarantine",
     "legacy_import",
     "lease_claim",
     "lease_release",
@@ -34,6 +37,111 @@ _SAFE_OPERATIONS = {
     "status_update",
 }
 T = TypeVar("T")
+
+_SCHEMA_SQL = """
+CREATE TABLE store_metadata (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    schema_version INTEGER NOT NULL,
+    store_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    legacy_import_completed_at TEXT,
+    import_format_version TEXT,
+    latest_revision INTEGER NOT NULL
+);
+CREATE TABLE sessions (
+    session_id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    pr_number TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE items (
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    item_kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    classification TEXT,
+    payload_json TEXT NOT NULL,
+    first_observed_revision INTEGER NOT NULL,
+    last_observed_revision INTEGER NOT NULL,
+    PRIMARY KEY (session_id, item_id)
+);
+CREATE TABLE leases (
+    lease_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL,
+    request_id TEXT,
+    request_hash TEXT,
+    request_path TEXT,
+    resume_token TEXT,
+    created_at TEXT,
+    expires_at TEXT,
+    submitted_at TEXT,
+    completed_at TEXT,
+    transition_revision INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE TABLE lease_conflict_keys (
+    lease_id TEXT NOT NULL REFERENCES leases(lease_id) ON DELETE CASCADE,
+    conflict_key TEXT NOT NULL,
+    PRIMARY KEY (lease_id, conflict_key)
+);
+CREATE TABLE evidence_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id TEXT NOT NULL UNIQUE,
+    session_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    lease_id TEXT,
+    actor_role TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    transaction_id TEXT,
+    committed_revision INTEGER NOT NULL,
+    record_json TEXT NOT NULL
+);
+CREATE TABLE outbox_commands (
+    command_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    effect_type TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    planned_revision INTEGER NOT NULL,
+    operation_category TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    retry_boundary TEXT,
+    error_type TEXT,
+    external_result_reference TEXT,
+    UNIQUE (session_id, effect_type, idempotency_key)
+);
+CREATE TABLE artifact_materializations (
+    artifact_kind TEXT PRIMARY KEY,
+    source_revision INTEGER NOT NULL,
+    format_version INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    content_hash TEXT,
+    last_attempt_at TEXT,
+    error_type TEXT
+);
+CREATE TABLE migration_history (
+    migration_id TEXT PRIMARY KEY,
+    from_version INTEGER NOT NULL,
+    to_version INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    committed_at TEXT,
+    outcome TEXT NOT NULL,
+    legacy_session_hash TEXT,
+    legacy_ledger_hash TEXT
+);
+"""
 
 
 class RuntimeStoreError(RuntimeError):
@@ -81,87 +189,144 @@ class RuntimeStore:
         self.database_path = self.workspace / "runtime.sqlite3"
         self.busy_timeout_ms = max(1, int(busy_timeout_ms))
 
-    def bootstrap(self, payload: dict[str, Any], *, evidence: list[dict[str, Any]] | None = None) -> StoreSnapshot:
-        return self._bootstrap_new(payload, evidence=evidence or [])
+    def is_initialized(self) -> bool:
+        """True once a committed store metadata row exists.
 
-    def _bootstrap_new(
-        self,
-        payload: dict[str, Any],
-        *,
-        evidence: list[dict[str, Any]],
-        legacy_hashes: tuple[str, str | None] | None = None,
-    ) -> StoreSnapshot:
-        self.workspace.mkdir(parents=True, exist_ok=True)
-        if self.database_path.exists():
-            return self.load()
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix="runtime.", suffix=".sqlite3.tmp", dir=self.workspace
-        )
-        os.close(descriptor)
-        temporary_path = Path(temporary_name)
-        connection = self._connect(temporary_path)
+        File existence is not initialization: the database file appears as soon
+        as an initializer opens it, and a crashed initializer leaves it empty.
+        """
+        if not self.database_path.is_file():
+            return False
+        connection = self._connect()
         try:
-            connection.execute("BEGIN IMMEDIATE")
-            self._create_schema(connection)
-            imported = legacy_hashes is not None
-            self._insert_metadata(connection, payload, revision=1, imported=imported)
-            self._write_session(connection, payload, revision=1)
-            self._write_evidence(connection, evidence, revision=1)
-            if legacy_hashes is not None:
-                now = _utc_now()
-                connection.execute(
-                    "INSERT INTO migration_history "
-                    "(migration_id, from_version, to_version, started_at, committed_at, outcome, "
-                    "legacy_session_hash, legacy_ledger_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        "legacy-v1-to-sqlite-v1",
-                        0,
-                        SCHEMA_VERSION,
-                        now,
-                        now,
-                        "committed",
-                        legacy_hashes[0],
-                        legacy_hashes[1],
-                    ),
-                )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            temporary_path.unlink(missing_ok=True)
+            return self._is_initialized(connection)
+        except sqlite3.OperationalError as exc:
+            if _is_busy(exc):
+                raise PersistenceBusyError() from exc
             raise
         finally:
             connection.close()
-        try:
-            if self.database_path.exists():
-                return self.load()
-            os.replace(temporary_path, self.database_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        return self.load()
+
+    def bootstrap(
+        self,
+        payload: dict[str, Any],
+        *,
+        evidence: list[dict[str, Any]] | None = None,
+        require_new: bool = False,
+    ) -> StoreSnapshot:
+        """Create the store from ``payload``, or load it if another writer already did.
+
+        With ``require_new`` the caller's payload must become revision 1; losing
+        the initialization race raises ``StaleRevisionError`` instead of
+        silently discarding that payload.
+        """
+        snapshot, created = self._initialize(payload=payload, evidence=evidence or [])
+        if require_new and not created:
+            raise StaleRevisionError(expected=0, actual=snapshot.revision)
+        return snapshot
 
     def open_or_migrate(self, *, session_path: Path, ledger_path: Path) -> StoreSnapshot:
-        if self.database_path.exists():
+        if self.is_initialized():
             return self.load()
-        if not session_path.is_file():
-            raise PersistenceInvalidError("PERSISTENCE_INVALID", "No runtime store or legacy session exists.")
-        payload = self._read_legacy_session(session_path)
-        evidence = self._read_legacy_evidence(ledger_path)
-        self._create_recovery_bundle(session_path, ledger_path)
-        snapshot = self._bootstrap_new(
-            payload,
-            evidence=evidence,
-            legacy_hashes=(
-                _sha256(session_path),
-                _sha256(ledger_path) if ledger_path.is_file() else None,
-            ),
-        )
-        _emit_persistence_event(
-            "persistence.migration",
-            operation="legacy_import",
-            outcome="committed",
-            contention="none",
-        )
+        snapshot, _created = self._initialize(legacy=(session_path, ledger_path))
         return snapshot
+
+    def _initialize(
+        self,
+        *,
+        payload: dict[str, Any] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        legacy: tuple[Path, Path] | None = None,
+    ) -> tuple[StoreSnapshot, bool]:
+        """Initialize the store in place under one exclusive SQLite transaction.
+
+        Every initializer queues on the target database's own lock, so exactly
+        one creates the schema and every other one loads its committed result. A
+        crash rolls the transaction back and leaves an uninitialized database
+        that the next initializer completes. Legacy import builds the recovery
+        bundle while holding this lock; that bundle is the only file IO allowed
+        inside a runtime write transaction.
+        """
+        started_at = time.monotonic()
+        connection = self._connect()
+        created = False
+        quarantined = False
+        try:
+            try:
+                connection.execute("BEGIN EXCLUSIVE")
+            except sqlite3.OperationalError as exc:
+                if _is_busy(exc):
+                    raise PersistenceBusyError() from exc
+                raise
+            if not self._is_initialized(connection):
+                legacy_hashes: tuple[str, str | None] | None = None
+                if legacy is not None:
+                    session_path, ledger_path = legacy
+                    if not session_path.is_file():
+                        raise PersistenceInvalidError(
+                            "PERSISTENCE_INVALID", "No runtime store or legacy session exists."
+                        )
+                    payload = self._read_legacy_session(session_path)
+                    evidence = self._read_legacy_evidence(ledger_path)
+                    quarantined = self._create_recovery_bundle(session_path, ledger_path)
+                    legacy_hashes = (
+                        _sha256(session_path),
+                        _sha256(ledger_path) if ledger_path.is_file() else None,
+                    )
+                if payload is None:
+                    raise PersistenceInvalidError("PERSISTENCE_INVALID", "Initialization requires a session payload.")
+                self._create_schema(connection)
+                self._insert_metadata(connection, payload, revision=1, imported=legacy_hashes is not None)
+                self._write_session(connection, payload, revision=1)
+                self._write_evidence(connection, evidence or [], revision=1)
+                if legacy_hashes is not None:
+                    self._insert_legacy_migration(connection, legacy_hashes)
+                connection.commit()
+                created = True
+            else:
+                connection.rollback()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if quarantined:
+            _emit_persistence_event(
+                "persistence.migration",
+                operation="bundle_quarantine",
+                outcome="bundle_quarantined",
+                contention="none",
+            )
+        if created and legacy is not None:
+            _emit_persistence_event(
+                "persistence.migration",
+                operation="legacy_import",
+                outcome="committed",
+                contention=_contention_bucket(started_at),
+            )
+        return self.load(), created
+
+    @staticmethod
+    def _is_initialized(connection: sqlite3.Connection) -> bool:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'store_metadata'"
+        ).fetchone()
+        if table is None:
+            return False
+        if connection.execute("SELECT 1 FROM store_metadata WHERE singleton = 1").fetchone() is None:
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime store metadata is incomplete.")
+        return True
+
+    @staticmethod
+    def _insert_legacy_migration(connection: sqlite3.Connection, legacy_hashes: tuple[str, str | None]) -> None:
+        now = _utc_now()
+        connection.execute(
+            "INSERT INTO migration_history "
+            "(migration_id, from_version, to_version, started_at, committed_at, outcome, "
+            "legacy_session_hash, legacy_ledger_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("legacy-v1-to-sqlite-v1", 0, SCHEMA_VERSION, now, now, "committed", *legacy_hashes),
+        )
 
     def load(self) -> StoreSnapshot:
         if not self.database_path.is_file():
@@ -650,112 +815,12 @@ class RuntimeStore:
 
     @staticmethod
     def _create_schema(connection: sqlite3.Connection) -> None:
-        connection.executescript(
-            """
-            CREATE TABLE store_metadata (
-                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                schema_version INTEGER NOT NULL,
-                store_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                legacy_import_completed_at TEXT,
-                import_format_version TEXT,
-                latest_revision INTEGER NOT NULL
-            );
-            CREATE TABLE sessions (
-                session_id TEXT PRIMARY KEY,
-                repo TEXT NOT NULL,
-                pr_number TEXT NOT NULL,
-                status TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                revision INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE items (
-                session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-                item_id TEXT NOT NULL,
-                item_kind TEXT NOT NULL,
-                state TEXT NOT NULL,
-                classification TEXT,
-                payload_json TEXT NOT NULL,
-                first_observed_revision INTEGER NOT NULL,
-                last_observed_revision INTEGER NOT NULL,
-                PRIMARY KEY (session_id, item_id)
-            );
-            CREATE TABLE leases (
-                lease_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-                item_id TEXT NOT NULL,
-                agent_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                status TEXT NOT NULL,
-                request_id TEXT,
-                request_hash TEXT,
-                request_path TEXT,
-                resume_token TEXT,
-                created_at TEXT,
-                expires_at TEXT,
-                submitted_at TEXT,
-                completed_at TEXT,
-                transition_revision INTEGER NOT NULL,
-                payload_json TEXT NOT NULL
-            );
-            CREATE TABLE lease_conflict_keys (
-                lease_id TEXT NOT NULL REFERENCES leases(lease_id) ON DELETE CASCADE,
-                conflict_key TEXT NOT NULL,
-                PRIMARY KEY (lease_id, conflict_key)
-            );
-            CREATE TABLE evidence_events (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                record_id TEXT NOT NULL UNIQUE,
-                session_id TEXT NOT NULL,
-                item_id TEXT NOT NULL,
-                lease_id TEXT,
-                actor_role TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                payload_hash TEXT NOT NULL,
-                transaction_id TEXT,
-                committed_revision INTEGER NOT NULL,
-                record_json TEXT NOT NULL
-            );
-            CREATE TABLE outbox_commands (
-                command_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                effect_type TEXT NOT NULL,
-                idempotency_key TEXT NOT NULL,
-                planned_revision INTEGER NOT NULL,
-                operation_category TEXT NOT NULL,
-                status TEXT NOT NULL,
-                attempt_count INTEGER NOT NULL DEFAULT 0,
-                retry_boundary TEXT,
-                error_type TEXT,
-                external_result_reference TEXT,
-                UNIQUE (session_id, effect_type, idempotency_key)
-            );
-            CREATE TABLE artifact_materializations (
-                artifact_kind TEXT PRIMARY KEY,
-                source_revision INTEGER NOT NULL,
-                format_version INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                content_hash TEXT,
-                last_attempt_at TEXT,
-                error_type TEXT
-            );
-            CREATE TABLE migration_history (
-                migration_id TEXT PRIMARY KEY,
-                from_version INTEGER NOT NULL,
-                to_version INTEGER NOT NULL,
-                started_at TEXT NOT NULL,
-                committed_at TEXT,
-                outcome TEXT NOT NULL,
-                legacy_session_hash TEXT,
-                legacy_ledger_hash TEXT
-            );
-            """
-        )
+        # One statement at a time: ``executescript`` commits any open transaction
+        # first, which would publish a half-initialized schema outside the
+        # exclusive initialization transaction.
+        for statement in _SCHEMA_SQL.split(";"):
+            if statement.strip():
+                connection.execute(statement)
 
     @staticmethod
     def _insert_metadata(
@@ -1008,30 +1073,57 @@ class RuntimeStore:
             raise PersistenceInvalidError("PERSISTENCE_INVALID", f"Legacy evidence ledger is malformed: {exc}") from exc
         return records
 
-    def _create_recovery_bundle(self, session_path: Path, ledger_path: Path) -> None:
-        bundle = self.workspace / "legacy-v1-recovery"
+    def _create_recovery_bundle(self, session_path: Path, ledger_path: Path) -> bool:
+        """Publish the verified legacy-v1 bundle; return True if an incomplete one was quarantined.
+
+        Callers hold the exclusive initialization lock, so no other process is
+        writing bundle state. The bundle is built in a staging directory and
+        published by one atomic rename, and ``manifest.json`` is written last,
+        so a published bundle without a manifest can only come from a pre-035
+        build that crashed mid-copy. That bundle is renamed aside, never
+        trusted and never deleted. A complete bundle whose hashes diverge is
+        tampering and still fails fast.
+        """
+        bundle = self.workspace / RECOVERY_BUNDLE_NAME
+        for staging_leftover in self.workspace.glob(f"{RECOVERY_BUNDLE_NAME}.tmp-*"):
+            shutil.rmtree(staging_leftover)
+        quarantined = False
         if bundle.exists():
-            self._verify_recovery_bundle()
-            manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
-            expected = {"session.json": _sha256(session_path)}
-            if ledger_path.is_file():
-                expected["evidence.jsonl"] = _sha256(ledger_path)
-            if manifest.get("files") != expected:
-                raise PersistenceInvalidError(
-                    "PERSISTENCE_INVALID",
-                    "Legacy inputs diverge from the verified recovery bundle.",
-                )
-            return
-        bundle.mkdir(parents=False)
-        shutil.copy2(session_path, bundle / "session.json")
-        files = {"session.json": _sha256(bundle / "session.json")}
+            if (bundle / "manifest.json").is_file():
+                self._verify_recovery_bundle()
+                manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+                if manifest.get("files") != self._legacy_input_hashes(session_path, ledger_path):
+                    raise PersistenceInvalidError(
+                        "PERSISTENCE_INVALID",
+                        "Legacy inputs diverge from the verified recovery bundle.",
+                    )
+                return False
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            bundle.rename(self.workspace / f"{RECOVERY_BUNDLE_NAME}.incomplete-{stamp}-{uuid.uuid4().hex[:8]}")
+            quarantined = True
+        staging = self.workspace / f"{RECOVERY_BUNDLE_NAME}.tmp-{uuid.uuid4().hex}"
+        staging.mkdir()
+        files: dict[str, str] = {}
+        for name, source in (("session.json", session_path), ("evidence.jsonl", ledger_path)):
+            if name == "evidence.jsonl" and not source.is_file():
+                continue
+            shutil.copy2(source, staging / name)
+            fsync_file(staging / name)
+            files[name] = _sha256(staging / name)
+        write_json_durable(staging / "manifest.json", {"format_version": "legacy-v1", "files": files})
+        os.rename(staging, bundle)
+        fsync_directory(self.workspace)
+        return quarantined
+
+    @staticmethod
+    def _legacy_input_hashes(session_path: Path, ledger_path: Path) -> dict[str, str]:
+        expected = {"session.json": _sha256(session_path)}
         if ledger_path.is_file():
-            shutil.copy2(ledger_path, bundle / "evidence.jsonl")
-            files["evidence.jsonl"] = _sha256(bundle / "evidence.jsonl")
-        write_json_atomic(bundle / "manifest.json", {"format_version": "legacy-v1", "files": files})
+            expected["evidence.jsonl"] = _sha256(ledger_path)
+        return expected
 
     def _verify_recovery_bundle(self) -> None:
-        bundle = self.workspace / "legacy-v1-recovery"
+        bundle = self.workspace / RECOVERY_BUNDLE_NAME
         if not bundle.exists():
             return
         manifest_path = bundle / "manifest.json"

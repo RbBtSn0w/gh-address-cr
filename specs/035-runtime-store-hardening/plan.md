@@ -38,13 +38,19 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
 
 ## F1 — Atomic initialization and migration (035a)
 
-- Replace `_bootstrap_new` temp-db + `os.replace` with `RuntimeStore.initialize(...)`:
-  connect to `runtime.sqlite3`, `BEGIN EXCLUSIVE`; if `store_metadata` exists,
-  roll back and `load()`; otherwise create schema, write rows and
-  `migration_history`, commit. A crash rolls back via the journal.
-- Add `RuntimeStore.is_initialized()`; replace every `database_path.exists()`
-  decision in `src/gh_address_cr/core/session.py`. `_validate_schema` reports an
-  empty database as uninitialized rather than `PERSISTENCE_INVALID`.
+- Replace `_bootstrap_new` temp-db + `os.replace` with a private
+  `RuntimeStore._initialize(...)` behind the existing `bootstrap` and
+  `open_or_migrate` entry points: connect to `runtime.sqlite3`,
+  `BEGIN EXCLUSIVE`; if `store_metadata` exists, roll back and `load()`;
+  otherwise create schema, write rows and `migration_history`, commit. A crash
+  rolls back via the journal. The schema is created one statement at a time
+  because `executescript` commits any open transaction first.
+- Add `RuntimeStore.is_initialized()` (committed metadata row, not file
+  existence); replace every `database_path.exists()` decision in
+  `src/gh_address_cr/core/session.py`. A metadata table without its row fails
+  fast with `PERSISTENCE_INVALID`; `load()` on an uninitialized store still fails fast.
+- `bootstrap(..., require_new=True)` raises `StaleRevisionError` when another
+  writer initialized first, so `save_session` never silently drops its payload.
 - `save_session` refuses to bootstrap over a legacy `session.json` (FR-003).
 - Lock timeout surfaces as `PersistenceBusyError`; no bare `FileExistsError`.
 - Migration is the only documented case of file IO inside a write transaction.

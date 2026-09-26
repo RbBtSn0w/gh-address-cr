@@ -21,7 +21,8 @@ commit and pass after the fix; paste both outputs in the PR description.
   `test_crash_at_every_bundle_checkpoint_recovers` (R1),
   `test_tampered_complete_bundle_still_fails_fast`,
   `test_incomplete_bundle_quarantine_emits_bounded_event`.
-- [ ] A005 Implement `RuntimeStore.initialize` / `is_initialized`; remove temp-db publication.
+- [ ] A005 Implement in-place `_initialize` behind `bootstrap` / `open_or_migrate`, plus
+  `is_initialized`; remove temp-db publication.
 - [ ] A006 Route `core/session.py` load/save/transact through `is_initialized`; enforce FR-003.
 - [ ] A007 Implement atomic bundle build, `write_json_durable`, and deterministic quarantine.
 - [ ] A008 Run completion gates, benchmark M profile, and compare with A003.
