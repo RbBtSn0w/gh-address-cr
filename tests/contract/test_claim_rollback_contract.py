@@ -417,11 +417,7 @@ class BatchFastFixRollbackTest(unittest.TestCase):
 
 
 class OrchestratorStepRollbackTest(unittest.TestCase):
-    """spec 033 FR-001 for `agent orchestrate step` (orchestrated).
-
-    The step issues the core lease, then grants the orchestrator's shadow lease. When two
-    items share a file the shadow grant is refused; the core lease must not be left behind.
-    """
+    """Phase C: orchestrated dispatch delegates all conflict policy to the runtime."""
 
     @staticmethod
     def _run(handler, *args):
@@ -435,7 +431,7 @@ class OrchestratorStepRollbackTest(unittest.TestCase):
         lines = [line for line in out.getvalue().splitlines() if line.startswith("{")]
         return code, json.loads(lines[-1]) if lines else {}
 
-    def test_a_refused_shadow_lease_does_not_strand_the_core_lease(self):
+    def test_same_file_runtime_claims_do_not_face_a_second_shadow_conflict(self):
         from gh_address_cr.core import agent_protocol
         from gh_address_cr.orchestrator import harness
         from gh_address_cr.orchestrator.session import load_orchestration_session
@@ -452,15 +448,11 @@ class OrchestratorStepRollbackTest(unittest.TestCase):
 
                 code, payload = self._run(harness.handle_step, "owner/repo", "622")
 
-                self.assertEqual((code, payload.get("reason_code")), (2, "LEASE_CONFLICT"))
+                self.assertEqual((code, payload.get("status")), (0, "DISPATCHED"))
                 leases = _leases_by_item(manager)
-                shadow = set(load_orchestration_session("owner/repo", "622").active_leases)
+                dispatches = set(load_orchestration_session("owner/repo", "622").active_dispatches)
                 active = {item for item, lease in leases.items() if lease["status"] in {"active", "submitted"}}
-                # Every core lease still active must be one the orchestrator shadows.
-                self.assertEqual(active - shadow, set())
-                refused = next(item for item in leases if item not in shadow)
-                self.assertEqual(leases[refused]["status"], "released")
-                self.assertEqual(manager.load()["items"][refused]["state"], "open")
+                self.assertEqual(active, dispatches)
 
 
 if __name__ == "__main__":

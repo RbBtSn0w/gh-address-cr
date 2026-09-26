@@ -223,6 +223,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("action_request.v1", payload["input_formats"])
         self.assertIn("batch_action_response.v1", payload["output_formats"])
         self.assertIn("work_item_boundary.v1", payload["output_formats"])
+        self.assertIn("worker_packet.v2", payload["output_formats"])
+        self.assertIn("dispatch_receipt.v1", payload["output_formats"])
 
     def test_agent_resolve_help_documents_batch_contract(self):
         result = self.run_runtime_module("agent", "resolve", "--help")

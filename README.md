@@ -348,7 +348,12 @@ not suppress later operations.
 `agent orchestrate` remains an optional advanced surface. The default supported
 path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
-PR handling.
+PR handling. Its versioned `worker-packet.v2` contains a
+`dispatch-receipt.v1` projection that references the canonical runtime
+`lease_id`, request binding, and committed revision. The orchestration session
+owns delivery only: lease conflict, expiry, status, and release decisions remain
+in the runtime store. The `--token` accepted by `agent orchestrate submit` is the
+opaque delivery token from that receipt, not a second lease.
 
 ## Architecture and Packaging
 

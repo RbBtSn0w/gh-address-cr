@@ -2,8 +2,9 @@
 
 **Feature Branch**: `feat/034-transactional-lease-runtime`
 **Created**: 2026-09-24
-**Status**: Accepted — Constitution 2.2.0 landed; Phase A implementation and
-local Completion Standard are complete on `feat/034a-atomic-runtime-store`
+**Status**: Accepted — Constitution 2.2.0 and Phases A/B landed; Phase C
+implementation and local Completion Standard are complete on
+`feat/034c-orchestrator-lease-convergence`, with remote PR gates pending
 **Input**: The explicit follow-up boundary in Spec 033 / PR #285: cross-process
 atomic claim, `session.json` / evidence-ledger crash consistency, and core/shadow
 lease convergence.
