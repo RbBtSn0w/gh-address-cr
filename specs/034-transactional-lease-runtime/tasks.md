@@ -84,7 +84,7 @@ shim or dual-primary mode to proceed around it.
 - [x] C006 Add bounded privacy-safe orchestrator reconciliation OTel events.
 - [x] C007 Update orchestrator and packaged-skill guidance if the worker recovery
   action changes.
-- [ ] C008 Run focused orchestrator gates, complete repository gates, and affected
+- [x] C008 Run focused orchestrator gates, complete repository gates, and affected
   PR-session final-gate with compact completion evidence.
 
 ## Stack and Review Discipline
