@@ -1,6 +1,6 @@
 # ADR-001: Use SQLite as the Canonical PR-Session Runtime Store
 
-**Status:** Proposed; selected for implementation, pending Constitution approval
+**Status:** Accepted and implemented
 **Date:** 2026-09-24
 **Deciders:** Repository maintainer
 **Supersedes:** The implicit multi-file persistence design in which
@@ -201,10 +201,10 @@ external calls are never inside the write transaction.
 - **Telemetry self-reference**: emit transaction observations after outcome; the
   telemetry write cannot participate in or amend commit truth.
 
-## Required Approval Before Code
+## Approval Record
 
 Amend Constitution Principle I from the file-specific owner `session.json` to a
 versioned runtime store owned by deterministic code, while keeping artifacts as
-non-authoritative projections. The amendment must carry the required governance
-version rationale and dependent-guidance review. Until that amendment is accepted,
-Phase A implementation is blocked.
+non-authoritative projections. PR #287 fulfilled this gate with Constitution
+2.2.0. The approved design was implemented incrementally by Phase A in PR #288,
+Phase B in PR #290, and Phase C in PR #292.
