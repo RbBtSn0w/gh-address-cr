@@ -1,7 +1,7 @@
 # Validation: Runtime Store Hardening
 
 **Date**: 2026-09-26
-**Scope**: Audit evidence, acceptance plan, and 035a/035b results.
+**Scope**: Audit evidence, acceptance plan, and 035a/035b/035c results.
 
 ## Audit Baseline
 
@@ -32,7 +32,7 @@
 | FR-007 outbox truth | ⚠️ `unknown` misclassified (R4) | 035b | ✅ (035b) |
 | FR-008 projections are not truth | ❌ publisher reads JSONL (R5) | 035b | ✅ (035b) |
 | FR-009 exactly-once exclusive migration | ❌ (R2, R3) | 035a | ✅ (035a) |
-| FR-014 stable bounded-contention outcome | ⚠️ codes flattened at CLI | 035c | |
+| FR-014 stable bounded-contention outcome | ⚠️ codes flattened at CLI | 035c | ✅ (035c) |
 | US-C2 dispatch rebuilt after restart | ⚠️ prune only | 035d | |
 
 ## Performance Baseline
@@ -166,6 +166,31 @@ all 8 tests. After the fix: `OK`, repeated 3 times.
 |---|---|
 | `ruff check src tests scripts/build_plugin_payload.py scripts/benchmark_runtime_store.py` | Passed |
 | `python3 -m unittest discover -s tests` | 1230 tests; 1 error in `test_stacked_pr_e2e_script` (`GitHub CLI is required.`) — the container has no `gh`; the same test fails identically on unmodified `develop` |
+| `python3 -m gh_address_cr --help` / `agent manifest` | Passed |
+| `build_plugin_payload.py --output` / `--check` | Passed |
+| `final-gate` | Not run: no PR session exists yet for this branch |
+
+## 035c Regression Evidence
+
+`tests/contract/test_persistence_reason_codes_contract.py` on 035b code:
+`FAILED (failures=13, errors=10)`. Every agent command either let the injected
+`SessionError` escape as a traceback (`next`, `submit`) or flattened it into
+`PUBLISH_ERROR` / `SESSION_ERROR` (`publish`, `leases`, `reclaim`); eight
+concurrent classifications surfaced `STALE_REVISION`; concurrent reclaims
+failed. After the fix the module passes twice in a row.
+
+Found while building 035d: moving classification, release, and reclaim onto
+`transact_session` stopped binding local telemetry to the PR, so their metrics
+were dropped. `test_transaction_only_commands_bind_pr_telemetry` failed
+(`AssertionError: unexpectedly None`) until `transact_session` bound the same
+context `load_session` does; the fix is a separate 035c commit.
+
+## 035c Gates
+
+| Gate | Result |
+|---|---|
+| `ruff check src tests scripts/build_plugin_payload.py scripts/benchmark_runtime_store.py` | Passed |
+| `python3 -m unittest discover -s tests` | Passed except the environmental `test_stacked_pr_e2e_script` |
 | `python3 -m gh_address_cr --help` / `agent manifest` | Passed |
 | `build_plugin_payload.py --output` / `--check` | Passed |
 | `final-gate` | Not run: no PR session exists yet for this branch |
