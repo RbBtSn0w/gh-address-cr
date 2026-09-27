@@ -252,6 +252,25 @@ class StaleRevisionRetryContractTest(unittest.TestCase):
         self.assertEqual(final["leases"][request["lease_id"]]["status"], "accepted")
 
 
+class TransactionTelemetryBindingContractTest(unittest.TestCase):
+    def test_transaction_only_commands_bind_pr_telemetry(self):
+        from gh_address_cr.core.telemetry_runtime import SessionTelemetry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_session(tmp, items=1)
+            SessionTelemetry.reset()
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                agent_protocol.record_classification(
+                    REPO, PR_NUMBER, item_id="local:0", classification="fix", agent_id="triage", note="Real."
+                )
+                telemetry_file = SessionTelemetry.get_instance().telemetry_file
+                workspace = session_store.workspace_dir(REPO, PR_NUMBER)
+            SessionTelemetry.reset()
+
+        self.assertIsNotNone(telemetry_file)
+        self.assertEqual(Path(telemetry_file).parent, workspace)
+
+
 @unittest.skipIf(os.name == "nt", "concurrency contracts use fork")
 class TransactionalHotPathContractTest(unittest.TestCase):
     def test_concurrent_classification_never_surfaces_stale_revision(self):

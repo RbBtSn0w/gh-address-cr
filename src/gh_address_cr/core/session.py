@@ -284,6 +284,12 @@ def transact_session(
     try:
         if not store.is_initialized():
             load_session(repo, pr_number)
+        else:
+            # load_session binds local telemetry to this PR; a transaction-only command must too,
+            # or its subprocess and command metrics are dropped.
+            from gh_address_cr.core.telemetry import configure_context_safely
+
+            configure_context_safely(repo, pr_number)
         result = store.transact(
             mutation,
             expected_revision=expected_revision,
