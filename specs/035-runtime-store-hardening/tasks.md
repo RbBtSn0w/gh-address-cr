@@ -62,17 +62,18 @@ commit and pass after the fix; paste both outputs in the PR description.
 
 **Owning branch**: `fix/035c-persistence-reason-codes` (base 035b)
 
-- [ ] C001 Write failing tests: `test_persistence_reason_codes_reach_agent_output`,
+- [x] C001 Write failing tests: `test_persistence_reason_codes_reach_agent_output`,
   `test_concurrent_reclaim_and_release_do_not_surface_stale_revision`,
   mutation-closure no-IO guard.
-- [ ] C002 `output_session_error`; `SessionError` handlers in `commands/agent.py` and `commands/high_level.py`.
-- [ ] C003 Wrap `RuntimeStoreError` in `side_effect_outbox.py`.
-- [ ] C004 Convert `release_claimed_lease`, `reclaim_leases`, agent submit/accept to `transact_session`.
-- [ ] C005 Add codes to `protocol_codes.py`; "Runtime Persistence" section in
+- [x] C002 `output_session_error`; `SessionError` handlers in `commands/agent.py` and `commands/high_level.py`.
+- [x] C003 Wrap `RuntimeStoreError` in `side_effect_outbox.py` (landed with 035b).
+- [x] C004 Convert `release_claimed_lease`, `reclaim_leases`, and classification to `transact_session`;
+  submit reads GitHub before saving, so it reruns from fresh state on `STALE_REVISION` (bounded, 3 attempts).
+- [x] C005 Add codes to `protocol_codes.py`; "Runtime Persistence" section in
   `skill/references/status-action-map.md`; sync `agent-protocol.md` and `SKILL.md`.
-- [ ] C006 `tests/test_skill_docs.py` asserts every persistence code has a map entry;
+- [x] C006 `tests/test_skill_docs.py` asserts every persistence code has a map entry;
   update `tests/contract/test_public_contract_stability.py` for the additive `retryable` field.
-- [ ] C007 Completion gates; benchmark M.
+- [x] C007 Completion gates; benchmark M.
 
 ## 035d — Orchestrator dispatch rebuild and regression detection
 

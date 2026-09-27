@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator, TypeVar
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import fsync_directory, fsync_file, json_ready, write_json_atomic, write_json_durable
 from gh_address_cr.core.process_lock import is_execution_lock_held
-from gh_address_cr.evidence.ledger import EvidenceRecord, SideEffectAttempt, payload_hash
+from gh_address_cr.evidence.ledger import EvidenceRecord, SideEffectAttempt, payload_hash, take_pending_evidence
 
 SCHEMA_VERSION = 2
 RECOVERY_BUNDLE_NAME = "legacy-v1-recovery"
@@ -425,6 +425,9 @@ class RuntimeStore:
                 if expected_revision is not None and expected_revision != current_revision:
                     raise StaleRevisionError(expected=expected_revision, actual=current_revision)
                 value = mutation(working)
+                # Evidence a mutation records through a session ledger is buffered on the
+                # payload; it commits here, in the same transaction as the state it describes.
+                evidence = [*(evidence or []), *take_pending_evidence(working)]
                 next_revision = current_revision + 1
                 normalized = json_ready(working)
                 self._write_session(connection, normalized, revision=next_revision, already_normalized=True)

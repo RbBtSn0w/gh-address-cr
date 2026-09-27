@@ -48,6 +48,23 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
   `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
   do not change `HOME` or create a second state directory mid-session.
 
+## Runtime Persistence
+
+Commands that fail on the runtime store return `waiting_on=runtime_store`, keep
+the store's own `reason_code`, and add `retryable`. The failed command committed
+nothing.
+
+- `STALE_REVISION` (`retryable=true`): another command changed the session after
+  this one loaded it. Rerun the same command; it reloads the current state.
+  Classification, lease release, and reclaim decide inside the write lock and
+  never report it; submit reruns itself up to three times before reporting it.
+- `PERSISTENCE_BUSY` (`retryable=true`): the store stayed locked past its bounded
+  wait. Let the other gh-address-cr command finish, then rerun the same command.
+- `PERSISTENCE_INVALID` (`retryable=false`): the store failed an integrity check
+  (for example an edited recovery bundle or an invariant violation). Stop. Do not
+  edit `session.json`, `evidence.jsonl`, or `runtime.sqlite3`, and keep
+  `legacy-v1-recovery/` intact; report it with `gh-address-cr submit-feedback`.
+
 ## Active Work
 
 If `status` is `ACTION_REQUESTED`:

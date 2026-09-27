@@ -114,6 +114,22 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
   Persistence" section to `skill/references/status-action-map.md`, and matching
   text in `skill/references/agent-protocol.md` and `skill/SKILL.md`.
 
+### 035c as built
+
+- Agent commands intercept `SessionError` once in `handle_agent_command`, and
+  handlers with their own catch-all intercept it first; high-level commands
+  intercept it around the whole flow. Both emit `session_error_guidance`
+  (reason code, `waiting_on=runtime_store`, `retryable`, next action) so there
+  is one source for the wording. Before this, most agent commands let the error
+  escape as a traceback.
+- Classification, lease release, and reclaim run as `transact_session`
+  closures; evidence a closure records through a session ledger commits in the
+  same transaction. Submit reads GitHub for revision binding before it saves,
+  so it cannot hold the write lock; its accept phase is pure until the save and
+  reruns from fresh state on `STALE_REVISION`, at most three attempts, emitting
+  a bounded `persistence.stale_retry` event per retry. Publishing after submit
+  runs outside that retry.
+
 ## F6 — Database-enforced invariants (035b, schema v2)
 
 - Document `payload_json` as per-row truth and normalized columns as same-transaction index projections.
