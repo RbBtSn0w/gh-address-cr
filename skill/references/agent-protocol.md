@@ -150,6 +150,11 @@ new side effect is attempted. If the runtime cannot prove whether the prior
 reply happened, publish returns `PUBLISH_RECONCILE_REQUIRED` with
 `waiting_on=reply_reconciliation`. This is a fail-closed machine state: reconcile
 the existing GitHub reply into evidence instead of blindly retrying publish.
+A side effect is `unknown` only after its executor has exited: while another
+live process is still executing the same reply or resolve, publish returns
+`SIDE_EFFECT_IN_PROGRESS` with `waiting_on=side_effect_execution`; wait and rerun
+publish rather than reconciling. Publish decisions come from the canonical
+outbox, never from the `evidence.jsonl` projection.
 
 A handful of terminal failure paths — orchestration crashes and other cases that never construct a `WorkflowError` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
 

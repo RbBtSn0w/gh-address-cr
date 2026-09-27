@@ -97,6 +97,15 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.leases(repo, pr_number),
         }
 
+    if code == protocol_codes.SIDE_EFFECT_IN_PROGRESS:
+        return {
+            "summary": (
+                "Another live process is executing this GitHub side effect. Wait for it to finish, then rerun "
+                "publish; the canonical outbox reuses its recorded result instead of repeating the effect."
+            ),
+            "command": command_templates.publish(repo, pr_number),
+        }
+
     if code.startswith("MISSING_"):
         return {
             "summary": (

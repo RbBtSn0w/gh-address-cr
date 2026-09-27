@@ -33,7 +33,7 @@ commit and pass after the fix; paste both outputs in the PR description.
 
 **Owning branch**: `fix/035b-outbox-ownership` (base 035a)
 
-- [ ] B001 Write failing tests: `test_load_does_not_demote_live_in_flight_command` (R4),
+- [x] B001 Write failing tests: `test_load_does_not_demote_live_in_flight_command` (R4),
   `test_owner_death_demotes_to_unknown`, `test_concurrent_publish_same_item_posts_once`,
   `test_read_only_load_takes_no_write_lock`,
   `test_publish_decisions_ignore_projection_tampering` (R5),
@@ -44,15 +44,16 @@ commit and pass after the fix; paste both outputs in the PR description.
   `test_v1_store_upgrades_to_v2_exactly_once_under_concurrency`,
   `test_transaction_id_is_shared_by_events_and_outbox_of_one_commit`,
   `test_last_observed_revision_changes_only_with_item_payload`.
-- [ ] B002 Schema v2 and migration framework (`_MIGRATIONS`, `SCHEMA_VERSION = 2`).
-- [ ] B003 `core/process_lock.py`, outbox owner columns, liveness-aware `recover()`.
-- [ ] B004 `execute_side_effect` / `side_effect_state`; switch publisher; remove ledger read helpers.
-- [ ] B005 Shared outbox backfill for legacy import and v1→v2.
-- [ ] B006 Stat-fast-path drift detection; single-read-transaction materialization.
-- [ ] B007 Partial unique index, `transaction_id`, `last_observed_revision` semantics.
-- [ ] B008 P2 persistence child spans and `ExecutionMetric` additive fields; privacy and fail-open tests.
-- [ ] B009 P3 incremental `evidence.jsonl` append with byte-equivalence test against full rebuild.
-- [ ] B010 Update `tests/contract/test_publish_precondition_and_status_contract.py` for outbox reads.
+- [x] B002 Schema v2 and migration framework (`_MIGRATIONS`, `SCHEMA_VERSION = 2`).
+- [x] B003 `core/process_lock.py`, outbox owner columns, liveness-aware `recover()`.
+- [x] B004 `execute_side_effect` / `side_effect_state`; switch publisher; remove ledger read helpers.
+- [x] B005 Shared outbox backfill for legacy import and v1→v2.
+- [x] B006 Stat-fast-path drift detection; single-read-transaction materialization.
+- [x] B007 Partial unique index, `transaction_id`, `last_observed_revision` semantics.
+- [x] B008 P2 persistence child spans; privacy and fail-open tests (`ExecutionMetric` fields moved to D004).
+- [x] B009 P3 incremental `evidence.jsonl` append with byte-equivalence test against full rebuild.
+- [x] B010 Update publish contracts for outbox reads (`test_publish_precondition_and_status_contract.py`
+  passed unchanged; the crash-simulation publish tests now record `in_flight` under the execution guard).
 - [ ] B011 Upgrade end-to-end: `v3.15.3` state with published replies → this branch; no duplicate
   side effects, unchanged final-gate. Repeat from a Spec 034 v1 store.
 - [ ] B012 Completion gates; benchmark M and L; degradation ratio ≤ 1.5.
@@ -85,7 +86,8 @@ commit and pass after the fix; paste both outputs in the PR description.
   `test_expired_canonical_lease_rejects_stale_dispatch_submit`.
 - [ ] D002 `dispatch-receipt.v2` token from `resume_token`; rebuild in `reconcile_dispatches`.
 - [ ] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
-- [ ] D004 P4 within-session latency growth flag and per-command p50/p90 in `telemetry_reporting.py`.
+- [ ] D004 P4 within-session latency growth flag, per-command p50/p90, and `ExecutionMetric`
+  persistence fields in `telemetry_reporting.py` / `telemetry_models.py`.
 - [ ] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`.
 
 ## Release Gate

@@ -198,13 +198,10 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
         else:
             snapshot = store.bootstrap(payload, evidence=evidence, require_new=True)
         payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
-        if evidence:
-            store.materialize_compatibility_artifacts(
-                session_path=path,
-                ledger_path=default_ledger_path(repo, pr_number),
-            )
-        else:
-            store.materialize_session_projection(session_path=path)
+        store.materialize_compatibility_artifacts(
+            session_path=path,
+            ledger_path=default_ledger_path(repo, pr_number),
+        )
     except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
 
@@ -232,13 +229,11 @@ def transact_session(
         )
         payload = result.payload
         payload["persistence"] = {"schema_version": result.schema_version, "revision": result.revision}
-        if evidence:
-            store.materialize_compatibility_artifacts(
-                session_path=session_file(repo, pr_number),
-                ledger_path=default_ledger_path(repo, pr_number),
-            )
-        else:
-            store.materialize_session_projection(session_path=session_file(repo, pr_number))
+        store.materialize_compatibility_artifacts(
+            session_path=session_file(repo, pr_number),
+            ledger_path=default_ledger_path(repo, pr_number),
+            committed=result,
+        )
         return TransactionResult(
             payload=payload,
             revision=result.revision,

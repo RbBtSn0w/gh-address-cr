@@ -138,6 +138,47 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
   the claim via `leases.release_claimed_lease(..., reason="dispatch_projection_failed")`,
   and returns `DISPATCH_PROJECTION_FAILED`.
 
+## 035b Implementation Notes (as built)
+
+These record where the implementation refined the plan above; each is covered
+by a contract test in `tests/contract/test_outbox_ownership_contract.py`.
+
+- **Backfill never overwrites.** Rows already present in the outbox are
+  canonical (a Spec 034 store wrote them); only side-effect keys with no row
+  are derived from `side_effect_attempt` evidence. A derived success without an
+  external reference becomes `unknown` and goes through reconciliation.
+- **Drift is decided by stat, not hash.** Materialization records each
+  projection's size and mtime. A mismatch always means the file is not what the
+  runtime wrote, so it is rebuilt (`drift_repaired`); no hash comparison is
+  needed and `content_hash` is no longer populated.
+- **Projections are written under the store's write lock**, in one
+  transaction with their materialization rows, so the recorded revision always
+  matches the bytes and concurrent writers cannot interleave appends. The
+  session-only projection path was removed: it left the ledger rows a revision
+  behind and made every following load rebuild all three files.
+- **Recovery-bundle verification is stat-gated.** The bundle's stat signature
+  is recorded (`store_metadata.legacy_bundle_signature`) when it is verified at
+  import or at the v1→v2 upgrade; a load hashes the bundle again only when the
+  signature moved, and a changed bundle still fails fast.
+- **Session rows are written differentially.** Only item and lease rows whose
+  payload changed are rewritten (changed and removed leases are deleted before
+  any insert, so a release plus a new grant on one item never trips the index),
+  and `transition_revision` / `last_observed_revision` record the last change.
+  An item's first rewrite after load also stores its derived claim fields.
+- **No redundant reloads.** `replace()` commits the caller's payload without
+  loading or reloading a snapshot; `transact()` returns an in-memory committed
+  view that is proven equal to a fresh reload; materialization reuses a
+  committed snapshot that is still the latest revision.
+- **Execution guard.** `side_effect_outbox.execution_guard` owns the advisory
+  lock from before the `in_flight` commit until the result commits or the call
+  unwinds; marking a side effect `in_flight` outside the guard is a programming
+  error. `record_outbox_result` accepts an `in_flight` result only from the
+  owner token.
+- **Deferred to 035d:** the `ExecutionMetric` persistence fields move to P4,
+  which is their only consumer.
+- **Rejected:** WAL with `synchronous=NORMAL` measured no gain (commit fsync is
+  not the bottleneck), so the store keeps rollback-journal full durability.
+
 ## Performance and Observability
 
 ### Verified baseline gaps
