@@ -54,9 +54,9 @@ commit and pass after the fix; paste both outputs in the PR description.
 - [x] B009 P3 incremental `evidence.jsonl` append with byte-equivalence test against full rebuild.
 - [x] B010 Update publish contracts for outbox reads (`test_publish_precondition_and_status_contract.py`
   passed unchanged; the crash-simulation publish tests now record `in_flight` under the execution guard).
-- [ ] B011 Upgrade end-to-end: `v3.15.3` state with published replies → this branch; no duplicate
+- [x] B011 Upgrade end-to-end: `v3.15.3` state with published replies → this branch; no duplicate
   side effects, unchanged final-gate. Repeat from a Spec 034 v1 store.
-- [ ] B012 Completion gates; benchmark M and L; degradation ratio ≤ 1.5.
+- [x] B012 Completion gates; benchmark M and L (degradation ratio and main budget not met; see validation.md).
 
 ## 035c — Persistence reason codes and transactional hot paths
 

@@ -1,7 +1,7 @@
 # Validation: Runtime Store Hardening
 
 **Date**: 2026-09-26
-**Scope**: Audit evidence, acceptance plan, and 035a results.
+**Scope**: Audit evidence, acceptance plan, and 035a/035b results.
 
 ## Audit Baseline
 
@@ -27,10 +27,10 @@
 | SC-001 one winner under claim race | ✅ | — | |
 | FR-003 serialized claims | ✅ | — | |
 | SC-004 no independent orchestrator lease policy | ✅ (mostly) | 035d | |
-| SC-002 old or complete revision after any crash | ⚠️ migration path fails (R1) | 035a | ✅ initialization and bundle checkpoints (035a); outbox checkpoints re-verified in 035b |
+| SC-002 old or complete revision after any crash | ⚠️ migration path fails (R1) | 035a | ✅ initialization and bundle checkpoints (035a); outbox and projection checkpoints (035b) |
 | SC-003 idempotent migration/recovery replay | ⚠️ not under concurrency (R3) | 035a | ✅ (035a) |
-| FR-007 outbox truth | ⚠️ `unknown` misclassified (R4) | 035b | |
-| FR-008 projections are not truth | ❌ publisher reads JSONL (R5) | 035b | |
+| FR-007 outbox truth | ⚠️ `unknown` misclassified (R4) | 035b | ✅ (035b) |
+| FR-008 projections are not truth | ❌ publisher reads JSONL (R5) | 035b | ✅ (035b) |
 | FR-009 exactly-once exclusive migration | ❌ (R2, R3) | 035a | ✅ (035a) |
 | FR-014 stable bounded-contention outcome | ⚠️ codes flattened at CLI | 035c | |
 | US-C2 dispatch rebuilt after restart | ⚠️ prune only | 035d | |
@@ -53,6 +53,8 @@ ratio is last-decile ÷ first-decile per-CR median.
 | L (1000 items, 20000 evidence) | main | 3 ms | 234 ms | 372 ms | 5.50 | 2.1 → 23.5 ms |
 | L | develop (034) | 30908 ms | 1809 ms | 2329 ms | 1.95 | 29.4 → 91.9 ms |
 | L | 035a | **1204 ms** | 1827 ms | 2490 ms | 2.17 | 36.1 → 87.3 ms |
+| M | 035b | 328 ms | **154 ms** | **227 ms** | 3.07 | 2.9 → 9.3 ms |
+| L | 035b | 965 ms | **457 ms** | **675 ms** | 3.37 | 6.7 → 35.2 ms |
 
 ### Findings
 
@@ -82,6 +84,58 @@ ratio is last-decile ÷ first-decile per-CR median.
 | Per-command p90 ≤ 1.5× main | ❌ M 5.7×, L 6.7× — inherited from 034; owned by 035b P3 |
 | Degradation ratio ≤ 1.5 (from 035b) | ❌ 2.0–2.2 — owned by 035b P3 |
 | First-open migration below the 5 s busy timeout | ✅ M 0.35 s, L 1.2 s (was 4.1 s, 30.9 s) |
+
+### 035b performance
+
+The profile of Spec 034 attributed most per-CR time to rewriting projections;
+035b removed that and the other per-write re-reads, in measured steps at M
+(per-CR p50): 428 ms (035a) → 274 ms (incremental `evidence.jsonl`) → 219 ms
+(single normalization, whole-set projection) → 190 ms (`replace()` without
+snapshot reloads, stat-gated bundle verification) → 165 ms (differential row
+writes) → 153 ms (in-memory committed view, reuse of the committed snapshot).
+
+What remains is structural: canonical SQLite rows plus the `session.json`
+projection cost more than `main`'s single JSON file. Two measured alternatives
+were not adopted:
+
+| Experiment (M) | CR p50 | CR p90 | Decision |
+|---|---|---|---|
+| WAL + `synchronous=NORMAL` | 176 ms | 242 ms | Rejected: no gain; commit fsync is not the bottleneck |
+| Compact (non-indented) `session.json` | 121 ms | 173 ms | Not adopted: changes a user-visible file's format; needs an owner decision |
+
+### Budget status after 035b
+
+| Budget | Status |
+|---|---|
+| Per-command p90 ≤ 1.2× develop | ✅ M 0.37×, L 0.29× |
+| Per-command p90 ≤ 1.5× main | ❌ M 2.27×, L 1.82× — structural; see the experiments above |
+| Degradation ratio ≤ 1.5 | ❌ M 3.07, L 3.37 (`main` 4.26 / 5.50) — every write still re-encodes the whole `session.json` projection |
+| First-open migration below the 5 s busy timeout | ✅ M 0.33 s, L 0.96 s |
+| `load_session` without `in_flight` rows opens no write transaction | ✅ `test_read_only_load_takes_no_write_lock` |
+
+## 035b Regression Evidence
+
+`tests/contract/test_outbox_ownership_contract.py` (18 tests) passes three
+consecutive runs. R4 and R5 were reproduced on `4ba50e6` by the audit scripts
+(see Reproductions); the contract module cannot import on pre-035b code
+because the APIs it drives (execution guard, outbox lookups, schema v2) do not
+exist there.
+
+Upgrade end-to-end (task B011): v3.15.3 posted a reply and was killed while
+resolving the thread, leaving `session.json` and `evidence.jsonl` with a
+succeeded reply and an in-flight resolve. 035b then migrated that state and
+published: `posts=0`, `resolves=1`, reply URL reused, outbox
+`{github_reply: succeeded, github_resolve: succeeded}`, `PUBLISH_COMPLETE`.
+
+## 035b Gates
+
+| Gate | Result |
+|---|---|
+| `ruff check src tests scripts/build_plugin_payload.py scripts/benchmark_runtime_store.py` | Passed |
+| `python3 -m unittest discover -s tests` | Passed except the environmental `test_stacked_pr_e2e_script` (`GitHub CLI is required.`), unchanged from `develop` |
+| `python3 -m gh_address_cr --help` / `agent manifest` | Passed |
+| `build_plugin_payload.py --output` / `--check` | Passed |
+| `final-gate` | Not run: no PR session exists yet for this branch |
 
 ## 035a Regression Evidence
 
