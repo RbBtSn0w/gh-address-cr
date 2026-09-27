@@ -89,7 +89,8 @@ commit and pass after the fix; paste both outputs in the PR description.
 - [x] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
 - [x] D004 P4 within-session latency growth flag, per-command p50/p90, and `ExecutionMetric`
   persistence fields in `telemetry_reporting.py` / `telemetry_models.py`.
-- [ ] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`.
+- [x] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`
+  (degradation-ratio budget recorded as unmet; see Outcome).
 
 ## Release Gate
 

@@ -1,7 +1,7 @@
 # Validation: Runtime Store Hardening
 
 **Date**: 2026-09-26
-**Scope**: Audit evidence, acceptance plan, and 035a/035b/035c results.
+**Scope**: Audit evidence, acceptance plan, and 035a–035d results.
 
 ## Audit Baseline
 
@@ -24,16 +24,16 @@
 
 | Requirement | Before 035 | Owning 035 PR | After 035 |
 |---|---|---|---|
-| SC-001 one winner under claim race | ✅ | — | |
-| FR-003 serialized claims | ✅ | — | |
-| SC-004 no independent orchestrator lease policy | ✅ (mostly) | 035d | |
+| SC-001 one winner under claim race | ✅ | — | ✅ |
+| FR-003 serialized claims | ✅ | — | ✅ |
+| SC-004 no independent orchestrator lease policy | ✅ (mostly) | 035d | ✅ (035d) |
 | SC-002 old or complete revision after any crash | ⚠️ migration path fails (R1) | 035a | ✅ initialization and bundle checkpoints (035a); outbox and projection checkpoints (035b) |
 | SC-003 idempotent migration/recovery replay | ⚠️ not under concurrency (R3) | 035a | ✅ (035a) |
 | FR-007 outbox truth | ⚠️ `unknown` misclassified (R4) | 035b | ✅ (035b) |
 | FR-008 projections are not truth | ❌ publisher reads JSONL (R5) | 035b | ✅ (035b) |
 | FR-009 exactly-once exclusive migration | ❌ (R2, R3) | 035a | ✅ (035a) |
 | FR-014 stable bounded-contention outcome | ⚠️ codes flattened at CLI | 035c | ✅ (035c) |
-| US-C2 dispatch rebuilt after restart | ⚠️ prune only | 035d | |
+| US-C2 dispatch rebuilt after restart | ⚠️ prune only | 035d | ✅ (035d) |
 
 ## Performance Baseline
 
@@ -57,6 +57,8 @@ ratio is last-decile ÷ first-decile per-CR median.
 | L | 035b | 965 ms | **457 ms** | **675 ms** | 3.37 | 6.7 → 35.2 ms |
 | M | 035b + compact `session.json` | 387 ms | **107 ms** | **149 ms** | 2.20 | 2.6 → 8.2 ms |
 | L | 035b + compact `session.json` | 831 ms | **294 ms** | **462 ms** | 4.12 | 5.3 → 24.1 ms |
+| M | 035d, measured before the compact projection | 325 ms | 147 ms | 228 ms | 3.16 | 2.9 → 8.2 ms |
+| L | 035d, measured before the compact projection | 1044 ms | 450 ms | 678 ms | 3.70 | 8.7 → 26.0 ms |
 
 ### Findings
 
@@ -194,6 +196,42 @@ context `load_session` does; the fix is a separate 035c commit.
 | `python3 -m gh_address_cr --help` / `agent manifest` | Passed |
 | `build_plugin_payload.py --output` / `--check` | Passed |
 | `final-gate` | Not run: no PR session exists yet for this branch |
+
+## 035d Regression Evidence
+
+On 035c code, `test_orchestrator_lease_convergence_contract.py` fails 4 of 6
+(token is not the lease resume token; a lost dispatch is not rebuilt; a failed
+dispatch leaves the claim locked; reconcile telemetry has no rebuild outcome).
+The same-file and expired-lease contracts already held and stay as guards.
+`test_latency_regression_contract.py` cannot import on 035c (no growth
+threshold, no `operation_latency`). After the fix both modules pass.
+
+035d performance is within noise of 035b (per-CR p50 147 ms at M, 450 ms at L);
+the CLI's own command metric is one appended line, and telemetry history is no
+longer re-read on every session load or transaction.
+
+## 035d Gates
+
+| Gate | Result |
+|---|---|
+| `ruff check src tests scripts/build_plugin_payload.py scripts/benchmark_runtime_store.py` | Passed |
+| `python3 -m unittest discover -s tests` | Passed except the environmental `test_stacked_pr_e2e_script` |
+| `python3 -m gh_address_cr --help` / `agent manifest` | Passed |
+| `build_plugin_payload.py --output` / `--check` | Passed |
+| `final-gate` | Not run: no PR session exists yet for these branches |
+
+## Outcome
+
+Every Spec 034 requirement the audit found unmet is now met (table above), and
+R1–R5 are permanent regression contracts.
+
+- Per-command p90 meets the 1.5x `main` budget (M 1.49x, L 1.24x) after the
+  owner-approved compact `session.json` projection (035b); 035d adds no
+  measurable cost (its benchmark above predates that change).
+- The within-session degradation ratio remains unmet: M 2.2, L 4.1 (target 1.5;
+  `main` 4.3 / 5.5). Each write re-encodes the whole session projection, so the
+  ratio needs an incremental session projection to go further; P4 surfaces any
+  command that slows by more than 2x in the final-gate completion line.
 
 ## Required Gates Per PR
 
