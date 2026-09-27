@@ -11,10 +11,14 @@ and free of cycles (#153 / #158).
 from __future__ import annotations
 
 import json
+import math
+import statistics
 from typing import Any
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.telemetry_models import (
+    LATENCY_GROWTH_MIN_SAMPLES,
+    LATENCY_GROWTH_RATIO,
     MAX_DURATION_SECONDS,
     MAX_ERROR_RATE_PERCENT,
     ExternalTelemetryEvent,
@@ -380,6 +384,62 @@ def _inefficiency_flags(slowest: list[ExternalTelemetryEvent], error_prone: list
             f"{row['operation']} had {row['failures']} failures, {row['timeouts']} timeouts, and {row['retries']} retries."
         )
     return flags
+
+
+def _runtime_command_series(events: list[ExternalTelemetryEvent]) -> dict[str, list[ExternalTelemetryEvent]]:
+    series: dict[str, list[ExternalTelemetryEvent]] = {}
+    for event in events:
+        if event.source != "runtime" or event.duration_ms <= 0:
+            continue
+        series.setdefault(event.operation, []).append(event)
+    for rows in series.values():
+        rows.sort(key=lambda event: event.started_at or "")
+    return series
+
+
+def _latency_growth_flags(events: list[ExternalTelemetryEvent]) -> list[str]:
+    """Flag operations that got slower as the session went on.
+
+    Absolute thresholds cannot see a command that drifts from 200 ms to 400 ms,
+    so each runtime operation with enough samples compares the median of its
+    last fifth to the median of its first fifth.
+    """
+    flags: list[str] = []
+    for operation, rows in sorted(_runtime_command_series(events).items()):
+        if len(rows) < LATENCY_GROWTH_MIN_SAMPLES:
+            continue
+        window = max(2, len(rows) // 5)
+        early = statistics.median(event.duration_ms for event in rows[:window])
+        late = statistics.median(event.duration_ms for event in rows[-window:])
+        if early > 0 and late / early > LATENCY_GROWTH_RATIO:
+            flags.append(
+                f"{operation} latency grew {late / early:.1f}x over this session ({early:.0f}ms -> {late:.0f}ms)."
+            )
+    return flags
+
+
+def _operation_latency(events: list[ExternalTelemetryEvent]) -> list[dict[str, Any]]:
+    """Per-operation p50/p90 for runtime commands, with the share spent in the runtime store."""
+    rows_out: list[dict[str, Any]] = []
+    for operation, rows in sorted(_runtime_command_series(events).items()):
+        durations = sorted(event.duration_ms for event in rows)
+        persistence = [
+            float((event.metadata or {}).get("persistence_ms"))
+            for event in rows
+            if isinstance((event.metadata or {}).get("persistence_ms"), (int, float))
+        ]
+        rows_out.append(
+            {
+                "operation": operation,
+                "count": len(durations),
+                "p50_ms": durations[max(1, math.ceil(0.5 * len(durations))) - 1],
+                "p90_ms": durations[max(1, math.ceil(0.9 * len(durations))) - 1],
+                "persistence_share": (
+                    round(sum(persistence) / sum(durations), 3) if persistence and sum(durations) else None
+                ),
+            }
+        )
+    return rows_out
 
 
 def _confidence_for_coverage(coverage_label: str) -> str:

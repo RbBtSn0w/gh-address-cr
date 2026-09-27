@@ -91,14 +91,20 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
 Advanced orchestration emits `worker-packet.v2`. Its
-`dispatch_receipt` uses `dispatch-receipt.v1` and contains the canonical
+`dispatch_receipt` uses `dispatch-receipt.v2` and contains the canonical
 `lease_id`, request binding, committed runtime revision, and an opaque delivery
-token. The orchestration session is a volatile delivery projection: it does not
-grant, expire, release, or resolve conflicts for leases. Before start, status,
-step, resume, and submit actions, the runtime reconciles that projection from
-canonical lease state. Pass the receipt's delivery token to `agent orchestrate
-submit --token`; canonical submission still validates the runtime lease and
-request binding.
+token equal to the canonical lease's resume token. The orchestration session is
+a volatile delivery projection: it does not grant, expire, release, or resolve
+conflicts for leases. Before start, status, step, resume, and submit actions,
+the runtime reconciles that projection from canonical lease state, dropping
+dispatches whose lease is no longer active and rebuilding missing dispatches for
+active orchestrator leases, so a worker's original token keeps working after the
+orchestration state is lost. Pass the receipt's delivery token to `agent
+orchestrate submit --token`; canonical submission still validates the runtime
+lease and request binding. If a step fails after the runtime claimed the item,
+it returns `DISPATCH_PROJECTION_FAILED` and releases that claim, so rerun the
+step instead of waiting for the lease to expire. `dispatch-receipt.v1` receipts
+already on disk remain valid until their lease ends.
 
 ## Telemetry Coverage
 

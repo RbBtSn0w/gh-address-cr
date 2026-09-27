@@ -65,6 +65,9 @@ nothing.
   edit `session.json`, `evidence.jsonl`, or `runtime.sqlite3`, and keep
   `legacy-v1-recovery/` intact; report it with `gh-address-cr submit-feedback`.
 
+If `reason_code` is `DISPATCH_PROJECTION_FAILED`:
+- **Action**: `agent orchestrate step` failed after the runtime claimed the item and has released that claim. When `next_action` is `RETRY`, rerun the step; when it is `HALT`, the release itself failed, so inspect `gh-address-cr agent leases <owner/repo> <pr_number>` before stepping again.
+
 ## Active Work
 
 If `status` is `ACTION_REQUESTED`:

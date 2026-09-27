@@ -1589,8 +1589,24 @@ def _set_span_attributes(span: Any, attributes: dict[str, Any]) -> None:
         return
 
 
+_PERSISTENCE_TOTALS = {"persistence_ms": 0.0, "lock_wait_ms": 0.0}
+
+
+def reset_persistence_totals() -> None:
+    """Start a fresh per-command tally of time spent in the runtime store."""
+    _PERSISTENCE_TOTALS["persistence_ms"] = 0.0
+    _PERSISTENCE_TOTALS["lock_wait_ms"] = 0.0
+
+
+def persistence_totals() -> dict[str, float]:
+    return {key: round(value, 3) for key, value in _PERSISTENCE_TOTALS.items()}
+
+
 def _record_timing(span: Any, *, started_at: float, locked_at: float | None, outcome: str) -> None:
     now = time.monotonic()
+    _PERSISTENCE_TOTALS["persistence_ms"] += (now - started_at) * 1000
+    if locked_at is not None:
+        _PERSISTENCE_TOTALS["lock_wait_ms"] += (locked_at - started_at) * 1000
     attributes: dict[str, Any] = {"gh_address_cr.persistence.outcome": outcome}
     if locked_at is not None:
         attributes["gh_address_cr.persistence.lock_wait_ms"] = round((locked_at - started_at) * 1000, 3)

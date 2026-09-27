@@ -79,15 +79,15 @@ commit and pass after the fix; paste both outputs in the PR description.
 
 **Owning branch**: `fix/035d-orchestrator-dispatch-rebuild` (base 035c)
 
-- [ ] D001 Replace source-text assertions in
+- [x] D001 Replace source-text assertions in
   `tests/contract/test_orchestrator_lease_convergence_contract.py` with behavior tests:
   `test_restart_rebuilds_dispatch_from_canonical_lease`,
   `test_two_non_overlapping_hunks_dispatch_without_second_grant`,
   `test_post_claim_failure_releases_canonical_lease`,
   `test_expired_canonical_lease_rejects_stale_dispatch_submit`.
-- [ ] D002 `dispatch-receipt.v2` token from `resume_token`; rebuild in `reconcile_dispatches`.
-- [ ] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
-- [ ] D004 P4 within-session latency growth flag, per-command p50/p90, and `ExecutionMetric`
+- [x] D002 `dispatch-receipt.v2` token from `resume_token`; rebuild in `reconcile_dispatches`.
+- [x] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
+- [x] D004 P4 within-session latency growth flag, per-command p50/p90, and `ExecutionMetric`
   persistence fields in `telemetry_reporting.py` / `telemetry_models.py`.
 - [ ] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`.
 
