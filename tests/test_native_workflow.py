@@ -946,23 +946,30 @@ class NativeWorkflowTests(unittest.TestCase):
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, item)
                 session = manager.load()
+                from gh_address_cr.core import side_effect_outbox
                 from gh_address_cr.core.utils import get_session_ledger
                 from gh_address_cr.evidence.ledger import SideEffectAttempt
 
                 ledger = get_session_ledger(session)
-                ledger.record_side_effect_attempt(
-                    attempt=SideEffectAttempt.new(
-                        session_id=str(session["session_id"]),
-                        item_id="github-thread:THREAD_1",
-                        side_effect_type="github_reply",
-                        idempotency_key=f"{session['session_id']}:github-thread:THREAD_1:github_reply",
-                        status="in_flight",
+                reply_key = f"{session['session_id']}:github-thread:THREAD_1:github_reply"
+                # The executor records in_flight under its execution lock and then dies before
+                # recording a result; leaving the guard releases the lock exactly as process exit does.
+                with side_effect_outbox.execution_guard(
+                    session, effect_type="github_reply", idempotency_key=reply_key
+                ):
+                    ledger.record_side_effect_attempt(
+                        attempt=SideEffectAttempt.new(
+                            session_id=str(session["session_id"]),
+                            item_id="github-thread:THREAD_1",
+                            side_effect_type="github_reply",
+                            idempotency_key=reply_key,
+                            status="in_flight",
+                            timestamp="2026-08-01T00:00:00Z",
+                        ),
+                        lease_id=None,
+                        agent_id="gh-address-cr-publisher",
                         timestamp="2026-08-01T00:00:00Z",
-                    ),
-                    lease_id=None,
-                    agent_id="gh-address-cr-publisher",
-                    timestamp="2026-08-01T00:00:00Z",
-                )
+                    )
                 client = NeverReconcilableClient()
 
                 with self.assertRaises(WorkflowError) as context:
@@ -1048,23 +1055,30 @@ class NativeWorkflowTests(unittest.TestCase):
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, item)
                 session = manager.load()
+                from gh_address_cr.core import side_effect_outbox
                 from gh_address_cr.core.utils import get_session_ledger
                 from gh_address_cr.evidence.ledger import SideEffectAttempt
 
                 ledger = get_session_ledger(session)
-                ledger.record_side_effect_attempt(
-                    attempt=SideEffectAttempt.new(
-                        session_id=str(session["session_id"]),
-                        item_id="github-thread:THREAD_1",
-                        side_effect_type="github_reply",
-                        idempotency_key=f"{session['session_id']}:github-thread:THREAD_1:github_reply",
-                        status="in_flight",
+                reply_key = f"{session['session_id']}:github-thread:THREAD_1:github_reply"
+                # The executor records in_flight under its execution lock and then dies before
+                # recording a result; leaving the guard releases the lock exactly as process exit does.
+                with side_effect_outbox.execution_guard(
+                    session, effect_type="github_reply", idempotency_key=reply_key
+                ):
+                    ledger.record_side_effect_attempt(
+                        attempt=SideEffectAttempt.new(
+                            session_id=str(session["session_id"]),
+                            item_id="github-thread:THREAD_1",
+                            side_effect_type="github_reply",
+                            idempotency_key=reply_key,
+                            status="in_flight",
+                            timestamp="2026-08-01T00:00:00Z",
+                        ),
+                        lease_id=None,
+                        agent_id="gh-address-cr-publisher",
                         timestamp="2026-08-01T00:00:00Z",
-                    ),
-                    lease_id=None,
-                    agent_id="gh-address-cr-publisher",
-                    timestamp="2026-08-01T00:00:00Z",
-                )
+                    )
                 client = NeverPostedClient()
 
                 result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)

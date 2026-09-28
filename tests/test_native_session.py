@@ -28,7 +28,7 @@ class NativeSessionTests(unittest.TestCase):
                 self.assertEqual(Path(loaded["ledger_path"]).name, "evidence.jsonl")
                 self.assertEqual(manager.session_path.name, "session.json")
                 self.assertTrue((manager.workspace_path / "runtime.sqlite3").is_file())
-                self.assertEqual(loaded["persistence"], {"schema_version": 1, "revision": 1})
+                self.assertEqual(loaded["persistence"], {"schema_version": 2, "revision": 1})
 
     def test_session_json_is_a_projection_and_cannot_overwrite_runtime_truth(self):
         from gh_address_cr.core.session import SessionManager
@@ -154,7 +154,7 @@ class NativeSessionTests(unittest.TestCase):
 
                 payload = json.loads(manager.session_path.read_text(encoding="utf-8"))
                 self.assertEqual(payload["status"], "WAITING_FOR_FIX")
-                self.assertEqual(payload["persistence"], {"schema_version": 1, "revision": 2})
+                self.assertEqual(payload["persistence"], {"schema_version": 2, "revision": 2})
                 self.assertEqual(list(manager.session_path.parent.glob("*.tmp")), [])
 
     def test_state_dir_reports_actionable_error_when_directory_is_not_writable(self):

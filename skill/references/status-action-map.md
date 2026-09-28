@@ -48,6 +48,26 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
   `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
   do not change `HOME` or create a second state directory mid-session.
 
+## Runtime Persistence
+
+Commands that fail on the runtime store return `waiting_on=runtime_store`, keep
+the store's own `reason_code`, and add `retryable`. The failed command committed
+nothing.
+
+- `STALE_REVISION` (`retryable=true`): another command changed the session after
+  this one loaded it. Rerun the same command; it reloads the current state.
+  Classification, lease release, and reclaim decide inside the write lock and
+  never report it; submit reruns itself up to three times before reporting it.
+- `PERSISTENCE_BUSY` (`retryable=true`): the store stayed locked past its bounded
+  wait. Let the other gh-address-cr command finish, then rerun the same command.
+- `PERSISTENCE_INVALID` (`retryable=false`): the store failed an integrity check
+  (for example an edited recovery bundle or an invariant violation). Stop. Do not
+  edit `session.json`, `evidence.jsonl`, or `runtime.sqlite3`, and keep
+  `legacy-v1-recovery/` intact; report it with `gh-address-cr submit-feedback`.
+
+If `reason_code` is `DISPATCH_PROJECTION_FAILED`:
+- **Action**: `agent orchestrate step` failed after the runtime claimed the item and has released that claim. When `next_action` is `RETRY`, rerun the step; when it is `HALT`, the release itself failed, so inspect `gh-address-cr agent leases <owner/repo> <pr_number>` before stepping again.
+
 ## Active Work
 
 If `status` is `ACTION_REQUESTED`:
@@ -83,6 +103,9 @@ If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 
 If `reason_code` is `PUBLISH_RECONCILE_REQUIRED`:
 - **Action**: Inspect the named GitHub thread and do not retry `agent publish` blindly. The canonical outbox says an interrupted reply may already have been posted, but the runtime could not match it automatically. If the reply exists, record its exact URL and author with the returned item-scoped `gh-address-cr agent evidence add ... --reply-url ... --author-login ...` command, then rerun publish and final-gate. If no matching reply can be identified, stop for manual reconciliation rather than posting a duplicate.
+
+If `reason_code` is `SIDE_EFFECT_IN_PROGRESS`:
+- **Action**: Another live process holds the execution lock for this GitHub reply or resolve. Do not reconcile or post it yourself. Wait for that process to finish, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`; publish reads the canonical outbox and reuses the recorded result. If the owning process dies, the next run sees the command as `unknown` and follows the `PUBLISH_RECONCILE_REQUIRED` rules.
 
 If `reason_code` is `LEASE_LOCKED_ITEM`:
 - **Action**: Do not retry blindly. A fixer that already holds an active lease on the item does not see this error: `gh-address-cr agent next <owner/repo> <pr_number> --role fixer --agent-id <id> --item-id <item_id>` re-enters that lease and returns the same request, recreating the request files under the original `request_id` if they were lost. The `--item-id` is required: without it the item is skipped as already leased and the command answers `NO_ELIGIBLE_ITEM` rather than re-entering. When this error does appear, read `lease_recovery.reason_code`: `LEASE_ACTIVE` means the requesting agent owns the lease but is not a fixer, or has already submitted against it, or the lease carries no request on record, and `lease_recovery.resume_command` names the submit step against the ActionRequest it already holds; `LEASE_RECOVERY_STOP` means another agent or role owns the item and no command is offered. `gh-address-cr agent reclaim <owner/repo> <pr_number>` only expires leases past their TTL and will not free a still-valid one, so it is not a recovery step here. Run `gh-address-cr agent leases <owner/repo> <pr_number>` to see the authoritative owner before trying item-mode `agent resolve` again.

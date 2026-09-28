@@ -38,13 +38,19 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
 
 ## F1 — Atomic initialization and migration (035a)
 
-- Replace `_bootstrap_new` temp-db + `os.replace` with `RuntimeStore.initialize(...)`:
-  connect to `runtime.sqlite3`, `BEGIN EXCLUSIVE`; if `store_metadata` exists,
-  roll back and `load()`; otherwise create schema, write rows and
-  `migration_history`, commit. A crash rolls back via the journal.
-- Add `RuntimeStore.is_initialized()`; replace every `database_path.exists()`
-  decision in `src/gh_address_cr/core/session.py`. `_validate_schema` reports an
-  empty database as uninitialized rather than `PERSISTENCE_INVALID`.
+- Replace `_bootstrap_new` temp-db + `os.replace` with a private
+  `RuntimeStore._initialize(...)` behind the existing `bootstrap` and
+  `open_or_migrate` entry points: connect to `runtime.sqlite3`,
+  `BEGIN EXCLUSIVE`; if `store_metadata` exists, roll back and `load()`;
+  otherwise create schema, write rows and `migration_history`, commit. A crash
+  rolls back via the journal. The schema is created one statement at a time
+  because `executescript` commits any open transaction first.
+- Add `RuntimeStore.is_initialized()` (committed metadata row, not file
+  existence); replace every `database_path.exists()` decision in
+  `src/gh_address_cr/core/session.py`. A metadata table without its row fails
+  fast with `PERSISTENCE_INVALID`; `load()` on an uninitialized store still fails fast.
+- `bootstrap(..., require_new=True)` raises `StaleRevisionError` when another
+  writer initialized first, so `save_session` never silently drops its payload.
 - `save_session` refuses to bootstrap over a legacy `session.json` (FR-003).
 - Lock timeout surfaces as `PersistenceBusyError`; no bare `FileExistsError`.
 - Migration is the only documented case of file IO inside a write transaction.
@@ -108,6 +114,22 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
   Persistence" section to `skill/references/status-action-map.md`, and matching
   text in `skill/references/agent-protocol.md` and `skill/SKILL.md`.
 
+### 035c as built
+
+- Agent commands intercept `SessionError` once in `handle_agent_command`, and
+  handlers with their own catch-all intercept it first; high-level commands
+  intercept it around the whole flow. Both emit `session_error_guidance`
+  (reason code, `waiting_on=runtime_store`, `retryable`, next action) so there
+  is one source for the wording. Before this, most agent commands let the error
+  escape as a traceback.
+- Classification, lease release, and reclaim run as `transact_session`
+  closures; evidence a closure records through a session ledger commits in the
+  same transaction. Submit reads GitHub for revision binding before it saves,
+  so it cannot hold the write lock; its accept phase is pure until the save and
+  reruns from fresh state on `STALE_REVISION`, at most three attempts, emitting
+  a bounded `persistence.stale_retry` event per retry. Publishing after submit
+  runs outside that retry.
+
 ## F6 — Database-enforced invariants (035b, schema v2)
 
 - Document `payload_json` as per-row truth and normalized columns as same-transaction index projections.
@@ -131,6 +153,70 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
 - `handle_step` catches known exceptions after `issue_action_request`, releases
   the claim via `leases.release_claimed_lease(..., reason="dispatch_projection_failed")`,
   and returns `DISPATCH_PROJECTION_FAILED`.
+
+## 035b Implementation Notes (as built)
+
+These record where the implementation refined the plan above; each is covered
+by a contract test in `tests/contract/test_outbox_ownership_contract.py`.
+
+- **Backfill never overwrites.** Rows already present in the outbox are
+  canonical (a Spec 034 store wrote them); only side-effect keys with no row
+  are derived from `side_effect_attempt` evidence. A derived success without an
+  external reference becomes `unknown` and goes through reconciliation.
+- **Drift is decided by stat, not hash.** Materialization records each
+  projection's size and mtime. A mismatch always means the file is not what the
+  runtime wrote, so it is rebuilt (`drift_repaired`); no hash comparison is
+  needed and `content_hash` is no longer populated.
+- **Projections are written under the store's write lock**, in one
+  transaction with their materialization rows, so the recorded revision always
+  matches the bytes and concurrent writers cannot interleave appends. The
+  session-only projection path was removed: it left the ledger rows a revision
+  behind and made every following load rebuild all three files.
+- **Recovery-bundle verification is stat-gated.** The bundle's stat signature
+  is recorded (`store_metadata.legacy_bundle_signature`) when it is verified at
+  import or at the v1→v2 upgrade; a load hashes the bundle again only when the
+  signature moved, and a changed bundle still fails fast.
+- **Session rows are written differentially.** Only item and lease rows whose
+  payload changed are rewritten (changed and removed leases are deleted before
+  any insert, so a release plus a new grant on one item never trips the index),
+  and `transition_revision` / `last_observed_revision` record the last change.
+  An item's first rewrite after load also stores its derived claim fields.
+- **No redundant reloads.** `replace()` commits the caller's payload without
+  loading or reloading a snapshot; `transact()` returns an in-memory committed
+  view that is proven equal to a fresh reload; materialization reuses a
+  committed snapshot that is still the latest revision.
+- **Execution guard.** `side_effect_outbox.execution_guard` owns the advisory
+  lock from before the `in_flight` commit until the result commits or the call
+  unwinds; marking a side effect `in_flight` outside the guard is a programming
+  error. `record_outbox_result` accepts an `in_flight` result only from the
+  owner token.
+- **Deferred to 035d:** the `ExecutionMetric` persistence fields move to P4,
+  which is their only consumer.
+- **Rejected:** WAL with `synchronous=NORMAL` measured no gain (commit fsync is
+  not the bottleneck), so the store keeps rollback-journal full durability.
+
+## 035d Implementation Notes (as built)
+
+- Dispatch receipts are `dispatch-receipt.v2`; the delivery token is the
+  canonical lease's `resume_token`. Reconciliation drops dispatches whose lease
+  is no longer active for that item and rebuilds missing dispatches for active
+  leases whose holder starts with `orchestrator:` (a restarted run adopts its
+  predecessor's leases). `validate_dispatch` mirrors canonical lease existence
+  and status only; request binding is carried by the token and every other
+  lease rule stays with core submit. v1 receipts on disk stay valid.
+- A failure after the core claim releases that claim and returns
+  `DISPATCH_PROJECTION_FAILED` (`RETRY`, or `HALT` if the release also failed).
+- P4 needed a signal the report never had: `SessionTelemetry` recorded only
+  subprocesses and adapters, never gh-address-cr's own commands. The CLI now
+  records each PR-bound command as an `ExecutionMetric` with
+  `persistence_ms` / `lock_wait_ms`; the efficiency report adds
+  `operation_latency` (p50, p90, persistence share) and flags an operation whose
+  last-fifth median exceeds its first-fifth median by more than 2x (at least 10
+  samples); the flag reaches the final-gate completion line's `issues`.
+- Binding telemetry to a PR re-read the whole `telemetry.jsonl` on every
+  session load and transaction; with one line per command that became a new
+  linear cost. History now loads only when a report needs it, and `record`
+  reads just the file's last line for retry detection.
 
 ## Performance and Observability
 

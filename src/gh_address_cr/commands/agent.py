@@ -23,6 +23,7 @@ from gh_address_cr.commands.common import (
 )
 from gh_address_cr.commands.common import (
     output_generic_agent_error,
+    output_session_error,
     output_workflow_error,
 )
 from gh_address_cr.commands.common import (
@@ -38,6 +39,7 @@ from gh_address_cr.core import (
     workflow,
     workflow_matching,
 )
+from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 
 PUBLIC_COMMANDS = {
@@ -118,6 +120,15 @@ def build_agent_manifest() -> dict:
 
 
 def handle_agent_command(args: argparse.Namespace) -> int:
+    try:
+        return _route_agent_command(args)
+    except session_store.SessionError as exc:
+        # Any agent subcommand can hit a session or persistence failure after its own
+        # error handling; surface its reason code instead of an unstructured traceback.
+        return output_session_error(exc, repo=args.pr_number, pr_number=args.args[0] if args.args else None)
+
+
+def _route_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
             "usage: gh-address-cr agent {manifest,classify,next,submit,resolve,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
@@ -914,6 +925,8 @@ def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
         )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, "PUBLISH_ERROR", str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -931,6 +944,8 @@ def handle_agent_leases(repo: str | None, passthrough: list[str]) -> int:
         payload = leases.list_leases(parsed.repo, parsed.pr_number)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -950,6 +965,8 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
         payload = leases.reclaim_leases(parsed.repo, parsed.pr_number, now=now)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")

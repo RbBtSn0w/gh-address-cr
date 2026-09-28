@@ -70,6 +70,26 @@ def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, mess
     return 5
 
 
+def output_session_error(exc: Any, *, repo: str | None, pr_number: str | None) -> int:
+    """Emit a structured failure that keeps a session/persistence error's own reason code."""
+    from gh_address_cr.core.session import session_error_guidance
+
+    guidance = session_error_guidance(exc)
+    payload = {
+        "status": "FAILED",
+        "repo": repo,
+        "pr_number": pr_number,
+        **guidance,
+        "exit_code": 5,
+        "remediation": remediation_for(
+            guidance["reason_code"], repo=repo or "<owner/repo>", pr_number=pr_number or "<pr_number>"
+        ),
+    }
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(guidance["next_action"], file=sys.stderr)
+    return 5
+
+
 def root_passthrough_args(args: argparse.Namespace) -> list[str]:
     return [*([args.repo] if args.repo else []), *([args.pr_number] if args.pr_number else []), *args.args]
 

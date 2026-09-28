@@ -27,6 +27,70 @@ class SessionError(RuntimeError):
         super().__init__(detail)
 
 
+# Persistence outcomes an agent may retry by rerunning the same command.
+RETRYABLE_SESSION_REASONS = frozenset({"STALE_REVISION", "PERSISTENCE_BUSY"})
+STALE_REVISION_ATTEMPTS = 3
+
+_PERSISTENCE_NEXT_ACTIONS = {
+    "STALE_REVISION": (
+        "Another gh-address-cr command changed this session after it was loaded. Rerun the same command; "
+        "it reloads the current state."
+    ),
+    "PERSISTENCE_BUSY": (
+        "The runtime store stayed locked past its bounded wait. Let the other gh-address-cr command finish, "
+        "then rerun the same command."
+    ),
+    "PERSISTENCE_INVALID": (
+        "The runtime store failed an integrity check. Stop: do not edit session.json, evidence.jsonl, or "
+        "runtime.sqlite3, and keep legacy-v1-recovery intact. Report it with `gh-address-cr submit-feedback`."
+    ),
+}
+
+
+def session_error_guidance(exc: SessionError) -> dict[str, Any]:
+    """The machine-facing recovery fields for a session or persistence failure."""
+    reason_code = str(exc.reason_code)
+    if reason_code in _PERSISTENCE_NEXT_ACTIONS:
+        waiting_on = "runtime_store"
+        next_action = f"{_PERSISTENCE_NEXT_ACTIONS[reason_code]} ({exc})"
+    else:
+        waiting_on = "state_directory" if reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
+        next_action = str(exc)
+    return {
+        "reason_code": reason_code,
+        "waiting_on": waiting_on,
+        "next_action": next_action,
+        "retryable": reason_code in RETRYABLE_SESSION_REASONS,
+    }
+
+
+def retry_on_stale_revision(operation: Callable[[], T], *, attempts: int = STALE_REVISION_ATTEMPTS) -> T:
+    """Rerun a load-validate-save operation when a concurrent writer committed first.
+
+    Only for operations whose work before the save is pure (no external side
+    effects), so a rerun from freshly loaded state is equivalent to the first
+    try. The bounded attempts keep a hot session from spinning; the final
+    conflict surfaces as ``STALE_REVISION``.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except SessionError as exc:
+            if exc.reason_code != "STALE_REVISION" or attempt == attempts:
+                raise
+            _emit_stale_retry(attempt)
+    raise AssertionError("unreachable")
+
+
+def _emit_stale_retry(attempt: int) -> None:
+    try:
+        from gh_address_cr.otel_tracing import add_current_span_event
+
+        add_current_span_event("persistence.stale_retry", {"persistence.retry_attempt": attempt})
+    except Exception:
+        return
+
+
 def state_dir() -> Path:
     try:
         path = paths.state_dir()
@@ -134,16 +198,17 @@ class SessionManager:
 def load_session(repo: str, pr_number: str) -> dict[str, Any]:
     path = session_file(repo, pr_number)
     store = RuntimeStore(workspace_dir(repo, pr_number))
-    if not store.database_path.exists() and not path.exists():
-        raise SessionError("SESSION_NOT_FOUND", f"No session exists for {repo} PR {pr_number}. Run review first.")
-    if not store.database_path.exists():
-        try:
-            read_json_object(path)
-        except JsonIOError as exc:
-            reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
-            raise SessionError(reason_code, str(exc)) from exc
     try:
-        if not store.database_path.exists():
+        if not store.is_initialized():
+            if not path.exists():
+                raise SessionError(
+                    "SESSION_NOT_FOUND", f"No session exists for {repo} PR {pr_number}. Run review first."
+                )
+            try:
+                read_json_object(path)
+            except JsonIOError as exc:
+                reason_code = "INVALID_SESSION_JSON" if exc.reason_code == "INVALID_JSON" else exc.reason_code
+                raise SessionError(reason_code, str(exc)) from exc
             store.open_or_migrate(
                 session_path=path,
                 ledger_path=default_ledger_path(repo, pr_number),
@@ -176,7 +241,7 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     store = RuntimeStore(workspace_dir(repo, pr_number))
     evidence = take_pending_evidence(payload)
     try:
-        if store.database_path.exists():
+        if store.is_initialized():
             persistence = payload.get("persistence")
             if not isinstance(persistence, dict) or not isinstance(persistence.get("revision"), int):
                 raise SessionError(
@@ -189,16 +254,18 @@ def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
                 operation="session_update",
                 evidence=evidence,
             )
-        else:
-            snapshot = store.bootstrap(payload, evidence=evidence)
-        payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
-        if evidence:
-            store.materialize_compatibility_artifacts(
-                session_path=path,
-                ledger_path=default_ledger_path(repo, pr_number),
+        elif path.exists():
+            raise SessionError(
+                "PERSISTENCE_INVALID",
+                "A legacy session exists but has not been migrated. Load the session to import it before saving.",
             )
         else:
-            store.materialize_session_projection(session_path=path)
+            snapshot = store.bootstrap(payload, evidence=evidence, require_new=True)
+        payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
+        store.materialize_compatibility_artifacts(
+            session_path=path,
+            ledger_path=default_ledger_path(repo, pr_number),
+        )
     except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
 
@@ -214,9 +281,15 @@ def transact_session(
     outbox: list[dict[str, Any]] | None = None,
 ) -> TransactionResult:
     store = RuntimeStore(workspace_dir(repo, pr_number))
-    if not store.database_path.exists():
-        load_session(repo, pr_number)
     try:
+        if not store.is_initialized():
+            load_session(repo, pr_number)
+        else:
+            # load_session binds local telemetry to this PR; a transaction-only command must too,
+            # or its subprocess and command metrics are dropped.
+            from gh_address_cr.core.telemetry import configure_context_safely
+
+            configure_context_safely(repo, pr_number)
         result = store.transact(
             mutation,
             expected_revision=expected_revision,
@@ -226,13 +299,11 @@ def transact_session(
         )
         payload = result.payload
         payload["persistence"] = {"schema_version": result.schema_version, "revision": result.revision}
-        if evidence:
-            store.materialize_compatibility_artifacts(
-                session_path=session_file(repo, pr_number),
-                ledger_path=default_ledger_path(repo, pr_number),
-            )
-        else:
-            store.materialize_session_projection(session_path=session_file(repo, pr_number))
+        store.materialize_compatibility_artifacts(
+            session_path=session_file(repo, pr_number),
+            ledger_path=default_ledger_path(repo, pr_number),
+            committed=result,
+        )
         return TransactionResult(
             payload=payload,
             revision=result.revision,

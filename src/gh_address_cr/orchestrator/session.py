@@ -14,7 +14,10 @@ STATE_COMPLETED = "COMPLETED"
 STATE_FAILED = "FAILED"
 
 ORCHESTRATION_SCHEMA_VERSION = 2
-DISPATCH_RECEIPT_SCHEMA_VERSION = "dispatch-receipt.v1"
+DISPATCH_RECEIPT_SCHEMA_VERSION = "dispatch-receipt.v2"
+_SUPPORTED_RECEIPT_VERSIONS = {"dispatch-receipt.v1", DISPATCH_RECEIPT_SCHEMA_VERSION}
+ORCHESTRATOR_AGENT_PREFIX = "orchestrator:"
+_CANONICAL_ACTIVE_STATUSES = {"active", "submitted"}
 
 
 class DispatchValidationError(Exception):
@@ -57,7 +60,7 @@ class DispatchReceipt:
 
     @classmethod
     def from_dict(cls, data: dict) -> "DispatchReceipt":
-        if data.get("schema_version") != DISPATCH_RECEIPT_SCHEMA_VERSION:
+        if data.get("schema_version") not in _SUPPORTED_RECEIPT_VERSIONS:
             raise OrchestrationSessionError("Unsupported dispatch receipt schema version.")
         return cls(
             item_id=data["item_id"],
@@ -130,7 +133,14 @@ class OrchestrationSession:
         lease_id: str,
         request_id: str,
         runtime_revision: int,
+        delivery_token: str,
     ) -> DispatchReceipt:
+        """Project a worker dispatch for a canonical lease.
+
+        The delivery token is the lease's committed ``resume_token``, so a
+        dispatch rebuilt from canonical state after a restart hands the worker's
+        original token back instead of stranding it.
+        """
         receipt = DispatchReceipt(
             item_id=item_id,
             assigned_role=role,
@@ -138,25 +148,24 @@ class OrchestrationSession:
             lease_id=lease_id,
             request_id=request_id,
             runtime_revision=runtime_revision,
-            delivery_token=f"dispatch-{uuid.uuid4().hex}",
+            delivery_token=delivery_token,
         )
         self.active_dispatches[item_id] = receipt
         self.log_audit_event("DISPATCH_PROJECTED", {"item_id": item_id, "role": role})
         return receipt
 
     def validate_dispatch(self, item_id: str, delivery_token: str, runtime_state: dict) -> DispatchReceipt:
+        """Match a worker's token to its dispatch and mirror the canonical lease status.
+
+        The token is the lease's ``resume_token``, which already binds the
+        request; expiry and every other lease rule stay with the core submit
+        transaction. This only refuses a dispatch whose canonical lease is gone.
+        """
         receipt = self.active_dispatches.get(item_id)
         if receipt is None or receipt.delivery_token != delivery_token:
             raise DispatchValidationError("Dispatch token does not match the active projection.")
-        lease = runtime_state.get("leases", {}).get(receipt.lease_id)
-        if not isinstance(lease, dict):
-            raise DispatchValidationError("Canonical lease no longer exists.")
-        if str(lease.get("status") or "").lower() not in {"active", "submitted"}:
-            raise DispatchValidationError("Canonical lease is no longer active.")
-        if str(lease.get("item_id") or "") != item_id:
-            raise DispatchValidationError("Canonical lease item binding changed.")
-        if str(lease.get("request_id") or "") != receipt.request_id:
-            raise DispatchValidationError("Canonical request binding changed.")
+        if _canonical_active_lease(runtime_state, receipt.lease_id, item_id) is None:
+            raise DispatchValidationError("Canonical lease is no longer active for this item.")
         return receipt
 
     def remove_dispatch(self, item_id: str, delivery_token: str) -> None:
@@ -169,14 +178,44 @@ class OrchestrationSession:
         self.log_audit_event("DISPATCH_REMOVED", {"item_id": item_id})
 
     def reconcile_dispatches(self, runtime_state: dict, *, runtime_revision: int) -> dict[str, int]:
+        """Mirror canonical orchestrator leases: drop dispatches without one, rebuild missing ones."""
+        leases = runtime_state.get("leases") if isinstance(runtime_state, dict) else {}
+        leases = leases if isinstance(leases, dict) else {}
         removed = 0
         for item_id, receipt in list(self.active_dispatches.items()):
-            try:
-                self.validate_dispatch(item_id, receipt.delivery_token, runtime_state)
-            except DispatchValidationError:
+            if _canonical_active_lease(runtime_state, receipt.lease_id, item_id) is None:
                 del self.active_dispatches[item_id]
                 removed += 1
-        return {"retained": len(self.active_dispatches), "removed": removed, "runtime_revision": runtime_revision}
+        rebuilt = 0
+        for lease_id, lease in leases.items():
+            if not isinstance(lease, dict):
+                continue
+            item_id = str(lease.get("item_id") or "")
+            if (
+                not item_id
+                or item_id in self.active_dispatches
+                or not str(lease.get("agent_id") or "").startswith(ORCHESTRATOR_AGENT_PREFIX)
+                or str(lease.get("status") or "").lower() not in _CANONICAL_ACTIVE_STATUSES
+                or not lease.get("resume_token")
+            ):
+                continue
+            self.active_dispatches[item_id] = DispatchReceipt(
+                item_id=item_id,
+                assigned_role=str(lease.get("role") or ""),
+                agent_id=str(lease.get("agent_id")),
+                lease_id=str(lease_id),
+                request_id=str(lease.get("request_id") or ""),
+                runtime_revision=runtime_revision,
+                delivery_token=str(lease["resume_token"]),
+            )
+            self.log_audit_event("DISPATCH_REBUILT", {"item_id": item_id})
+            rebuilt += 1
+        return {
+            "retained": len(self.active_dispatches) - rebuilt,
+            "removed": removed,
+            "rebuilt": rebuilt,
+            "runtime_revision": runtime_revision,
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -222,6 +261,16 @@ class OrchestrationSession:
                 "ORCHESTRATION_V1_RECONCILE_REQUIRED: legacy shadow leases were discarded; runtime reconciliation is required"
             )
         return session
+
+
+def _canonical_active_lease(runtime_state: dict, lease_id: str, item_id: str) -> dict | None:
+    leases = runtime_state.get("leases") if isinstance(runtime_state, dict) else None
+    lease = leases.get(lease_id) if isinstance(leases, dict) else None
+    if not isinstance(lease, dict) or str(lease.get("item_id") or "") != item_id:
+        return None
+    if str(lease.get("status") or "").lower() not in _CANONICAL_ACTIVE_STATUSES:
+        return None
+    return lease
 
 
 def save_orchestration_session(session: OrchestrationSession) -> None:

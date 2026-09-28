@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from gh_address_cr.core.leases import LeaseConflictError, claim_lease
 from gh_address_cr.core.runtime_store import (
+    SCHEMA_VERSION,
     PersistenceBusyError,
     PersistenceInvalidError,
     RuntimeStore,
@@ -264,7 +265,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
             ledger_metadata = json.loads(
                 ledger_path.with_name("evidence.jsonl.meta.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(ledger_metadata, {"format_version": 1, "schema_version": 1, "revision": 1})
+            self.assertEqual(ledger_metadata, {"format_version": 1, "schema_version": SCHEMA_VERSION, "revision": 1})
 
     def test_tampered_legacy_recovery_bundle_fails_integrity_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,7 +292,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "injected import crash"):
                     store.open_or_migrate(session_path=session_path, ledger_path=ledger_path)
 
-            self.assertFalse(store.database_path.exists())
+            self.assertFalse(store.is_initialized())
             self.assertTrue((workspace / "legacy-v1-recovery" / "manifest.json").is_file())
             self.assertEqual(list(workspace.glob("runtime.*.sqlite3.tmp")), [])
 
@@ -819,7 +820,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         transaction = next(attributes for name, attributes in events if name == "persistence.transaction")
         self.assertEqual(transaction["persistence.operation"], "status_update")
         self.assertEqual(transaction["persistence.outcome"], "committed")
-        self.assertEqual(transaction["persistence.schema_version"], 1)
+        self.assertEqual(transaction["persistence.schema_version"], SCHEMA_VERSION)
         serialized = json.dumps(events, sort_keys=True)
         for forbidden in ("owner/repo", "finding-1", "runtime.sqlite3", str(workspace), "SELECT", "INSERT"):
             self.assertNotIn(forbidden, serialized)

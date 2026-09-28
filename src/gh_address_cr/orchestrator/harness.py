@@ -13,6 +13,7 @@ from gh_address_cr.core import agent_protocol, protocol_codes
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as core_session
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.leases import release_claimed_lease
 from gh_address_cr.orchestrator.session import (
     DispatchValidationError,
     OrchestrationSession,
@@ -501,13 +502,16 @@ def handle_step(args: List[str]) -> int:
         runtime_state = _load_runtime_state(repo, pr)
         persistence = runtime_state.get("persistence") if isinstance(runtime_state, dict) else {}
         runtime_revision = int(persistence.get("revision") or 0) if isinstance(persistence, dict) else 0
+        lease_id = str(action_result["lease_id"])
+        canonical_lease = runtime_state.get("leases", {}).get(lease_id) or {}
         dispatch = session.project_dispatch(
             item_id=item_id,
             role=role,
             agent_id=f"orchestrator:{session.run_id}",
-            lease_id=str(action_result["lease_id"]),
+            lease_id=lease_id,
             request_id=str(action_request["request_id"]),
             runtime_revision=runtime_revision,
+            delivery_token=str(canonical_lease["resume_token"]),
         )
         warnings = session.pop_audit_warnings()
 
@@ -535,8 +539,26 @@ def handle_step(args: List[str]) -> int:
         sys.stdout.write(json.dumps(payload) + "\n")
         return 0
     except Exception as e:
-        _output_signal("FAILED", protocol_codes.SYSTEM_ERROR, "HALT", f"Failed to project worker dispatch: {e}")
+        # The core claim already committed; without a dispatch no worker will ever submit
+        # against it, so release it now instead of leaving the item locked until TTL.
+        released = _release_undispatched_claim(repo, pr, action_result)
+        _output_signal(
+            "FAILED",
+            protocol_codes.DISPATCH_PROJECTION_FAILED,
+            "RETRY" if released else "HALT",
+            f"Failed to project worker dispatch ({type(e).__name__}): {e}",
+        )
         return 5
+
+
+def _release_undispatched_claim(repo: str, pr: str, action_result: dict) -> bool:
+    lease_id = action_result.get("lease_id") if isinstance(action_result, dict) else None
+    if not lease_id:
+        return False
+    try:
+        return release_claimed_lease(repo, pr, lease_id=str(lease_id), reason="dispatch_projection_failed")
+    except Exception:
+        return False
 
 
 def handle_resume(args: List[str]) -> int:
@@ -655,12 +677,13 @@ def _record_reconciliation_event(result: dict[str, int]) -> None:
 
     removed = int(result.get("removed") or 0)
     retained = int(result.get("retained") or 0)
-    count = removed + retained
+    rebuilt = int(result.get("rebuilt") or 0)
+    count = removed + retained + rebuilt
     count_bucket = "0" if count == 0 else "1" if count == 1 else "2-5" if count <= 5 else "6+"
     add_current_span_event(
         "orchestrator.reconcile",
         {
-            "gh_address_cr.orchestrator.reconcile.outcome": "repaired" if removed else "current",
+            "gh_address_cr.orchestrator.reconcile.outcome": "rebuilt" if rebuilt else "repaired" if removed else "current",
             "gh_address_cr.orchestrator.reconcile.count_bucket": count_bucket,
         },
     )

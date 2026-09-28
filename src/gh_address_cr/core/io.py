@@ -39,6 +39,50 @@ def write_json_atomic(path: str | Path, payload: Any) -> None:
         raise
 
 
+def write_json_durable(path: str | Path, payload: Any) -> None:
+    """Atomically replace ``path`` and fsync the file and its directory.
+
+    Reserved for artifacts that cannot be rebuilt, such as the legacy recovery
+    bundle. Rebuildable projections use ``write_json_atomic`` and skip the fsync
+    cost on every runtime transaction.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f"{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(json_ready(payload), handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except Exception:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
+    fsync_directory(target.parent)
+
+
+def fsync_file(path: str | Path) -> None:
+    with open(path, "rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def fsync_directory(path: str | Path) -> None:
+    """Persist directory entries (creations and renames) on POSIX.
+
+    Windows cannot open a directory for fsync; NTFS journals metadata updates,
+    so there is no equivalent call to make there.
+    """
+    if os.name == "nt":
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def read_json_object(path: str | Path) -> dict[str, Any]:
     target = Path(path)
     try:

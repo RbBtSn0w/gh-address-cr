@@ -17,6 +17,10 @@ from typing import Any, TypedDict
 # the external-event reporting helpers.
 MAX_DURATION_SECONDS = 60.0
 MAX_ERROR_RATE_PERCENT = 20.0
+# Within-session slowdown: flag an operation whose late-session median latency
+# exceeds its early-session median by this ratio, once it has enough samples.
+LATENCY_GROWTH_RATIO = 2.0
+LATENCY_GROWTH_MIN_SAMPLES = 10
 
 
 @dataclass
@@ -28,6 +32,8 @@ class ExecutionMetric:
     is_retry: bool = False
     pid: int = 0
     execution_id: str = ""
+    persistence_ms: float | None = None
+    lock_wait_ms: float | None = None
 
     @property
     def duration(self) -> float:
@@ -38,7 +44,7 @@ class ExecutionMetric:
         return self.exit_code == 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "command": self.command,
             "start_time": self.start_time,
             "end_time": self.end_time,
@@ -49,6 +55,11 @@ class ExecutionMetric:
             "pid": self.pid,
             "execution_id": self.execution_id,
         }
+        if self.persistence_ms is not None:
+            payload["persistence_ms"] = self.persistence_ms
+        if self.lock_wait_ms is not None:
+            payload["lock_wait_ms"] = self.lock_wait_ms
+        return payload
 
 
 @dataclass
@@ -135,6 +146,7 @@ class EfficiencyReportPayload(TypedDict):
     slowest_operations: list[SlowestOperation]
     error_prone_operations: list[dict[str, Any]]
     inefficiency_flags: list[str]
+    operation_latency: list[dict[str, Any]]
     cli_health_issues: list[dict[str, Any]]
     diagnostics: list[str]
     confidence: str
