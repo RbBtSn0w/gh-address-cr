@@ -62,7 +62,9 @@ class SingleItemDeclineAxesCLITest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def test_single_disposition_reject_on_fresh_thread(self):
         # (single x reject x fresh): the flagship #204 cell.

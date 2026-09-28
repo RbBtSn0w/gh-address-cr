@@ -9,6 +9,53 @@ from unittest.mock import patch
 
 
 class NativeSessionTests(unittest.TestCase):
+    def test_bounded_command_defers_session_projection_but_keeps_evidence_current(self):
+        from gh_address_cr.core import agent_protocol
+        from gh_address_cr.core.runtime_store import RuntimeStore
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("owner/repo", "124")
+                session = manager.create(status="WAITING_FOR_CLASSIFICATION")
+                session["items"] = {
+                    "local:1": {
+                        "item_id": "local:1",
+                        "item_kind": "local_finding",
+                        "state": "open",
+                        "status": "OPEN",
+                    }
+                }
+                manager.save(session)
+
+                agent_protocol.record_classification(
+                    "owner/repo",
+                    "124",
+                    item_id="local:1",
+                    classification="fix",
+                    agent_id="triage-1",
+                    note="Real defect.",
+                )
+
+                stale_projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+                evidence = [
+                    json.loads(line)
+                    for line in manager.ledger_path.read_text(encoding="utf-8").splitlines()
+                ]
+                materializations = {
+                    row["artifact_kind"]: row
+                    for row in RuntimeStore(manager.workspace_path).load_materializations()
+                }
+                loaded = manager.load()
+                current_projection = json.loads(manager.session_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(stale_projection["persistence"]["revision"], 1)
+        self.assertEqual([row["event_type"] for row in evidence], ["classification_recorded"])
+        self.assertEqual(materializations["session_json"]["status"], "dirty")
+        self.assertEqual(materializations["evidence_jsonl"]["status"], "current")
+        self.assertEqual(loaded["persistence"]["revision"], 2)
+        self.assertEqual(current_projection["persistence"]["revision"], 2)
+
     def test_session_manager_creates_loads_and_saves_pr_scoped_session(self):
         from gh_address_cr.core.session import SessionManager
 
@@ -28,7 +75,7 @@ class NativeSessionTests(unittest.TestCase):
                 self.assertEqual(Path(loaded["ledger_path"]).name, "evidence.jsonl")
                 self.assertEqual(manager.session_path.name, "session.json")
                 self.assertTrue((manager.workspace_path / "runtime.sqlite3").is_file())
-                self.assertEqual(loaded["persistence"], {"schema_version": 2, "revision": 1})
+                self.assertEqual(loaded["persistence"], {"schema_version": 3, "revision": 1})
 
     def test_session_json_is_a_projection_and_cannot_overwrite_runtime_truth(self):
         from gh_address_cr.core.session import SessionManager
@@ -154,7 +201,7 @@ class NativeSessionTests(unittest.TestCase):
 
                 payload = json.loads(manager.session_path.read_text(encoding="utf-8"))
                 self.assertEqual(payload["status"], "WAITING_FOR_FIX")
-                self.assertEqual(payload["persistence"], {"schema_version": 2, "revision": 2})
+                self.assertEqual(payload["persistence"], {"schema_version": 3, "revision": 2})
                 self.assertEqual(list(manager.session_path.parent.glob("*.tmp")), [])
 
     def test_state_dir_reports_actionable_error_when_directory_is_not_writable(self):

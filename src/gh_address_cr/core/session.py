@@ -13,6 +13,7 @@ from gh_address_cr.core.runtime_store import (
     RuntimeStore,
     StaleRevisionError,
     TransactionResult,
+    WorkingSetRequest,
 )
 from gh_address_cr.evidence.ledger import take_pending_evidence
 
@@ -236,6 +237,32 @@ def load_session(repo: str, pr_number: str) -> dict[str, Any]:
     return payload
 
 
+def load_working_set(repo: str, pr_number: str, request: WorkingSetRequest) -> dict[str, Any]:
+    """Load a declared runtime subset while preserving recovery and revision semantics."""
+    store = RuntimeStore(workspace_dir(repo, pr_number))
+    try:
+        if not store.is_initialized():
+            load_session(repo, pr_number)
+        else:
+            from gh_address_cr.core.telemetry import configure_context_safely
+
+            configure_context_safely(repo, pr_number)
+        store.recover()
+        snapshot = store.load_working_set(request)
+    except (PersistenceBusyError, PersistenceInvalidError) as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
+    payload = snapshot.payload
+    payload["persistence"] = {"schema_version": snapshot.schema_version, "revision": snapshot.revision}
+    payload.setdefault("session_id", f"{repo}#{pr_number}")
+    payload.setdefault("repo", repo)
+    payload.setdefault("pr_number", str(pr_number))
+    payload.setdefault("items", {})
+    payload.setdefault("leases", {})
+    payload.setdefault("ledger_path", str(default_ledger_path(repo, pr_number)))
+    _coerce_lease_datetimes(payload)
+    return payload
+
+
 def save_session(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     path = session_file(repo, pr_number)
     store = RuntimeStore(workspace_dir(repo, pr_number))
@@ -299,10 +326,8 @@ def transact_session(
         )
         payload = result.payload
         payload["persistence"] = {"schema_version": result.schema_version, "revision": result.revision}
-        store.materialize_compatibility_artifacts(
-            session_path=session_file(repo, pr_number),
+        store.materialize_evidence_artifacts(
             ledger_path=default_ledger_path(repo, pr_number),
-            committed=result,
         )
         return TransactionResult(
             payload=payload,
@@ -311,6 +336,41 @@ def transact_session(
             value=result.value,
             operation=result.operation,
         )
+    except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
+
+
+def transact_working_set(
+    repo: str,
+    pr_number: str,
+    request: WorkingSetRequest,
+    mutation: Callable[[dict[str, Any]], T],
+    *,
+    operation: str,
+    expected_revision: int | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    outbox: list[dict[str, Any]] | None = None,
+) -> TransactionResult:
+    store = RuntimeStore(workspace_dir(repo, pr_number))
+    try:
+        if not store.is_initialized():
+            load_session(repo, pr_number)
+        else:
+            from gh_address_cr.core.telemetry import configure_context_safely
+
+            configure_context_safely(repo, pr_number)
+        result = store.transact_working_set(
+            request,
+            mutation,
+            expected_revision=expected_revision,
+            operation=operation,
+            evidence=evidence,
+            outbox=outbox,
+        )
+        store.materialize_evidence_artifacts(
+            ledger_path=default_ledger_path(repo, pr_number),
+        )
+        return result
     except (PersistenceBusyError, PersistenceInvalidError, StaleRevisionError) as exc:
         raise SessionError(exc.reason_code, str(exc)) from exc
 

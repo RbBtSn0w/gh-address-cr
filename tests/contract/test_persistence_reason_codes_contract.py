@@ -228,11 +228,12 @@ class StaleRevisionRetryContractTest(unittest.TestCase):
                     }),
                     encoding="utf-8",
                 )
-                real_load = session_store.load_session
+                real_full_load = session_store.load_session
+                real_load = session_store.load_working_set
                 interleaved: list[bool] = []
 
-                def load_then_commit_elsewhere(repo: str, pr_number: str) -> dict:
-                    session = real_load(repo, pr_number)
+                def load_then_commit_elsewhere(repo: str, pr_number: str, request) -> dict:
+                    session = real_load(repo, pr_number, request)
                     if not interleaved:
                         interleaved.append(True)
                         agent_protocol.record_classification(
@@ -241,11 +242,11 @@ class StaleRevisionRetryContractTest(unittest.TestCase):
                         )
                     return session
 
-                with patch.object(session_store, "load_session", side_effect=load_then_commit_elsewhere):
+                with patch.object(session_store, "load_working_set", side_effect=load_then_commit_elsewhere):
                     accepted = agent_protocol.submit_action_response(
                         REPO, PR_NUMBER, response_path=response_path, github_client=UnstackedGitHubClient()
                     )
-                final = real_load(REPO, PR_NUMBER)
+                final = real_full_load(REPO, PR_NUMBER)
 
         self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
         self.assertEqual(final["items"]["local:1"]["decision"], "fix")
@@ -315,6 +316,7 @@ class TransactionalHotPathContractTest(unittest.TestCase):
 
     def test_mutation_closures_perform_no_file_or_network_io(self):
         real_transact = session_store.transact_session
+        real_working_transact = session_store.transact_working_set
         guarded: list[str] = []
 
         def forbid(*args, **kwargs):
@@ -330,12 +332,29 @@ class TransactionalHotPathContractTest(unittest.TestCase):
 
             return real_transact(repo, pr_number, guarded_mutation, **kwargs)
 
+        def working_transact_with_io_guard(repo, pr_number, request, mutation, **kwargs):
+            def guarded_mutation(payload):
+                guarded.append(kwargs.get("operation", ""))
+                with patch.object(builtins, "open", side_effect=forbid), patch.object(
+                    socket, "socket", side_effect=forbid
+                ):
+                    return mutation(payload)
+
+            return real_working_transact(repo, pr_number, request, guarded_mutation, **kwargs)
+
         with tempfile.TemporaryDirectory() as tmp:
             _seed_session(tmp, items=2, expired_leases=1)
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 # Warm the state-directory writability cache that ledger construction consults.
                 session_store.workspace_dir(REPO, PR_NUMBER)
-                with patch.object(session_store, "transact_session", side_effect=transact_with_io_guard):
+                with (
+                    patch.object(session_store, "transact_session", side_effect=transact_with_io_guard),
+                    patch.object(
+                        session_store,
+                        "transact_working_set",
+                        side_effect=working_transact_with_io_guard,
+                    ),
+                ):
                     agent_protocol.record_classification(
                         REPO, PR_NUMBER, item_id="local:1", classification="fix", agent_id="triage", note="Real."
                     )

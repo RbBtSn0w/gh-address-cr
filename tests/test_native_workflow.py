@@ -97,6 +97,36 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(evidence_rows[0]["event_type"], "classification_recorded")
                 self.assertEqual(evidence_rows[0]["agent_id"], "triage-1")
 
+    def test_explicit_action_request_does_not_load_full_session(self):
+        from gh_address_cr.core import agent_protocol
+
+        repo = "owner/repo"
+        pr_number = "124"
+        item = open_item()
+        item["classification_evidence"] = {
+            "classification": "fix",
+            "event_type": "classification_recorded",
+            "note": "Real defect.",
+            "record_id": "classification-1",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                with patch.object(
+                    agent_protocol.session_store,
+                    "load_session",
+                    side_effect=AssertionError("full session load"),
+                ):
+                    requested = agent_protocol.issue_action_request(
+                        repo,
+                        pr_number,
+                        role="fixer",
+                        agent_id="fixer-1",
+                        item_id="local:1",
+                    )
+
+        self.assertEqual(requested["status"], "ACTION_REQUESTED")
+
     def test_action_request_refreshes_missing_stack_context_before_claim(self):
         from gh_address_cr.core.runtime_kernel.stack import project_stack_context
         from tests.helpers import stack_observation
@@ -491,9 +521,16 @@ class NativeWorkflowTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                with patch(
-                    "gh_address_cr.github.client.GitHubClient",
-                    side_effect=AssertionError("ordinary unbound submit must not construct a GitHub client"),
+                with (
+                    patch(
+                        "gh_address_cr.github.client.GitHubClient",
+                        side_effect=AssertionError("ordinary unbound submit must not construct a GitHub client"),
+                    ),
+                    patch.object(
+                        agent_protocol.session_store,
+                        "load_session",
+                        side_effect=AssertionError("submit must not load the full session"),
+                    ),
                 ):
                     accepted = agent_protocol.submit_action_response(
                         repo,

@@ -29,6 +29,7 @@ import statistics
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import patch
@@ -120,6 +121,45 @@ def _seed_legacy_workspace(items: int, evidence: int) -> None:
 
 
 _TRACER: Any = None
+_COST_COMPONENTS = ("load", "transaction", "materialization")
+
+
+class _PersistenceCostRecorder:
+    """Measure exclusive public persistence boundaries inside benchmark steps."""
+
+    def __init__(self) -> None:
+        self.totals_ns = {component: 0 for component in _COST_COMPONENTS}
+
+    def wrap(self, component: str, function: Callable[..., Any]) -> Callable[..., Any]:
+        def measured(*args: Any, **kwargs: Any) -> Any:
+            started = time.perf_counter_ns()
+            try:
+                return function(*args, **kwargs)
+            finally:
+                self.totals_ns[component] += time.perf_counter_ns() - started
+
+        return measured
+
+    def snapshot(self) -> dict[str, int]:
+        return dict(self.totals_ns)
+
+
+def _install_cost_recorder(stack: ExitStack, recorder: _PersistenceCostRecorder) -> None:
+    from gh_address_cr.core.runtime_store import RuntimeStore
+
+    boundaries = {
+        "load": ("load",),
+        "transaction": ("replace", "transact", "transact_working_set"),
+        "materialization": (
+            "materialize_compatibility_artifacts",
+            "materialize_compatibility_artifacts_from_rows",
+            "materialize_evidence_artifacts",
+        ),
+    }
+    for component, names in boundaries.items():
+        for name in names:
+            original = getattr(RuntimeStore, name)
+            stack.enter_context(patch.object(RuntimeStore, name, recorder.wrap(component, original)))
 
 
 def _timed(function: Callable[[], Any]) -> tuple[Any, int]:
@@ -129,6 +169,17 @@ def _timed(function: Callable[[], Any]) -> tuple[Any, int]:
     else:
         value = _run_under_cli_span(function)
     return value, time.perf_counter_ns() - started
+
+
+def _timed_step(
+    function: Callable[[], Any], recorder: _PersistenceCostRecorder
+) -> tuple[Any, int, dict[str, int]]:
+    before = recorder.snapshot()
+    value, total_ns = _timed(function)
+    after = recorder.snapshot()
+    costs = {component: after[component] - before[component] for component in _COST_COMPONENTS}
+    costs["other"] = max(0, total_ns - sum(costs.values()))
+    return value, total_ns, costs
 
 
 def _run_under_cli_span(function: Callable[[], Any]) -> Any:
@@ -180,10 +231,16 @@ def _degradation_ratio(per_cr_ns: list[int]) -> float:
     return round(last / first, 3) if first else 0.0
 
 
-def _run_cr(agent_protocol: Any, client: Any, workdir: Path, index: int) -> dict[str, int]:
+def _run_cr(
+    agent_protocol: Any,
+    client: Any,
+    workdir: Path,
+    index: int,
+    recorder: _PersistenceCostRecorder,
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
     item_id = f"local:{index}"
     agent_id = f"bench-fixer-{index}"
-    _, classify_ns = _timed(
+    _, classify_ns, classify_costs = _timed_step(
         lambda: agent_protocol.record_classification(
             REPO,
             PR_NUMBER,
@@ -191,12 +248,14 @@ def _run_cr(agent_protocol: Any, client: Any, workdir: Path, index: int) -> dict
             classification="fix",
             agent_id="bench-triage",
             note="Benchmark classification.",
-        )
+        ),
+        recorder,
     )
-    requested, next_ns = _timed(
+    requested, next_ns, next_costs = _timed_step(
         lambda: agent_protocol.issue_action_request(
             REPO, PR_NUMBER, role="fixer", agent_id=agent_id, item_id=item_id, github_client=client
-        )
+        ),
+        recorder,
     )
     request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
     response_path = workdir / f"response-{index}.json"
@@ -215,14 +274,18 @@ def _run_cr(agent_protocol: Any, client: Any, workdir: Path, index: int) -> dict
         ),
         encoding="utf-8",
     )
-    accepted, submit_ns = _timed(
+    accepted, submit_ns, submit_costs = _timed_step(
         lambda: agent_protocol.submit_action_response(
             REPO, PR_NUMBER, response_path=response_path, github_client=client
-        )
+        ),
+        recorder,
     )
     if accepted.get("status") != "ACTION_ACCEPTED":
         raise AssertionError(f"{item_id} was not accepted: {accepted.get('status')}")
-    return {"classify": classify_ns, "next": next_ns, "submit": submit_ns}
+    return (
+        {"classify": classify_ns, "next": next_ns, "submit": submit_ns},
+        {"classify": classify_costs, "next": next_costs, "submit": submit_costs},
+    )
 
 
 def _measure_loads(session_store: Any, samples: int) -> list[int]:
@@ -244,18 +307,27 @@ def run_profile(profile: str, *, load_samples: int, cr_limit: int | None) -> dic
 
             client = _UnstackedClient()
             step_ns: dict[str, list[int]] = {"classify": [], "next": [], "submit": []}
+            cost_ns = {
+                step: {component: [] for component in (*_COST_COMPONENTS, "other")}
+                for step in step_ns
+            }
             per_cr_ns: list[int] = []
-            was_enabled = gc.isenabled()
-            gc.disable()
-            try:
-                for index in range(items):
-                    steps = _run_cr(agent_protocol, client, workdir, index)
-                    for name, value in steps.items():
-                        step_ns[name].append(value)
-                    per_cr_ns.append(sum(steps.values()))
-            finally:
-                if was_enabled:
-                    gc.enable()
+            recorder = _PersistenceCostRecorder()
+            with ExitStack() as cost_patches:
+                _install_cost_recorder(cost_patches, recorder)
+                was_enabled = gc.isenabled()
+                gc.disable()
+                try:
+                    for index in range(items):
+                        steps, costs = _run_cr(agent_protocol, client, workdir, index, recorder)
+                        for name, value in steps.items():
+                            step_ns[name].append(value)
+                            for component, component_ns in costs[name].items():
+                                cost_ns[name][component].append(component_ns)
+                        per_cr_ns.append(sum(steps.values()))
+                finally:
+                    if was_enabled:
+                        gc.enable()
             loads_after = _measure_loads(session_store, load_samples)
 
     return {
@@ -263,6 +335,17 @@ def run_profile(profile: str, *, load_samples: int, cr_limit: int | None) -> dic
         "first_load_ms": round(first_load_ns / 1e6, 3),
         "load_session_ms": {"before_loop": _summary_ms(loads_before), "after_loop": _summary_ms(loads_after)},
         "steps_ms": {name: _summary_ms(values) for name, values in step_ns.items()},
+        "cost_breakdown_ms": {
+            step: {component: _summary_ms(values) for component, values in components.items()}
+            for step, components in cost_ns.items()
+        },
+        "cost_breakdown_degradation_ratio": {
+            step: {component: _degradation_ratio(values) for component, values in components.items()}
+            for step, components in cost_ns.items()
+        },
+        "step_degradation_ratio": {
+            name: _degradation_ratio(values) for name, values in step_ns.items()
+        },
         "per_cr_ms": _summary_ms(per_cr_ns),
         "degradation_ratio": _degradation_ratio(per_cr_ns),
     }

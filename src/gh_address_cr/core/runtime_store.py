@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -19,7 +20,7 @@ from gh_address_cr.core.io import fsync_directory, fsync_file, json_ready, write
 from gh_address_cr.core.process_lock import is_execution_lock_held
 from gh_address_cr.evidence.ledger import EvidenceRecord, SideEffectAttempt, payload_hash, take_pending_evidence
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 RECOVERY_BUNDLE_NAME = "legacy-v1-recovery"
 _LEASE_DATETIME_FIELDS = {"created_at", "expires_at", "submitted_at", "completed_at"}
 _SAFE_OPERATIONS = {
@@ -91,6 +92,11 @@ CREATE TABLE leases (
     submitted_at TEXT,
     completed_at TEXT,
     transition_revision INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE TABLE lease_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     payload_json TEXT NOT NULL
 );
 CREATE TABLE lease_conflict_keys (
@@ -194,6 +200,21 @@ class StoreSnapshot:
 class TransactionResult(StoreSnapshot):
     value: Any = None
     operation: str = "update"
+
+
+@dataclass(frozen=True)
+class WorkingSetRequest:
+    """Versioned declaration of canonical rows required by one command mutation."""
+
+    item_ids: tuple[str, ...] = ()
+    lease_ids: tuple[str, ...] = ()
+    active_lease_item_ids: tuple[str, ...] = ()
+    include_active_leases: bool = False
+    schema_version: str = "runtime-working-set.v1"
+
+    def __post_init__(self) -> None:
+        if self.schema_version != "runtime-working-set.v1":
+            raise ValueError(f"Unsupported working-set schema: {self.schema_version}")
 
 
 class RuntimeStore:
@@ -355,6 +376,19 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    def load_working_set(self, request: WorkingSetRequest) -> StoreSnapshot:
+        """Load only the canonical rows declared by ``request``."""
+        if not self.database_path.is_file():
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "The runtime store does not exist.")
+        connection = self._connect()
+        try:
+            self._validate_schema(connection)
+            self._check_recovery_bundle(connection)
+            snapshot, _, _ = _load_working_set(connection, request)
+            return snapshot
+        finally:
+            connection.close()
+
     def replace(
         self,
         payload: dict[str, Any],
@@ -397,6 +431,91 @@ class RuntimeStore:
             evidence=evidence,
             outbox=outbox,
         )
+
+    def transact_working_set(
+        self,
+        request: WorkingSetRequest,
+        mutation: Callable[[dict[str, Any]], T],
+        *,
+        expected_revision: int | None = None,
+        operation: str,
+        evidence: list[dict[str, Any]] | None = None,
+        outbox: list[dict[str, Any]] | None = None,
+    ) -> TransactionResult:
+        """Commit an explicit subset without materializing the full session graph."""
+        started_at = time.monotonic()
+        transaction_id = uuid.uuid4().hex
+        with _persistence_span("gh_address_cr.persistence.transaction", operation) as span:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                locked_at = time.monotonic()
+                self._validate_schema(connection)
+                current, stored_items, stored_leases = _load_working_set(connection, request)
+                if expected_revision is not None and expected_revision != current.revision:
+                    raise StaleRevisionError(expected=expected_revision, actual=current.revision)
+                working = current.payload
+                value = mutation(working)
+                evidence = [*(evidence or []), *take_pending_evidence(working)]
+                next_revision = current.revision + 1
+                normalized = json_ready(working)
+                _write_working_set(
+                    connection,
+                    normalized,
+                    stored_items=stored_items,
+                    stored_leases=stored_leases,
+                    revision=next_revision,
+                )
+                self._write_evidence(
+                    connection,
+                    evidence or [],
+                    revision=next_revision,
+                    transaction_id=transaction_id,
+                )
+                self._write_outbox(
+                    connection,
+                    outbox or [],
+                    revision=next_revision,
+                    transaction_id=transaction_id,
+                )
+                self._advance_revision(connection, next_revision)
+                _set_span_attributes(span, {"gh_address_cr.persistence.working_set": "bounded"})
+                _record_size_buckets_from_store(span, connection)
+                connection.commit()
+                _record_timing(span, started_at=started_at, locked_at=locked_at, outcome="committed")
+                result = TransactionResult(
+                    payload=_committed_view(normalized),
+                    revision=next_revision,
+                    value=value,
+                    operation=operation,
+                )
+                _emit_persistence_event(
+                    "persistence.transaction",
+                    operation=operation,
+                    outcome="committed",
+                    contention=_contention_bucket(started_at),
+                )
+                return result
+            except sqlite3.OperationalError as exc:
+                connection.rollback()
+                if _is_busy(exc):
+                    _record_timing(span, started_at=started_at, locked_at=None, outcome="busy")
+                    raise PersistenceBusyError() from exc
+                _record_timing(span, started_at=started_at, locked_at=None, outcome="failed")
+                raise
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                _record_timing(span, started_at=started_at, locked_at=None, outcome="invariant_violation")
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID",
+                    "The transition violates a runtime store invariant, such as one active lease per item.",
+                ) from exc
+            except Exception as exc:
+                connection.rollback()
+                _record_timing(span, started_at=started_at, locked_at=None, outcome=_exception_outcome(exc))
+                raise
+            finally:
+                connection.close()
 
     def _transact(
         self,
@@ -767,13 +886,39 @@ class RuntimeStore:
         """Materialize projections; ``committed`` skips a reload when it is still the latest revision."""
         self._materialize(session_path=session_path, ledger_path=ledger_path, committed=committed)
 
-    def _materialize(
+    def materialize_compatibility_artifacts_from_rows(
         self,
         *,
         session_path: Path,
         ledger_path: Path,
+        expected_revision: int,
+    ) -> None:
+        """Materialize canonical projections without decoding item or lease payloads."""
+        self._materialize(
+            session_path=session_path,
+            ledger_path=ledger_path,
+            from_rows=True,
+            expected_revision=expected_revision,
+        )
+
+    def materialize_evidence_artifacts(self, *, ledger_path: Path) -> None:
+        """Keep append-only evidence current without rebuilding ``session.json``."""
+        self._materialize(
+            session_path=None,
+            ledger_path=ledger_path,
+            include_session=False,
+        )
+
+    def _materialize(
+        self,
+        *,
+        session_path: Path | None,
+        ledger_path: Path,
         full_rebuild: bool = False,
         committed: StoreSnapshot | None = None,
+        from_rows: bool = False,
+        expected_revision: int | None = None,
+        include_session: bool = True,
     ) -> None:
         """Write projections for one committed revision under the store's write lock.
 
@@ -783,7 +928,13 @@ class RuntimeStore:
         append-only, so the appended file is byte-identical to a full rewrite.
         A full rebuild runs only when the file is missing, failed, or edited.
         """
-        kinds = tuple(kind for kind, _ in self._artifact_paths(session_path, ledger_path))
+        if include_session and session_path is None:
+            raise ValueError("session_path is required when materializing session_json")
+        kinds = (
+            tuple(kind for kind, _ in self._artifact_paths(session_path, ledger_path))
+            if include_session and session_path is not None
+            else ("evidence_jsonl", "evidence_jsonl_metadata")
+        )
         started_at = time.monotonic()
         with _persistence_span("gh_address_cr.persistence.materialize", "artifact_write") as span:
             connection = self._connect()
@@ -791,14 +942,33 @@ class RuntimeStore:
                 connection.execute("BEGIN IMMEDIATE")
                 locked_at = time.monotonic()
                 self._validate_schema(connection)
-                if committed is not None and committed.revision == self._latest_revision(connection):
-                    snapshot = committed
+                latest_revision = self._latest_revision(connection)
+                if expected_revision is not None and expected_revision != latest_revision:
+                    raise StaleRevisionError(expected=expected_revision, actual=latest_revision)
+                if not include_session:
+                    snapshot = None
+                    projection_revision = latest_revision
+                elif from_rows:
+                    assert session_path is not None
+                    snapshot = None
+                    projection_revision = latest_revision
+                    self._write_session_projection_from_rows(
+                        connection,
+                        revision=projection_revision,
+                        session_path=session_path,
+                    )
                 else:
-                    snapshot = self._load_snapshot(connection)
+                    assert session_path is not None
+                    if committed is not None and committed.revision == latest_revision:
+                        snapshot = committed
+                    else:
+                        snapshot = self._load_snapshot(connection)
+                    projection_revision = snapshot.revision
+                    self._write_session_projection(snapshot, session_path=session_path)
                 rows = self._materialization_rows(connection)
                 written: list[tuple[str, Path, int | None]] = []
-                self._write_session_projection(snapshot, session_path=session_path)
-                written.append(("session_json", session_path, None))
+                if include_session and session_path is not None:
+                    written.append(("session_json", session_path, None))
                 last_sequence = self._materialize_evidence(
                     connection, None if full_rebuild else rows.get("evidence_jsonl"), ledger_path
                 )
@@ -806,12 +976,12 @@ class RuntimeStore:
                 metadata_path = ledger_path.with_name(f"{ledger_path.name}.meta.json")
                 write_json_atomic(
                     metadata_path,
-                    {"format_version": 1, "schema_version": SCHEMA_VERSION, "revision": snapshot.revision},
+                    {"format_version": 1, "schema_version": SCHEMA_VERSION, "revision": projection_revision},
                 )
                 written.append(("evidence_jsonl_metadata", metadata_path, None))
                 for kind, path, written_sequence in written:
                     self._upsert_materialization(
-                        connection, kind, revision=snapshot.revision, status="current", path=path,
+                        connection, kind, revision=projection_revision, status="current", path=path,
                         last_sequence=written_sequence,
                     )
                 connection.commit()
@@ -889,6 +1059,48 @@ class RuntimeStore:
         encoded = json.dumps(projection, sort_keys=True, separators=(",", ":"), default=json_ready)
         session_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(prefix=f"{session_path.name}.", suffix=".tmp", dir=session_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(encoded)
+                handle.write("\n")
+            os.replace(temporary_name, session_path)
+        except BaseException:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+            raise
+
+    @staticmethod
+    def _write_session_projection_from_rows(
+        connection: sqlite3.Connection,
+        *,
+        revision: int,
+        session_path: Path,
+    ) -> None:
+        row = connection.execute("SELECT payload_json FROM sessions ORDER BY rowid LIMIT 1").fetchone()
+        if row is None:
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime store has no session row.")
+        session_fields = json.loads(row[0])
+        if not isinstance(session_fields, dict):
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session payload must be an object.")
+        fields = {str(key): _projection_dumps(value) for key, value in session_fields.items()}
+        fields["items"] = _projection_rows(connection, "items", "item_id")
+        fields["leases"] = _projection_rows(connection, "leases", "lease_id")
+        fields["lease_events"] = _projection_array(
+            [
+                _ascii_json_fragment(str(encoded))
+                for (encoded,) in connection.execute(
+                    "SELECT payload_json FROM lease_events ORDER BY sequence"
+                )
+            ]
+        )
+        fields["persistence"] = _projection_dumps(
+            {"schema_version": SCHEMA_VERSION, "revision": revision}
+        )
+        encoded = _projection_object(fields)
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f"{session_path.name}.", suffix=".tmp", dir=session_path.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(encoded)
@@ -1096,9 +1308,13 @@ class RuntimeStore:
             raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session ID is required.")
         items = normalized.pop("items", {})
         leases = normalized.pop("leases", {})
+        lease_events = normalized.pop("lease_events", [])
         normalized.pop("persistence", None)
-        if not isinstance(items, dict) or not isinstance(leases, dict):
-            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session items and leases must be objects.")
+        if not isinstance(items, dict) or not isinstance(leases, dict) or not isinstance(lease_events, list):
+            raise PersistenceInvalidError(
+                "PERSISTENCE_INVALID", "Session items, leases, and lease events have invalid shapes."
+            )
+        _derive_item_claim_projection(items, leases)
         now = _utc_now()
         connection.execute("DELETE FROM sessions WHERE session_id != ?", (session_id,))
         connection.execute(
@@ -1119,6 +1335,7 @@ class RuntimeStore:
         )
         _write_items(connection, session_id, items, revision=revision)
         _write_leases(connection, session_id, leases, revision=revision)
+        _write_lease_events(connection, session_id, lease_events)
 
     @staticmethod
     def _write_evidence(
@@ -1226,6 +1443,13 @@ class RuntimeStore:
             _coerce_lease_datetimes(lease)
             leases[lease_id] = lease
         payload["leases"] = leases
+        payload["lease_events"] = [
+            json.loads(encoded)
+            for (encoded,) in connection.execute(
+                "SELECT payload_json FROM lease_events WHERE session_id = ? ORDER BY sequence",
+                (session_id,),
+            )
+        ]
         _derive_item_claim_projection(payload["items"], leases)
         return StoreSnapshot(payload=payload, revision=int(row[1]))
 
@@ -1499,7 +1723,36 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
     connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
 
 
-_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {1: _migrate_v1_to_v2}
+def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "CREATE TABLE lease_events ("
+        "sequence INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE, "
+        "payload_json TEXT NOT NULL)"
+    )
+    for session_id, encoded_root in connection.execute(
+        "SELECT session_id, payload_json FROM sessions ORDER BY rowid"
+    ).fetchall():
+        root = json.loads(encoded_root)
+        events = root.pop("lease_events", [])
+        if not isinstance(events, list):
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session lease_events must be an array.")
+        for event in events:
+            connection.execute(
+                "INSERT INTO lease_events (session_id, payload_json) VALUES (?, ?)",
+                (str(session_id), _dumps(json_ready(event))),
+            )
+        connection.execute(
+            "UPDATE sessions SET payload_json = ? WHERE session_id = ?",
+            (_dumps(root), str(session_id)),
+        )
+    connection.execute("UPDATE artifact_materializations SET status = 'dirty'")
+
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+}
 
 
 def _stored_schema_version(connection: sqlite3.Connection) -> int | None:
@@ -1633,6 +1886,241 @@ def _record_size_buckets(span: Any, connection: sqlite3.Connection, payload: dic
     )
 
 
+def _record_size_buckets_from_store(span: Any, connection: sqlite3.Connection) -> None:
+    try:
+        if not span.is_recording():
+            return
+        item_count = int(connection.execute("SELECT COUNT(*) FROM items").fetchone()[0])
+        evidence_count = int(connection.execute("SELECT COALESCE(MAX(sequence), 0) FROM evidence_events").fetchone()[0])
+    except Exception:
+        return
+    _set_span_attributes(
+        span,
+        {
+            "gh_address_cr.persistence.items_bucket": _count_bucket(item_count),
+            "gh_address_cr.persistence.evidence_bucket": _count_bucket(evidence_count),
+        },
+    )
+
+
+def _load_working_set(
+    connection: sqlite3.Connection,
+    request: WorkingSetRequest,
+) -> tuple[StoreSnapshot, dict[str, tuple[int, str]], dict[str, str]]:
+    row = connection.execute(
+        "SELECT payload_json, revision FROM sessions ORDER BY rowid LIMIT 1"
+    ).fetchone()
+    if row is None:
+        raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime store has no session row.")
+    decoded = json.loads(row[0])
+    if not isinstance(decoded, dict):
+        raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session payload must be an object.")
+    payload = dict(decoded)
+    session_id = str(payload.get("session_id") or "")
+    if not session_id:
+        raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session ID is required.")
+    payload.pop("items", None)
+    payload.pop("leases", None)
+    payload.pop("persistence", None)
+    payload["lease_events"] = []
+
+    explicit_lease_ids = tuple(sorted({str(lease_id) for lease_id in request.lease_ids if str(lease_id)}))
+    active_item_ids = tuple(
+        sorted(
+            {
+                str(item_id)
+                for item_id in (*request.item_ids, *request.active_lease_item_ids)
+                if str(item_id)
+            }
+        )
+    )
+    clauses: list[str] = []
+    parameters: list[Any] = [session_id]
+    if explicit_lease_ids:
+        clauses.append(f"lease_id IN ({', '.join('?' for _ in explicit_lease_ids)})")
+        parameters.extend(explicit_lease_ids)
+    if active_item_ids:
+        clauses.append(
+            f"(item_id IN ({', '.join('?' for _ in active_item_ids)}) "
+            "AND status IN ('active', 'submitted'))"
+        )
+        parameters.extend(active_item_ids)
+    if request.include_active_leases:
+        clauses.append("status IN ('active', 'submitted')")
+    stored_leases: dict[str, str] = {}
+    lease_item_ids: set[str] = set()
+    if clauses:
+        for lease_id, item_id, encoded in connection.execute(
+            "SELECT lease_id, item_id, payload_json FROM leases WHERE session_id = ? AND ("
+            + " OR ".join(clauses)
+            + ") ORDER BY lease_id",
+            parameters,
+        ):
+            stored_leases[str(lease_id)] = str(encoded)
+            if str(lease_id) in explicit_lease_ids or request.include_active_leases:
+                lease_item_ids.add(str(item_id))
+    implicit_active_item_ids = tuple(sorted(lease_item_ids - set(active_item_ids)))
+    if implicit_active_item_ids:
+        placeholders = ", ".join("?" for _ in implicit_active_item_ids)
+        for lease_id, item_id, encoded in connection.execute(
+            "SELECT lease_id, item_id, payload_json FROM leases WHERE session_id = ? "
+            f"AND item_id IN ({placeholders}) AND status IN ('active', 'submitted') ORDER BY lease_id",
+            (session_id, *implicit_active_item_ids),
+        ):
+            stored_leases[str(lease_id)] = str(encoded)
+            lease_item_ids.add(str(item_id))
+
+    item_ids = tuple(
+        sorted({str(item_id) for item_id in request.item_ids if str(item_id)} | lease_item_ids)
+    )
+    stored_items: dict[str, tuple[int, str]] = {}
+    if item_ids:
+        placeholders = ", ".join("?" for _ in item_ids)
+        stored_items = {
+            str(item_id): (int(first_revision), str(encoded))
+            for item_id, first_revision, encoded in connection.execute(
+                "SELECT item_id, first_observed_revision, payload_json FROM items "
+                f"WHERE session_id = ? AND item_id IN ({placeholders}) ORDER BY item_id",
+                (session_id, *item_ids),
+            )
+        }
+    payload["items"] = {
+        item_id: json.loads(stored_items[item_id][1])
+        for item_id in sorted(stored_items)
+    }
+    leases: dict[str, dict[str, Any]] = {}
+    for lease_id in sorted(stored_leases):
+        lease = json.loads(stored_leases[lease_id])
+        lease.setdefault("lease_id", lease_id)
+        _coerce_lease_datetimes(lease)
+        leases[lease_id] = lease
+    payload["leases"] = leases
+    _derive_item_claim_projection(payload["items"], leases)
+    return StoreSnapshot(payload=payload, revision=int(row[1])), stored_items, stored_leases
+
+
+def _write_working_set(
+    connection: sqlite3.Connection,
+    payload: dict[str, Any],
+    *,
+    stored_items: dict[str, tuple[int, str]],
+    stored_leases: dict[str, str],
+    revision: int,
+) -> None:
+    normalized = dict(payload)
+    session_id = str(normalized.get("session_id") or "")
+    if not session_id:
+        raise PersistenceInvalidError("PERSISTENCE_INVALID", "Session ID is required.")
+    items = normalized.pop("items", {})
+    leases = normalized.pop("leases", {})
+    lease_events = normalized.pop("lease_events", [])
+    normalized.pop("persistence", None)
+    normalized.pop("_pending_evidence_records", None)
+    if not isinstance(items, dict) or not isinstance(leases, dict) or not isinstance(lease_events, list):
+        raise PersistenceInvalidError(
+            "PERSISTENCE_INVALID", "Working-set items, leases, and lease events have invalid shapes."
+        )
+    _derive_item_claim_projection(items, leases)
+    metadata = normalized.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise PersistenceInvalidError("PERSISTENCE_INVALID", "Working-set metadata must be an object.")
+    now = _utc_now()
+    connection.execute(
+        "UPDATE sessions SET repo = ?, pr_number = ?, status = ?, "
+        "payload_json = ?, revision = ?, updated_at = ? "
+        "WHERE session_id = ?",
+        (
+            str(normalized.get("repo") or ""),
+            str(normalized.get("pr_number") or ""),
+            str(normalized.get("status") or ""),
+            _dumps(normalized),
+            revision,
+            now,
+            session_id,
+        ),
+    )
+    for event in lease_events:
+        connection.execute(
+            "INSERT INTO lease_events (session_id, payload_json) VALUES (?, ?)",
+            (session_id, _dumps(json_ready(event))),
+        )
+
+    for item_id in stored_items.keys() - {str(key) for key in items}:
+        connection.execute("DELETE FROM items WHERE session_id = ? AND item_id = ?", (session_id, item_id))
+    for item_id, item in items.items():
+        if not isinstance(item, dict):
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", f"Item {item_id} must be an object.")
+        encoded = _dumps(item)
+        prior = stored_items.get(str(item_id))
+        if prior is not None and prior[1] == encoded:
+            continue
+        classification_evidence = item.get("classification_evidence")
+        classification = (
+            classification_evidence.get("classification")
+            if isinstance(classification_evidence, dict)
+            else item.get("decision")
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id,
+                str(item_id),
+                str(item.get("item_kind") or "unknown"),
+                str(item.get("state") or "open"),
+                str(classification) if classification else None,
+                encoded,
+                prior[0] if prior is not None else revision,
+                revision,
+            ),
+        )
+
+    changed_leases: list[tuple[str, dict[str, Any], str]] = []
+    for lease_id, lease in leases.items():
+        if not isinstance(lease, dict):
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", f"Lease {lease_id} must be an object.")
+        encoded = _dumps(lease)
+        if stored_leases.get(str(lease_id)) != encoded:
+            changed_leases.append((str(lease_id), lease, encoded))
+    removed_leases = stored_leases.keys() - {str(key) for key in leases}
+    for lease_id in removed_leases | {lease_id for lease_id, _, _ in changed_leases}:
+        connection.execute("DELETE FROM leases WHERE lease_id = ?", (lease_id,))
+    for lease_id, lease, encoded in changed_leases:
+        _insert_lease(connection, session_id, lease_id, lease, encoded, revision)
+
+
+def _insert_lease(
+    connection: sqlite3.Connection,
+    session_id: str,
+    lease_id: str,
+    lease: dict[str, Any],
+    encoded: str,
+    revision: int,
+) -> None:
+    connection.execute(
+        "INSERT INTO leases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            lease_id,
+            session_id,
+            str(lease.get("item_id") or ""),
+            str(lease.get("agent_id") or ""),
+            str(lease.get("role") or ""),
+            str(lease.get("status") or ""),
+            lease.get("request_id"),
+            lease.get("request_hash"),
+            lease.get("request_path"),
+            lease.get("resume_token"),
+            lease.get("created_at"),
+            lease.get("expires_at"),
+            lease.get("submitted_at"),
+            lease.get("completed_at"),
+            revision,
+            encoded,
+        ),
+    )
+    for key in lease.get("conflict_keys") or ():
+        connection.execute("INSERT INTO lease_conflict_keys VALUES (?, ?)", (lease_id, str(key)))
+
+
 def _write_items(connection: sqlite3.Connection, session_id: str, items: dict[str, Any], *, revision: int) -> None:
     stored = {
         str(item_id): (int(first), encoded)
@@ -1708,6 +2196,14 @@ def _write_leases(connection: sqlite3.Connection, session_id: str, leases: dict[
             connection.execute("INSERT INTO lease_conflict_keys VALUES (?, ?)", (lease_id, str(key)))
 
 
+def _write_lease_events(connection: sqlite3.Connection, session_id: str, events: list[Any]) -> None:
+    connection.execute("DELETE FROM lease_events WHERE session_id = ?", (session_id,))
+    connection.executemany(
+        "INSERT INTO lease_events (session_id, payload_json) VALUES (?, ?)",
+        ((session_id, _dumps(json_ready(event))) for event in events),
+    )
+
+
 def _committed_view(normalized: dict[str, Any]) -> dict[str, Any]:
     """The payload ``_load_snapshot`` would return for rows just written from ``normalized``.
 
@@ -1733,6 +2229,42 @@ def _committed_view(normalized: dict[str, Any]) -> dict[str, Any]:
 def _dumps(value: Any) -> str:
     """Canonical compact JSON for values that are already JSON-ready."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _projection_dumps(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=json_ready)
+
+
+def _projection_object(fragments: dict[str, str]) -> str:
+    return "{" + ",".join(
+        f"{json.dumps(key)}:{fragments[key]}" for key in sorted(fragments)
+    ) + "}"
+
+
+def _projection_array(fragments: list[str]) -> str:
+    return "[" + ",".join(fragments) + "]"
+
+
+def _projection_rows(connection: sqlite3.Connection, table: str, identity_column: str) -> str:
+    fragments = {
+        str(identity): _ascii_json_fragment(str(encoded))
+        for identity, encoded in connection.execute(
+            f"SELECT {identity_column}, payload_json FROM {table} ORDER BY {identity_column}"
+        )
+    }
+    return _projection_object(fragments)
+
+
+def _ascii_json_fragment(fragment: str) -> str:
+    if fragment.isascii():
+        return fragment
+    escaped = fragment.encode("ascii", "backslashreplace").decode("ascii")
+
+    def surrogate_pair(match: re.Match[str]) -> str:
+        adjusted = int(match.group(1), 16) - 0x10000
+        return f"\\u{0xD800 + (adjusted >> 10):04x}\\u{0xDC00 + (adjusted & 0x3FF):04x}"
+
+    return re.sub(r"\\U([0-9a-fA-F]{8})", surrogate_pair, escaped)
 
 
 def _json(value: Any) -> str:
@@ -1768,7 +2300,8 @@ def _derive_item_claim_projection(
     items: dict[str, dict[str, Any]], leases: dict[str, dict[str, Any]]
 ) -> None:
     active_by_item: dict[str, dict[str, Any]] = {}
-    for lease in leases.values():
+    for lease_id, lease in leases.items():
+        lease.setdefault("lease_id", str(lease_id))
         if lease.get("status") not in {"active", "submitted"}:
             continue
         item_id = str(lease.get("item_id") or "")
