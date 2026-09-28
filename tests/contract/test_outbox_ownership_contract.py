@@ -626,6 +626,24 @@ class ProjectionContractTest(unittest.TestCase):
         self.assertEqual(incremental, rebuilt)
         self.assertEqual([json.loads(line) for line in rebuilt.decode("utf-8").splitlines()], canonical)
 
+    def test_session_projection_is_compact_json_matching_canonical_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_path, ledger_path = workspace / "session.json", workspace / "evidence.jsonl"
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            store.transact(lambda payload: payload.update(status="ACTIVE"), operation="status_update")
+            store.materialize_compatibility_artifacts(session_path=session_path, ledger_path=ledger_path)
+            text = session_path.read_text(encoding="utf-8")
+            snapshot = store.load()
+
+        self.assertEqual(text.count("\n"), 1, "the projection is one compact line")
+        self.assertNotIn(": ", text)
+        projection = json.loads(text)
+        self.assertEqual(projection.pop("persistence"), {"schema_version": SCHEMA_VERSION, "revision": 2})
+        self.assertEqual(projection, json.loads(json.dumps(snapshot.payload, default=str)))
+        self.assertEqual(list(projection), sorted(projection))
+
     def test_projection_drift_is_repaired_from_canonical_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

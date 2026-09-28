@@ -879,9 +879,28 @@ class RuntimeStore:
 
     @staticmethod
     def _write_session_projection(snapshot: StoreSnapshot, *, session_path: Path) -> None:
+        """Write ``session.json`` as compact, key-sorted JSON.
+
+        The projection is rewritten on every committed write and grows with the
+        session, so it uses the C encoder's compact output rather than the
+        pure-Python indenting encoder; the content is identical JSON.
+        """
         projection = dict(snapshot.payload)
         projection["persistence"] = {"schema_version": SCHEMA_VERSION, "revision": snapshot.revision}
-        write_json_atomic(session_path, projection)
+        # The C encoder handles native JSON types itself and calls json_ready only for the
+        # rest (lease datetimes), instead of first walking the whole payload in Python.
+        encoded = json.dumps(projection, sort_keys=True, separators=(",", ":"), default=json_ready)
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=f"{session_path.name}.", suffix=".tmp", dir=session_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(encoded)
+                handle.write("\n")
+            os.replace(temporary_name, session_path)
+        except BaseException:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+            raise
 
     @staticmethod
     def _artifact_paths(session_path: Path, ledger_path: Path) -> tuple[tuple[str, Path], ...]:
