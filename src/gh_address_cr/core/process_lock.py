@@ -11,11 +11,11 @@ ambiguity. Network filesystems are unsupported (Spec 034 FR-013).
 
 from __future__ import annotations
 
-import os
+import sys
 from pathlib import Path
 from typing import IO
 
-if os.name == "nt":
+if sys.platform == "win32":
     import msvcrt
 
     def _try_lock(handle: IO[bytes]) -> bool:

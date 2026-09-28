@@ -690,26 +690,33 @@ def _execute_github_side_effect(
     reconciling or repeating it. If the process dies mid-call, the lock is
     released by the OS and the next load demotes the attempt to ``unknown``.
     """
-    attempt = {
-        "session": session,
-        "item_id": item_id,
-        "lease_id": lease_id,
-        "agent_id": agent_id,
-        "side_effect_type": side_effect_type,
-        "idempotency_key": idempotency_key,
-        "timestamp": timestamp,
-    }
+
+    def record(status: str, *, external_url: str | None = None, last_error: str | None = None) -> None:
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type=side_effect_type,
+            idempotency_key=idempotency_key,
+            status=status,
+            timestamp=timestamp,
+            external_url=external_url,
+            last_error=last_error,
+        )
+
     with side_effect_outbox.execution_guard(
         session, effect_type=side_effect_type, idempotency_key=idempotency_key
     ):
-        _record_side_effect_attempt(ledger, status="in_flight", **attempt)
+        record("in_flight")
         try:
             result = call()
         except GitHubError as exc:
-            _record_side_effect_attempt(ledger, status="failed", last_error=str(exc), **attempt)
+            record("failed", last_error=str(exc))
             session_store.save_session(repo, pr_number, session)
             raise _publish_error(repo, pr_number, item_id, exc) from exc
-        _record_side_effect_attempt(ledger, status="succeeded", external_url=external_url(result), **attempt)
+        record("succeeded", external_url=external_url(result))
     return result
 
 

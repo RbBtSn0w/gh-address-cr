@@ -806,10 +806,10 @@ class RuntimeStore:
                     {"format_version": 1, "schema_version": SCHEMA_VERSION, "revision": snapshot.revision},
                 )
                 written.append(("evidence_jsonl_metadata", metadata_path, None))
-                for kind, path, last_sequence in written:
+                for kind, path, written_sequence in written:
                     self._upsert_materialization(
                         connection, kind, revision=snapshot.revision, status="current", path=path,
-                        last_sequence=last_sequence,
+                        last_sequence=written_sequence,
                     )
                 connection.commit()
                 _record_timing(span, started_at=started_at, locked_at=locked_at, outcome="current")
@@ -846,17 +846,11 @@ class RuntimeStore:
     @staticmethod
     def _materialize_evidence(connection: sqlite3.Connection, row: dict[str, Any] | None, ledger_path: Path) -> int:
         last_sequence = int(connection.execute("SELECT COALESCE(MAX(sequence), 0) FROM evidence_events").fetchone()[0])
-        appendable = (
-            row is not None
-            and row["status"] in {"current", "dirty"}
-            and row["last_sequence"] is not None
-            and int(row["last_sequence"]) <= last_sequence
-            and _artifact_matches(row, ledger_path)
-        )
-        if appendable:
+        appended_through = _appendable_sequence(row, ledger_path, last_sequence)
+        if appended_through is not None:
             rows = connection.execute(
                 "SELECT record_json FROM evidence_events WHERE sequence > ? ORDER BY sequence",
-                (int(row["last_sequence"]),),
+                (appended_through,),
             )
             with ledger_path.open("a", encoding="utf-8") as handle:
                 for (encoded,) in rows:
@@ -1513,6 +1507,16 @@ def _stored_schema_version(connection: sqlite3.Connection) -> int | None:
         return None
     row = connection.execute("SELECT schema_version FROM store_metadata WHERE singleton = 1").fetchone()
     return int(row[0]) if row is not None else None
+
+
+def _appendable_sequence(row: dict[str, Any] | None, ledger_path: Path, last_sequence: int) -> int | None:
+    """Return the sequence an append can resume after, or ``None`` when a full rebuild is required."""
+    if row is None or row["status"] not in {"current", "dirty"} or row["last_sequence"] is None:
+        return None
+    start = int(row["last_sequence"])
+    if start > last_sequence or not _artifact_matches(row, ledger_path):
+        return None
+    return start
 
 
 def _artifact_matches(row: dict[str, Any], path: Path) -> bool:
