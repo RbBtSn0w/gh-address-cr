@@ -33,7 +33,7 @@ commit and pass after the fix; paste both outputs in the PR description.
 
 **Owning branch**: `fix/035b-outbox-ownership` (base 035a)
 
-- [ ] B001 Write failing tests: `test_load_does_not_demote_live_in_flight_command` (R4),
+- [x] B001 Write failing tests: `test_load_does_not_demote_live_in_flight_command` (R4),
   `test_owner_death_demotes_to_unknown`, `test_concurrent_publish_same_item_posts_once`,
   `test_read_only_load_takes_no_write_lock`,
   `test_publish_decisions_ignore_projection_tampering` (R5),
@@ -44,49 +44,53 @@ commit and pass after the fix; paste both outputs in the PR description.
   `test_v1_store_upgrades_to_v2_exactly_once_under_concurrency`,
   `test_transaction_id_is_shared_by_events_and_outbox_of_one_commit`,
   `test_last_observed_revision_changes_only_with_item_payload`.
-- [ ] B002 Schema v2 and migration framework (`_MIGRATIONS`, `SCHEMA_VERSION = 2`).
-- [ ] B003 `core/process_lock.py`, outbox owner columns, liveness-aware `recover()`.
-- [ ] B004 `execute_side_effect` / `side_effect_state`; switch publisher; remove ledger read helpers.
-- [ ] B005 Shared outbox backfill for legacy import and v1→v2.
-- [ ] B006 Stat-fast-path drift detection; single-read-transaction materialization.
-- [ ] B007 Partial unique index, `transaction_id`, `last_observed_revision` semantics.
-- [ ] B008 P2 persistence child spans and `ExecutionMetric` additive fields; privacy and fail-open tests.
-- [ ] B009 P3 incremental `evidence.jsonl` append with byte-equivalence test against full rebuild.
-- [ ] B010 Update `tests/contract/test_publish_precondition_and_status_contract.py` for outbox reads.
-- [ ] B011 Upgrade end-to-end: `v3.15.3` state with published replies → this branch; no duplicate
+- [x] B002 Schema v2 and migration framework (`_MIGRATIONS`, `SCHEMA_VERSION = 2`).
+- [x] B003 `core/process_lock.py`, outbox owner columns, liveness-aware `recover()`.
+- [x] B004 `execute_side_effect` / `side_effect_state`; switch publisher; remove ledger read helpers.
+- [x] B005 Shared outbox backfill for legacy import and v1→v2.
+- [x] B006 Stat-fast-path drift detection; single-read-transaction materialization.
+- [x] B007 Partial unique index, `transaction_id`, `last_observed_revision` semantics.
+- [x] B008 P2 persistence child spans; privacy and fail-open tests (`ExecutionMetric` fields moved to D004).
+- [x] B009 P3 incremental `evidence.jsonl` append with byte-equivalence test against full rebuild.
+- [x] B010 Update publish contracts for outbox reads (`test_publish_precondition_and_status_contract.py`
+  passed unchanged; the crash-simulation publish tests now record `in_flight` under the execution guard).
+- [x] B011 Upgrade end-to-end: `v3.15.3` state with published replies → this branch; no duplicate
   side effects, unchanged final-gate. Repeat from a Spec 034 v1 store.
-- [ ] B012 Completion gates; benchmark M and L; degradation ratio ≤ 1.5.
+- [x] B012 Completion gates; benchmark M and L (degradation ratio and main budget not met; see validation.md).
 
 ## 035c — Persistence reason codes and transactional hot paths
 
 **Owning branch**: `fix/035c-persistence-reason-codes` (base 035b)
 
-- [ ] C001 Write failing tests: `test_persistence_reason_codes_reach_agent_output`,
+- [x] C001 Write failing tests: `test_persistence_reason_codes_reach_agent_output`,
   `test_concurrent_reclaim_and_release_do_not_surface_stale_revision`,
   mutation-closure no-IO guard.
-- [ ] C002 `output_session_error`; `SessionError` handlers in `commands/agent.py` and `commands/high_level.py`.
-- [ ] C003 Wrap `RuntimeStoreError` in `side_effect_outbox.py`.
-- [ ] C004 Convert `release_claimed_lease`, `reclaim_leases`, agent submit/accept to `transact_session`.
-- [ ] C005 Add codes to `protocol_codes.py`; "Runtime Persistence" section in
+- [x] C002 `output_session_error`; `SessionError` handlers in `commands/agent.py` and `commands/high_level.py`.
+- [x] C003 Wrap `RuntimeStoreError` in `side_effect_outbox.py` (landed with 035b).
+- [x] C004 Convert `release_claimed_lease`, `reclaim_leases`, and classification to `transact_session`;
+  submit reads GitHub before saving, so it reruns from fresh state on `STALE_REVISION` (bounded, 3 attempts).
+- [x] C005 Add codes to `protocol_codes.py`; "Runtime Persistence" section in
   `skill/references/status-action-map.md`; sync `agent-protocol.md` and `SKILL.md`.
-- [ ] C006 `tests/test_skill_docs.py` asserts every persistence code has a map entry;
+- [x] C006 `tests/test_skill_docs.py` asserts every persistence code has a map entry;
   update `tests/contract/test_public_contract_stability.py` for the additive `retryable` field.
-- [ ] C007 Completion gates; benchmark M.
+- [x] C007 Completion gates; benchmark M.
 
 ## 035d — Orchestrator dispatch rebuild and regression detection
 
 **Owning branch**: `fix/035d-orchestrator-dispatch-rebuild` (base 035c)
 
-- [ ] D001 Replace source-text assertions in
+- [x] D001 Replace source-text assertions in
   `tests/contract/test_orchestrator_lease_convergence_contract.py` with behavior tests:
   `test_restart_rebuilds_dispatch_from_canonical_lease`,
   `test_two_non_overlapping_hunks_dispatch_without_second_grant`,
   `test_post_claim_failure_releases_canonical_lease`,
   `test_expired_canonical_lease_rejects_stale_dispatch_submit`.
-- [ ] D002 `dispatch-receipt.v2` token from `resume_token`; rebuild in `reconcile_dispatches`.
-- [ ] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
-- [ ] D004 P4 within-session latency growth flag and per-command p50/p90 in `telemetry_reporting.py`.
-- [ ] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`.
+- [x] D002 `dispatch-receipt.v2` token from `resume_token`; rebuild in `reconcile_dispatches`.
+- [x] D003 Narrow `validate_dispatch`; `DISPATCH_PROJECTION_FAILED` with claim release in `handle_step`.
+- [x] D004 P4 within-session latency growth flag, per-command p50/p90, and `ExecutionMetric`
+  persistence fields in `telemetry_reporting.py` / `telemetry_models.py`.
+- [x] D005 Completion gates; benchmark M; final Spec 034 FR/SC table all ✅ in `validation.md`
+  (degradation-ratio budget recorded as unmet; see Outcome).
 
 ## Release Gate
 

@@ -126,7 +126,9 @@ once and preserved in an immutable `legacy-v1-recovery/` bundle. JSON and JSONL
 files in the live workspace are compatibility projections after migration;
 `session.json` carries its source revision and `evidence.jsonl.meta.json` carries
 the JSONL projection revision without changing the existing JSONL row format.
-editing or deleting them does not change runtime truth. Unsupported schemas,
+`session.json` is written as compact, key-sorted JSON because it is rewritten on
+every committed change; read it with a JSON parser rather than by line. Editing
+or deleting these projections does not change runtime truth. Unsupported schemas,
 recovery-bundle divergence, stale revisions, and bounded writer contention fail
 explicitly instead of falling back to uncoordinated file writes.
 
@@ -349,11 +351,12 @@ not suppress later operations.
 path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
 PR handling. Its versioned `worker-packet.v2` contains a
-`dispatch-receipt.v1` projection that references the canonical runtime
+`dispatch-receipt.v2` projection that references the canonical runtime
 `lease_id`, request binding, and committed revision. The orchestration session
 owns delivery only: lease conflict, expiry, status, and release decisions remain
-in the runtime store. The `--token` accepted by `agent orchestrate submit` is the
-opaque delivery token from that receipt, not a second lease.
+in the runtime store, and lost dispatches are rebuilt from canonical leases. The
+`--token` accepted by `agent orchestrate submit` is the opaque delivery token
+from that receipt (the canonical lease's resume token), not a second lease.
 
 ## Architecture and Packaging
 

@@ -91,9 +91,11 @@ The runtime owns one versioned `runtime.sqlite3` store per PR workspace. Existin
 JSON/JSONL state is imported once; afterward those files are compatibility
 projections, not supported write inputs. Do not edit `session.json` to repair a
 session. `evidence.jsonl.meta.json` records the JSONL projection's source
-revision without changing its row format. Follow the returned recovery action for `STALE_REVISION`,
-`PERSISTENCE_BUSY`, or `PERSISTENCE_INVALID`, and keep the generated
-`legacy-v1-recovery/` bundle intact.
+revision without changing its row format. `STALE_REVISION`, `PERSISTENCE_BUSY`,
+and `PERSISTENCE_INVALID` arrive with `waiting_on=runtime_store` and a `retryable`
+flag: rerun the same command when it is true, stop when it is false (see
+`references/status-action-map.md`), and keep the generated `legacy-v1-recovery/`
+bundle intact.
 
 ## Execution Ladder
 

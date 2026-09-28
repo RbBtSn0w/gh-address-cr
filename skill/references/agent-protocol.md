@@ -91,14 +91,20 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
 Advanced orchestration emits `worker-packet.v2`. Its
-`dispatch_receipt` uses `dispatch-receipt.v1` and contains the canonical
+`dispatch_receipt` uses `dispatch-receipt.v2` and contains the canonical
 `lease_id`, request binding, committed runtime revision, and an opaque delivery
-token. The orchestration session is a volatile delivery projection: it does not
-grant, expire, release, or resolve conflicts for leases. Before start, status,
-step, resume, and submit actions, the runtime reconciles that projection from
-canonical lease state. Pass the receipt's delivery token to `agent orchestrate
-submit --token`; canonical submission still validates the runtime lease and
-request binding.
+token equal to the canonical lease's resume token. The orchestration session is
+a volatile delivery projection: it does not grant, expire, release, or resolve
+conflicts for leases. Before start, status, step, resume, and submit actions,
+the runtime reconciles that projection from canonical lease state, dropping
+dispatches whose lease is no longer active and rebuilding missing dispatches for
+active orchestrator leases, so a worker's original token keeps working after the
+orchestration state is lost. Pass the receipt's delivery token to `agent
+orchestrate submit --token`; canonical submission still validates the runtime
+lease and request binding. If a step fails after the runtime claimed the item,
+it returns `DISPATCH_PROJECTION_FAILED` and releases that claim, so rerun the
+step instead of waiting for the lease to expire. `dispatch-receipt.v1` receipts
+already on disk remain valid until their lease ends.
 
 ## Telemetry Coverage
 
@@ -150,6 +156,11 @@ new side effect is attempted. If the runtime cannot prove whether the prior
 reply happened, publish returns `PUBLISH_RECONCILE_REQUIRED` with
 `waiting_on=reply_reconciliation`. This is a fail-closed machine state: reconcile
 the existing GitHub reply into evidence instead of blindly retrying publish.
+A side effect is `unknown` only after its executor has exited: while another
+live process is still executing the same reply or resolve, publish returns
+`SIDE_EFFECT_IN_PROGRESS` with `waiting_on=side_effect_execution`; wait and rerun
+publish rather than reconciling. Publish decisions come from the canonical
+outbox, never from the `evidence.jsonl` projection.
 
 A handful of terminal failure paths — orchestration crashes and other cases that never construct a `WorkflowError` — emit a bare `{status, reason_code, waiting_on, next_action, exit_code}` summary and carry neither `commands` nor `remediation`. Fall back to `status-action-map.md` there.
 
