@@ -6,7 +6,7 @@ import os
 import uuid
 from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.command_runner import telemetry_debug_enabled
@@ -48,10 +48,23 @@ class SessionTelemetry:
     _instance: ClassVar[SessionTelemetry | None] = None
 
     def __init__(self) -> None:
-        self.metrics: list[ExecutionMetric] = []
+        self._metrics: list[ExecutionMetric] = []
         self.telemetry_file: Path | None = None
         self._loaded_files: set[Path] = set()
+        self._pending_files: list[Path] = []
         self.paths: core_paths.SessionPaths | None = None
+
+    @property
+    def metrics(self) -> list[ExecutionMetric]:
+        """All metrics for the configured session, loading persisted history on first use.
+
+        Binding a PR happens on every session load and transaction, while the
+        history is only needed to build a report; loading it lazily keeps the
+        per-command cost from growing with the session's telemetry file.
+        """
+        while self._pending_files:
+            self._load_persisted_metrics(self._pending_files.pop(0))
+        return self._metrics
 
     @classmethod
     def get_instance(cls) -> SessionTelemetry:
@@ -71,15 +84,17 @@ class SessionTelemetry:
         return _ACTIVE_SESSION_TELEMETRY.set(self)
 
     def configure_context(self, repo: str, pr_number: str) -> None:
-        self.metrics.clear()
+        self._metrics.clear()
         self._loaded_files.clear()
+        self._pending_files.clear()
         self.paths = core_paths.SessionPaths(repo, pr_number)
         path = self.paths.workspace_dir / "telemetry.jsonl"
         self.configure_file(path)
 
     def configure_file(self, path: Path) -> None:
         self.telemetry_file = path
-        self._load_persisted_metrics(path)
+        if path not in self._loaded_files and path not in self._pending_files:
+            self._pending_files.append(path)
 
     def _load_persisted_metrics(self, path: Path) -> None:
         if path in self._loaded_files:
@@ -100,7 +115,7 @@ class SessionTelemetry:
                     metric = self._metric_from_payload(payload)
                     if metric is not None:
                         loaded_metrics.append(metric)
-            self.metrics.extend(loaded_metrics)
+            self._metrics.extend(loaded_metrics)
         except OSError:
             return
 
@@ -121,6 +136,8 @@ class SessionTelemetry:
                 is_retry=bool(payload.get("is_retry", False)),
                 pid=int(payload.get("pid", 0)),
                 execution_id=str(payload.get("execution_id") or ""),
+                persistence_ms=_optional_float(payload.get("persistence_ms")),
+                lock_wait_ms=_optional_float(payload.get("lock_wait_ms")),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -133,12 +150,13 @@ class SessionTelemetry:
         exit_code: int,
         pid: int | None = None,
         execution_id: str | None = None,
+        persistence_ms: float | None = None,
+        lock_wait_ms: float | None = None,
     ) -> None:
         is_retry = False
-        if self.metrics:
-            last_metric = self.metrics[-1]
-            if last_metric.command == command and not last_metric.is_success:
-                is_retry = True
+        last_metric = self._last_metric()
+        if last_metric is not None and last_metric.command == command and not last_metric.is_success:
+            is_retry = True
 
         metric = ExecutionMetric(
             command=command,
@@ -148,19 +166,45 @@ class SessionTelemetry:
             is_retry=is_retry,
             pid=pid if pid is not None else os.getpid(),
             execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
+            persistence_ms=persistence_ms,
+            lock_wait_ms=lock_wait_ms,
         )
-        self.metrics.append(metric)
-        self._persist_metric(metric)
+        persisted = self._persist_metric(metric)
+        # With history not yet loaded, a persisted line arrives with it later; keep the
+        # metric in memory now only when it was not persisted, so it is never lost or doubled.
+        if not self._pending_files or not persisted:
+            self._metrics.append(metric)
 
-    def _persist_metric(self, metric: ExecutionMetric) -> None:
+    def _last_metric(self) -> ExecutionMetric | None:
+        if not self._pending_files:
+            return self._metrics[-1] if self._metrics else None
+        path = self._pending_files[-1]
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - 8192))
+                tail = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            return None
+        for line in reversed(tail.splitlines()):
+            if not line.strip():
+                continue
+            try:
+                return self._metric_from_payload(json.loads(line))
+            except ValueError:
+                continue
+        return None
+
+    def _persist_metric(self, metric: ExecutionMetric) -> bool:
         if self.telemetry_file is None:
-            return
+            return False
         try:
             self.telemetry_file.parent.mkdir(parents=True, exist_ok=True)
             with self.telemetry_file.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(metric.to_dict(), sort_keys=True) + "\n")
         except OSError:
-            return
+            return False
+        return True
 
     def evaluate_efficiency(self) -> list[str]:
         flags: list[str] = []
@@ -243,3 +287,13 @@ class SessionTelemetry:
             summary += "\n> ⚠️ **Inefficiencies Detected**:\n"
             summary += "\n".join(f"> - {flag}" for flag in report.flagged_inefficiencies)
         return summary
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number >= 0 else None

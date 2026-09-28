@@ -97,6 +97,33 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.leases(repo, pr_number),
         }
 
+    if code in {protocol_codes.STALE_REVISION, protocol_codes.PERSISTENCE_BUSY}:
+        return {
+            "summary": (
+                "A concurrent gh-address-cr command held or changed the runtime store. The failed command made "
+                "no change; rerun the same command, which reloads the current state."
+            ),
+            "command": command_templates.address(repo, pr_number),
+        }
+
+    if code == protocol_codes.PERSISTENCE_INVALID:
+        return {
+            "summary": (
+                "The runtime store failed an integrity check. Stop and do not edit session.json, evidence.jsonl, "
+                "or runtime.sqlite3, or delete legacy-v1-recovery. Report it with submit-feedback."
+            ),
+            "command": "gh-address-cr submit-feedback",
+        }
+
+    if code == protocol_codes.DISPATCH_PROJECTION_FAILED:
+        return {
+            "summary": (
+                "The orchestrator could not build a worker dispatch after the runtime claimed the item, and "
+                "released that claim. Rerun the step; inspect leases first if the release also failed."
+            ),
+            "command": command_templates.leases(repo, pr_number),
+        }
+
     if code == protocol_codes.SIDE_EFFECT_IN_PROGRESS:
         return {
             "summary": (

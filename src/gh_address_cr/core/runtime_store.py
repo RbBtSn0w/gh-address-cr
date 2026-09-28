@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator, TypeVar
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import fsync_directory, fsync_file, json_ready, write_json_atomic, write_json_durable
 from gh_address_cr.core.process_lock import is_execution_lock_held
-from gh_address_cr.evidence.ledger import EvidenceRecord, SideEffectAttempt, payload_hash
+from gh_address_cr.evidence.ledger import EvidenceRecord, SideEffectAttempt, payload_hash, take_pending_evidence
 
 SCHEMA_VERSION = 2
 RECOVERY_BUNDLE_NAME = "legacy-v1-recovery"
@@ -425,6 +425,9 @@ class RuntimeStore:
                 if expected_revision is not None and expected_revision != current_revision:
                     raise StaleRevisionError(expected=expected_revision, actual=current_revision)
                 value = mutation(working)
+                # Evidence a mutation records through a session ledger is buffered on the
+                # payload; it commits here, in the same transaction as the state it describes.
+                evidence = [*(evidence or []), *take_pending_evidence(working)]
                 next_revision = current_revision + 1
                 normalized = json_ready(working)
                 self._write_session(connection, normalized, revision=next_revision, already_normalized=True)
@@ -1586,8 +1589,24 @@ def _set_span_attributes(span: Any, attributes: dict[str, Any]) -> None:
         return
 
 
+_PERSISTENCE_TOTALS = {"persistence_ms": 0.0, "lock_wait_ms": 0.0}
+
+
+def reset_persistence_totals() -> None:
+    """Start a fresh per-command tally of time spent in the runtime store."""
+    _PERSISTENCE_TOTALS["persistence_ms"] = 0.0
+    _PERSISTENCE_TOTALS["lock_wait_ms"] = 0.0
+
+
+def persistence_totals() -> dict[str, float]:
+    return {key: round(value, 3) for key, value in _PERSISTENCE_TOTALS.items()}
+
+
 def _record_timing(span: Any, *, started_at: float, locked_at: float | None, outcome: str) -> None:
     now = time.monotonic()
+    _PERSISTENCE_TOTALS["persistence_ms"] += (now - started_at) * 1000
+    if locked_at is not None:
+        _PERSISTENCE_TOTALS["lock_wait_ms"] += (locked_at - started_at) * 1000
     attributes: dict[str, Any] = {"gh_address_cr.persistence.outcome": outcome}
     if locked_at is not None:
         attributes["gh_address_cr.persistence.lock_wait_ms"] = round((locked_at - started_at) * 1000, 3)

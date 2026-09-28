@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from gh_address_cr import __version__
@@ -1048,6 +1049,8 @@ def main(argv: list[str] | None = None) -> int:
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
+    started_at = time.time()
+    _reset_command_persistence_totals()
     span_attributes = _command_span_attributes(effective_argv, args)
     prior_command_attributes = get_current_span_attributes(
         ["gh_address_cr.command.name", "gh_address_cr.command.path"]
@@ -1059,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)
         if rc is not None:
@@ -1076,8 +1080,45 @@ def main(argv: list[str] | None = None) -> int:
         set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
     finally:
+        _record_command_metric(args, started_at=started_at, exit_code=rc if isinstance(rc, int) else 1)
         if restore_command_scope:
             set_current_span_attributes(prior_command_attributes)
+
+
+def _reset_command_persistence_totals() -> None:
+    try:
+        from gh_address_cr.core.runtime_store import reset_persistence_totals
+
+        reset_persistence_totals()
+    except Exception:
+        return
+
+
+def _record_command_metric(args: argparse.Namespace, *, started_at: float, exit_code: int) -> None:
+    """Record this gh-address-cr command in the PR session's local telemetry (fail-open).
+
+    Only commands that bound a PR session are recorded, so the efficiency report
+    can compare the same command's latency early and late in the session. The
+    label is the bounded span name, never arguments or paths.
+    """
+    try:
+        from gh_address_cr.core.runtime_store import persistence_totals
+        from gh_address_cr.core.telemetry_runtime import SessionTelemetry
+
+        tracker = SessionTelemetry.get_instance()
+        if tracker.telemetry_file is None:
+            return
+        totals = persistence_totals()
+        tracker.record(
+            command=f"gh-address-cr {_command_span_name(args)}",
+            start_time=started_at,
+            end_time=time.time(),
+            exit_code=exit_code,
+            persistence_ms=totals["persistence_ms"],
+            lock_wait_ms=totals["lock_wait_ms"],
+        )
+    except Exception:
+        return
 
 
 if __name__ == "__main__":

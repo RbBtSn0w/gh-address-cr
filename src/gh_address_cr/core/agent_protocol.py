@@ -98,46 +98,52 @@ def record_classification(
             payload={"item_id": item_id},
         )
 
-    session = session_store.load_session(repo, pr_number)
-    item = _items(session).get(item_id)
-    if not isinstance(item, dict):
-        raise WorkflowError(
-            status="CLASSIFICATION_REJECTED",
-            reason_code="ITEM_NOT_FOUND",
-            waiting_on="work_item",
-            exit_code=5,
-            message=f"Work item not found: {item_id}",
-            payload={"item_id": item_id},
-        )
+    def classify(session: dict[str, Any]) -> Any:
+        item = _items(session).get(item_id)
+        if not isinstance(item, dict):
+            raise WorkflowError(
+                status="CLASSIFICATION_REJECTED",
+                reason_code="ITEM_NOT_FOUND",
+                waiting_on="work_item",
+                exit_code=5,
+                message=f"Work item not found: {item_id}",
+                payload={"item_id": item_id},
+            )
 
-    ledger = _ledger(session)
-    record = ledger.append_event(
-        session_id=str(session["session_id"]),
-        item_id=item_id,
-        lease_id=None,
-        agent_id=agent_id,
-        role="triage",
-        event_type="classification_recorded",
-        payload={"classification": normalized, "note": note},
-    )
-    item["classification_evidence"] = {
-        "event_type": "classification_recorded",
-        "classification": normalized,
-        "note": note,
-        "record_id": record.record_id,
-    }
-    item["decision"] = normalized
-    item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
-    if released_lease_id:
-        _return_item_to_claimable_state(item)
-        if not is_stale_github_thread_item(item):
-            item["blocking"] = True
-        item["claimed_by"] = None
-        item["claimed_at"] = None
-        item["lease_expires_at"] = None
-        item.pop("active_lease_id", None)
-    session_store.save_session(repo, pr_number, session)
+        ledger = _ledger(session)
+        record = ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=None,
+            agent_id=agent_id,
+            role="triage",
+            event_type="classification_recorded",
+            payload={"classification": normalized, "note": note},
+        )
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": normalized,
+            "note": note,
+            "record_id": record.record_id,
+        }
+        item["decision"] = normalized
+        item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
+        if released_lease_id:
+            _return_item_to_claimable_state(item)
+            if not is_stale_github_thread_item(item):
+                item["blocking"] = True
+            item["claimed_by"] = None
+            item["claimed_at"] = None
+            item["lease_expires_at"] = None
+            item.pop("active_lease_id", None)
+        return record, released_lease_id
+
+    # Classification is pure session logic, so it is decided under the write lock
+    # against committed state instead of racing other writers with a stale copy.
+    record, released_lease_id = session_store.transact_session(
+        repo, pr_number, classify, operation="session_update"
+    ).value
     return {
         "status": "CLASSIFICATION_RECORDED",
         "repo": repo,
@@ -612,6 +618,29 @@ def submit_action_response(
     publisher_agent_id: str = "gh-address-cr-publisher",
 ) -> dict[str, Any]:
     now = _coerce_now(now)
+    # The accept phase reads GitHub for revision binding, so it cannot run inside a
+    # write transaction; it is pure until its save, so a stale save reruns it.
+    payload, prepared = session_store.retry_on_stale_revision(
+        lambda: _accept_action_response(
+            repo, pr_number, response_path=response_path, now=now, publish=publish, github_client=github_client
+        )
+    )
+    if not publish:
+        return payload
+    return _publish_accepted_response(
+        repo, pr_number, payload, prepared, github_client=github_client, publisher_agent_id=publisher_agent_id, now=now
+    )
+
+
+def _accept_action_response(
+    repo: str,
+    pr_number: str,
+    *,
+    response_path: str | Path,
+    now: datetime,
+    publish: bool,
+    github_client: Any | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
     response = load_response_json_object(
@@ -655,9 +684,19 @@ def submit_action_response(
         "evidence_record_id": record.record_id,
         "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
-    if not publish:
-        return payload
+    return payload, prepared
 
+
+def _publish_accepted_response(
+    repo: str,
+    pr_number: str,
+    payload: dict[str, Any],
+    prepared: dict[str, Any],
+    *,
+    github_client: Any | None,
+    publisher_agent_id: str,
+    now: datetime,
+) -> dict[str, Any]:
     from gh_address_cr.core import publisher
 
     published = publisher.publish_github_thread_responses(

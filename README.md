@@ -351,11 +351,12 @@ not suppress later operations.
 path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
 PR handling. Its versioned `worker-packet.v2` contains a
-`dispatch-receipt.v1` projection that references the canonical runtime
+`dispatch-receipt.v2` projection that references the canonical runtime
 `lease_id`, request binding, and committed revision. The orchestration session
 owns delivery only: lease conflict, expiry, status, and release decisions remain
-in the runtime store. The `--token` accepted by `agent orchestrate submit` is the
-opaque delivery token from that receipt, not a second lease.
+in the runtime store, and lost dispatches are rebuilt from canonical leases. The
+`--token` accepted by `agent orchestrate submit` is the opaque delivery token
+from that receipt (the canonical lease's resume token), not a second lease.
 
 ## Architecture and Packaging
 

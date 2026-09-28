@@ -114,6 +114,22 @@ Spec 034's status line is amended in 035a to "Superseded in part by 035".
   Persistence" section to `skill/references/status-action-map.md`, and matching
   text in `skill/references/agent-protocol.md` and `skill/SKILL.md`.
 
+### 035c as built
+
+- Agent commands intercept `SessionError` once in `handle_agent_command`, and
+  handlers with their own catch-all intercept it first; high-level commands
+  intercept it around the whole flow. Both emit `session_error_guidance`
+  (reason code, `waiting_on=runtime_store`, `retryable`, next action) so there
+  is one source for the wording. Before this, most agent commands let the error
+  escape as a traceback.
+- Classification, lease release, and reclaim run as `transact_session`
+  closures; evidence a closure records through a session ledger commits in the
+  same transaction. Submit reads GitHub for revision binding before it saves,
+  so it cannot hold the write lock; its accept phase is pure until the save and
+  reruns from fresh state on `STALE_REVISION`, at most three attempts, emitting
+  a bounded `persistence.stale_retry` event per retry. Publishing after submit
+  runs outside that retry.
+
 ## F6 — Database-enforced invariants (035b, schema v2)
 
 - Document `payload_json` as per-row truth and normalized columns as same-transaction index projections.
@@ -178,6 +194,29 @@ by a contract test in `tests/contract/test_outbox_ownership_contract.py`.
   which is their only consumer.
 - **Rejected:** WAL with `synchronous=NORMAL` measured no gain (commit fsync is
   not the bottleneck), so the store keeps rollback-journal full durability.
+
+## 035d Implementation Notes (as built)
+
+- Dispatch receipts are `dispatch-receipt.v2`; the delivery token is the
+  canonical lease's `resume_token`. Reconciliation drops dispatches whose lease
+  is no longer active for that item and rebuilds missing dispatches for active
+  leases whose holder starts with `orchestrator:` (a restarted run adopts its
+  predecessor's leases). `validate_dispatch` mirrors canonical lease existence
+  and status only; request binding is carried by the token and every other
+  lease rule stays with core submit. v1 receipts on disk stay valid.
+- A failure after the core claim releases that claim and returns
+  `DISPATCH_PROJECTION_FAILED` (`RETRY`, or `HALT` if the release also failed).
+- P4 needed a signal the report never had: `SessionTelemetry` recorded only
+  subprocesses and adapters, never gh-address-cr's own commands. The CLI now
+  records each PR-bound command as an `ExecutionMetric` with
+  `persistence_ms` / `lock_wait_ms`; the efficiency report adds
+  `operation_latency` (p50, p90, persistence share) and flags an operation whose
+  last-fifth median exceeds its first-fifth median by more than 2x (at least 10
+  samples); the flag reaches the final-gate completion line's `issues`.
+- Binding telemetry to a PR re-read the whole `telemetry.jsonl` on every
+  session load and transaction; with one line per command that became a new
+  linear cost. History now loads only when a report needs it, and `record`
+  reads just the file's last line for retry detection.
 
 ## Performance and Observability
 

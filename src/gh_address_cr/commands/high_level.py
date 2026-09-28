@@ -819,6 +819,27 @@ def _high_level_phase(command: str, phase: str) -> Iterator[dict[str, str | int 
         add_current_span_event("gh_address_cr.high_level.phase.end", payload)
 
 
+def _emit_session_error_summary(
+    command: str, repo: str, pr_number: str, exc: session_store.SessionError, *, human: bool, lean: bool
+) -> int:
+    guidance = session_store.session_error_guidance(exc)
+    summary = _native_summary(
+        command=command,
+        repo=repo,
+        pr_number=pr_number,
+        status="BLOCKED",
+        reason_code=guidance["reason_code"],
+        waiting_on=guidance["waiting_on"],
+        next_action=guidance["next_action"],
+        exit_code=5,
+        session={},
+        lean=lean,
+    )
+    summary["retryable"] = guidance["retryable"]
+    _emit_native_summary(summary, human=human)
+    return 5
+
+
 class HighLevelReviewRuntime:
     def _run_preflight_checks(
         self, command: str, parsed: Any, repo: str, pr_number: str
@@ -1011,12 +1032,19 @@ class HighLevelReviewRuntime:
         return 5
 
     def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
+        parsed = _parse_native_high_level_args(command, passthrough_args)
+        lean = bool(lean or parsed.lean or parsed.summary)
+        try:
+            return self._handle_parsed(command, parsed, human=human, lean=lean)
+        except session_store.SessionError as exc:
+            # Loading and every later save can fail on persistence; each keeps its own reason code.
+            return _emit_session_error_summary(command, parsed.repo, str(parsed.pr_number), exc, human=human, lean=lean)
+
+    def _handle_parsed(self, command: str, parsed: argparse.Namespace, *, human: bool, lean: bool) -> int:
         from gh_address_cr.otel_tracing import add_current_span_event
 
-        parsed = _parse_native_high_level_args(command, passthrough_args)
         repo = parsed.repo
         pr_number = str(parsed.pr_number)
-        lean = bool(lean or parsed.lean or parsed.summary)
         run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
         auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
 
@@ -1026,25 +1054,8 @@ class HighLevelReviewRuntime:
         if exit_code is not None:
             return exit_code
 
-        try:
-            with _high_level_phase(command, "session"):
-                session = _load_or_create_session(repo, pr_number)
-        except session_store.SessionError as exc:
-            waiting_on = "state_directory" if exc.reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
-            summary = _native_summary(
-                command=command,
-                repo=repo,
-                pr_number=pr_number,
-                status="BLOCKED",
-                reason_code=exc.reason_code,
-                waiting_on=waiting_on,
-                next_action=str(exc),
-                exit_code=5,
-                session={},
-                lean=lean,
-            )
-            _emit_native_summary(summary, human=human)
-            return 5
+        with _high_level_phase(command, "session"):
+            session = _load_or_create_session(repo, pr_number)
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:
