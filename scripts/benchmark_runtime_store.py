@@ -119,10 +119,44 @@ def _seed_legacy_workspace(items: int, evidence: int) -> None:
             handle.write("\n")
 
 
+_TRACER: Any = None
+
+
 def _timed(function: Callable[[], Any]) -> tuple[Any, int]:
     started = time.perf_counter_ns()
-    value = function()
+    if _TRACER is None:
+        value = function()
+    else:
+        value = _run_under_cli_span(function)
     return value, time.perf_counter_ns() - started
+
+
+def _run_under_cli_span(function: Callable[[], Any]) -> Any:
+    """Run one step the way the CLI does: inside a recording root span, so persistence child spans are real."""
+    from gh_address_cr.otel_tracing import run_traced
+
+    box: list[Any] = []
+
+    def operation() -> int:
+        box.append(function())
+        return 0
+
+    run_traced(_TRACER, "gh-address-cr", operation, context=None)
+    return box[0]
+
+
+def _install_tracer() -> Any:
+    """Install an SDK tracer with a batching in-memory exporter; returns the provider for shutdown."""
+    global _TRACER
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    _TRACER = provider.get_tracer("gh-address-cr-benchmark")
+    return provider, exporter
 
 
 def _percentile(values: list[int], quantile: float) -> int:
@@ -249,11 +283,17 @@ def main() -> int:
     parser.add_argument("--load-samples", type=int, default=15)
     parser.add_argument("--cr-limit", type=int, help="Run at most this many CRs per profile (smoke runs).")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON only.")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Run every step inside a recording CLI span with an in-memory OTel exporter (telemetry overhead runs).",
+    )
     args = parser.parse_args()
     if args.load_samples <= 0 or (args.cr_limit is not None and args.cr_limit <= 0):
         parser.error("--load-samples and --cr-limit must be positive")
 
     profiles = args.profile or ["M"]
+    tracing = _install_tracer() if args.trace else None
     report = {
         "schema_version": 1,
         "runtime": {
@@ -267,6 +307,12 @@ def main() -> int:
             for profile in profiles
         },
     }
+    if tracing is not None:
+        provider, exporter = tracing
+        provider.shutdown()
+        report["tracing"] = {"enabled": True, "spans_exported": len(exporter.get_finished_spans())}
+    else:
+        report["tracing"] = {"enabled": False, "spans_exported": 0}
     if args.json:
         print(json.dumps(report, sort_keys=True))
     else:

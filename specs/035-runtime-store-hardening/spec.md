@@ -2,7 +2,7 @@
 
 **Feature Branch**: `fix/035-runtime-store-hardening` (stacked as 035a → 035b → 035c → 035d)
 **Created**: 2026-09-26
-**Status**: Implemented on stacked branches 035a–035d (not yet merged to `develop`); the degradation-ratio budget is unmet, see validation.md
+**Status**: Merged to `develop` via #294 (2026-09-28); the degradation-ratio and tracing-p90 budgets are unmet and continue in Spec 036
 **Input**: Post-merge audit of Spec 034 (PRs #287, #288, #290, #292, #293) on
 `develop` before release PR #289 promotes it to `main`.
 

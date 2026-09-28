@@ -233,10 +233,32 @@ R1–R5 are permanent regression contracts.
   ratio needs an incremental session projection to go further; P4 surfaces any
   command that slows by more than 2x in the final-gate completion line.
 
+## Telemetry Overhead (closeout)
+
+`benchmark_runtime_store.py --trace` runs every step inside a recording CLI root
+span (`run_traced`) with an SDK `TracerProvider`, a `BatchSpanProcessor`, and an
+in-memory exporter, so the persistence child spans are real. Three alternating
+runs of profile M per mode on the authoring container (2,732 spans exported per
+traced run):
+
+| Mode | Per-CR p50 (3 runs) | Per-CR p90 (3 runs) | Degradation ratio |
+|---|---|---|---|
+| Tracing off | 100.3 / 94.3 / 102.9 ms | 135.6 / 145.1 / 142.5 ms | 2.85 / 2.84 / 2.74 |
+| Tracing on | 99.1 / 103.7 / 109.9 ms | 154.2 / 157.9 / 153.3 ms | 2.70 / 2.83 / 2.98 |
+
+| Budget | Status |
+|---|---|
+| Telemetry on versus off ≤ 5% | ✅ p50 +3.3% (median of runs); ❌ p90 +8.2% |
+
+The traced number includes the CLI root span, which predates Spec 035, so the
+cost added by the persistence spans alone is at most this figure. Tracing does
+not change the degradation ratio. The p90 overage continues in Spec 036.
+
 ## Required Gates Per PR
 
 - `pip install -e .`
 - `ruff check src tests scripts/build_plugin_payload.py`
+- `python3 scripts/check_mypy_ratchet.py`
 - `python3 -m unittest discover -s tests`
 - `python3 -m gh_address_cr --help`
 - `python3 -m gh_address_cr agent manifest`

@@ -247,13 +247,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/gh-address-cr-dev.rb
-          if ! git diff --cached --quiet; then
+          # Every PR writes the same dev formula, so concurrent previews race on
+          # the tap's main ref. Rebuild the commit on the latest tap head and retry.
+          pushed=false
+          for attempt in 1 2 3 4; do
+            if git diff --cached --quiet; then
+              break
+            fi
             git commit -m "gh-address-cr-dev ${DEV_VERSION} (PR #${PR_NUM})"
-            git push
-            echo "pushed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-          fi
+            if git push; then
+              pushed=true
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::Could not push the dev formula after ${attempt} attempts."
+              exit 1
+            fi
+            sleep $((attempt * 2))
+            git fetch origin
+            git reset --hard "@{upstream}"
+            cp ../gh-address-cr-dev.rb Formula/gh-address-cr-dev.rb
+            git add Formula/gh-address-cr-dev.rb
+          done
+          echo "pushed=${pushed}" >> "$GITHUB_OUTPUT"
 
       - name: Comment on PR with Multi-Path Verification Instructions
         uses: actions/github-script@v7

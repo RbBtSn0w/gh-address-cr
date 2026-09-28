@@ -94,6 +94,17 @@ commit and pass after the fix; paste both outputs in the PR description.
 
 ## Release Gate
 
-- [ ] G001 035a merged to `develop` (035b recommended) before
-  [RbBtSn0w/gh-address-cr#289](https://github.com/RbBtSn0w/gh-address-cr/pull/289) merges.
-- [ ] G002 Each PR's session runs `final-gate` and records the compact metrics line.
+- [x] G001 035a merged to `develop` (035b recommended) before
+  [RbBtSn0w/gh-address-cr#289](https://github.com/RbBtSn0w/gh-address-cr/pull/289) merges
+  (all of 035a–035d landed through #294 on 2026-09-28).
+- [ ] G002 Each PR's session runs `final-gate` and records the compact metrics line
+  (owner action: needs a PR session with GitHub access; record the line in `validation.md`).
+
+## Closeout
+
+- [x] H001 Measure the telemetry-on versus telemetry-off budget with `benchmark_runtime_store.py --trace`
+  (p50 within budget, p90 over; see validation.md).
+- [x] H002 Add the mypy ratchet to the `AGENTS.md` verification commands.
+- [x] H003 Retry the dev-formula push in the PR preview job so concurrent stacked PRs do not race on the tap.
+- [x] H004 Hand the unmet degradation-ratio and tracing-p90 budgets to
+  [Spec 036](../036-runtime-transaction-hot-path/spec.md).
