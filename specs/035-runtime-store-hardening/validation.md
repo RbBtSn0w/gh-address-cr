@@ -124,7 +124,7 @@ were not adopted:
 
 ## 035b Regression Evidence
 
-`tests/contract/test_outbox_ownership_contract.py` (18 tests) passes three
+`tests/contract/test_outbox_ownership_contract.py` (19 tests, including the compact projection contract) passes three
 consecutive runs. R4 and R5 were reproduced on `4ba50e6` by the audit scripts
 (see Reproductions); the contract module cannot import on pre-035b code
 because the APIs it drives (execution guard, outbox lookups, schema v2) do not
