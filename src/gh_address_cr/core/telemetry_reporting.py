@@ -424,9 +424,9 @@ def _operation_latency(events: list[ExternalTelemetryEvent]) -> list[dict[str, A
     for operation, rows in sorted(_runtime_command_series(events).items()):
         durations = sorted(event.duration_ms for event in rows)
         persistence = [
-            float((event.metadata or {}).get("persistence_ms"))
-            for event in rows
-            if isinstance((event.metadata or {}).get("persistence_ms"), (int, float))
+            float(value)
+            for value in ((event.metadata or {}).get("persistence_ms") for event in rows)
+            if isinstance(value, (int, float))
         ]
         rows_out.append(
             {
