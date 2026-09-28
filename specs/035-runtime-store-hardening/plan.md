@@ -195,6 +195,29 @@ by a contract test in `tests/contract/test_outbox_ownership_contract.py`.
 - **Rejected:** WAL with `synchronous=NORMAL` measured no gain (commit fsync is
   not the bottleneck), so the store keeps rollback-journal full durability.
 
+## 035d Implementation Notes (as built)
+
+- Dispatch receipts are `dispatch-receipt.v2`; the delivery token is the
+  canonical lease's `resume_token`. Reconciliation drops dispatches whose lease
+  is no longer active for that item and rebuilds missing dispatches for active
+  leases whose holder starts with `orchestrator:` (a restarted run adopts its
+  predecessor's leases). `validate_dispatch` mirrors canonical lease existence
+  and status only; request binding is carried by the token and every other
+  lease rule stays with core submit. v1 receipts on disk stay valid.
+- A failure after the core claim releases that claim and returns
+  `DISPATCH_PROJECTION_FAILED` (`RETRY`, or `HALT` if the release also failed).
+- P4 needed a signal the report never had: `SessionTelemetry` recorded only
+  subprocesses and adapters, never gh-address-cr's own commands. The CLI now
+  records each PR-bound command as an `ExecutionMetric` with
+  `persistence_ms` / `lock_wait_ms`; the efficiency report adds
+  `operation_latency` (p50, p90, persistence share) and flags an operation whose
+  last-fifth median exceeds its first-fifth median by more than 2x (at least 10
+  samples); the flag reaches the final-gate completion line's `issues`.
+- Binding telemetry to a PR re-read the whole `telemetry.jsonl` on every
+  session load and transaction; with one line per command that became a new
+  linear cost. History now loads only when a report needs it, and `record`
+  reads just the file's last line for retry detection.
+
 ## Performance and Observability
 
 ### Verified baseline gaps

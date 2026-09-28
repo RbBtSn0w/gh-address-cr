@@ -115,6 +115,15 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": "gh-address-cr submit-feedback",
         }
 
+    if code == protocol_codes.DISPATCH_PROJECTION_FAILED:
+        return {
+            "summary": (
+                "The orchestrator could not build a worker dispatch after the runtime claimed the item, and "
+                "released that claim. Rerun the step; inspect leases first if the release also failed."
+            ),
+            "command": command_templates.leases(repo, pr_number),
+        }
+
     if code == protocol_codes.SIDE_EFFECT_IN_PROGRESS:
         return {
             "summary": (

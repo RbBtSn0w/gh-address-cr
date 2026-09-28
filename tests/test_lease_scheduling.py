@@ -41,6 +41,7 @@ class TestLeaseScheduling(unittest.TestCase):
             lease_id="lease-1",
             request_id="req-1",
             runtime_revision=2,
+            delivery_token="resume:req-1",
         )
         runtime_state = {
             "leases": {
@@ -67,12 +68,13 @@ class TestLeaseScheduling(unittest.TestCase):
             lease_id="lease-1",
             request_id="req-1",
             runtime_revision=2,
+            delivery_token="resume:req-1",
         )
         runtime_state = {"leases": {}}
 
         result = self.session.reconcile_dispatches(runtime_state, runtime_revision=3)
 
-        self.assertEqual(result, {"retained": 0, "removed": 1, "runtime_revision": 3})
+        self.assertEqual(result, {"retained": 0, "removed": 1, "rebuilt": 0, "runtime_revision": 3})
         self.assertEqual(runtime_state["leases"], {})
 
 
