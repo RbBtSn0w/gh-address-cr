@@ -55,6 +55,8 @@ ratio is last-decile ÷ first-decile per-CR median.
 | L | 035a | **1204 ms** | 1827 ms | 2490 ms | 2.17 | 36.1 → 87.3 ms |
 | M | 035b | 328 ms | **154 ms** | **227 ms** | 3.07 | 2.9 → 9.3 ms |
 | L | 035b | 965 ms | **457 ms** | **675 ms** | 3.37 | 6.7 → 35.2 ms |
+| M | 035b + compact `session.json` | 387 ms | **107 ms** | **149 ms** | 2.20 | 2.6 → 8.2 ms |
+| L | 035b + compact `session.json` | 831 ms | **294 ms** | **462 ms** | 4.12 | 5.3 → 24.1 ms |
 
 ### Findings
 
@@ -101,7 +103,7 @@ were not adopted:
 | Experiment (M) | CR p50 | CR p90 | Decision |
 |---|---|---|---|
 | WAL + `synchronous=NORMAL` | 176 ms | 242 ms | Rejected: no gain; commit fsync is not the bottleneck |
-| Compact (non-indented) `session.json` | 121 ms | 173 ms | Not adopted: changes a user-visible file's format; needs an owner decision |
+| Compact (non-indented) `session.json` | 121 ms | 173 ms | Adopted after owner approval (2026-09-28); with the encoder `default` hook it measures 107 ms / 149 ms |
 
 ### Budget status after 035b
 
@@ -112,6 +114,13 @@ were not adopted:
 | Degradation ratio ≤ 1.5 | ❌ M 3.07, L 3.37 (`main` 4.26 / 5.50) — every write still re-encodes the whole `session.json` projection |
 | First-open migration below the 5 s busy timeout | ✅ M 0.33 s, L 0.96 s |
 | `load_session` without `in_flight` rows opens no write transaction | ✅ `test_read_only_load_takes_no_write_lock` |
+
+### Budget status after the compact projection
+
+| Budget | Status |
+|---|---|
+| Per-command p90 ≤ 1.5× main | ✅ M 1.49×, L 1.24× |
+| Degradation ratio ≤ 1.5 | ❌ M 2.20, L 4.12 (`main` 4.26 / 5.50). Early CRs got faster, so the ratio rose at L; absolute late-session cost is still below `main`. Every write re-encodes the whole projection, so the ratio cannot reach 1.5 without incremental session projection. |
 
 ## 035b Regression Evidence
 
