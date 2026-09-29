@@ -135,7 +135,9 @@ class RuntimeWorkingSetContractTest(unittest.TestCase):
             request = WorkingSetRequest(item_ids=("finding-1",))
             committed = store.transact_working_set(
                 request,
-                lambda payload: payload["items"]["finding-1"].update(body="unicode 雪 🚀"),
+                lambda payload: payload["items"]["finding-1"].update(
+                    body="unicode café 雪 🚀"
+                ),
                 operation="session_update",
             )
             session_path = workspace / "session.json"

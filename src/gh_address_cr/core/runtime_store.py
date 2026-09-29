@@ -2258,13 +2258,11 @@ def _projection_rows(connection: sqlite3.Connection, table: str, identity_column
 def _ascii_json_fragment(fragment: str) -> str:
     if fragment.isascii():
         return fragment
-    escaped = fragment.encode("ascii", "backslashreplace").decode("ascii")
-
-    def surrogate_pair(match: re.Match[str]) -> str:
-        adjusted = int(match.group(1), 16) - 0x10000
-        return f"\\u{0xD800 + (adjusted >> 10):04x}\\u{0xDC00 + (adjusted & 0x3FF):04x}"
-
-    return re.sub(r"\\U([0-9a-fA-F]{8})", surrogate_pair, escaped)
+    return re.sub(
+        r"[^\x00-\x7f]",
+        lambda match: json.dumps(match.group(0))[1:-1],
+        fragment,
+    )
 
 
 def _json(value: Any) -> str:

@@ -422,6 +422,16 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, open_item())
+                seeded = manager.load()
+                seeded["items"]["local:2"] = open_item("local:2")
+                seeded["leases"]["lease-terminal"] = {
+                    "lease_id": "lease-terminal",
+                    "item_id": "local:2",
+                    "agent_id": "previous-fixer",
+                    "role": "fixer",
+                    "status": "released",
+                }
+                manager.save(seeded)
                 agent_protocol.record_classification(
                     repo,
                     pr_number,
@@ -469,6 +479,8 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(session["leases"][request["lease_id"]]["status"], "released")
                 self.assertEqual(session["items"]["local:1"]["state"], "open")
                 self.assertNotIn("active_lease_id", session["items"]["local:1"])
+                self.assertIn("local:2", session["items"])
+                self.assertIn("lease-terminal", session["leases"])
 
                 refreshed = agent_protocol.issue_action_request(
                     repo,
