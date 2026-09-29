@@ -41,9 +41,23 @@ class RuntimeStoreBenchmarkTest(unittest.TestCase):
         profile = report["profiles"]["S"]
         self.assertEqual(profile["workload"], {"items": 50, "evidence": 200, "crs_run": 5})
         self.assertEqual(set(profile["steps_ms"]), {"classify", "next", "submit"})
+        self.assertEqual(set(profile["cost_breakdown_ms"]), {"classify", "next", "submit"})
         for summary in (*profile["steps_ms"].values(), profile["per_cr_ms"]):
             self.assertEqual(set(summary), {"p50", "p90", "max"})
             self.assertGreater(summary["p50"], 0)
+        for step, breakdown in profile["cost_breakdown_ms"].items():
+            self.assertEqual(set(breakdown), {"load", "transaction", "materialization", "other"})
+            for component in breakdown.values():
+                self.assertEqual(set(component), {"p50", "p90", "max"})
+                self.assertGreaterEqual(component["p50"], 0)
+            self.assertLessEqual(
+                sum(component["p50"] for component in breakdown.values()),
+                profile["steps_ms"][step]["p50"] + 0.5,
+            )
+        self.assertEqual(
+            set(profile["cost_breakdown_degradation_ratio"]),
+            {"classify", "next", "submit"},
+        )
         self.assertGreater(profile["first_load_ms"], 0)
         self.assertEqual(set(profile["load_session_ms"]), {"before_loop", "after_loop"})
         self.assertGreater(profile["degradation_ratio"], 0)

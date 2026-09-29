@@ -213,6 +213,7 @@ def _write_and_materialize(workspace: str, barrier, index: int) -> None:
 def _downgrade_to_v1(store: RuntimeStore) -> None:
     """Rewrite a fresh store into the Spec 034 (schema v1) layout."""
     with closing(sqlite3.connect(store.database_path)) as connection:
+        connection.execute("DROP TABLE lease_events")
         connection.execute("DROP INDEX leases_one_active_per_item")
         for table, column in (
             ("outbox_commands", "owner_token"),
@@ -408,6 +409,65 @@ class OutboxOwnershipContractTest(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "schema contracts use fork")
 class SchemaV2ContractTest(unittest.TestCase):
+    def test_v2_upgrade_normalizes_lease_events_without_changing_snapshot(self):
+        events = [
+            {
+                "event_type": "lease_created",
+                "timestamp": "2026-09-28T00:00:00+00:00",
+                "lease_id": "lease-1",
+                "item_id": "finding-1",
+                "agent_id": "agent-1",
+                "role": "fixer",
+                "status": "active",
+            },
+            {
+                "event_type": "lease_released",
+                "timestamp": "2026-09-28T00:01:00+00:00",
+                "lease_id": "lease-1",
+                "item_id": "finding-1",
+                "agent_id": "agent-1",
+                "role": "fixer",
+                "status": "released",
+                "reason": "done",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            payload = _session()
+            payload["lease_events"] = events
+            store.bootstrap(payload)
+            with closing(sqlite3.connect(store.database_path)) as connection:
+                connection.execute("DROP TABLE IF EXISTS lease_events")
+                row = connection.execute("SELECT payload_json FROM sessions").fetchone()
+                root = json.loads(row[0])
+                root["lease_events"] = events
+                connection.execute(
+                    "UPDATE sessions SET payload_json = ?",
+                    (json.dumps(root, ensure_ascii=False, sort_keys=True, separators=(",", ":")),),
+                )
+                connection.execute("UPDATE store_metadata SET schema_version = 2")
+                connection.execute("DELETE FROM migration_history WHERE migration_id = 'sqlite-v2-to-v3'")
+                connection.commit()
+
+            upgraded = RuntimeStore(Path(tmp))
+            snapshot = upgraded.load()
+            with closing(sqlite3.connect(upgraded.database_path)) as connection:
+                version = connection.execute("SELECT schema_version FROM store_metadata").fetchone()[0]
+                stored_root = json.loads(connection.execute("SELECT payload_json FROM sessions").fetchone()[0])
+                stored_events = [
+                    json.loads(row[0])
+                    for row in connection.execute("SELECT payload_json FROM lease_events ORDER BY sequence")
+                ]
+                migration_count = connection.execute(
+                    "SELECT COUNT(*) FROM migration_history WHERE migration_id = 'sqlite-v2-to-v3'"
+                ).fetchone()[0]
+
+        self.assertEqual(version, 3)
+        self.assertEqual(snapshot.payload["lease_events"], events)
+        self.assertEqual(stored_events, events)
+        self.assertNotIn("lease_events", stored_root)
+        self.assertEqual(migration_count, 1)
+
     def test_legacy_import_backfills_outbox_from_side_effect_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -455,7 +515,7 @@ class SchemaV2ContractTest(unittest.TestCase):
 
         self.assertEqual(snapshot.revision, 2)
         self.assertEqual(version, SCHEMA_VERSION)
-        self.assertEqual(migrations, ["sqlite-v1-to-v2"])
+        self.assertEqual(migrations, ["sqlite-v1-to-v2", "sqlite-v2-to-v3"])
         self.assertEqual(rows["reply-ok"]["status"], "planned", "an existing canonical row is never overwritten")
         self.assertEqual(
             {key: (row["status"], row["external_result_reference"]) for key, row in rows.items() if key != "reply-ok"},
@@ -586,8 +646,7 @@ class SchemaV2ContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = RuntimeStore(Path(tmp))
             store.bootstrap(_session())
-            # The first rewrite stores the derived claim fields every loaded item carries; after that an
-            # item's revision moves only when its own payload changes.
+            # Bootstrap stores canonical claim fields, so a no-op transaction never advances an item row.
             store.transact(lambda payload: None, operation="session_update")
             store.transact(
                 lambda payload: payload["items"]["finding-1"].update(status="FIXED"), operation="session_update"
@@ -597,7 +656,7 @@ class SchemaV2ContractTest(unittest.TestCase):
                     connection.execute("SELECT item_id, last_observed_revision FROM items").fetchall()
                 )
 
-        self.assertEqual(observed, {"finding-1": 3, "finding-2": 2})
+        self.assertEqual(observed, {"finding-1": 3, "finding-2": 1})
 
 
 @unittest.skipIf(os.name == "nt", "projection contracts use fork")

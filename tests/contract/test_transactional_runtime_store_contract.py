@@ -18,6 +18,7 @@ from gh_address_cr.core.runtime_store import (
     PersistenceInvalidError,
     RuntimeStore,
     StaleRevisionError,
+    WorkingSetRequest,
 )
 from gh_address_cr.evidence.ledger import EvidenceLedger, EvidenceRecord
 
@@ -823,6 +824,34 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(transaction["persistence.schema_version"], SCHEMA_VERSION)
         serialized = json.dumps(events, sort_keys=True)
         for forbidden in ("owner/repo", "finding-1", "runtime.sqlite3", str(workspace), "SELECT", "INSERT"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_bounded_transaction_failure_emits_private_persistence_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+
+            with (
+                patch("gh_address_cr.otel_tracing.add_current_span_event") as emit,
+                self.assertRaisesRegex(ValueError, "injected bounded failure"),
+            ):
+                store.transact_working_set(
+                    WorkingSetRequest(item_ids=("finding-1",)),
+                    lambda payload: (_ for _ in ()).throw(
+                        ValueError("injected bounded failure")
+                    ),
+                    operation="session_update",
+                )
+
+        events = [(call.args[0], call.args[1]) for call in emit.call_args_list]
+        transaction = next(
+            attributes for name, attributes in events if name == "persistence.transaction"
+        )
+        self.assertEqual(transaction["persistence.operation"], "session_update")
+        self.assertEqual(transaction["persistence.outcome"], "failed")
+        serialized = json.dumps(events, sort_keys=True)
+        for forbidden in ("owner/repo", "finding-1", str(workspace), "injected bounded failure"):
             self.assertNotIn(forbidden, serialized)
 
     def test_recovery_outbox_and_materialization_telemetry_is_bounded_and_private(self):

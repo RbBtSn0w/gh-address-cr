@@ -257,7 +257,9 @@ class PythonScriptTestCase(unittest.TestCase):
         return self.workspace_dir() / "session.json"
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def audit_log_file(self):
         return self.workspace_dir() / "audit.jsonl"

@@ -126,8 +126,11 @@ once and preserved in an immutable `legacy-v1-recovery/` bundle. JSON and JSONL
 files in the live workspace are compatibility projections after migration;
 `session.json` carries its source revision and `evidence.jsonl.meta.json` carries
 the JSONL projection revision without changing the existing JSONL row format.
-`session.json` is written as compact, key-sorted JSON because it is rewritten on
-every committed change; read it with a JSON parser rather than by line. Editing
+`session.json` is written as compact, key-sorted JSON. Runtime schema v3 marks
+it dirty after bounded commands and rewrites it at explicit full-load, reporting,
+export, and recovery boundaries; consumers that require current data must verify
+its embedded revision or request materialization. Incremental evidence remains
+current after command commits. Read JSON with a parser rather than by line. Editing
 or deleting these projections does not change runtime truth. Unsupported schemas,
 recovery-bundle divergence, stale revisions, and bounded writer contention fail
 explicitly instead of falling back to uncoordinated file writes.

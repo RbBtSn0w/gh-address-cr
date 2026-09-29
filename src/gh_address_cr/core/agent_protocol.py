@@ -43,6 +43,7 @@ from gh_address_cr.core.leases import (
 )
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
+from gh_address_cr.core.runtime_store import WorkingSetRequest
 from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
@@ -67,6 +68,38 @@ from gh_address_cr.core.utils import (
 )
 
 MUTATING_ROLES = {"fixer"}
+
+
+def _persist_loaded_scope(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    request: WorkingSetRequest | None,
+) -> None:
+    """Persist mutations using the same full or bounded scope that was loaded."""
+    if request is None:
+        session_store.save_session(repo, pr_number, session)
+        return
+    persistence = session.get("persistence")
+    expected_revision = (
+        int(persistence["revision"])
+        if isinstance(persistence, dict) and isinstance(persistence.get("revision"), int)
+        else None
+    )
+
+    def replace_loaded_scope(current: dict[str, Any]) -> None:
+        current.clear()
+        current.update(session)
+
+    session_store.transact_working_set(
+        repo,
+        pr_number,
+        request,
+        replace_loaded_scope,
+        operation="session_update",
+        expected_revision=expected_revision,
+    )
 
 
 def record_classification(
@@ -141,8 +174,12 @@ def record_classification(
 
     # Classification is pure session logic, so it is decided under the write lock
     # against committed state instead of racing other writers with a stale copy.
-    record, released_lease_id = session_store.transact_session(
-        repo, pr_number, classify, operation="session_update"
+    record, released_lease_id = session_store.transact_working_set(
+        repo,
+        pr_number,
+        WorkingSetRequest(item_ids=(item_id,)),
+        classify,
+        operation="session_update",
     ).value
     return {
         "status": "CLASSIFICATION_RECORDED",
@@ -164,6 +201,7 @@ def _reenter_own_fixer_lease(
     agent_id: str,
     item_id: str | None,
     github_client: Any | None,
+    working_set_request: WorkingSetRequest | None,
 ) -> dict[str, Any] | None:
     """Hand an agent back the request for the fixer lease it already holds.
 
@@ -227,7 +265,12 @@ def _reenter_own_fixer_lease(
                 "rebuilt": True,
             },
         )
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
     if _payload_for_lease(skeleton_path, **identity) is None:
         # Derived from the request now on disk. Regenerating the skeleton does not touch
         # the request or the hash the lease stores for it: when only the skeleton was
@@ -341,7 +384,20 @@ def issue_action_request(
     github_client: Any | None = None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
-    session = session_store.load_session(repo, pr_number)
+    working_set_request = (
+        WorkingSetRequest(item_ids=(item_id,), include_active_leases=True)
+        if item_id
+        else None
+    )
+    session = (
+        session_store.load_working_set(
+            repo,
+            pr_number,
+            working_set_request,
+        )
+        if working_set_request is not None
+        else session_store.load_session(repo, pr_number)
+    )
     ledger = _ledger(session)
     expired = expire_leases(session, now=current_time)
     _return_expired_items_to_open(session, expired)
@@ -349,7 +405,14 @@ def issue_action_request(
     item_id, item = _next_item(session, role, item_id=item_id)
     if item is None:
         reentered = _reenter_own_fixer_lease(
-            repo, pr_number, session, role=role, agent_id=agent_id, item_id=item_id, github_client=github_client
+            repo,
+            pr_number,
+            session,
+            role=role,
+            agent_id=agent_id,
+            item_id=item_id,
+            github_client=github_client,
+            working_set_request=working_set_request,
         )
         if reentered is not None:
             return reentered
@@ -365,7 +428,12 @@ def issue_action_request(
                 request_hash=str(locked_lease.get("request_hash") or ""),
                 now=current_time,
             ).to_dict()
-            session_store.save_session(repo, pr_number, session)
+            _persist_loaded_scope(
+                repo,
+                pr_number,
+                session,
+                request=working_set_request,
+            )
             raise WorkflowError(
                 status=protocol_codes.LEASE_LOCKED_ITEM,
                 reason_code=protocol_codes.LEASE_LOCKED_ITEM,
@@ -378,7 +446,12 @@ def issue_action_request(
                 ),
                 payload={"item_id": item_id, "lease_recovery": recovery},
             )
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise WorkflowError(
             status=protocol_codes.NO_ELIGIBLE_ITEM,
             reason_code=protocol_codes.NO_ELIGIBLE_ITEM,
@@ -405,7 +478,12 @@ def issue_action_request(
             event_type="request_rejected",
             payload={"reason_code": protocol_codes.MISSING_CLASSIFICATION},
         )
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise WorkflowError(
             status="REQUEST_REJECTED",
             reason_code=protocol_codes.MISSING_CLASSIFICATION,
@@ -464,6 +542,8 @@ def issue_action_request(
     local_decision = item.get("decision")
 
     def commit_claim(current: dict[str, Any]) -> Any:
+        current_expired = expire_leases(current, now=current_time)
+        _return_expired_items_to_open(current, current_expired)
         current_item = current.get("items", {}).get(item_id)
         if not isinstance(current_item, dict):
             raise LeaseConflictError("ITEM_NOT_CLAIMABLE", item_id)
@@ -493,9 +573,10 @@ def issue_action_request(
         return committed_lease
 
     try:
-        committed = session_store.transact_session(
+        committed = session_store.transact_working_set(
             repo,
             pr_number,
+            WorkingSetRequest(item_ids=(item_id,), include_active_leases=True),
             commit_claim,
             operation="lease_claim",
         )
@@ -641,8 +722,6 @@ def _accept_action_response(
     publish: bool,
     github_client: Any | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    session = session_store.load_session(repo, pr_number)
-    ledger = _ledger(session)
     response = load_response_json_object(
         response_path,
         status=protocol_codes.ACTION_REJECTED,
@@ -652,16 +731,32 @@ def _accept_action_response(
         shape_message="ActionResponse must be a JSON object.",
         payload_name="ActionResponse",
     )
+    requested_lease_id = str(response.get("lease_id") or "")
+    bounded_request = WorkingSetRequest(
+        lease_ids=(requested_lease_id,) if requested_lease_id else (),
+    )
+    working_set_request: WorkingSetRequest | None = bounded_request
+    session = session_store.load_working_set(
+        repo,
+        pr_number,
+        bounded_request,
+    )
+    if requested_lease_id and requested_lease_id not in session.get("leases", {}):
+        # Rebound GitHub-thread responses are a compatibility path that needs
+        # the complete lease history to locate the replacement lease.
+        session = session_store.load_session(repo, pr_number)
+        working_set_request = None
+    ledger = _ledger(session)
 
     try:
         if publish:
             _validate_publish_shortcut_target(session, response)
-        prepared = prepare_action_response_submission(session, ledger, response, now=now)
+        preflight = prepare_action_response_submission(session, ledger, response, now=now)
         binding = verify_request_revision_binding(
             repo,
             pr_number,
             session,
-            prepared,
+            preflight,
             response,
             github_client=github_client,
             ledger=ledger,
@@ -670,18 +765,66 @@ def _accept_action_response(
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
-        record = accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise
-    session_store.save_session(repo, pr_number, session)
+
+    def accept(current: dict[str, Any]) -> dict[str, Any]:
+        metadata = session.get("metadata")
+        if isinstance(metadata, dict):
+            current["metadata"] = dict(metadata)
+        current_ledger = _ledger(current)
+        prepared = prepare_action_response_submission(current, current_ledger, response, now=now)
+        try:
+            record = accept_action_response_submission(
+                current,
+                current_ledger,
+                response,
+                prepared,
+                now=now,
+            )
+        except WorkflowError as exc:
+            return {"error": exc, "prepared": prepared}
+        return {
+            "prepared": prepared,
+            "evidence_record_id": record.record_id,
+        }
+
+    persistence = session.get("persistence")
+    expected_revision = (
+        int(persistence["revision"])
+        if isinstance(persistence, dict) and isinstance(persistence.get("revision"), int)
+        else None
+    )
+    committed = session_store.transact_working_set(
+        repo,
+        pr_number,
+        WorkingSetRequest(
+            item_ids=(str(preflight["item_id"]),),
+            lease_ids=(str(preflight["lease_id"]),),
+        ),
+        accept,
+        operation="lease_release",
+        expected_revision=expected_revision,
+    )
+    outcome = committed.value
+    if isinstance(outcome, dict) and isinstance(outcome.get("error"), WorkflowError):
+        raise outcome["error"]
+    if not isinstance(outcome, dict) or not isinstance(outcome.get("prepared"), dict):
+        raise RuntimeError("Accepted ActionResponse transaction returned an invalid outcome.")
+    prepared = outcome["prepared"]
     payload = {
         "status": "ACTION_ACCEPTED",
         "repo": repo,
         "pr_number": str(pr_number),
         "lease_id": prepared["lease_id"],
         "item_id": prepared["item_id"],
-        "evidence_record_id": record.record_id,
+        "evidence_record_id": outcome["evidence_record_id"],
         "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
     return payload, prepared
