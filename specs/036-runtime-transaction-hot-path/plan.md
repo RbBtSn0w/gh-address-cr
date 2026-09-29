@@ -79,8 +79,8 @@ direction as historical evidence. No success criterion was relaxed.
 1. Resolve a bounded working set from canonical SQLite rows without decoding
    unrelated items or terminal lease payloads.
 2. Run the existing deterministic policy over an explicit working-set DTO.
-3. Commit its declared item, lease, evidence, outbox, and session-field delta
-   under the existing expected-revision transaction.
+3. Compare and commit item, lease, evidence, outbox, and session-field changes
+   inside the selected scope under the existing expected-revision transaction.
 4. Append lease lifecycle events to their normalized table without rewriting
    prior events or the session root.
 5. Materialize compatibility artifacts after commit under the existing public
@@ -91,7 +91,7 @@ direction as historical evidence. No success criterion was relaxed.
 
 | Condition | Path | Result |
 |---|---|---|
-| Bounded working set with a declared delta | Incremental | Decode and encode selected entities only |
+| Bounded working set with validated write scope | Incremental | Decode and encode selected entities only |
 | Whole-payload replacement or unprovable input | Full | Existing normalization and equality checks |
 | Fragment missing or inconsistent | Full rebuild | Identical output; no silent partial projection |
 | Expected revision changed | Reject | Existing `STALE_REVISION` behavior |
@@ -136,16 +136,16 @@ revision. Selection is declarative data, not a second policy implementation.
 The runtime kernel remains responsible for eligibility, conflict, recovery,
 and transition decisions.
 
-The mutation returns an explicit delta:
+The runtime kernel mutates this bounded DTO in place. The store compares only
+its selected canonical fragments and validates that every pre-existing changed
+identity belonged to the requested working set. New item and lease identities
+created by the operation are allowed. Evidence records and outbox commands are
+append-only members of the same bounded transaction. The store then commits the
+validated write set with the existing compare-and-swap revision boundary.
 
-- upsert/remove item rows
-- upsert/remove lease rows
-- session metadata patch
-- evidence records and outbox commands
-
-The store validates that every changed identity belonged to the requested
-working set or was newly created by the operation, then commits the delta with
-the existing compare-and-swap revision boundary.
+ADR-002 records why a separate explicit-delta DTO is not introduced until a
+consumer needs field-level merge, cross-working-set composition, or an external
+mutation provider.
 
 ### Canonical Fragments
 
@@ -199,7 +199,7 @@ are recorded.
 
 ## Complexity Budget
 
-- One versioned working-set DTO, one delta type, and one store commit path.
+- One versioned working-set DTO, one write-scope validator, and one store commit path.
 - No dict/list/set proxy emulation, daemon, cache database, or compatibility
   alias.
 - No operation-specific SQL policy. Queries may select rows by declarative
@@ -226,7 +226,7 @@ the embedded append-only `lease_events` array, while materialization remains
 any decision about artifact cadence.
 
 The next implementation phase must prove that one benchmark command can run
-from a bounded working set and explicit delta without invoking `load_session`
+from a bounded working set and validated write set without invoking `load_session`
 or `replace()`. Full projection cost is measured separately and remains a
 public recovery-contract decision if it alone prevents SC-001.
 

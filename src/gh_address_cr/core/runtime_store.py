@@ -500,19 +500,44 @@ class RuntimeStore:
                 connection.rollback()
                 if _is_busy(exc):
                     _record_timing(span, started_at=started_at, locked_at=None, outcome="busy")
+                    _emit_persistence_event(
+                        "persistence.transaction",
+                        operation=operation,
+                        outcome="busy",
+                        contention=_contention_bucket(started_at),
+                    )
                     raise PersistenceBusyError() from exc
                 _record_timing(span, started_at=started_at, locked_at=None, outcome="failed")
+                _emit_persistence_event(
+                    "persistence.transaction",
+                    operation=operation,
+                    outcome="failed",
+                    contention=_contention_bucket(started_at),
+                )
                 raise
             except sqlite3.IntegrityError as exc:
                 connection.rollback()
                 _record_timing(span, started_at=started_at, locked_at=None, outcome="invariant_violation")
+                _emit_persistence_event(
+                    "persistence.transaction",
+                    operation=operation,
+                    outcome="invariant_violation",
+                    contention=_contention_bucket(started_at),
+                )
                 raise PersistenceInvalidError(
                     "PERSISTENCE_INVALID",
                     "The transition violates a runtime store invariant, such as one active lease per item.",
                 ) from exc
             except Exception as exc:
                 connection.rollback()
-                _record_timing(span, started_at=started_at, locked_at=None, outcome=_exception_outcome(exc))
+                outcome = _exception_outcome(exc)
+                _record_timing(span, started_at=started_at, locked_at=None, outcome=outcome)
+                _emit_persistence_event(
+                    "persistence.transaction",
+                    operation=operation,
+                    outcome=outcome,
+                    contention=_contention_bucket(started_at),
+                )
                 raise
             finally:
                 connection.close()
@@ -883,8 +908,13 @@ class RuntimeStore:
     def materialize_compatibility_artifacts(
         self, *, session_path: Path, ledger_path: Path, committed: StoreSnapshot | None = None
     ) -> None:
-        """Materialize projections; ``committed`` skips a reload when it is still the latest revision."""
-        self._materialize(session_path=session_path, ledger_path=ledger_path, committed=committed)
+        """Materialize projections from canonical rows or a supplied committed snapshot."""
+        self._materialize(
+            session_path=session_path,
+            ledger_path=ledger_path,
+            committed=committed,
+            from_rows=committed is None,
+        )
 
     def materialize_compatibility_artifacts_from_rows(
         self,
@@ -2024,6 +2054,24 @@ def _write_working_set(
     metadata = normalized.get("metadata")
     if metadata is not None and not isinstance(metadata, dict):
         raise PersistenceInvalidError("PERSISTENCE_INVALID", "Working-set metadata must be an object.")
+    item_ids = {str(key) for key in items}
+    lease_ids = {str(key) for key in leases}
+    _reject_unselected_existing_rows(
+        connection,
+        table="items",
+        identity_column="item_id",
+        session_id=session_id,
+        candidate_ids=item_ids,
+        selected_ids=set(stored_items),
+    )
+    _reject_unselected_existing_rows(
+        connection,
+        table="leases",
+        identity_column="lease_id",
+        session_id=session_id,
+        candidate_ids=lease_ids,
+        selected_ids=set(stored_leases),
+    )
     now = _utc_now()
     connection.execute(
         "UPDATE sessions SET repo = ?, pr_number = ?, status = ?, "
@@ -2045,7 +2093,7 @@ def _write_working_set(
             (session_id, _dumps(json_ready(event))),
         )
 
-    for item_id in stored_items.keys() - {str(key) for key in items}:
+    for item_id in stored_items.keys() - item_ids:
         connection.execute("DELETE FROM items WHERE session_id = ? AND item_id = ?", (session_id, item_id))
     for item_id, item in items.items():
         if not isinstance(item, dict):
@@ -2081,11 +2129,36 @@ def _write_working_set(
         encoded = _dumps(lease)
         if stored_leases.get(str(lease_id)) != encoded:
             changed_leases.append((str(lease_id), lease, encoded))
-    removed_leases = stored_leases.keys() - {str(key) for key in leases}
+    removed_leases = stored_leases.keys() - lease_ids
     for lease_id in removed_leases | {lease_id for lease_id, _, _ in changed_leases}:
         connection.execute("DELETE FROM leases WHERE lease_id = ?", (lease_id,))
     for lease_id, lease, encoded in changed_leases:
         _insert_lease(connection, session_id, lease_id, lease, encoded, revision)
+
+
+def _reject_unselected_existing_rows(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    identity_column: str,
+    session_id: str,
+    candidate_ids: set[str],
+    selected_ids: set[str],
+) -> None:
+    unchecked_ids = tuple(sorted(candidate_ids - selected_ids))
+    if not unchecked_ids:
+        return
+    placeholders = ", ".join("?" for _ in unchecked_ids)
+    existing = connection.execute(
+        f"SELECT {identity_column} FROM {table} WHERE session_id = ? "
+        f"AND {identity_column} IN ({placeholders}) ORDER BY {identity_column}",
+        (session_id, *unchecked_ids),
+    ).fetchall()
+    if existing:
+        raise PersistenceInvalidError(
+            "PERSISTENCE_INVALID",
+            f"Working-set mutation attempted to overwrite unselected {table} rows.",
+        )
 
 
 def _insert_lease(

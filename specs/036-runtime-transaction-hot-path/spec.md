@@ -34,11 +34,14 @@ encode and normalize work proportional to what the command changed.
 - **FR-001** A mutating command requests a bounded, versioned working set from
   SQLite and does not implicitly materialize the full session. Full loads stay
   explicit for compatibility, reporting, and recovery consumers.
-- **FR-002** The deterministic runtime kernel returns an explicit delta over the
-  selected session fields, items, leases, evidence, and outbox commands. The
-  store must not infer changes by wrapping or deep-walking a mutable dict graph.
-- **FR-003** The bounded transaction validates and encodes only declared changed
-  rows. `last_observed_revision` semantics from Spec 035 US6 are unchanged.
+- **FR-002** The deterministic runtime kernel mutates a bounded working set that
+  contains the session root plus selected item and lease rows. The store rejects
+  changes to any pre-existing item or lease identity outside that selection;
+  identities created by the operation are allowed. The bounded path must not
+  wrap or deep-walk an implicit whole-session mutable graph.
+- **FR-003** The bounded transaction compares canonical fragments only inside
+  the validated working set and encodes only changed or newly created rows.
+  `last_observed_revision` semantics from Spec 035 US6 are unchanged.
 - **FR-004** When explicitly materialized, the `session.json` projection is assembled from per-entity encoded
   fragments. Only changed entities are re-encoded, and the output stays
   **byte-identical** to a full compact re-encode. The projection's public format
@@ -63,7 +66,7 @@ encode and normalize work proportional to what the command changed.
 ## Scope Boundaries
 
 - In scope: `src/gh_address_cr/core/runtime_store.py`, one internal working-set
-  and delta contract in the runtime kernel, minimal agent-protocol wiring to
+  and enforced write-scope contract in the runtime kernel, minimal agent-protocol wiring to
   use it, projection materialization, and `scripts/benchmark_runtime_store.py`.
 - Out of scope: public CLI/agent protocol shapes, the public projection format,
   and the SQLite-as-truth model from Spec 034/035. Runtime schema v3 is in scope

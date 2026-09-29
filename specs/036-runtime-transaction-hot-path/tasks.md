@@ -56,3 +56,11 @@
 - [x] T015 Run alternating traced/plain benchmarks and record p50/p90 overhead.
 - [x] T016 Run repository lint, mypy, unit, CLI, agent-manifest, and plugin-payload gates.
 - [x] T017 Record validation evidence and draft Conventional Commit message.
+
+## Phase 4 — Review Closure
+
+- [x] T040 Materialize canonical state before `submit-feedback` reads session context.
+- [x] T041 Emit bounded persistence telemetry for busy, failed, and invariant-violation exits.
+- [x] T042 Add a RED contract and reject writes to unselected pre-existing identities.
+- [x] T043 Record ADR-002 and align the specification with the enforced write-scope contract.
+- [x] T044 Route the public explicit materialization boundary through canonical row fragments.

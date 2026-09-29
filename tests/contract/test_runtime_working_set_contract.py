@@ -9,7 +9,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from gh_address_cr.core.runtime_store import RuntimeStore
+from gh_address_cr.core.runtime_store import PersistenceInvalidError, RuntimeStore
 
 
 def _session() -> dict:
@@ -125,6 +125,34 @@ class RuntimeWorkingSetContractTest(unittest.TestCase):
 
         self.assertEqual(revisions, {"finding-1": 2, "finding-2": 1})
 
+    def test_bounded_transaction_rejects_overwrite_of_unselected_existing_item(self):
+        from gh_address_cr.core.runtime_store import WorkingSetRequest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStore(Path(tmp))
+            store.bootstrap(_session())
+
+            with self.assertRaises(PersistenceInvalidError) as caught:
+                store.transact_working_set(
+                    WorkingSetRequest(item_ids=("finding-1",)),
+                    lambda payload: payload["items"].update(
+                        {
+                            "finding-2": {
+                                "item_id": "finding-2",
+                                "item_kind": "local_finding",
+                                "state": "resolved",
+                                "status": "RESOLVED",
+                            }
+                        }
+                    ),
+                    operation="session_update",
+                )
+
+            full = store.load().payload
+
+        self.assertEqual(caught.exception.reason_code, "PERSISTENCE_INVALID")
+        self.assertEqual(full["items"]["finding-2"]["state"], "open")
+
     def test_fragment_projection_is_byte_identical_to_full_projection(self):
         from gh_address_cr.core.runtime_store import WorkingSetRequest
 
@@ -155,6 +183,29 @@ class RuntimeWorkingSetContractTest(unittest.TestCase):
             rebuilt = session_path.read_bytes()
 
         self.assertEqual(projected, rebuilt)
+
+    def test_explicit_materialization_assembles_session_from_canonical_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            store = RuntimeStore(workspace)
+            store.bootstrap(_session())
+            session_path = workspace / "session.json"
+            ledger_path = workspace / "evidence.jsonl"
+
+            with patch.object(
+                store,
+                "_load_snapshot",
+                side_effect=AssertionError("explicit projection decoded the full snapshot"),
+            ):
+                store.materialize_compatibility_artifacts(
+                    session_path=session_path,
+                    ledger_path=ledger_path,
+                )
+
+            projection = json.loads(session_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(projection["items"]["finding-1"]["item_id"], "finding-1")
+        self.assertEqual(projection["leases"]["lease-terminal"]["status"], "released")
 
     def test_bounded_lease_event_append_keeps_history_out_of_session_root(self):
         from gh_address_cr.core.runtime_store import WorkingSetRequest

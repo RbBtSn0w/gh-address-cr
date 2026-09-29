@@ -207,3 +207,31 @@ Correctness and repository gates:
 - v2-to-v3 migration preserved ordered lease history and executed exactly once.
 
 Draft commit message: `perf: bound runtime transaction hot path`.
+
+## Review closure — 2026-09-29
+
+The max-severity review follow-up closed four contract gaps:
+
+- `submit-feedback` now materializes the current canonical session before
+  collecting diagnostic context, while retaining a visible legacy-file
+  fallback when migration or recovery fails;
+- bounded transaction failures emit the same private, low-cardinality
+  `persistence.transaction` events as the full transaction path;
+- the store rejects attempts to overwrite pre-existing item or lease rows that
+  were not selected by the working-set request;
+- the public explicit compatibility boundary now assembles `session.json` from
+  canonical row fragments instead of decoding a full snapshot.
+
+ADR-002 records the accepted bounded mutable working-set contract and the
+trigger for introducing a separate explicit-delta DTO later.
+
+Verification after these changes:
+
+- focused feedback, transaction, and working-set contracts passed (51 tests);
+- ruff passed;
+- mypy ratchet passed with zero errors;
+- the full suite passed 1,281 tests with an isolated writable state directory
+  (the existing lock `ResourceWarning` remains);
+- CLI help, agent manifest, and plugin payload build/check passed;
+- profile M: p50 `9.149 ms`, p90 `11.015 ms`, degradation `0.898`;
+- profile L: p50 `8.857 ms`, p90 `10.275 ms`, degradation `0.941`.
