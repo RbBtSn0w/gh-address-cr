@@ -11,6 +11,38 @@ def load_producer_intake_fixture(name):
 
 
 class FindingsIntakeTests(unittest.TestCase):
+    def test_native_intake_records_new_finding_observation_exactly_once(self):
+        from gh_address_cr.commands.high_level import _ingest_native_findings
+
+        session = {
+            "session_id": "octo/example#77",
+            "items": {},
+            "metadata": {},
+        }
+        raw = json.dumps(
+            {
+                "findings": [
+                    {
+                        "title": "Missing guard",
+                        "path": "src/example.py",
+                        "line": 12,
+                        "body": "Validate input.",
+                    }
+                ]
+            }
+        )
+
+        _ingest_native_findings(session, raw=raw, source="json")
+        _ingest_native_findings(session, raw=raw, source="json")
+
+        observations = [
+            event
+            for event in session["_pending_evidence_records"]
+            if event["event_type"] == "finding_observed"
+        ]
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["payload"]["item_kind"], "local_finding")
+
     def test_fixed_finding_blocks_parse_to_normalized_findings(self):
         from gh_address_cr.intake.findings import parse_finding_blocks
 

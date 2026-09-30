@@ -35,6 +35,27 @@ class FakeGitHubClient:
 
 
 class NativeGateTests(unittest.TestCase):
+    def test_gatekeeper_records_new_github_thread_observation_exactly_once(self):
+        from gh_address_cr.core.gate import Gatekeeper
+        from gh_address_cr.evidence.ledger import EvidenceLedger
+
+        repo = "owner/repo"
+        pr_number = "123"
+        thread = {"id": "THREAD_NEW", "isResolved": False}
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, {})
+                gatekeeper = Gatekeeper(github_client=FakeGitHubClient(threads=[thread]))
+
+                gatekeeper.run(repo, pr_number)
+                gatekeeper.run(repo, pr_number)
+
+                observations = EvidenceLedger(manager.ledger_path).load(event_type="finding_observed")
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0].item_id, "github-thread:THREAD_NEW")
+        self.assertEqual(observations[0].payload["item_kind"], "github_thread")
+
     def test_multiple_local_validation_blockers_have_item_evidence_recovery(self):
         from gh_address_cr.core.gate import FINAL_GATE_MISSING_VALIDATION_EVIDENCE, GateResult
 

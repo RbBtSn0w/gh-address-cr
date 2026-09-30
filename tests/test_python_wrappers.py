@@ -2883,20 +2883,25 @@ else:
         archived_workspace = archived_runs[0]
         archived_summary = archived_workspace / "audit_summary.md"
         archived_report = archived_workspace / "efficiency-report.json"
+        archived_cr_metrics = archived_workspace / "cr-metrics.json"
         self.assertTrue((archived_workspace / "audit.jsonl").exists())
         self.assertTrue((archived_workspace / "trace.jsonl").exists())
         self.assertTrue(archived_summary.exists())
         self.assertTrue(archived_report.exists())
+        self.assertTrue(archived_cr_metrics.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
         self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")
         self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
+        self.assertIn(f"- cr_metrics_path: {archived_cr_metrics}", summary_text)
         self.assertIn("## PR Completion Summary Guidance", summary_text)
         self.assertIn(f"- Efficiency Report: {archived_report}", summary_text)
         self.assertIn(f"- Audit Summary: {archived_summary}", summary_text)
         report = json.loads(archived_report.read_text(encoding="utf-8"))
         self.assertEqual(report["report_artifact"], str(archived_report))
+        cr_metrics = json.loads(archived_cr_metrics.read_text(encoding="utf-8"))
+        self.assertEqual(cr_metrics["report_artifact"], str(archived_cr_metrics))
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)

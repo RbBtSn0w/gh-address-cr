@@ -33,6 +33,13 @@ Final output must include:
 
 Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary.
 
+`final-gate` also writes the advisory `cr-metrics.json` report using the
+`cr-lifecycle.v1` schema. It projects item lifecycle timing and rework from the
+evidence ledger; inferred observation times are excluded from exact lead-time
+aggregates. Report generation is fail-open: diagnostics remain visible, but
+the lifecycle report cannot change the final-gate verdict or exit code. The
+artifact is decision evidence for maintainers, never workflow authority.
+
 Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
 
 For local development loops, `runtime-only` is advisory rather than abnormal by itself. Report the label and its implication, but do not expand it into a blocker or mandatory exception narrative unless additional telemetry diagnostics, inefficiency flags, or gate blockers are also present.
@@ -54,6 +61,7 @@ gh-address-cr final-gate --no-auto-clean <owner/repo> <pr_number>
 ```
 
 Successful `gh-address-cr final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`.
+The archive includes `cr-metrics.json` when projection succeeds.
 
 If gate fails, continue iteration; completion summary is forbidden.
 

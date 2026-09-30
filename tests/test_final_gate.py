@@ -11,6 +11,113 @@ from gh_address_cr.core import gate
 
 
 class FinalGateTestCase(unittest.TestCase):
+    def test_native_final_gate_writes_lifecycle_artifact_and_summary_reference(self):
+        from gh_address_cr.commands.final_gate import write_native_final_gate_artifacts
+        from gh_address_cr.core.gate import GateResult
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = SessionManager("octo/example", "102")
+                manager.save(manager.create(status="WAITING_FOR_GATE"))
+                result = GateResult(
+                    repo="octo/example",
+                    pr_number="102",
+                    counts={key: 0 for key in gate.COUNT_KEYS},
+                    failure_codes=[],
+                )
+
+                summary_path, _ = write_native_final_gate_artifacts(
+                    "octo/example", "102", "gate-test", result
+                )
+
+                lifecycle_path = manager.workspace_path / "cr-metrics.json"
+                lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
+                summary = summary_path.read_text(encoding="utf-8")
+
+        self.assertEqual(lifecycle["schema_version"], "cr-lifecycle.v1")
+        self.assertIn(f"- cr_metrics_path: {lifecycle_path}", summary)
+        self.assertIn("- cr_metrics_status: SUCCESS", summary)
+
+    def test_lifecycle_projection_failure_is_visible_and_does_not_fail_artifact_write(self):
+        from gh_address_cr.commands.final_gate import write_native_final_gate_artifacts
+        from gh_address_cr.core.gate import GateResult
+        from gh_address_cr.core.session import SessionManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False),
+                patch(
+                    "gh_address_cr.core.cr_metrics.build_cr_summary",
+                    side_effect=OSError("injected metrics failure"),
+                ),
+            ):
+                manager = SessionManager("octo/example", "102")
+                manager.save(manager.create(status="WAITING_FOR_GATE"))
+                result = GateResult(
+                    repo="octo/example",
+                    pr_number="102",
+                    counts={key: 0 for key in gate.COUNT_KEYS},
+                    failure_codes=[],
+                )
+
+                summary_path, telemetry = write_native_final_gate_artifacts(
+                    "octo/example", "102", "gate-test", result
+                )
+
+                summary = summary_path.read_text(encoding="utf-8")
+                lifecycle = json.loads((manager.workspace_path / "cr-metrics.json").read_text(encoding="utf-8"))
+
+        self.assertIsNotNone(telemetry)
+        self.assertIn("- cr_metrics_status: UNAVAILABLE", summary)
+        self.assertIn("cr-metrics projection unavailable: OSError", summary)
+        self.assertEqual(lifecycle["schema_version"], "cr-lifecycle.v1")
+        self.assertEqual(lifecycle["status"], "UNAVAILABLE")
+        self.assertEqual(lifecycle["reason_code"], "CR_SUMMARY_UNAVAILABLE")
+
+    def test_lifecycle_projection_failure_preserves_passing_final_gate_exit_code(self):
+        from gh_address_cr.commands.final_gate import handle_final_gate
+        from gh_address_cr.core.gate import GateResult
+        from gh_address_cr.core.session import SessionManager
+
+        result = GateResult(
+            repo="octo/example",
+            pr_number="102",
+            counts={key: 0 for key in gate.COUNT_KEYS},
+            failure_codes=[],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GH_ADDRESS_CR_STATE_DIR": tmp, "DISABLE_TELEMETRY": "1"},
+                    clear=False,
+                ),
+                patch("gh_address_cr.commands.final_gate.core_gate.Gatekeeper.run", return_value=result),
+                patch(
+                    "gh_address_cr.core.cr_metrics.build_cr_summary",
+                    side_effect=OSError("injected metrics failure"),
+                ),
+                contextlib.redirect_stdout(stdout := io.StringIO()),
+            ):
+                manager = SessionManager("octo/example", "102")
+                manager.save(manager.create(status="WAITING_FOR_GATE"))
+                exit_code = handle_final_gate(
+                    "octo/example",
+                    "102",
+                    ["--machine", "--no-auto-clean"],
+                )
+                lifecycle = json.loads((manager.workspace_path / "cr-metrics.json").read_text(encoding="utf-8"))
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASSED")
+        self.assertEqual(payload["completion_summary"]["lifecycle_status"], "UNAVAILABLE")
+        self.assertEqual(payload["completion_summary"]["lifecycle_completeness"], "unavailable")
+        self.assertEqual(payload["completion_summary"]["lifecycle_diagnostic_count"], "1")
+        self.assertEqual(lifecycle["status"], "UNAVAILABLE")
+        self.assertIn("cr-metrics projection unavailable: OSError", lifecycle["diagnostics"])
+
     def test_local_stale_revision_recovery_records_item_evidence(self):
         result = gate.GateResult(
             repo="octo/example",
@@ -239,6 +346,7 @@ class FinalGateTestCase(unittest.TestCase):
                         archived = list((Path(tmp) / "archive" / "octo__example" / "pr-102").glob("*"))
                         self.assertEqual(len(archived), 1)
                         self.assertTrue((archived[0] / "stack-audit-summary.md").is_file())
+                        self.assertTrue((archived[0] / "cr-metrics.json").is_file())
 
     def test_stack_audit_summary_omits_public_member_list(self):
         from gh_address_cr.commands.final_gate import write_stack_final_gate_artifacts
@@ -901,6 +1009,46 @@ class FinalGateTestCase(unittest.TestCase):
         self.assertEqual(guidance.count(summary_line), 1)
         self.assertNotIn("Attention Items", guidance)
         self.assertNotIn("IMPLICATION PROMPT", guidance)
+
+    def test_completion_summary_adds_bounded_lifecycle_advisory_when_eligible(self):
+        from gh_address_cr.commands.final_gate import build_completion_summary_line
+
+        result = self.evaluate(
+            self.passing_session(),
+            remote_threads=[{"id": "THREAD_DONE", "isResolved": True}],
+        )
+        telemetry_report = {
+            "coverage_label": "complete",
+            "total_events": 1,
+            "success_rate": 100.0,
+            "confidence": "high",
+            "total_observed_duration_ms": 1000,
+            "sources": [],
+            "slowest_operations": [],
+            "inefficiency_flags": [],
+            "diagnostics": [],
+            "report_artifact": "path/to/report.json",
+        }
+        lifecycle_report = {
+            "aggregates": {
+                "eligible_items": 2,
+                "excluded_items": 1,
+                "observed_to_verified_ms": {"median": 4500, "p90": 8000},
+                "first_pass_verified_rate": {
+                    "numerator": 1,
+                    "denominator": 2,
+                    "rate": 0.5,
+                    "excluded": 1,
+                },
+            }
+        }
+
+        line = build_completion_summary_line(result, telemetry_report, lifecycle_report=lifecycle_report)
+
+        self.assertIn(
+            "lifecycle: 2 eligible/1 excluded, verified p50 4.5s, p90 8.0s, first-pass 1/2 (50.0%)",
+            line,
+        )
 
     def test_build_completion_summary_line_reports_runtime_only_telemetry_for_issue_103(self):
         from gh_address_cr.commands.final_gate import build_completion_summary_line, build_completion_summary_model

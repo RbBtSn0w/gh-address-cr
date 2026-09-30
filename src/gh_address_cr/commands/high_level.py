@@ -219,6 +219,8 @@ def _ingest_native_findings(
     scan_id: str | None = None,
     handoff_sha256: str | None = None,
 ) -> list[dict[str, Any]]:
+    from gh_address_cr.evidence.ledger import record_new_item_observations
+
     if not raw.strip():
         raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
     format_source = "adapter" if source == "adapter" else "json"
@@ -229,6 +231,7 @@ def _ingest_native_findings(
             finding = with_local_item_fields(source, base)
         findings.append(finding)
     items = session.setdefault("items", {})
+    previous_item_ids = set(map(str, items))
     incoming_ids: set[str] = set()
     now = _utc_now()
     if scan_id:
@@ -285,6 +288,7 @@ def _ingest_native_findings(
     )
     if handoff_sha256:
         handoff["last_consumed_sha256"] = handoff_sha256
+    record_new_item_observations(session, previous_item_ids, timestamp=now)
     return findings
 
 
@@ -910,6 +914,8 @@ class HighLevelReviewRuntime:
 
         remote_threads: list[dict[str, Any]] = []
         if command in {"address", "review", "threads", "adapter"}:
+            from gh_address_cr.evidence.ledger import record_new_item_observations
+
             client = GitHubClient()
             try:
                 stack_context = client.get_stack_context(repo, pr_number)
@@ -927,7 +933,9 @@ class HighLevelReviewRuntime:
             except Exception:
                 pass
             remote_threads = client.list_threads(repo, pr_number)
+            previous_item_ids = set(map(str, session.get("items") or {}))
             session = core_gate.session_with_remote_threads(session, remote_threads)
+            record_new_item_observations(session, previous_item_ids, timestamp=_utc_now())
             metadata = session.setdefault("metadata", {})
             if isinstance(metadata, dict):
                 try:
