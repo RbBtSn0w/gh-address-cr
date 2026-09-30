@@ -178,7 +178,11 @@ class Gatekeeper:
             if require_checks or require_required_checks
             else []
         )
+        previous_item_ids = set(map(str, session.get("items") or {}))
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
+        from gh_address_cr.evidence.ledger import record_new_item_observations
+
+        record_new_item_observations(merged_session, previous_item_ids)
         result = evaluate_final_gate(
             merged_session,
             remote_threads=remote_threads,

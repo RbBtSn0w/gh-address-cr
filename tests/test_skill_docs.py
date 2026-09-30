@@ -547,6 +547,14 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary", combined)
         self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
 
+    def test_completion_contract_documents_advisory_lifecycle_report(self):
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+
+        self.assertIn("`cr-metrics.json`", completion_text)
+        self.assertIn("`cr-lifecycle.v1`", completion_text)
+        self.assertIn("cannot change the final-gate verdict or exit code", completion_text)
+        self.assertIn("inferred observation times are excluded", completion_text)
+
     def test_skill_identifies_as_thin_adapter(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("thin adapter", text.lower())

@@ -355,3 +355,33 @@ def take_pending_evidence(session: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(pending, list):
         raise ValueError("Session pending evidence must be a list.")
     return [dict(record) for record in pending if isinstance(record, dict)]
+
+
+def record_new_item_observations(
+    session: dict[str, Any],
+    previous_item_ids: set[str],
+    *,
+    timestamp: str | None = None,
+) -> None:
+    """Buffer one exact runtime-observation event for each newly discovered item."""
+    items = session.get("items")
+    if not isinstance(items, dict):
+        return
+    ledger = SessionEvidenceLedger(session.get("ledger_path") or ".", session)
+    for item_id in sorted(set(map(str, items)) - previous_item_ids):
+        item = items.get(item_id)
+        if not isinstance(item, dict):
+            continue
+        item_kind = str(item.get("item_kind") or "")
+        if item_kind not in {"github_thread", "local_finding"}:
+            continue
+        ledger.append_event(
+            session_id=str(session.get("session_id") or ""),
+            item_id=item_id,
+            lease_id=None,
+            agent_id="gh-address-cr-runtime",
+            role="intake",
+            event_type="finding_observed",
+            payload={"item_kind": item_kind, "source": str(item.get("source") or "unknown")},
+            timestamp=timestamp,
+        )

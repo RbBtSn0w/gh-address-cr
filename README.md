@@ -143,6 +143,9 @@ Completion means the latest final gate reports:
 - terminal GitHub threads have durable reply evidence
 - a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
 - a telemetry coverage label and structured efficiency report path
+- an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
+  aggregates exclude inferred observation times, and report failures never
+  change the gate verdict or exit code
 - an audit summary path with a sha256 hash
 
 A zero unresolved-thread count alone is not sufficient.
