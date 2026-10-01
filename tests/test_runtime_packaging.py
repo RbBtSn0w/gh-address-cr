@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from packaging.version import Version
+
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
@@ -357,7 +359,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
 
-    def test_changelog_starts_with_unreleased_and_tracks_current_source_version(self):
+    def test_changelog_is_release_managed_and_not_ahead_of_source_version(self):
         changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         pyproject_text = PYPROJECT.read_text(encoding="utf-8")
 
@@ -366,9 +368,11 @@ class RuntimePackagingTest(PythonScriptTestCase):
         package_version = version_match.group(1)
         headings = [line for line in changelog_text.splitlines() if line.startswith("## ")]
 
-        self.assertEqual(headings[0], "## [Unreleased]")
-        self.assertEqual(package_version, "3.16.0")
-        self.assertTrue(any(heading.startswith("## [3.15.3]") for heading in headings))
+        # semantic-release prepends generated notes, so a hand-written section would be stranded.
+        self.assertNotIn("## [Unreleased]", headings)
+        latest_match = re.match(r"^## \[([^\]]+)\]", headings[0])
+        self.assertIsNotNone(latest_match)
+        self.assertLessEqual(Version(latest_match.group(1)), Version(package_version))
 
     def test_version_sync_script_updates_pyproject_and_runtime_version(self):
         pyproject = Path(self.temp_dir.name) / "pyproject.toml"
