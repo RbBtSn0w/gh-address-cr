@@ -10,10 +10,6 @@ It is not a code-review producer and not a generic GitHub bot. The runtime owns
 state and side effects; agents return structured evidence and the runtime
 publishes GitHub replies/resolves.
 
-> **Upgrading from 2.x?** 3.0 is a breaking release: the `agent fix`,
-> `agent trivial-fix`, `agent fix-all`, `agent resolve-stale`, and
-> `agent submit-batch` commands are replaced by a single `agent resolve`.
-
 Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `skill/SKILL.md`.
 
@@ -121,11 +117,9 @@ view. If the configured directory is unavailable, the runtime returns
 `STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
 Each PR workspace uses `runtime.sqlite3` as its authoritative, versioned runtime
-store. On first open, an existing `session.json` and `evidence.jsonl` are imported
-once and preserved in an immutable `legacy-v1-recovery/` bundle. JSON and JSONL
-files in the live workspace are compatibility projections after migration;
+store. JSON and JSONL files in the live workspace are read-only projections;
 `session.json` carries its source revision and `evidence.jsonl.meta.json` carries
-the JSONL projection revision without changing the existing JSONL row format.
+the JSONL projection revision without changing the JSONL row format.
 `session.json` is written as compact, key-sorted JSON. Runtime schema v3 marks
 it dirty after bounded commands and rewrites it at explicit full-load, reporting,
 export, and recovery boundaries; consumers that require current data must verify
@@ -300,7 +294,7 @@ Advanced integration commands:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent resolve` — (`<item_id>` | `--files`/`--file` | `--input`) x (`--disposition fix|trivial|reject|clarify`) x (`--stale`)
+- `agent resolve` — supported GitHub-thread item, files, batch, and stale command shapes with `--disposition fix|trivial|reject|clarify|defer`
 - `agent evidence`
 - `agent publish`
 - `agent leases`
@@ -309,19 +303,21 @@ Advanced integration commands:
 - `doctor`
 
 High-level commands emit machine-readable JSON summaries by default. Use
-`--human` when a person needs narrative output and `--lean` where supported for
-low-token agent context.
+`--machine` to explicitly request structured output, `--human` when a person
+needs narrative output, and `--lean` where supported for low-token agent
+context.
 
 Every final efficiency summary reports one coverage label: `complete`,
 `partial`, `runtime-only`, or `unavailable`. The runtime records process and
 workflow telemetry for the surviving core path and keeps telemetry fail-open:
 reduced coverage is reported in the summary, but it does not change the review
 verdict by itself.
-For GitHub review-thread replies, the single mutating entrypoint is
-`agent resolve`; it records classification internally, so no separate
-`agent classify` round-trip is needed. It resolves along three independent
-axes: disposition (`--disposition fix|trivial|reject|clarify`), selection
-(an `<item_id>`, `--files`/`--file`, or `--input`), and condition (`--stale`).
+For GitHub review-thread replies, the current shortcut is `agent resolve`; it
+records classification internally, so no separate `agent classify` round-trip
+is needed. Use only the item, files, batch, and stale shapes documented by
+`agent manifest`; their flags are validated together rather than forming an
+unrestricted product. Local findings use `agent classify` → `agent next` →
+response skeleton → `agent submit` and must not publish GitHub side effects.
 Shared files/validation evidence is not the same as a shared reviewer answer.
 Use `agent resolve --input <batch-response.json>` with per-thread summary/why
 entries for ordinary multi-thread handling. Commit evidence is hydrated by the
@@ -344,10 +340,8 @@ runtime rejects security-sensitive, API-sensitive, performance, or ambiguous
 comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve, validation,
 and final-gate evidence still applies.
 
-Agents that need a schema-defined triage handoff may emit
-`workflow_decision.v1` JSON with `schema_version`, `request_id`, `item_id`,
-`decision`, and `reason`. Existing Markdown decision blocks remain a documented
-compatibility path, but JSON avoids whitespace-sensitive parsing.
+Agents that need a schema-defined triage handoff emit `workflow_decision.v1`
+JSON with `schema_version`, `request_id`, `item_id`, `decision`, and `reason`.
 
 `command-session --input <json>|-` executes multiple one-shot runtime commands
 inside one process and returns one result per operation. Failed operations do
@@ -432,9 +426,10 @@ next --batch
 submit
 resolve <item_id>
 resolve <item_id> --disposition trivial
+resolve <item_id> --disposition defer --why <why>
 resolve --input <batch-response.json>
 resolve --why <why>
-resolve --disposition reject|clarify --why <why>
+resolve --disposition reject|clarify|defer --why <why>
 resolve --stale
 evidence add
 evidence list
@@ -547,7 +542,9 @@ severity or reviewer priority evidence exists.
 
 1. Run `gh-address-cr review <owner/repo> <pr_number>`.
 2. Ingest existing findings or wait for external review handoff.
-3. Resolve items through `agent resolve` and publish through `agent publish`.
+3. Route GitHub threads through `agent resolve` and `agent publish`. Route local
+   findings through `agent classify` → `agent next` → response skeleton →
+   `agent submit`; do not publish GitHub side effects for local findings.
 4. Finish with `final-gate`.
 
 for GitHub thread `fix`: `fix_reply`
@@ -615,35 +612,19 @@ Packaged skill install:
 
 The packaged skill does not install the runtime CLI package.
 
-Upgrade from skill-shim usage:
+## Current Public Contract
 
-- Install the runtime CLI with `pipx` or `uv tool`
-- Keep `--skill skill` for the packaged adapter
-- Homebrew tap distribution remains available
-
-## Compatibility Inventory
-
-Preserved Public Contracts:
+Use runtime `3.16.0`, protocol `1.1`, skill contract `1.1`, and
+`dispatch-receipt.v2`. The current public commands are:
 
 - `review`
 - `address`
 - `threads`
 - `findings`
-- `submit-action`
 - `final-gate`
 
-Unsupported historical root commands:
-
-- `legacy_scripts`
-
-Removed Or Unsupported Surfaces:
-
-- removed migration/evaluation command surfaces
-- legacy script entrypoints
-
-Internal Naming Rule:
-
-- the shipped runtime and packaged skill remain `gh-address-cr`
+The shipped runtime, packaged skill, Python package, console entrypoint, and
+plugin remain named `gh-address-cr`.
 
 ## Troubleshooting
 

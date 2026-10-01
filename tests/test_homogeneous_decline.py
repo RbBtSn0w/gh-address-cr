@@ -160,22 +160,19 @@ class HomogeneousDeclineCLITest(PythonScriptTestCase):
         # evidence/disposition incoherence, not an ad-hoc mode conflict.
         self.assertEqual(payload["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
 
-    def test_reject_and_clarify_mutually_exclusive(self):
+    def test_removed_boolean_disposition_is_an_unknown_argument(self):
         self._two_identical_threads()
 
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "--reject",
-                "--clarify",
-                "--files", "src/shared.py",
-                "--why", self.REASON,
-            )
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--reject",
+            "--files", "src/shared.py",
+            "--why", self.REASON,
+        )
 
         self.assertEqual(result.returncode, 2)
-        payload = json.loads(result.stdout)
-        # spec 029: two dispositions at once is a same-axis conflict.
-        self.assertEqual(payload["reason_code"], "RESOLVE_AXIS_CONFLICT")
+        self.assertIn("unrecognized arguments: --reject", result.stderr)
+        self.assertNotIn("RESOLVE_FLAG_DEPRECATED", result.stdout + result.stderr)
 
     def test_decline_single_item_by_id_is_now_valid(self):
         # spec 029 / #204: item_id + --reject used to be rejected

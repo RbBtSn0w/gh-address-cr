@@ -4,8 +4,9 @@ T025 widens this to the 5-site cross-command equality check: `agent resolve`'s
 `--disposition` choices, `submit_action`'s `--resolution` choices (T029,
 constant-sourced), `agent.roles.TERMINAL_RESOLUTIONS`,
 `core.agent_protocol_evidence.TERMINAL_RESOLUTIONS`, and
-`agent.responses.WORKFLOW_DECISIONS`. `agent evidence add` is explicitly NOT
-a 6th site (SC-004a) — it has no disposition/resolution surface.
+`agent.responses.WORKFLOW_DECISIONS`. `agent resolve` additionally exposes the
+single-thread-only `trivial` fast path. `agent evidence add` has no
+disposition/resolution surface.
 """
 
 from __future__ import annotations
@@ -24,9 +25,9 @@ class DispositionVocabularyBaselineTest(unittest.TestCase):
 
 
 class FiveSiteVocabularyAlignmentTest(unittest.TestCase):
-    """T025: all five sites agree, modulo the two documented exceptions."""
+    """All five sites agree, modulo the documented `trivial` exception."""
 
-    SHARED_INTERSECTION = {"fix", "reject", "clarify"}
+    SHARED_INTERSECTION = set(TERMINAL_RESOLUTIONS)
 
     def _agent_resolve_disposition_choices(self) -> set[str]:
         import re
@@ -55,10 +56,9 @@ class FiveSiteVocabularyAlignmentTest(unittest.TestCase):
     def _captured_stderr(self) -> str:
         return self._stderr_buf.getvalue()
 
-    def test_agent_resolve_disposition_is_subset_of_shared_intersection_plus_trivial(self):
+    def test_agent_resolve_disposition_matches_terminal_resolutions_plus_trivial(self):
         choices = self._agent_resolve_disposition_choices()
         self.assertEqual(choices, self.SHARED_INTERSECTION | {"trivial"})
-        self.assertNotIn("defer", choices)
 
     def test_submit_action_resolution_matches_terminal_resolutions(self):
         from gh_address_cr.commands.submit_action import parse_args as submit_parse_args

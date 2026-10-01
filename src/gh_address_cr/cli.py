@@ -206,7 +206,7 @@ def alias_help(command: str) -> str:
             "Use --auto-simple for a lightweight GitHub thread-only path that does not wait for external review findings.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "address":
         return (
@@ -216,7 +216,7 @@ def alias_help(command: str) -> str:
             "This command does not wait for external review findings and does not ingest local findings.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "threads":
         return (
@@ -225,7 +225,7 @@ def alias_help(command: str) -> str:
             "Use when only GitHub review threads need processing.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "findings":
         return (
@@ -235,7 +235,7 @@ def alias_help(command: str) -> str:
             "Missing --input fails immediately instead of waiting on stdin.\n"
             "`--sync` requires --source so auto-closing stays scoped to one producer.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "adapter":
         return (
@@ -246,7 +246,7 @@ def alias_help(command: str) -> str:
             "Arguments after <adapter_cmd...> are passed through to the adapter command unchanged.\n"
             "Use global --human/--machine before `adapter` to change wrapper output mode.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
 
     if command == "submit-action":
@@ -263,7 +263,7 @@ def alias_help(command: str) -> str:
             "Runtime diagnostics entrypoint.\n\n"
             "Checks GitHub CLI availability/authentication, optional repository access, and writable state directories.\n"
             "Default output is a structured JSON summary with stable checks, reason_code, and diagnostics fields.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     return ""
 
@@ -816,7 +816,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--machine",
         action="store_true",
-        help="Compatibility alias for the default structured JSON summary.",
+        help="Explicitly request the structured JSON summary.",
     )
     parser.add_argument(
         "--human",
@@ -906,8 +906,9 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
         return handle_command_session(_root_passthrough_args(args))
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
-        sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
-        return 0
+        compatibility = workflow.runtime_compatibility()
+        sys.stdout.write(json.dumps(compatibility, indent=2, sort_keys=True) + "\n")
+        return int(compatibility["exit_code"])
 
     return None
 

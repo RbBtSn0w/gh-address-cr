@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from importlib import metadata, resources, util
 from pathlib import Path
 from typing import Any
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from gh_address_cr import (
     PROTOCOL_VERSION,
@@ -124,18 +128,157 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
 TERMINAL_LOCAL_VALIDATION_STATES = frozenset(
     {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 )
+RUNTIME_PACKAGE = "gh-address-cr"
+RUNTIME_ENTRYPOINTS = ("gh-address-cr", "python3 -m gh_address_cr")
+RUNTIME_COMPATIBILITY_EXIT = 5
 
 
-def runtime_compatibility() -> dict[str, Any]:
+def _runtime_compatibility_payload() -> dict[str, Any]:
     return {
-        "status": "compatible",
-        "runtime_package": "gh-address-cr",
+        "runtime_package": RUNTIME_PACKAGE,
         "runtime_version": __version__,
         "required_protocol_version": PROTOCOL_VERSION,
         "supported_protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
         "supported_skill_contract_versions": list(SUPPORTED_SKILL_CONTRACT_VERSIONS),
-        "entrypoints": ["gh-address-cr", "python3 -m gh_address_cr"],
+        "entrypoints": list(RUNTIME_ENTRYPOINTS),
+    }
+
+
+def _incompatible_runtime(reason_code: str, message: str, **details: Any) -> dict[str, Any]:
+    return {
+        **_runtime_compatibility_payload(),
+        **details,
+        "status": "incompatible",
+        "reason_code": reason_code,
+        "waiting_on": "runtime_compatibility",
+        "next_action": message,
+        "remediation": {
+            "summary": (
+                "Upgrade gh-address-cr through the installation channel that installed this skill, "
+                "then rerun the compatibility check."
+            ),
+            "command": "gh-address-cr adapter check-runtime",
+        },
+        "exit_code": RUNTIME_COMPATIBILITY_EXIT,
+    }
+
+
+def _load_runtime_requirements() -> dict[str, Any]:
+    raw = resources.files("gh_address_cr").joinpath("runtime-requirements.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("runtime requirements must be a JSON object")
+    return payload
+
+
+def _require_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be a non-empty string")
+    return value.strip()
+
+
+def _require_string_list(payload: dict[str, Any], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError(f"{key} must be a non-empty string array")
+    return [item.strip() for item in value]
+
+
+def _available_runtime_entrypoints() -> set[str]:
+    available: set[str] = set()
+    try:
+        distribution = metadata.distribution(RUNTIME_PACKAGE)
+    except metadata.PackageNotFoundError:
+        distribution = None
+    if distribution is not None and any(
+        entrypoint.group == "console_scripts"
+        and entrypoint.name == "gh-address-cr"
+        and entrypoint.value == "gh_address_cr.__main__:main"
+        for entrypoint in distribution.entry_points
+    ):
+        available.add("gh-address-cr")
+    if util.find_spec("gh_address_cr.__main__") is not None:
+        available.add("python3 -m gh_address_cr")
+    return available
+
+
+def runtime_compatibility() -> dict[str, Any]:
+    try:
+        requirements = _load_runtime_requirements()
+        runtime_package = _require_string(requirements, "runtime_package")
+        minimum_runtime_version = _require_string(requirements, "minimum_runtime_version")
+        protocol_specifiers = _require_string_list(requirements, "supported_protocol_versions")
+        skill_contract_version = _require_string(requirements, "skill_contract_version")
+        required_entrypoints = _require_string_list(requirements, "required_entrypoints")
+        minimum_version = Version(minimum_runtime_version)
+        protocol_ranges = [SpecifierSet(specifier) for specifier in protocol_specifiers]
+    except (OSError, json.JSONDecodeError, ValueError, InvalidSpecifier, InvalidVersion) as exc:
+        return _incompatible_runtime(
+            "RUNTIME_REQUIREMENTS_INVALID",
+            "The packaged runtime requirements are missing or invalid.",
+            diagnostics={"error_type": type(exc).__name__},
+        )
+
+    requirement_details = {
+        "minimum_runtime_version": str(minimum_version),
+        "required_protocol_ranges": protocol_specifiers,
+        "required_skill_contract_version": skill_contract_version,
+        "required_entrypoints": required_entrypoints,
+    }
+    if runtime_package != RUNTIME_PACKAGE:
+        return _incompatible_runtime(
+            "RUNTIME_REQUIREMENTS_INVALID",
+            "The packaged runtime requirements identify a different runtime package.",
+            **requirement_details,
+        )
+
+    try:
+        runtime_version = Version(__version__)
+    except InvalidVersion:
+        return _incompatible_runtime(
+            "RUNTIME_VERSION_INCOMPATIBLE",
+            "The installed runtime version is not a valid release version.",
+            **requirement_details,
+        )
+    if runtime_version < minimum_version:
+        return _incompatible_runtime(
+            "RUNTIME_VERSION_INCOMPATIBLE",
+            f"Runtime {runtime_version} is older than the required {minimum_version} baseline.",
+            **requirement_details,
+        )
+
+    if not any(Version(PROTOCOL_VERSION) in protocol_range for protocol_range in protocol_ranges):
+        return _incompatible_runtime(
+            "PROTOCOL_VERSION_INCOMPATIBLE",
+            f"Protocol {PROTOCOL_VERSION} is outside the skill's required protocol range.",
+            **requirement_details,
+        )
+
+    if skill_contract_version not in SUPPORTED_SKILL_CONTRACT_VERSIONS:
+        return _incompatible_runtime(
+            "SKILL_CONTRACT_INCOMPATIBLE",
+            f"Skill contract {skill_contract_version} is not supported by this runtime.",
+            **requirement_details,
+        )
+
+    missing_entrypoints = sorted(set(required_entrypoints).difference(_available_runtime_entrypoints()))
+    if missing_entrypoints:
+        return _incompatible_runtime(
+            "RUNTIME_ENTRYPOINTS_INCOMPATIBLE",
+            "The runtime does not provide every entrypoint required by the skill.",
+            missing_entrypoints=missing_entrypoints,
+            **requirement_details,
+        )
+
+    return {
+        **_runtime_compatibility_payload(),
+        **requirement_details,
+        "status": "compatible",
+        "reason_code": "RUNTIME_COMPATIBLE",
+        "waiting_on": None,
         "remediation": None,
+        "exit_code": 0,
     }
 
 
@@ -978,20 +1121,20 @@ def decline_item(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Decline (reject/clarify) a single review-thread item with a reason.
+    """Handle a non-fix resolution for one review-thread item with a reason.
 
     Composes the same primitives as `fast_fix_item` — `record_classification`
     -> `issue_action_request` -> `submit_action_response` — so single-item
     decline inherits identical lease-ownership and final-gate guarantees
     (spec 029 FR-002/FR-009). No new algorithm.
     """
-    if resolution not in {"reject", "clarify"}:
+    if resolution not in {"reject", "clarify", "defer"}:
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
             waiting_on="decline_input",
             exit_code=2,
-            message=f"agent resolve {item_id}: decline_item supports only reject or clarify, got {resolution!r}.",
+            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
             payload={"item_id": item_id},
         )
     if not why or not why.strip():

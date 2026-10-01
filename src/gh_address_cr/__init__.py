@@ -1,9 +1,7 @@
 """Deterministic runtime package for the gh-address-cr control plane."""
 
-__version__ = "3.15.2"
-# 1.1 moves reviewer-authored item text behind `item.untrusted_content`; 1.0 requests
-# (flat `item.body`) stay readable so an in-flight lease survives the upgrade.
+__version__ = "3.16.0"
 PROTOCOL_VERSION = "1.1"
-SUPPORTED_PROTOCOL_VERSIONS = ("1.0", "1.1")
-SUPPORTED_SKILL_CONTRACT_VERSIONS = ("1.0",)
+SUPPORTED_PROTOCOL_VERSIONS = ("1.1",)
+SUPPORTED_SKILL_CONTRACT_VERSIONS = ("1.1",)
 MAX_PARALLEL_CLAIMS = 2

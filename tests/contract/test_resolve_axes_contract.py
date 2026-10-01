@@ -23,7 +23,7 @@ from tests.helpers import PythonScriptTestCase
 from tests.test_control_plane_workflow import github_thread
 from tests.test_native_workflow import UnstackedGitHubClient, open_item, stale_github_thread_item
 
-DISPOSITIONS = ("fix", "trivial", "reject", "clarify")
+DISPOSITIONS = ("fix", "trivial", "reject", "clarify", "defer")
 SELECTIONS = ("single", "files", "batch")
 CONDITIONS = ("fresh", "stale")
 
@@ -106,6 +106,22 @@ class SingleItemDeclineAxesCLITest(PythonScriptTestCase):
         item = session["items"]["github-thread:stale1"]
         self.assertEqual(item["state"], "publish_ready")
         self.assertEqual(item["publish_resolution"], "clarify")
+
+    def test_single_disposition_defer_on_stale_thread(self):
+        self.write_session(items=[stale_github_thread_item("github-thread:stale-defer")])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "github-thread:stale-defer",
+            "--disposition", "defer",
+            "--stale",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        item = self.load_session()["items"]["github-thread:stale-defer"]
+        self.assertEqual(item["state"], "publish_ready")
+        self.assertEqual(item["publish_resolution"], "defer")
 
 
 class DeclineFinalGateAndLeaseTest(unittest.TestCase):
@@ -424,9 +440,24 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "DECLINE_ALL_ACCEPTED")
 
+    def test_files_defer_stale_succeeds(self):
+        self.write_session(items=[stale_github_thread_item("github-thread:fdefer")])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--disposition", "defer",
+            "--files", "src/example.py",
+            "--stale",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_ACCEPTED")
+        self.assertEqual(payload["resolution"], "defer")
+
     def test_single_trivial_stale_succeeds(self):
-        # (single x trivial x stale): FR-003 is exhaustive over all four
-        # dispositions, including trivial — do not skip this cell.
+        # The single-thread trivial fast path also supports a stale thread.
         self.write_session(
             items=[
                 stale_github_thread_item("github-thread:trivialstale")
@@ -445,21 +476,6 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
             "--why", "Docs-only correction.",
             "--validation", "spellcheck=passed@50ms",
         )
-
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_item_id_reject_with_deprecated_homogeneous_reason_alias_succeeds(self):
-        # (U2-dissolved): the deprecated alias still supplies the reason for
-        # a single decline; no special item_id+alias conflict rule exists.
-        self.write_session(items=[github_thread("github-thread:aliasreason")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:aliasreason",
-                "--disposition", "reject",
-                "--homogeneous-reason", self.REASON,
-            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -497,21 +513,6 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_AXIS_CONFLICT")
 
-    def test_legacy_boolean_disagreeing_with_disposition_conflicts(self):
-        self.write_session(items=[github_thread("github-thread:legacyconflict")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:legacyconflict",
-                "--disposition", "fix",
-                "--reject",
-                "--why", self.REASON,
-            )
-
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_AXIS_CONFLICT")
-
     def test_fix_evidence_with_decline_disposition_is_incoherent(self):
         self.write_session(items=[github_thread("github-thread:incoherent")])
 
@@ -521,6 +522,27 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
             "--disposition", "clarify",
             "--commit", "abc123",
             "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+
+    def test_batch_defer_is_incoherent(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--input", "batch-response.json",
+            "--disposition", "defer",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+
+    def test_batch_explicit_fix_disposition_is_incoherent(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--input", "batch-response.json",
+            "--disposition", "fix",
         )
 
         self.assertEqual(result.returncode, 2)
@@ -596,6 +618,8 @@ class ResolveHelpDiscoverabilityTest(unittest.TestCase):
 
         for token in ("--disposition", "--stale", "--files", "--input", "item_id"):
             self.assertIn(token, help_text)
+
+        self.assertIn("defer", help_text)
 
         # PR #206 CR: --why's help text must not read as reject/clarify-only —
         # it is also the shared rationale for a homogeneous fix (files selection).

@@ -21,7 +21,6 @@ IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--format",
     "--handoff-sha256",
     "--head",
-    "--homogeneous-reason",
     "--input",
     "--item-id",
     "--max-iterations",

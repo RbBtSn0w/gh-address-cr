@@ -80,7 +80,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "compatible")
         self.assertEqual(payload["runtime_package"], "gh-address-cr")
-        self.assertIn("1.0", payload["supported_protocol_versions"])
+        self.assertEqual(payload["supported_protocol_versions"], ["1.1"])
 
     def test_agent_next_rejects_fixer_without_classification_before_lease(self):
         self.write_session(items=[open_item()])
