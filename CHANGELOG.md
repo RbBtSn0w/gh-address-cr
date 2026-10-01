@@ -1,9 +1,3 @@
-## [Unreleased]
-
-### Features
-
-* **skill:** converge guidance on the 3.16 runtime contract
-
 ## [3.15.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.2...v3.15.3) (2026-09-18)
 
 ## [3.15.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.1...v3.15.2) (2026-09-11)
