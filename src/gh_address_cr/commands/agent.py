@@ -672,14 +672,6 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
     if parsed.item_id:
         return _dispatch_single_item_resolution(parsed, now_dt=now_dt)
     if parsed.input:
-        if not parsed.input:
-            raise WorkflowError(
-                status=protocol_codes.FAST_FIX_ALL_REJECTED,
-                reason_code="MISSING_BATCH_INPUT",
-                waiting_on="batch_action_response",
-                exit_code=2,
-                message="agent resolve requires --input <batch-response.json> for a batch selection.",
-            )
         return workflow.fast_fix_from_batch_input(
             parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
         )
