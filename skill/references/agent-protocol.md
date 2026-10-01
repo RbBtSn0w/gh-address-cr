@@ -98,7 +98,13 @@ Local findings instead use `agent classify` → `agent next` → response skelet
 - `gh-address-cr agent orchestrate autopilot <owner/repo> <pr_number>`
   - Optional advanced dry-run planning surface. Side-effecting execution is not enabled by default, and the single-agent path does not require orchestration.
 
-The public agent protocol is `1.1` and the skill contract is `1.1`. Advanced
+The public agent protocol is `1.1` and the skill contract is `1.1`. An
+`ActionRequest` is runtime-authored and must carry a supported
+`schema_version`; a request file written by an older runtime (for example `1.0`
+from 3.15.x) is rejected at submit with `PROTOCOL_VERSION_INCOMPATIBLE`, and
+`agent next` for the same lease reissues it at `1.1` under the same
+`request_id` and `lease_id`. `ActionResponse.schema_version` echoes its request
+and is not versioned independently. Advanced
 orchestration emits `worker-packet.v2`. Its
 `dispatch_receipt` uses `dispatch-receipt.v2` and contains the canonical
 `lease_id`, request binding, committed runtime revision, and an opaque delivery

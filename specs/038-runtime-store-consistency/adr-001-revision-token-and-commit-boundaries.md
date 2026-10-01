@@ -1,6 +1,6 @@
 # ADR-001: Revision Tokens Advance Only Across Contiguous Commits
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-01
 **Deciders:** Repository architecture owner
 
@@ -102,10 +102,12 @@ the session's own pending buffer. It never reads `evidence.jsonl`.
 ### D7 — Authority only after commit
 
 While the store is uninitialized, a complete recovery bundle has no authority:
-no committed migration ever verified against it. If it diverges from the
-current legacy inputs, it is renamed aside (`*.superseded-<stamp>`), never
-deleted, and rebuilt. Malformed legacy items and leases fail with
-`PERSISTENCE_INVALID` instead of `AttributeError`.
+no committed migration ever verified against it. A self-consistent bundle of
+*different* legacy inputs is renamed aside (`*.superseded-<stamp>`), never
+deleted, and rebuilt. A bundle whose files fail their own manifest is still
+tampering and fails fast (Spec 035 contract unchanged). Legacy item and lease
+shapes are validated before any bundle is written, so malformed input fails
+with `PERSISTENCE_INVALID` instead of `AttributeError`.
 
 ### D8 — Boundary contracts
 
@@ -123,8 +125,10 @@ deleted, and rebuilt. Malformed legacy items and leases fail with
   store's coercer.
 - **Lifecycle metrics:** items whose verification precedes addressing are
   excluded as `verified_before_addressed` rather than crashing the report.
-- **Archiving:** final-gate archives `runtime.sqlite3` with the SQLite backup
-  API, then removes the workspace.
+- **Archiving:** final-gate takes the store's write reservation, archives
+  `runtime.sqlite3` with the SQLite backup API, then removes the workspace. A
+  store another command is still writing is left in place and auto-clean is
+  skipped instead of racing it.
 
 ### D9 — Opportunistic projection repair on read
 

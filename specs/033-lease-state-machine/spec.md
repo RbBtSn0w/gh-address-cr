@@ -117,7 +117,9 @@ owner, and assert the returned request submits.
   `lease_id`, with the lease's stored `request_hash` equal to the hash of the request on
   disk.
 - **FR-004 (I4, ledger honesty)**: The ledger MUST record `request_issued` exactly when
-  an `ActionRequest` is written, and MUST NOT when none is. Status and recovery text MUST
+  an `ActionRequest` is issued, and MUST NOT when none is. *Amended by Spec 038 D3:*
+  issuance commits with the lease, and the request file is a rebuildable artifact
+  whose reissue records `request_issued` with `rebuilt: true`. Status and recovery text MUST
   agree with what the ledger and session record; a payload must not say evidence was
   published or accepted when it was not, nor deny partial acceptance that occurred.
 - **FR-005 (transition and claim tables)**: The lease statuses, the transitions between
