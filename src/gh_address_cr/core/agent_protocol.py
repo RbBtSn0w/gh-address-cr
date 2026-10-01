@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import copy
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -14,6 +14,7 @@ from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol_evidence import required_evidence_for
 from gh_address_cr.core.agent_protocol_leases import active_fixer_lease_for_item
+from gh_address_cr.core.agent_protocol_leases import payload_for_lease as _payload_for_lease
 from gh_address_cr.core.agent_protocol_submission import (
     accept_action_response_submission,
     handling_boundary_summary_or_none,
@@ -66,6 +67,7 @@ from gh_address_cr.core.utils import (
 from gh_address_cr.core.utils import (
     return_item_to_claimable_state as _return_item_to_claimable_state,
 )
+from gh_address_cr.evidence.ledger import EvidenceRecord
 
 MUTATING_ROLES = {"fixer"}
 
@@ -299,48 +301,6 @@ def _reenter_own_fixer_lease(
     }
 
 
-def _payload_for_lease(
-    path: Path,
-    *,
-    request_id: str,
-    lease_id: str,
-    validate: Any | None = None,
-) -> dict[str, Any] | None:
-    """The JSON object on disk when it belongs to this lease, else None.
-
-    One predicate for the request and for its response skeleton. Applying it to the
-    request only was an asymmetry, not a decision: a corrupt or foreign skeleton was
-    handed back untouched while the request beside it would have been rebuilt.
-
-    Usable means all of:
-
-    - it parses, and is an object;
-    - it passes `validate`, when one is given. For the request that is
-      `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
-      accepts cannot drift from what submit accepts. "Any JSON object" is not enough:
-      `{}` parses, then skeleton generation indexes required keys and raises KeyError
-      instead of rebuilding. A skeleton has no such parser -- it is deliberately
-      incomplete until the agent fills it in -- so it is checked on identity alone;
-    - it carries this lease's `request_id` and `lease_id`. A file can be perfectly
-      valid and still belong to another lease, and handing that back points the agent
-      at the wrong request.
-
-    A skeleton the agent has already filled in still matches, so re-entry keeps it;
-    only an unusable one is regenerated and the agent's evidence is never discarded.
-    """
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            return None
-        if validate is not None:
-            validate(payload)
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
-        return None
-    if str(payload.get("request_id")) != request_id or str(payload.get("lease_id")) != lease_id:
-        return None
-    return payload
-
-
 def _rebuild_fixer_request(
     repo: str,
     pr_number: str,
@@ -399,6 +359,7 @@ def issue_action_request(
         else session_store.load_session(repo, pr_number)
     )
     ledger = _ledger(session)
+    metadata_base = copy.deepcopy(session.get("metadata"))
     expired = expire_leases(session, now=current_time)
     _return_expired_items_to_open(session, expired)
 
@@ -540,6 +501,7 @@ def issue_action_request(
     request["response_skeleton_path"] = str(response_skeleton_path)
     local_classification = item.get("classification_evidence")
     local_decision = item.get("decision")
+    local_metadata = session_store.metadata_delta(metadata_base, session.get("metadata"))
 
     def commit_claim(current: dict[str, Any]) -> Any:
         current_expired = expire_leases(current, now=current_time)
@@ -547,9 +509,7 @@ def issue_action_request(
         current_item = current.get("items", {}).get(item_id)
         if not isinstance(current_item, dict):
             raise LeaseConflictError("ITEM_NOT_CLAIMABLE", item_id)
-        local_metadata = session.get("metadata")
-        if isinstance(local_metadata, dict):
-            current["metadata"] = dict(local_metadata)
+        session_store.apply_metadata_delta(current, local_metadata)
         if isinstance(local_classification, dict) and not has_classification_evidence(current_item):
             current_item["classification_evidence"] = dict(local_classification)
             current_item["decision"] = local_decision
@@ -572,6 +532,21 @@ def issue_action_request(
         current_item["active_lease_id"] = lease_id
         return committed_lease
 
+    # `request_issued` commits with the lease: issuance is the committed claim, and
+    # the request files written below are artifacts re-entry can rebuild.
+    request_issued = EvidenceRecord.new(
+        session_id=str(session["session_id"]),
+        item_id=item_id,
+        lease_id=lease_id,
+        agent_id=agent_id,
+        role=role,
+        event_type="request_issued",
+        payload={
+            "request_id": request_id,
+            "request_path": str(request_path),
+            "response_skeleton_path": str(response_skeleton_path),
+        },
+    )
     try:
         committed = session_store.transact_working_set(
             repo,
@@ -579,6 +554,7 @@ def issue_action_request(
             WorkingSetRequest(item_ids=(item_id,), include_active_leases=True),
             commit_claim,
             operation="lease_claim",
+            evidence=[request_issued.to_json()],
         )
     except LeaseConflictError as exc:
         raise WorkflowError(
@@ -596,20 +572,6 @@ def issue_action_request(
     write_json_atomic(request_path, request)
     response_skeleton = response_skeleton_for_request(request, agent_id=agent_id, item=item)
     write_json_atomic(response_skeleton_path, response_skeleton)
-
-    ledger.append_event(
-        session_id=str(session["session_id"]),
-        item_id=item_id,
-        lease_id=lease_id,
-        agent_id=agent_id,
-        role=role,
-        event_type="request_issued",
-        payload={
-            "request_id": request_id,
-            "request_path": str(request_path),
-            "response_skeleton_path": str(response_skeleton_path),
-        },
-    )
     return {
         "status": "ACTION_REQUESTED",
         "acquisition": "created",

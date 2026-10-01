@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -13,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterator, ParamSpec, TypeVar
 
 from gh_address_cr.core.github_thread_state import returned_claimable_state
 from gh_address_cr.core.io import fsync_directory, fsync_file, json_ready, write_json_atomic, write_json_durable
@@ -42,6 +43,8 @@ _SAFE_OPERATIONS = {
     "status_update",
 }
 T = TypeVar("T")
+P = ParamSpec("P")
+R = TypeVar("R")
 
 _SCHEMA_SQL = """
 CREATE TABLE store_metadata (
@@ -203,6 +206,24 @@ class TransactionResult(StoreSnapshot):
 
 
 @dataclass(frozen=True)
+class OutboxCommit:
+    """An outbox-only commit: the revision it was based on and the one it produced.
+
+    A caller holding a session token may adopt ``revision`` only when its token
+    equals ``base_revision``; otherwise another writer committed in between and
+    the caller's payload no longer describes ``revision``.
+    """
+
+    base_revision: int
+    revision: int
+
+
+@dataclass(frozen=True)
+class RecoveryCommit(OutboxCommit):
+    recovered: int = 0
+
+
+@dataclass(frozen=True)
 class WorkingSetRequest:
     """Versioned declaration of canonical rows required by one command mutation."""
 
@@ -217,6 +238,26 @@ class WorkingSetRequest:
             raise ValueError(f"Unsupported working-set schema: {self.schema_version}")
 
 
+def _busy_is_retryable(method: Callable[P, R]) -> Callable[P, R]:
+    """Surface SQLite lock contention as the documented, retryable PERSISTENCE_BUSY.
+
+    Busy can arise at any statement, including the schema probe every new
+    connection runs, so the translation wraps whole public operations rather
+    than individual statements.
+    """
+
+    @functools.wraps(method)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return method(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            if _is_busy(exc):
+                raise PersistenceBusyError() from exc
+            raise
+
+    return wrapper
+
+
 class RuntimeStore:
     def __init__(self, workspace: Path, *, busy_timeout_ms: int = 5_000):
         self.workspace = Path(workspace)
@@ -224,6 +265,7 @@ class RuntimeStore:
         self.busy_timeout_ms = max(1, int(busy_timeout_ms))
         self._schema_current = False
 
+    @_busy_is_retryable
     def is_initialized(self) -> bool:
         """True once a committed store metadata row exists.
 
@@ -242,6 +284,7 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    @_busy_is_retryable
     def bootstrap(
         self,
         payload: dict[str, Any],
@@ -260,6 +303,7 @@ class RuntimeStore:
             raise StaleRevisionError(expected=0, actual=snapshot.revision)
         return snapshot
 
+    @_busy_is_retryable
     def open_or_migrate(self, *, session_path: Path, ledger_path: Path) -> StoreSnapshot:
         if self.is_initialized():
             return self.load()
@@ -365,6 +409,7 @@ class RuntimeStore:
             ("legacy-v1-to-sqlite-v1", 0, SCHEMA_VERSION, now, now, "committed", *legacy_hashes),
         )
 
+    @_busy_is_retryable
     def load(self) -> StoreSnapshot:
         if not self.database_path.is_file():
             raise PersistenceInvalidError("PERSISTENCE_INVALID", "The runtime store does not exist.")
@@ -376,6 +421,7 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    @_busy_is_retryable
     def load_working_set(self, request: WorkingSetRequest) -> StoreSnapshot:
         """Load only the canonical rows declared by ``request``."""
         if not self.database_path.is_file():
@@ -389,6 +435,7 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    @_busy_is_retryable
     def replace(
         self,
         payload: dict[str, Any],
@@ -415,6 +462,7 @@ class RuntimeStore:
         )
         return StoreSnapshot(payload=result.payload, revision=result.revision)
 
+    @_busy_is_retryable
     def transact(
         self,
         mutation: Callable[[dict[str, Any]], T],
@@ -432,6 +480,7 @@ class RuntimeStore:
             outbox=outbox,
         )
 
+    @_busy_is_retryable
     def transact_working_set(
         self,
         request: WorkingSetRequest,
@@ -643,6 +692,7 @@ class RuntimeStore:
             finally:
                 connection.close()
 
+    @_busy_is_retryable
     def load_evidence(self) -> list[dict[str, Any]]:
         connection = self._connect()
         try:
@@ -652,6 +702,7 @@ class RuntimeStore:
             connection.close()
         return [json.loads(row[0]) for row in rows]
 
+    @_busy_is_retryable
     def load_outbox(self) -> list[dict[str, Any]]:
         connection = self._connect()
         try:
@@ -663,6 +714,7 @@ class RuntimeStore:
             connection.close()
         return [dict(zip(_OUTBOX_COLUMNS, row, strict=True)) for row in rows]
 
+    @_busy_is_retryable
     def outbox_command(self, *, effect_type: str, idempotency_key: str) -> dict[str, Any] | None:
         """Return the canonical outbox row for one side effect, or None if it was never planned."""
         connection = self._connect()
@@ -677,7 +729,14 @@ class RuntimeStore:
             connection.close()
         return dict(zip(_OUTBOX_COLUMNS, row, strict=True)) if row is not None else None
 
-    def mark_outbox_in_flight(self, command_id: str, *, owner_token: str | None = None) -> StoreSnapshot:
+    @_busy_is_retryable
+    def mark_outbox_in_flight(
+        self,
+        command_id: str,
+        *,
+        owner_token: str | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+    ) -> OutboxCommit:
         return self._transition_outbox(
             "status = 'in_flight', attempt_count = attempt_count + 1, "
             "error_type = NULL, external_result_reference = NULL, owner_token = ?, in_flight_since = ?",
@@ -686,8 +745,10 @@ class RuntimeStore:
             allowed_statuses=("planned", "failed", "unknown"),
             operation="outbox_execute",
             unknown_requires_idempotency=True,
+            evidence=evidence,
         )
 
+    @_busy_is_retryable
     def record_outbox_result(
         self,
         command_id: str,
@@ -697,7 +758,7 @@ class RuntimeStore:
         external_result_reference: str | None = None,
         error_type: str | None = None,
         owner_token: str | None = None,
-    ) -> StoreSnapshot:
+    ) -> OutboxCommit:
         """Record an external result; an ``in_flight`` row accepts it only from its owner.
 
         ``unknown`` rows (owner gone) accept a reconciled result from anyone.
@@ -715,7 +776,8 @@ class RuntimeStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._validate_schema(connection)
-            next_revision = self._latest_revision(connection) + 1
+            base_revision = self._latest_revision(connection)
+            next_revision = base_revision + 1
             cursor = connection.execute(
                 "UPDATE outbox_commands SET status = ?, error_type = ?, external_result_reference = ?, "
                 "owner_token = NULL, in_flight_since = NULL "
@@ -743,30 +805,46 @@ class RuntimeStore:
             outcome=status,
             contention=_contention_bucket(started_at),
         )
-        return self.load()
+        return OutboxCommit(base_revision=base_revision, revision=next_revision)
 
+    @_busy_is_retryable
     def recover(self) -> int:
+        """Demote ``in_flight`` commands whose executor is gone; return how many."""
+        commit = self.recover_outbox()
+        return 0 if commit is None else commit.recovered
+
+    @_busy_is_retryable
+    def recover_outbox(self) -> "RecoveryCommit | None":
         """Demote ``in_flight`` commands whose executor is gone to ``unknown``.
 
         Reads first and opens a write transaction only when a dead-owner row
         exists, so ordinary loads never contend for the write lock. An executor
         holds its execution lock for the whole external call, so a held lock
-        means the command is still running and must stay ``in_flight``.
+        means the command is still running and must stay ``in_flight``. The
+        liveness probe runs outside the transaction, so each demotion is guarded
+        by the owner token read with it: a command another executor re-marked in
+        the meantime keeps its new owner.
         """
         started_at = time.monotonic()
         connection = self._connect()
         try:
             self._validate_schema(connection)
             in_flight = [
-                str(row[0])
-                for row in connection.execute("SELECT command_id FROM outbox_commands WHERE status = 'in_flight'")
+                (str(row[0]), row[1])
+                for row in connection.execute(
+                    "SELECT command_id, owner_token FROM outbox_commands WHERE status = 'in_flight'"
+                )
             ]
         finally:
             connection.close()
         if not in_flight:
-            return 0
-        dead = [command_id for command_id in in_flight if not is_execution_lock_held(self.workspace, command_id)]
-        recovered = 0
+            return None
+        dead = [
+            (command_id, owner_token)
+            for command_id, owner_token in in_flight
+            if not is_execution_lock_held(self.workspace, command_id)
+        ]
+        commit: RecoveryCommit | None = None
         if dead:
             with _persistence_span("gh_address_cr.persistence.recover", "outbox_recovery") as span:
                 connection = self._connect()
@@ -775,19 +853,24 @@ class RuntimeStore:
                     locked_at = time.monotonic()
                     self._validate_schema(connection)
                     current_revision = self._latest_revision(connection)
-                    placeholders = ", ".join("?" for _ in dead)
-                    cursor = connection.execute(
-                        "UPDATE outbox_commands SET status = 'unknown', owner_token = NULL "
-                        f"WHERE status = 'in_flight' AND command_id IN ({placeholders})",
-                        dead,
-                    )
-                    recovered = int(cursor.rowcount)
+                    recovered = 0
+                    for command_id, owner_token in dead:
+                        cursor = connection.execute(
+                            "UPDATE outbox_commands SET status = 'unknown', owner_token = NULL, "
+                            "in_flight_since = NULL "
+                            "WHERE command_id = ? AND status = 'in_flight' AND owner_token IS ?",
+                            (command_id, owner_token),
+                        )
+                        recovered += int(cursor.rowcount)
                     if recovered:
                         next_revision = current_revision + 1
                         connection.execute(
                             "UPDATE sessions SET revision = ?, updated_at = ?", (next_revision, _utc_now())
                         )
                         self._advance_revision(connection, next_revision)
+                        commit = RecoveryCommit(
+                            base_revision=current_revision, revision=next_revision, recovered=recovered
+                        )
                     connection.commit()
                     _record_timing(span, started_at=started_at, locked_at=locked_at, outcome="recovered")
                 except Exception:
@@ -798,10 +881,10 @@ class RuntimeStore:
         _emit_persistence_event(
             "persistence.recovery",
             operation="outbox_recovery",
-            outcome="recovered" if recovered else "owner_alive",
+            outcome="recovered" if commit is not None else "owner_alive",
             contention=_contention_bucket(started_at),
         )
-        return recovered
+        return commit
 
     def _transition_outbox(
         self,
@@ -812,8 +895,10 @@ class RuntimeStore:
         allowed_statuses: tuple[str, ...],
         operation: str,
         unknown_requires_idempotency: bool = False,
-    ) -> StoreSnapshot:
+        evidence: list[dict[str, Any]] | None = None,
+    ) -> OutboxCommit:
         started_at = time.monotonic()
+        transaction_id = uuid.uuid4().hex
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -836,6 +921,7 @@ class RuntimeStore:
                     "Outbox command is missing or cannot enter the requested state.",
                 )
             next_revision = current_revision + 1
+            self._write_evidence(connection, evidence or [], revision=next_revision, transaction_id=transaction_id)
             connection.execute("UPDATE sessions SET revision = ?, updated_at = ?", (next_revision, _utc_now()))
             self._advance_revision(connection, next_revision)
             connection.commit()
@@ -850,8 +936,9 @@ class RuntimeStore:
             outcome="in_flight",
             contention=_contention_bucket(started_at),
         )
-        return self.load()
+        return OutboxCommit(base_revision=current_revision, revision=next_revision)
 
+    @_busy_is_retryable
     def load_materializations(self) -> list[dict[str, Any]]:
         connection = self._connect()
         try:
@@ -860,12 +947,16 @@ class RuntimeStore:
         finally:
             connection.close()
 
-    def recover_artifacts(self, *, session_path: Path, ledger_path: Path) -> int:
+    @_busy_is_retryable
+    def recover_artifacts(self, *, session_path: Path, ledger_path: Path, wait: bool = True) -> int:
         """Rebuild stale, missing, failed, or externally edited projections.
 
         Drift is detected from the size and mtime recorded when each projection
         was last written, so the common path costs three ``stat`` calls rather
-        than hashing files that grow with the session.
+        than hashing files that grow with the session. With ``wait=False`` the
+        repair is opportunistic: a reader that would have to queue behind a
+        writer leaves the projection dirty for a later command instead of
+        blocking, because projections never change command truth.
         """
         connection = self._connect()
         try:
@@ -889,7 +980,19 @@ class RuntimeStore:
                 repairs += 1
                 drift += 1
         if repairs:
-            self._materialize(session_path=session_path, ledger_path=ledger_path, full_rebuild=bool(drift))
+            materializer = self if wait else RuntimeStore(self.workspace, busy_timeout_ms=1)
+            try:
+                materializer._materialize(session_path=session_path, ledger_path=ledger_path, full_rebuild=bool(drift))
+            except PersistenceBusyError:
+                if wait:
+                    raise
+                _emit_persistence_event(
+                    "artifact.materialization",
+                    operation="artifact_recovery",
+                    outcome="deferred",
+                    contention="high",
+                )
+                return 0
         if drift:
             _emit_persistence_event(
                 "artifact.materialization",
@@ -905,6 +1008,7 @@ class RuntimeStore:
         )
         return repairs
 
+    @_busy_is_retryable
     def materialize_compatibility_artifacts(
         self, *, session_path: Path, ledger_path: Path, committed: StoreSnapshot | None = None
     ) -> None:
@@ -916,6 +1020,7 @@ class RuntimeStore:
             from_rows=committed is None,
         )
 
+    @_busy_is_retryable
     def materialize_compatibility_artifacts_from_rows(
         self,
         *,
@@ -931,6 +1036,7 @@ class RuntimeStore:
             expected_revision=expected_revision,
         )
 
+    @_busy_is_retryable
     def materialize_evidence_artifacts(self, *, ledger_path: Path) -> None:
         """Keep append-only evidence current without rebuilding ``session.json``."""
         self._materialize(
@@ -1311,6 +1417,10 @@ class RuntimeStore:
             row = connection.execute(
                 "SELECT schema_version FROM store_metadata WHERE singleton = 1"
             ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if _is_busy(exc):
+                raise PersistenceBusyError() from exc
+            raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime schema metadata is unavailable.") from exc
         except sqlite3.DatabaseError as exc:
             raise PersistenceInvalidError("PERSISTENCE_INVALID", "Runtime schema metadata is unavailable.") from exc
         if row is None or int(row[0]) != SCHEMA_VERSION:
@@ -1498,6 +1608,12 @@ class RuntimeStore:
         payload.setdefault("items", {})
         payload.setdefault("leases", {})
         payload.setdefault("metadata", {})
+        for collection in ("items", "leases"):
+            entries = payload[collection]
+            if not isinstance(entries, dict) or not all(isinstance(entry, dict) for entry in entries.values()):
+                raise PersistenceInvalidError(
+                    "PERSISTENCE_INVALID", f"Legacy session {collection} must be an object of objects."
+                )
         return payload
 
     @staticmethod
@@ -1528,8 +1644,11 @@ class RuntimeStore:
         published by one atomic rename, and ``manifest.json`` is written last,
         so a published bundle without a manifest can only come from a pre-035
         build that crashed mid-copy. That bundle is renamed aside, never
-        trusted and never deleted. A complete bundle whose hashes diverge is
-        tampering and still fails fast.
+        trusted and never deleted. A complete bundle whose files fail their own
+        manifest is tampering and still fails fast. A complete, self-consistent
+        bundle of *different* legacy inputs comes from an import that never
+        committed: no migration ever verified against it, so it has no
+        authority. It is renamed aside and rebuilt from the current inputs.
         """
         bundle = self.workspace / RECOVERY_BUNDLE_NAME
         for staging_leftover in self.workspace.glob(f"{RECOVERY_BUNDLE_NAME}.tmp-*"):
@@ -1539,15 +1658,19 @@ class RuntimeStore:
             if (bundle / "manifest.json").is_file():
                 self._verify_recovery_bundle()
                 manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
-                if manifest.get("files") != self._legacy_input_hashes(session_path, ledger_path):
-                    raise PersistenceInvalidError(
-                        "PERSISTENCE_INVALID",
-                        "Legacy inputs diverge from the verified recovery bundle.",
-                    )
-                return False
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            bundle.rename(self.workspace / f"{RECOVERY_BUNDLE_NAME}.incomplete-{stamp}-{uuid.uuid4().hex[:8]}")
-            quarantined = True
+                if manifest.get("files") == self._legacy_input_hashes(session_path, ledger_path):
+                    return False
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                bundle.rename(
+                    self.workspace / f"{RECOVERY_BUNDLE_NAME}.superseded-{stamp}-{uuid.uuid4().hex[:8]}"
+                )
+                quarantined = True
+            else:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                bundle.rename(
+                    self.workspace / f"{RECOVERY_BUNDLE_NAME}.incomplete-{stamp}-{uuid.uuid4().hex[:8]}"
+                )
+                quarantined = True
         staging = self.workspace / f"{RECOVERY_BUNDLE_NAME}.tmp-{uuid.uuid4().hex}"
         staging.mkdir()
         files: dict[str, str] = {}
@@ -2364,7 +2487,9 @@ def _coerce_lease_datetimes(lease: dict[str, Any]) -> None:
         if not isinstance(value, str) or not value:
             continue
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        lease[field] = parsed
+        # Leases written before timestamps carried an offset are UTC, as the
+        # pre-store session reader assumed.
+        lease[field] = parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def _derive_item_claim_projection(

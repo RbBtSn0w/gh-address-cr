@@ -143,8 +143,10 @@ class Gatekeeper:
         manager = SessionManager(repo, str(pr_number))
         try:
             session = manager.load()
-        except SessionError:
-            if require_existing_session:
+        except SessionError as exc:
+            # Only a missing session is replaced; a busy, stale, or invalid store
+            # keeps its own reason code instead of being masked by a fresh session.
+            if require_existing_session or exc.reason_code != "SESSION_NOT_FOUND":
                 raise
             session = manager.create(status="WAITING_FOR_GATE")
         if observed_stack_context is not None:

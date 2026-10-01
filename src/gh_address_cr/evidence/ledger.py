@@ -312,10 +312,24 @@ class SessionEvidenceLedger(EvidenceLedger):
         session: dict[str, Any],
         *,
         flush: Callable[[list[dict[str, Any]]], None] | None = None,
+        canonical: Callable[[], list[dict[str, Any]]] | None = None,
     ):
         super().__init__(path)
         self.session = session
         self.flush = flush
+        self.canonical = canonical
+
+    def load(self, *, event_type: str | None = None) -> list[EvidenceRecord]:
+        """Committed canonical evidence plus this session's uncommitted buffer.
+
+        ``evidence.jsonl`` is a rebuildable projection and is never read back as
+        input, so a stale or edited projection cannot change runtime decisions.
+        """
+        if self.canonical is None:
+            raise ValueError("A session ledger requires its canonical evidence source to load records.")
+        rows = [*self.canonical(), *(self.session.get(_PENDING_EVIDENCE_KEY) or [])]
+        records = [self._record_from_line(index, json.dumps(row)) for index, row in enumerate(rows, start=1)]
+        return [record for record in records if event_type is None or record.event_type == event_type]
 
     def append(self, record: EvidenceRecord) -> EvidenceRecord:
         pending = self.session.setdefault(_PENDING_EVIDENCE_KEY, [])

@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import shutil
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
     maybe_prepend_implicit_scope,
+    output_session_error,
     prepend_optional,
 )
 from gh_address_cr.core import command_templates as core_command_templates
@@ -296,13 +298,19 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return _handle_stack_final_gate(parsed, machine_requested=machine_requested)
 
     try:
-        result = core_gate.Gatekeeper().run(
-            parsed.repo,
-            parsed.pr_number,
-            snapshot_path=parsed.snapshot or None,
-            require_checks=parsed.require_checks,
-            require_required_checks=parsed.require_required_checks,
+        # The gate's GitHub calls are reads and its only write is the session save,
+        # so a rerun from fresh state after a concurrent commit is equivalent.
+        result = session_store.retry_on_stale_revision(
+            lambda: core_gate.Gatekeeper().run(
+                parsed.repo,
+                parsed.pr_number,
+                snapshot_path=parsed.snapshot or None,
+                require_checks=parsed.require_checks,
+                require_required_checks=parsed.require_required_checks,
+            )
         )
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except FileNotFoundError as exc:
         if machine_requested:
             emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2)
@@ -1376,10 +1384,47 @@ def final_gate_failure_message(result: core_gate.GateResult) -> str:
     return " and ".join(reasons) or "gate checks reported failure"
 
 
+ARCHIVE_BUSY_TIMEOUT_MS = 5_000
+_RUNTIME_DATABASE = "runtime.sqlite3"
+
+
 def archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Path | None:
+    """Archive the workspace and remove it, never copying a store mid-transaction.
+
+    The runtime store is copied with SQLite's backup API while this process holds
+    the write reservation, so the archive is a committed snapshot and no writer
+    commits into a file that is about to be removed. A store another command is
+    still writing is left in place; auto-clean is skipped rather than racing it.
+    """
     workspace = session_store.workspace_dir(repo, pr_number)
     if not workspace.exists():
         return None
+    database = workspace / _RUNTIME_DATABASE
+    if not database.is_file():
+        return _archive_files(repo, pr_number, audit_id, workspace, connection=None)
+    connection = sqlite3.connect(database, timeout=ARCHIVE_BUSY_TIMEOUT_MS / 1_000, isolation_level=None)
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {int(ARCHIVE_BUSY_TIMEOUT_MS)}")
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            print(f"Skipped auto-clean: the runtime store is still in use ({exc}).", file=sys.stderr)
+            return None
+        return _archive_files(repo, pr_number, audit_id, workspace, connection=connection)
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def _archive_files(
+    repo: str,
+    pr_number: str,
+    audit_id: str,
+    workspace: Path,
+    *,
+    connection: sqlite3.Connection | None,
+) -> Path:
     archive_root = core_paths.state_dir() / "archive" / core_paths.normalize_repo(repo) / f"pr-{pr_number}"
     archive_root.mkdir(parents=True, exist_ok=True)
     base_name = audit_id or "final-gate"
@@ -1388,7 +1433,21 @@ def archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Pat
     while archive_target.exists():
         archive_target = archive_root / f"{base_name}-{suffix}"
         suffix += 1
-    shutil.copytree(workspace, archive_target)
+    shutil.copytree(
+        workspace,
+        archive_target,
+        ignore=shutil.ignore_patterns(_RUNTIME_DATABASE, f"{_RUNTIME_DATABASE}-*"),
+    )
+    if connection is not None:
+        # ``connection`` holds the write reservation; a separate reader copies the
+        # committed pages, which the reservation keeps stable until removal.
+        source = sqlite3.connect(workspace / _RUNTIME_DATABASE)
+        archived = sqlite3.connect(archive_target / _RUNTIME_DATABASE)
+        try:
+            source.backup(archived)
+        finally:
+            archived.close()
+            source.close()
     shutil.rmtree(workspace, ignore_errors=True)
     print(f"Archived PR workspace: {archive_target}", file=sys.stderr)
     print(f"Auto-cleaned PR workspace: {workspace}", file=sys.stderr)

@@ -10,9 +10,9 @@ from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.process_lock import ExecutionLock, is_execution_lock_held, try_acquire_execution_lock
 from gh_address_cr.core.runtime_store import (
+    OutboxCommit,
     RuntimeStore,
     RuntimeStoreError,
-    StoreSnapshot,
     outbox_command_id,
     retry_boundary_for,
 )
@@ -58,7 +58,7 @@ def side_effect_state(session: dict[str, Any], *, effect_type: str, idempotency_
     try:
         command = store.outbox_command(effect_type=effect_type, idempotency_key=idempotency_key)
         if command is not None and command["status"] == "in_flight" and not _owner_alive(store, command):
-            store.recover()
+            _advance_token(session, store.recover_outbox())
             command = store.outbox_command(effect_type=effect_type, idempotency_key=idempotency_key)
     except RuntimeStoreError as exc:
         raise session_store.SessionError(exc.reason_code, str(exc)) from exc
@@ -107,7 +107,7 @@ def reconcile_side_effect_no_effect(
         )
     except RuntimeStoreError as exc:
         raise session_store.SessionError(exc.reason_code, str(exc)) from exc
-    _update_revision(session, result)
+    _advance_token(session, result)
 
 
 def side_effect_in_progress(session: dict[str, Any], *, effect_type: str) -> WorkflowError:
@@ -135,21 +135,13 @@ def _begin_attempt(
 ) -> None:
     existing = store.outbox_command(effect_type=attempt.side_effect_type, idempotency_key=attempt.idempotency_key)
     if existing is None:
-        persistence = session.get("persistence")
-        expected_revision = persistence.get("revision") if isinstance(persistence, dict) else None
-        store.transact(
-            lambda current: None,
-            operation="outbox_plan",
-            expected_revision=expected_revision if isinstance(expected_revision, int) else None,
-            evidence=records,
-            outbox=[_command(attempt, command_id)],
-        )
-        _update_revision(session, store.mark_outbox_in_flight(command_id, owner_token=owner_token))
-        return
-    retryable = existing["status"] in {"planned", "failed"} or (
-        existing["status"] == "unknown" and existing["retry_boundary"] == "idempotent"
-    )
-    if not retryable:
+        # Before the external call a stale caller still fails fast, so nothing is
+        # posted from a payload another writer has already superseded.
+        _plan(session, store, attempt, command_id, guard_revision=True)
+    elif not (
+        existing["status"] in {"planned", "failed"}
+        or (existing["status"] == "unknown" and existing["retry_boundary"] == "idempotent")
+    ):
         raise WorkflowError(
             status=protocol_codes.PUBLISH_BLOCKED,
             reason_code=protocol_codes.PUBLISH_RECONCILE_REQUIRED,
@@ -161,14 +153,9 @@ def _begin_attempt(
             ),
             payload={"item_id": attempt.item_id, "effect_type": attempt.side_effect_type},
         )
-    in_flight = store.mark_outbox_in_flight(command_id, owner_token=owner_token)
-    committed = store.transact(
-        lambda current: None,
-        operation="outbox_attempt",
-        expected_revision=in_flight.revision,
-        evidence=records,
-    )
-    _update_revision(session, committed)
+    # The attempt evidence commits with the in_flight transition, so a concurrent
+    # writer can never leave a command in flight without its attempt record.
+    _advance_token(session, store.mark_outbox_in_flight(command_id, owner_token=owner_token, evidence=records))
 
 
 def _finish_attempt(
@@ -182,18 +169,10 @@ def _finish_attempt(
 ) -> None:
     existing = store.outbox_command(effect_type=attempt.side_effect_type, idempotency_key=attempt.idempotency_key)
     if existing is None:
-        persistence = session.get("persistence")
-        expected_revision = persistence.get("revision") if isinstance(persistence, dict) else None
-        planned = store.transact(
-            lambda current: None,
-            operation="outbox_plan",
-            expected_revision=expected_revision if isinstance(expected_revision, int) else None,
-            outbox=[_command(attempt, command_id)],
-        )
-        _update_revision(session, planned)
+        _plan(session, store, attempt, command_id)
         existing = {"status": "planned"}
     if existing["status"] == "planned":
-        _update_revision(session, store.mark_outbox_in_flight(command_id, owner_token=owner_token))
+        _advance_token(session, store.mark_outbox_in_flight(command_id, owner_token=owner_token))
     result = store.record_outbox_result(
         command_id,
         status=attempt.status,
@@ -202,7 +181,29 @@ def _finish_attempt(
         error_type="external_error" if attempt.status == "failed" else None,
         owner_token=owner_token,
     )
-    _update_revision(session, result)
+    _advance_token(session, result)
+
+
+def _plan(
+    session: dict[str, Any],
+    store: RuntimeStore,
+    attempt: SideEffectAttempt,
+    command_id: str,
+    *,
+    guard_revision: bool = False,
+) -> None:
+    # Planning after the external call records a fact, so it never waits on the
+    # caller's revision: a concurrent unrelated commit must not leave a real
+    # GitHub mutation unrecorded.
+    persistence = session.get("persistence")
+    token = persistence.get("revision") if isinstance(persistence, dict) else None
+    planned = store.transact(
+        lambda current: None,
+        operation="outbox_plan",
+        expected_revision=token if guard_revision and isinstance(token, int) else None,
+        outbox=[_command(attempt, command_id)],
+    )
+    _advance_token(session, OutboxCommit(base_revision=planned.revision - 1, revision=planned.revision))
 
 
 def _owner_alive(store: RuntimeStore, command: dict[str, Any]) -> bool:
@@ -226,11 +227,19 @@ def _command(attempt: SideEffectAttempt, command_id: str) -> dict[str, Any]:
     }
 
 
-def _update_revision(session: dict[str, Any], snapshot: StoreSnapshot) -> None:
-    session["persistence"] = {
-        "schema_version": snapshot.schema_version,
-        "revision": snapshot.revision,
-    }
+def _advance_token(session: dict[str, Any], commit: OutboxCommit | None) -> None:
+    """Adopt an outbox commit's revision only when nothing else committed in between.
+
+    The session payload describes its token's revision. Moving the token past a
+    foreign commit would let the caller's next whole-session save overwrite that
+    commit, so a non-contiguous commit leaves the token stale and the save fails
+    with the documented, retryable STALE_REVISION.
+    """
+    if commit is None:
+        return
+    persistence = session.get("persistence")
+    if isinstance(persistence, dict) and persistence.get("revision") == commit.base_revision:
+        persistence["revision"] = commit.revision
 
 
 def _materialize(store: RuntimeStore, session: dict[str, Any]) -> None:

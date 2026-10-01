@@ -86,7 +86,7 @@ class ActionProtocolTestCase(unittest.TestCase):
 
     def request_payload(self, **overrides):
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "request_id": "req_123",
             "session_id": "session_123",
             "lease_id": "lease_123",
@@ -103,7 +103,7 @@ class ActionProtocolTestCase(unittest.TestCase):
 
     def response_payload(self, resolution="fix", **overrides):
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "request_id": "req_123",
             "lease_id": "lease_123",
             "agent_id": "codex-fixer-1",
