@@ -314,7 +314,7 @@ def load_current_session(
     pr_number: str,
     errors: list[str],
 ) -> dict[str, Any]:
-    """Load canonical session truth and materialize its compatibility projection."""
+    """Load canonical session truth and materialize its read-only projection."""
     path = session_file(repo, pr_number)
     database_path = path.parent / "runtime.sqlite3"
     if not path.exists() and not database_path.is_file():

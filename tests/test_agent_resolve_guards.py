@@ -31,23 +31,17 @@ class TrivialResolveGuardTest(unittest.TestCase):
         base = dict(
             repo="o/r", pr_number="1", item_id=None, agent_id="a", commit=None, files=None, file=[],
             summary=None, why=None, severity=None, severity_note=None, review_priority=None, validation=[],
-            input=None, batch=False, trivial=False, stale=False, reject=False, clarify=False,
-            disposition=None, homogeneous_reason=None, concern_label=None,
-            match_files=False, include_stale=False, publish=False, now=None,
+            input=None, stale=False, disposition=None, publish=False, now=None,
         )
         base.update(kw)
-        ns = argparse.Namespace(**base)
-        from gh_address_cr.commands.agent import _normalize_disposition
-
-        _normalize_disposition(ns)
-        return ns
+        return argparse.Namespace(**base)
 
     def test_trivial_without_item_id_is_rejected(self):
-        # #9: --trivial must require a single item_id, not fall into match-all.
+        # A trivial disposition must require a single item_id, not fall into match-all.
         from gh_address_cr.commands.agent import _validate_resolve_mode
 
         with self.assertRaises(WorkflowError) as ctx:
-            _validate_resolve_mode(self._ns(trivial=True, commit="abc", homogeneous_reason="x"))
+            _validate_resolve_mode(self._ns(disposition="trivial", commit="abc", why="x"))
         self.assertEqual(ctx.exception.reason_code, "TRIVIAL_REQUIRES_ITEM_ID")
 
     def test_item_id_with_batch_is_rejected(self):
@@ -56,21 +50,15 @@ class TrivialResolveGuardTest(unittest.TestCase):
         from gh_address_cr.commands.agent import _validate_resolve_axes
 
         with self.assertRaises(WorkflowError) as ctx:
-            _validate_resolve_axes(self._ns(item_id="github-thread:abc", batch=True, input="b.json"))
+            _validate_resolve_axes(self._ns(item_id="github-thread:abc", input="b.json"))
         self.assertEqual(ctx.exception.reason_code, "RESOLVE_AXIS_CONFLICT")
 
-    def test_item_id_with_stale_or_homogeneous_reason_is_now_valid(self):
-        # spec 029 / #204: item_id + --stale and item_id + --homogeneous-reason
-        # (a decline-reason alias) are NOT selection conflicts — disposition
-        # and condition axes compose freely with a single-item selection.
+    def test_item_id_with_stale_and_non_fix_disposition_is_valid(self):
         from gh_address_cr.commands.agent import _validate_resolve_axes
 
-        for kw in (
-            {"stale": True, "reject": True, "why": "x"},
-            {"homogeneous_reason": "x", "reject": True},
-        ):
+        for disposition in ("reject", "clarify", "defer"):
+            kw = {"stale": True, "disposition": disposition, "why": "x"}
             with self.subTest(kw=kw):
-                # Must not raise.
                 _validate_resolve_axes(self._ns(item_id="github-thread:abc", **kw))
 
 
@@ -93,8 +81,7 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
 
     def test_missing_reason_is_rejected(self):
         # spec 029 / /speckit-analyze U1: item_id + --disposition reject with
-        # no --why (and no deprecated --homogeneous-reason alias) must fail
-        # fast with a decline-specific message, not submit silently.
+        # no --why must fail fast with a decline-specific message, not submit silently.
         self.write_session(items=[github_thread("github-thread:noreason")])
 
         result = self.run_runtime_module(
@@ -110,35 +97,6 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
         # PR #206 CR: this is a decline-specific failure, not a fix-input one —
         # waiting_on must route recovery to decline_input, not fast_fix_input.
         self.assertEqual(payload["waiting_on"], "decline_input")
-
-    def test_legacy_boolean_spellings_still_work(self):
-        # --reject/--clarify booleans remain a valid alias for --disposition
-        # until T028's visible-deprecation-notice layer lands.
-        self.write_session(
-            items=[
-                github_thread("github-thread:legacy1"),
-                github_thread("github-thread:legacy2"),
-            ]
-        )
-
-        with self.deprecation_window(True):
-            reject_result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:legacy1",
-                "--reject",
-                "--why", "Style preference only; not a defect.",
-            )
-            self.assertEqual(reject_result.returncode, 0, reject_result.stdout + reject_result.stderr)
-            self.assertEqual(json.loads(reject_result.stdout)["item_id"], "github-thread:legacy1")
-
-            clarify_result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:legacy2",
-                "--clarify",
-                "--why", "Needs the author's intent before this can be actioned.",
-            )
-            self.assertEqual(clarify_result.returncode, 0, clarify_result.stdout + clarify_result.stderr)
-            self.assertEqual(json.loads(clarify_result.stdout)["item_id"], "github-thread:legacy2")
 
     def test_stale_and_disposition_clarify_together_is_accepted(self):
         # The false-conflict case: --stale (condition axis) and
@@ -176,143 +134,31 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
         self.assertEqual(json.loads(result.stdout)["item_id"], "github-thread:stalefalseconflict")
 
 
-class DeprecatedFlagNoticeTest(PythonScriptTestCase):
-    """T024: legacy flags still resolve the same way, but emit a visible
-    stderr deprecation notice; machine-summary stdout is byte-stable."""
-
-    REASON = "Style preference only; not a defect."
-
-    def write_session(self, *, items):
-        self.workspace_dir().mkdir(parents=True, exist_ok=True)
-        payload = {
-            "session_id": "session_deprecation",
-            "repo": self.repo,
-            "pr_number": self.pr,
-            "status": "WAITING_FOR_FIX",
-            "items": {item["item_id"]: item for item in items},
-            "leases": {},
-            "ledger_path": str(self.workspace_dir() / "evidence.jsonl"),
-            "metrics": {"blocking_items_count": len(items)},
-        }
-        self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-    def test_legacy_reject_boolean_emits_deprecation_notice(self):
-        self.write_session(items=[github_thread("github-thread:notice1")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:notice1",
-                "--reject",
-                "--why", self.REASON,
-            )
-
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("deprecated", result.stderr.lower())
-        self.assertIn("--reject", result.stderr)
-        self.assertIn("--disposition reject", result.stderr)
-
-    def test_match_files_and_homogeneous_reason_and_include_stale_emit_notices(self):
-        self.write_session(items=[github_thread("github-thread:notice2")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "--disposition", "reject",
-                "--files", "src/shared.py",
-                "--match-files",
-                "--homogeneous-reason", self.REASON,
-                "--include-stale",
-            )
-
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for flag in ("--match-files", "--homogeneous-reason", "--include-stale"):
-            self.assertIn(flag, result.stderr)
-        self.assertIn("deprecated", result.stderr.lower())
-
-    def test_machine_summary_is_stable_between_legacy_and_axis_forms(self):
-        # FR-010/N3: deprecation notice goes to stderr only; stdout JSON
-        # shape and exit code are identical for equivalent invocations.
-        self.write_session(
-            items=[
-                github_thread("github-thread:stable_legacy"),
-                github_thread("github-thread:stable_axis"),
-            ]
-        )
-
-        with self.deprecation_window(True):
-            legacy = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:stable_legacy",
-                "--reject",
-                "--why", self.REASON,
-            )
-        axis = self.run_runtime_module(
-            "agent", "resolve", self.repo, self.pr,
-            "github-thread:stable_axis",
-            "--disposition", "reject",
-            "--why", self.REASON,
-        )
-
-        self.assertEqual(legacy.returncode, axis.returncode)
-        legacy_payload = json.loads(legacy.stdout)
-        axis_payload = json.loads(axis.stdout)
-        legacy_payload.pop("item_id")
-        axis_payload.pop("item_id")
-        self.assertEqual(sorted(legacy_payload.keys()), sorted(axis_payload.keys()))
-        self.assertEqual(legacy_payload["status"], axis_payload["status"])
-
-
-class RemovalWindowFailLoudTest(PythonScriptTestCase):
-    """T027: once the deprecation window is closed, legacy flags fail loudly
-    with RESOLVE_FLAG_DEPRECATED instead of silently aliasing."""
-
-    def write_session(self, *, items):
-        self.workspace_dir().mkdir(parents=True, exist_ok=True)
-        payload = {
-            "session_id": "session_window_closed",
-            "repo": self.repo,
-            "pr_number": self.pr,
-            "status": "WAITING_FOR_FIX",
-            "items": {item["item_id"]: item for item in items},
-            "leases": {},
-            "ledger_path": str(self.workspace_dir() / "evidence.jsonl"),
-            "metrics": {"blocking_items_count": len(items)},
-        }
-        self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-    def test_legacy_flag_after_window_close_is_rejected(self):
-        self.write_session(items=[github_thread("github-thread:windowclosed")])
-
-        with self.deprecation_window(False):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:windowclosed",
-                "--reject",
-                "--why", "Style preference only; not a defect.",
-            )
-
-        self.assertEqual(result.returncode, 2)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["reason_code"], "RESOLVE_FLAG_DEPRECATED")
-
-    def test_axis_form_still_works_after_window_close(self):
-        self.write_session(items=[github_thread("github-thread:windowclosedaxis")])
-
-        with self.deprecation_window(False):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:windowclosedaxis",
-                "--disposition", "reject",
-                "--why", "Style preference only; not a defect.",
-            )
-
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+class RemovedResolveFlagTest(PythonScriptTestCase):
+    def test_removed_flags_are_unknown_arguments(self):
+        for flag in (
+            "--batch",
+            "--trivial",
+            "--reject",
+            "--clarify",
+            "--homogeneous-reason",
+            "--concern-label",
+            "--match-files",
+            "--include-stale",
+        ):
+            with self.subTest(flag=flag):
+                result = self.run_runtime_module(
+                    "agent", "resolve", self.repo, self.pr,
+                    "github-thread:removed",
+                    flag,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("unrecognized arguments", result.stderr)
+                self.assertNotIn("RESOLVE_FLAG_DEPRECATED", result.stdout + result.stderr)
 
 
 class BatchDispositionCoherenceTest(PythonScriptTestCase):
-    """PR #206 CR: --input (batch selection) is fix-only; a non-fix
-    --disposition must fail loudly instead of being silently ignored."""
+    """Batch input owns each item's decision; top-level disposition is invalid."""
 
     def test_input_with_decline_disposition_is_rejected(self):
         result = self.run_runtime_module(
@@ -325,7 +171,33 @@ class BatchDispositionCoherenceTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
-        self.assertIn("fix-only", payload["next_action"])
+        self.assertIn("does not accept a top-level --disposition", payload["next_action"])
+
+    def test_input_rejects_ignored_top_level_flags(self):
+        cases = (
+            ("--agent-id", "worker"),
+            ("--commit", "abc123"),
+            ("--files", "src/example.py"),
+            ("--file", "src/example.py"),
+            ("--summary", "summary"),
+            ("--why", "reason"),
+            ("--severity", "P2"),
+            ("--severity-note", "override"),
+            ("--review-priority", "high"),
+            ("--validation", "unit=passed"),
+            ("--stale", None),
+        )
+        for flag, value in cases:
+            with self.subTest(flag=flag):
+                args = ["agent", "resolve", self.repo, self.pr, "--input", "batch-response.json", flag]
+                if value is not None:
+                    args.append(value)
+                result = self.run_runtime_module(*args)
+
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+                self.assertIn(flag, payload["next_action"])
 
 
 class DeclineItemResolutionValidationTest(unittest.TestCase):
@@ -340,7 +212,7 @@ class DeclineItemResolutionValidationTest(unittest.TestCase):
                 "o/r", "1",
                 item_id="github-thread:abc",
                 agent_id="agent",
-                resolution="defer",
+                resolution="archive",
                 why="some reason",
             )
         self.assertEqual(ctx.exception.reason_code, "UNSUPPORTED_DECLINE_RESOLUTION")

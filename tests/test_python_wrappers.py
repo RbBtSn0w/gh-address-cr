@@ -640,6 +640,7 @@ else:
         self.assertEqual(request["mode"], "simple-address")
         self.assertEqual(request["threads"][0]["thread_id"], "THREAD_SIMPLE")
         self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_SIMPLE"])
+        self.assertEqual(request["batch_response_skeleton"]["schema_version"], "1.1")
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["item_id"], "github-thread:THREAD_SIMPLE")
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["request_id"], "<request_id from agent next>")
         self.assertEqual(

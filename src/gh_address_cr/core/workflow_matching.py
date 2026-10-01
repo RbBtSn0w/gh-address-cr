@@ -562,14 +562,14 @@ def decline_matching_threads(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Decline (reject/clarify) every matching GitHub review thread with one shared reply."""
-    if resolution not in {"reject", "clarify"}:
+    """Apply one shared non-fix resolution to every matching GitHub review thread."""
+    if resolution not in {"reject", "clarify", "defer"}:
         raise WorkflowError(
             status="DECLINE_ALL_REJECTED",
             reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
             waiting_on="resolve_mode",
             exit_code=2,
-            message="Homogeneous decline supports only --reject or --clarify.",
+            message="Files-scope non-fix resolution requires reject, clarify, or defer.",
         )
     current_time = _coerce_now(now)
     ctx = _build_fast_fix_context(

@@ -72,13 +72,13 @@ class ActionProtocolTestCase(unittest.TestCase):
 
     def manifest(self, **overrides):
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "agent_id": "codex-fixer-1",
             "roles": ["fixer", "verifier"],
             "actions": ["fix", "clarify", "defer", "reject", "verify"],
             "input_formats": ["action_request.v1"],
             "output_formats": ["action_response.v1"],
-            "protocol_versions": ["1.0"],
+            "protocol_versions": ["1.1"],
             "constraints": {"max_parallel_claims": 2},
         }
         payload.update(overrides)
@@ -271,6 +271,7 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
         self.assertIn("post_github_reply", request.forbidden_actions)
         self.assertIn("resolve_github_thread", request.forbidden_actions)
         self.assertIn("fix_reply", request.required_evidence)
+        self.assertEqual(request.schema_version, "1.1")
 
     def test_build_action_request_for_local_finding_keeps_single_normalized_item(self):
         request = build_action_request(
@@ -449,13 +450,13 @@ class CapabilityManifestTests(ActionProtocolTestCase):
     def test_manifest_declares_role_action_formats_and_protocol_version(self):
         manifest = validate_capability_manifest(self.manifest().to_dict())
 
-        self.assertTrue(is_manifest_eligible(manifest, "fixer", "fix", "action_request.v1", "1.0", 1))
-        self.assertTrue(is_manifest_eligible(manifest, AgentRole.VERIFIER, "verify", "action_request.v1", "1.0", 1))
-        self.assertFalse(is_manifest_eligible(manifest, "triage", "fix", "action_request.v1", "1.0", 1))
-        self.assertFalse(is_manifest_eligible(manifest, "fixer", "publish", "action_request.v1", "1.0", 1))
-        self.assertFalse(is_manifest_eligible(manifest, "fixer", "fix", "legacy_request", "1.0", 1))
+        self.assertTrue(is_manifest_eligible(manifest, "fixer", "fix", "action_request.v1", "1.1", 1))
+        self.assertTrue(is_manifest_eligible(manifest, AgentRole.VERIFIER, "verify", "action_request.v1", "1.1", 1))
+        self.assertFalse(is_manifest_eligible(manifest, "triage", "fix", "action_request.v1", "1.1", 1))
+        self.assertFalse(is_manifest_eligible(manifest, "fixer", "publish", "action_request.v1", "1.1", 1))
+        self.assertFalse(is_manifest_eligible(manifest, "fixer", "fix", "legacy_request", "1.1", 1))
         self.assertFalse(is_manifest_eligible(manifest, "fixer", "fix", "action_request.v1", "2.0", 1))
-        self.assertFalse(is_manifest_eligible(manifest, "fixer", "fix", "action_request.v1", "1.0", 2))
+        self.assertFalse(is_manifest_eligible(manifest, "fixer", "fix", "action_request.v1", "1.1", 2))
 
     def test_manifest_rejects_missing_or_malformed_mutating_work_capabilities(self):
         for field in ("agent_id", "roles", "actions", "input_formats", "output_formats", "protocol_versions"):

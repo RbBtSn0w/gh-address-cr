@@ -1,10 +1,12 @@
 # Feedback Workflow
 
-When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
+When the skill itself blocks progress, prepare a feedback report for the skill
+repository before giving up. Creating the GitHub issue is an external write and
+requires explicit user authorization.
 
 ## Contents
 
-- Automatic feedback on skill exceptions
+- Prepare feedback for skill exceptions
 - Feedback command fields
 - Examples
 
@@ -19,11 +21,13 @@ Use feedback issues for skill-level problems:
 
 Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
 
-## Automatic feedback on skill exceptions
+## Prepare feedback for skill exceptions
 
-File a `tooling-bug` feedback issue automatically — without waiting to be asked — whenever a
-`gh-address-cr` command fails in a way that is the skill's own fault. This is the only
-auto-trigger; everything else stays manual.
+Automatically prepare sanitized diagnostics for a `tooling-bug` whenever a
+`gh-address-cr` command fails in a way that is the skill's own fault. Show the
+proposed title, fields, and command to the user, then request explicit user
+authorization before running `gh-address-cr submit-feedback`. Do not create an
+issue merely because the trigger matched.
 
 A failure is the skill's fault when EITHER:
 
@@ -51,12 +55,13 @@ forced you off the prescribed flow, or repeated `CONFLICTING_*`/`MISSING_*` came
 contradictory instructions rather than your input), report it manually as `workflow-gap` —
 do not auto-file it.
 
-Filing is safe to do unconditionally on a qualifying failure: repeated identical exceptions
-are deduplicated by fingerprint, and a recently-closed match inside the cooldown window is
-suppressed, so you will not create duplicates. Sanitization is automatic, but still avoid
-pasting secrets, usernames, machine names, or absolute local paths into the fields you write.
+After authorization, repeated identical exceptions are deduplicated by
+fingerprint, and a recently-closed match inside the cooldown window is
+suppressed. Sanitization is automatic, but still avoid pasting secrets,
+usernames, machine names, or absolute local paths into the fields you write.
 
-Fill the template from the diagnostics the failing command already gave you:
+Prepare this command from the diagnostics the failing command already gave you,
+but do not run it until the user authorizes issue creation:
 
 ```bash
 gh-address-cr submit-feedback \

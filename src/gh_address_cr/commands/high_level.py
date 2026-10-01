@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
+from gh_address_cr import PROTOCOL_VERSION
 from gh_address_cr.core import command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
@@ -580,7 +581,7 @@ def _claimable_github_thread_item_ids(threads: list[dict[str, Any]]) -> list[str
 
 def _batch_response_skeleton(item_ids: list[str]) -> dict[str, Any]:
     return {
-        "schema_version": "1.0",
+        "schema_version": PROTOCOL_VERSION,
         "agent_id": "<agent_id>",
         "resolution": "fix",
         "common": {

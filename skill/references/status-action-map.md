@@ -61,9 +61,9 @@ nothing.
 - `PERSISTENCE_BUSY` (`retryable=true`): the store stayed locked past its bounded
   wait. Let the other gh-address-cr command finish, then rerun the same command.
 - `PERSISTENCE_INVALID` (`retryable=false`): the store failed an integrity check
-  (for example an edited recovery bundle or an invariant violation). Stop. Do not
-  edit `session.json`, `evidence.jsonl`, or `runtime.sqlite3`, and keep
-  `legacy-v1-recovery/` intact; report it with `gh-address-cr submit-feedback`.
+  (for example an invariant violation). Stop. Do not edit `session.json`,
+  `evidence.jsonl`, or `runtime.sqlite3`; follow the returned artifact and
+  remediation, then prepare sanitized feedback if the skill itself is at fault.
 
 If `reason_code` is `DISPATCH_PROJECTION_FAILED`:
 - **Action**: `agent orchestrate step` failed after the runtime claimed the item and has released that claim. When `next_action` is `RETRY`, rerun the step; when it is `HALT`, the release itself failed, so inspect `gh-address-cr agent leases <owner/repo> <pr_number>` before stepping again.
@@ -154,7 +154,4 @@ If `reason_code` is `RESOLVE_AXIS_CONFLICT`:
 - **Action**: `agent resolve` accepts exactly one selection source (`item_id`, `--files`/`--file`, or `--input`) and exactly one disposition. Drop the extra flag and rerun.
 
 If `reason_code` is `RESOLVE_EVIDENCE_INCOHERENT`:
-- **Action**: A `reject`/`clarify` disposition declines with a reason (`--why`) and does not accept `--commit`/`--validation`. Use `--disposition fix` for code changes, or drop the fix-only evidence.
-
-If `reason_code` is `RESOLVE_FLAG_DEPRECATED`:
-- **Action**: The deprecation window for this legacy `agent resolve` flag has closed. Replace it with its axis-based equivalent (`--disposition fix|trivial|reject|clarify`, `--stale`, `--why`, or plain `--input`) and rerun.
+- **Action**: A `reject`/`clarify`/`defer` disposition declines with a reason (`--why`) and does not accept `--commit`/`--validation`. Use `--disposition fix` for code changes, or drop the fix-only evidence.

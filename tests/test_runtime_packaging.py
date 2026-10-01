@@ -207,6 +207,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "MANIFEST_READY")
+        self.assertEqual(payload["schema_version"], "1.1")
+        self.assertEqual(payload["protocol_versions"], ["1.1"])
+        self.assertEqual(payload["supported_protocol_versions"], ["1.1"])
+        self.assertEqual(payload["supported_skill_contract_versions"], ["1.1"])
         self.assertIn("address", payload["public_commands"])
         self.assertIn("review-to-findings", payload["public_commands"])
         self.assertIn("submit-feedback", payload["public_commands"])
@@ -224,7 +228,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("batch_action_response.v1", payload["output_formats"])
         self.assertIn("work_item_boundary.v1", payload["output_formats"])
         self.assertIn("worker_packet.v2", payload["output_formats"])
-        self.assertIn("dispatch_receipt.v1", payload["output_formats"])
+        self.assertIn("dispatch_receipt.v2", payload["output_formats"])
+        self.assertNotIn("dispatch_receipt.v1", payload["output_formats"])
 
     def test_agent_resolve_help_documents_batch_contract(self):
         result = self.run_runtime_module("agent", "resolve", "--help")
@@ -232,6 +237,30 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: gh-address-cr agent resolve", result.stdout)
         self.assertIn("BatchActionResponse", result.stdout)
+        for deprecated_flag in (
+            "--batch",
+            "--trivial",
+            "--reject",
+            "--clarify",
+            "--homogeneous-reason",
+            "--concern-label",
+            "--match-files",
+            "--include-stale",
+        ):
+            self.assertNotIn(deprecated_flag, result.stdout)
+
+    def test_agent_resolve_rejects_removed_flag_as_unknown_argument(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "github-thread:abc",
+            "--reject",
+            "--why", "Not applicable.",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --reject", result.stderr)
+        self.assertNotIn("RESOLVE_FLAG_DEPRECATED", result.stdout + result.stderr)
+        self.assertFalse(self.session_file().exists())
 
     def test_missing_gh_preflight_fails_before_session_mutation(self):
         env = self.env.copy()
@@ -328,17 +357,18 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
 
-    def test_changelog_top_entry_is_not_future_release_without_version_bump(self):
+    def test_changelog_starts_with_unreleased_and_tracks_current_source_version(self):
         changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         pyproject_text = PYPROJECT.read_text(encoding="utf-8")
 
         version_match = re.search(r'^version = "([^"]+)"$', pyproject_text, re.MULTILINE)
         self.assertIsNotNone(version_match)
         package_version = version_match.group(1)
-        first_heading = next(line for line in changelog_text.splitlines() if line.startswith("## "))
+        headings = [line for line in changelog_text.splitlines() if line.startswith("## ")]
 
-        if first_heading != "## Unreleased":
-            self.assertIn(f"[{package_version}]", first_heading)
+        self.assertEqual(headings[0], "## [Unreleased]")
+        self.assertEqual(package_version, "3.16.0")
+        self.assertTrue(any(heading.startswith("## [3.15.3]") for heading in headings))
 
     def test_version_sync_script_updates_pyproject_and_runtime_version(self):
         pyproject = Path(self.temp_dir.name) / "pyproject.toml"
@@ -837,9 +867,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill", text)
         self.assertNotIn("--skill gh-address-cr", text)
         self.assertIn("does not install the runtime CLI package", text)
-        self.assertIn("Upgrade from skill-shim usage", text)
-        self.assertIn("Install the runtime CLI with `pipx` or `uv tool`", text)
-        self.assertIn("Homebrew tap", text)
+        self.assertIn("## Current Public Contract", text)
+        self.assertIn("runtime `3.16.0`", text)
+        self.assertIn("protocol `1.1`", text)
+        self.assertIn("skill contract `1.1`", text)
 
     def test_contributing_documents_homebrew_release_policy(self):
         text = CONTRIBUTING.read_text(encoding="utf-8")

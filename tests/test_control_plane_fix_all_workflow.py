@@ -579,12 +579,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
 
-    def test_agent_fix_all_include_stale_routes_to_resolve_stale(self):
-        """Legacy compat window regression test: when RESOLVE_DEPRECATION_WINDOW_OPEN is True,
-
-        passing the legacy --include-stale flag routes to STALE_THREADS_REQUIRE_RESOLVE_STALE.
-        (Closed-window fast failure is tested in test_agent_resolve_guards.py).
-        """
+    def test_agent_fix_all_rejects_removed_include_stale_flag(self):
         self.write_session(
             items=[
                 github_thread(
@@ -597,26 +592,22 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent",
-                "resolve",
-                self.repo,
-                self.pr,
-                "--commit",
-                "abc123",
-                "--files",
-                "src/stale.py",
-                "--validation",
-                "python3 -m unittest tests.test_stale=passed",
-                "--include-stale",
-            )
+        result = self.run_runtime_module(
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--include-stale",
+        )
 
-        self.assertEqual(result.returncode, 4)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
-        self.assertEqual(payload["reason_code"], "STALE_THREADS_REQUIRE_RESOLVE_STALE")
-        self.assertIn("agent resolve", payload["next_action"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --include-stale", result.stderr)
 
     def test_agent_fix_all_excludes_stale_without_opt_in(self):
         self.write_session(
