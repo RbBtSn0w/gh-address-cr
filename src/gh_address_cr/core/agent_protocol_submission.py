@@ -674,7 +674,7 @@ def expected_request_hash_for_response(
             request = json.loads(path.read_text(encoding="utf-8"))
             expected_hash = ActionRequest.from_dict(request).stable_hash()
         except UnsupportedProtocolVersionError:
-            return None, protocol_codes.PROTOCOL_VERSION_INCOMPATIBLE
+            return None, protocol_codes.REQUEST_PROTOCOL_SUPERSEDED
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None, "INVALID_REQUEST_CONTEXT"
         if response_request_id != str(request.get("request_id") or ""):

@@ -116,7 +116,7 @@ class TestRequestHashCompatibility(unittest.TestCase):
     def test_pre_envelope_request_file_is_rejected_as_superseded_protocol(self):
         # 3.16 supports protocol 1.1 only. A request file written by an older runtime
         # (schema_version 1.0, flat `body`, no envelope) is never hashed as if it were
-        # current: submit reports PROTOCOL_VERSION_INCOMPATIBLE and re-entry reissues
+        # current: submit reports REQUEST_PROTOCOL_SUPERSEDED and re-entry reissues
         # the request at 1.1 (tests/contract/test_runtime_store_consistency_contract.py).
         legacy_request = self._request(_thread_item(state="claimed"), schema_version="1.0")
 

@@ -101,7 +101,7 @@ Local findings instead use `agent classify` → `agent next` → response skelet
 The public agent protocol is `1.1` and the skill contract is `1.1`. An
 `ActionRequest` is runtime-authored and must carry a supported
 `schema_version`; a request file written by an older runtime (for example `1.0`
-from 3.15.x) is rejected at submit with `PROTOCOL_VERSION_INCOMPATIBLE`, and
+from 3.15.x) is rejected at submit with `REQUEST_PROTOCOL_SUPERSEDED`, and
 `agent next` for the same lease reissues it at `1.1` under the same
 `request_id` and `lease_id`. `ActionResponse.schema_version` echoes its request
 and is not versioned independently. Advanced

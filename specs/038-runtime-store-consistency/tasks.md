@@ -65,7 +65,7 @@ Each fix task follows a RED contract test of its own. Tests live in
 - [x] T025 RED and fix: a dev-preview runtime satisfies the minimum, and
       `3.15.9` does not.
 - [x] T026 RED and fix: submitting against a `1.0` request fails with
-      `PROTOCOL_VERSION_INCOMPATIBLE`. Re-entry rebuilds the request at
+      `REQUEST_PROTOCOL_SUPERSEDED`. Re-entry rebuilds the request at
       protocol 1.1 and updates the lease hash.
 - [x] T027 RED and fix: batch re-entry recomputes `request_hash` after a
       rebuild.

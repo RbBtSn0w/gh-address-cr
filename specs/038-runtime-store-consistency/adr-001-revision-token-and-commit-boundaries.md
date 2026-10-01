@@ -43,8 +43,11 @@ and `_write_leases` deletes a lease that another agent committed in the meantime
   `session.revision == base_revision`. Otherwise the token stays stale, and the
   caller's next whole-session save fails with the documented, retryable
   `STALE_REVISION`.
-- Recording a plan or result never takes `expected_revision`. A real GitHub
-  mutation must never go unrecorded because of a concurrent unrelated commit.
+- Recording a result, or the plan recorded after an external call, never takes
+  `expected_revision`. A real GitHub mutation must never go unrecorded because
+  of a concurrent unrelated commit. The plan recorded *before* an external call
+  keeps the caller's revision as a guard, so nothing is posted from a payload
+  another writer has already superseded.
 - The `in_flight` attempt evidence commits in the same transaction as the
   `in_flight` transition, which removes the two-transaction split.
 - `recover()` keeps its own revision bump, but callers that hold a token
@@ -54,12 +57,13 @@ and `_write_leases` deletes a lease that another agent committed in the meantime
 ### D2 — Publish is replayable, so stale publishes rerun
 
 `publish_github_thread_responses` is idempotent through the outbox. A replay
-reuses every `succeeded` command and performs zero new GitHub mutations. The
-CLI publish entry is therefore wrapped in `retry_on_stale_revision`, and that
-function's contract is widened explicitly from "pure before the save" to
-"pure, or idempotent through the canonical outbox". A contract test counts
-`post_reply` and `resolve_thread` calls across the replay and expects no new
-mutations.
+reuses every `succeeded` command, so it performs no new GitHub mutation for
+work already done. A command recorded `failed` (the GitHub call raised) is
+retried by the replay exactly as a manual rerun would retry it. The publish
+entry is therefore wrapped in `retry_on_stale_revision`, and that function's
+contract is widened explicitly from "pure before the save" to "pure, or
+idempotent through the canonical outbox". A contract test counts `post_reply`
+and `resolve_thread` calls across a replay and expects no repeated mutation.
 
 ### D3 — Evidence commits with the state it describes
 
@@ -117,7 +121,7 @@ with `PERSISTENCE_INVALID` instead of `AttributeError`.
   incompatible by design; they are packaging probes, not skill runtimes.
 - **ActionRequest protocol:** an `ActionRequest` whose `schema_version` is not
   in `SUPPORTED_PROTOCOL_VERSIONS` fails fast at submit with
-  `PROTOCOL_VERSION_INCOMPATIBLE`. Re-entry (single and batch) rebuilds such a
+  `REQUEST_PROTOCOL_SUPERSEDED`. Re-entry (single and batch) rebuilds such a
   request at the current protocol and recomputes the lease hash, which is the
   upgrade path for leases issued by 3.15.x. `ActionResponse.schema_version`
   remains an echo of its request and is not independently versioned.
@@ -188,7 +192,8 @@ no session state corresponds to, which breaks projection metadata.
 | Decision function | Lease transition table (Spec 033); contiguous-token rule (D1) |
 | Side-effect plan / outbox boundary | Outbox rows are planned and transitioned in their own commits; evidence for `in_flight` commits with the transition (D1) |
 | Artifact truth boundary | Request files are rebuildable artifacts (D3); recovery bundle authority starts at commit (D7) |
-| Telemetry self-reference | New outcomes (`deferred`, `bundle_superseded`, `publish_replay`) go through `_emit_persistence_event` with allow-listed operations |
+| Telemetry self-reference | Deferred read-path repair emits `artifact_recovery/deferred`; a superseded bundle reuses the bounded `bundle_quarantine/bundle_quarantined` event; a publish replay reuses `persistence.stale_retry`. All go through allow-listed operations with no paths or ids |
+| File IO inside a write transaction | Batch re-entry reads (never writes) an existing request file under the claim transaction to decide whether to reissue it. This is a bounded, read-only exception beside the recovery bundle; request writes still happen after commit |
 | Recovery, replay, contract tests | One RED contract test per finding, converted from the review probes; replay test counts GitHub mutations |
 
 ## Consequences

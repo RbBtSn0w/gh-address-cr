@@ -469,7 +469,40 @@ class BoundaryContractTest(_StateDirTest):
 
         with self.assertRaises(WorkflowError) as raised:
             agent_protocol.submit_action_response("owner/repo", "60", response_path=response_path)
-        self.assertEqual(raised.exception.reason_code, "PROTOCOL_VERSION_INCOMPATIBLE")
+        self.assertEqual(raised.exception.reason_code, "REQUEST_PROTOCOL_SUPERSEDED")
+
+    def test_superseded_protocol_request_upgrade_path_end_to_end(self):
+        from gh_address_cr.core import agent_protocol
+        from gh_address_cr.core.errors import WorkflowError
+
+        _thread_session("owner/repo", "63")
+        claimed = _claim("owner/repo", "63")
+        request_path = Path(claimed["request_path"])
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request["schema_version"] = "1.0"
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+
+        def response_file() -> Path:
+            response = json.loads(Path(claimed["response_skeleton_path"]).read_text(encoding="utf-8"))
+            response.update({"resolution": "clarify", "note": "n", "reply_markdown": "Please confirm."})
+            response.pop("validation_commands", None)
+            path = Path(self.state_dir) / "response-63.json"
+            path.write_text(json.dumps(response), encoding="utf-8")
+            return path
+
+        with self.assertRaises(WorkflowError) as raised:
+            agent_protocol.submit_action_response("owner/repo", "63", response_path=response_file())
+        self.assertEqual(raised.exception.reason_code, "REQUEST_PROTOCOL_SUPERSEDED")
+        self.assertIn("agent next", json.dumps(raised.exception.to_summary(repo="owner/repo", pr_number="63")))
+
+        again = agent_protocol.issue_action_request(
+            "owner/repo", "63", role="fixer", agent_id="agent-a", item_id=THREAD_ITEM
+        )
+        self.assertEqual(again["acquisition"], "reentered")
+        self.assertEqual(again["lease_id"], claimed["lease_id"])
+
+        accepted = agent_protocol.submit_action_response("owner/repo", "63", response_path=response_file())
+        self.assertEqual(accepted["status"], "ACTION_ACCEPTED")
 
     def test_reentry_reissues_a_superseded_protocol_request(self):
         from gh_address_cr import PROTOCOL_VERSION
