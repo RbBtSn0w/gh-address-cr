@@ -11,6 +11,8 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from packaging.version import Version
+
 from gh_address_cr import __version__, cli
 from gh_address_cr.core import workflow
 
@@ -45,7 +47,7 @@ class RuntimeCompatibilityTest(unittest.TestCase):
     def test_current_runtime_satisfies_packaged_requirements(self):
         payload = workflow.runtime_compatibility()
 
-        self.assertEqual(__version__, "3.16.0")
+        self.assertGreaterEqual(Version(__version__), Version(payload["minimum_runtime_version"]))
         self.assertEqual(payload["status"], "compatible")
         self.assertEqual(payload["reason_code"], "RUNTIME_COMPATIBLE")
         self.assertEqual(payload["exit_code"], 0)
