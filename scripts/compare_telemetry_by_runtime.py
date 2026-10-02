@@ -70,7 +70,10 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         rates = [float(row["success_rate"]) for row in rows if isinstance(row.get("success_rate"), (int, float))]
         kinds: Counter[str] = Counter()
         for row in rows:
-            kinds.update({flag_kind(str(flag)) for flag in row.get("inefficiency_flags") or []})
+            flags = row.get("inefficiency_flags")
+            # Archived JSON can be malformed; only a list of flags is meaningful.
+            if isinstance(flags, list):
+                kinds.update({flag_kind(str(flag)) for flag in flags})
         summary[label] = {
             "sessions": len(rows),
             "median_success_rate": statistics.median(rates) if rates else None,

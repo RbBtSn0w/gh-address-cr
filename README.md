@@ -141,7 +141,8 @@ Completion means the latest final gate reports:
   `final-gate` blocking on an open thread) counts in `needs_action_count`, not as
   a failure in `success_rate` or the inefficiency flags
 - the efficiency report's `runtime` (`version`, `origin` of `package`, `editable`,
-  or `vcs`, and the `commit` for a git install), so reports from a development
+  `vcs`, or `local` for another non-editable local install, and the `commit` for
+  a git install), so reports from a development
   checkout and from a release can be compared with
   `python3 scripts/compare_telemetry_by_runtime.py` (add `--baseline` and
   `--candidate` runtime labels to fail on a success-rate drop or new flag kinds)

@@ -53,6 +53,13 @@ class CompareTelemetryByRuntimeTests(unittest.TestCase):
         self.assertEqual(groups["3.16.0 package"]["median_success_rate"], 91.0)
         self.assertEqual(groups["3.16.0 package"]["flag_kinds"], {"error_prone:gh-address-cr address": 3})
 
+    def test_malformed_flags_are_ignored_not_split_into_characters(self):
+        write_report(self.root, "o__r/pr-20", runtime=RELEASE_3160, success_rate=91.0, flags="not-a-list")
+
+        kinds = summarize(collect_reports(self.root))["3.16.0 package"]["flag_kinds"]
+
+        self.assertEqual(kinds, {"error_prone:gh-address-cr address": 3})
+
     def test_check_reports_the_316_regression_against_315(self):
         groups = summarize(collect_reports(self.root))
 
