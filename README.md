@@ -696,6 +696,44 @@ python3 -m build
 python3 -m twine check dist/*
 ```
 
+### Dogfooding an unreleased runtime
+
+To address review comments on a real PR with an unreleased runtime, pin a
+commit instead of using `gh-address-cr` from PATH (usually the release) or
+`python3 -m gh_address_cr` (an editable install that follows whichever branch
+is checked out). `scripts/dogfood_env.sh` installs one commit non-editably into
+its own venv and prints the exports that select it, so the runtime stays fixed
+while you check out the PR branch:
+
+```bash
+eval "$(scripts/dogfood_env.sh --ref develop)"
+```
+
+The pinned commit is printed on stderr and in the first export line. Then run
+the normal workflow on the PR branch:
+
+```bash
+gh-address-cr address <owner/repo> <pr_number> --lean
+gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary "..." --why "..." --validation "unit-tests=passed@4200ms"
+gh-address-cr agent publish <owner/repo> <pr_number>
+gh-address-cr final-gate <owner/repo> <pr_number>
+```
+
+Notes:
+
+- Only committed code is installed; rerun the script after the runtime changes.
+  Use `--no-install` in a new shell to reuse the last pinned build.
+- Sessions live in a separate state directory
+  (`GH_ADDRESS_CR_STATE_DIR`, default under `~/.cache/gh-address-cr-dogfood`,
+  override the root with `--home` or `GH_ADDRESS_CR_DOGFOOD_HOME`), so they do
+  not mix with sessions created by the released runtime.
+- Efficiency reports from the pinned build record `runtime.origin=vcs` and the
+  commit. Compare them with release runs with
+  `python3 scripts/compare_telemetry_by_runtime.py`.
+- `tests/test_dogfood_env_script.py` covers the script without a network
+  install. Set `GH_ADDRESS_CR_DOGFOOD_INSTALL_TEST=1` to also run the real
+  pinned install.
+
 ## Repository model
 
 This repository has two scopes:
