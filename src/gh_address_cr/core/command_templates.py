@@ -50,6 +50,11 @@ def threads(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "threads", repo, pr_number, "--lean")
 
 
+def threads_full(repo: str, pr_number: str) -> str:
+    """Thread rows with full review bodies (the lean form omits them)."""
+    return shell_command("gh-address-cr", "threads", repo, pr_number)
+
+
 def classify(repo: str, pr_number: str) -> str:
     return shell_command(
         "gh-address-cr",

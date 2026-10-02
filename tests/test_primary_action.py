@@ -284,6 +284,24 @@ class PrimaryActionProjectionTests(unittest.TestCase):
         self.assertEqual(context["selected_item"]["path"], "src/app.py")
         self.assertNotIn("threads", context)
 
+    def test_truncated_excerpt_is_marked_and_names_the_full_body_command(self):
+        def context_for(body):
+            session = {
+                "repo": "octo/example",
+                "pr_number": "77",
+                "items": {"github-thread:1": {"item_id": "github-thread:1", "item_kind": "github_thread", "body": body}},
+            }
+            return project_context_summary(session, selected_item_id="github-thread:1")["selected_item"]
+
+        short = context_for("Explain this branch.")
+        self.assertFalse(short["comment_excerpt_truncated"])
+        self.assertIsNone(short["full_comment_command"])
+
+        long = context_for("x" * 501)
+        self.assertEqual(len(long["comment_excerpt"]), 500)
+        self.assertTrue(long["comment_excerpt_truncated"])
+        self.assertEqual(long["full_comment_command"], "gh-address-cr threads octo/example 77")
+
 
 if __name__ == "__main__":
     unittest.main()
