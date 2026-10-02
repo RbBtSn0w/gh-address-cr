@@ -514,12 +514,15 @@ def _next_action_with_pr(
             None,
         )
         if reconcile_blocker is not None:
-            reconcile = command_templates.evidence_add_reply(
-                repo,
-                pr_number,
-                item_id=str(reconcile_blocker.get("item_id") or "<item_id>"),
+            item_id = str(reconcile_blocker.get("item_id") or "<item_id>")
+            reply = command_templates.resolve_closed_fix(repo, pr_number, item_id)
+            explain = command_templates.resolve_closed_clarify(repo, pr_number, item_id)
+            reconcile = command_templates.evidence_add_reply(repo, pr_number, item_id=item_id)
+            return (
+                f"The thread was resolved without a reply from this session. Let the runtime reply: `{reply}` "
+                f"after a code fix, or `{explain}` when no change was needed. If you already replied, record it "
+                f"with `{reconcile}`. Then rerun {final_gate}."
             )
-            return f"Record terminal-thread reply evidence with `{reconcile}`, then rerun {final_gate}."
         return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
     if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
         return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."

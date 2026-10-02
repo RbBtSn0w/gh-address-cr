@@ -81,6 +81,8 @@ Local findings instead use `agent classify` → `agent next` → response skelet
   - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition reject|clarify|defer --why <text> [--stale] [--publish]`
   - Decline exactly one thread, fresh or stale, with a reason. No `--commit`/`--files`/`--validation`.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --closed [--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> | --disposition clarify|reject|defer --why <text>]`
+  - For a thread resolved on GitHub without a reply from this session (the case final-gate blocks with `FINAL_GATE_MISSING_REPLY_EVIDENCE`): reopens it locally and runs the normal claim, submit, and publish in one call, so the runtime posts the reply and resolves the thread again. Rejected with `THREAD_NOT_RESOLVED` for an open thread and `CLOSED_THREAD_NEEDS_NO_REPLY` when no reply is required.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition defer --why <text> [--stale] [--publish]`
   - Canonical defer form for one GitHub review thread; stale handling remains optional.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json> [--publish]`

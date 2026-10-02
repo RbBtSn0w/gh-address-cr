@@ -366,6 +366,12 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         "fix (default), trivial (doc/typo fast path), reject, clarify, or defer.",
     )
     parser.add_argument("--stale", action="store_true", help="Condition (primary axis): resolve matching STALE/outdated threads.")
+    parser.add_argument(
+        "--closed",
+        action="store_true",
+        help="Condition: reply on a single thread resolved on GitHub without a reply from this session; "
+        "the runtime posts the reply and resolves again in the same call.",
+    )
     parser.add_argument("--files", help="Selection: files-scope collective, instead of a single item_id.")
     parser.add_argument("--file", action="append", default=[], help="Selection: repeatable single-path form of --files.")
     parser.add_argument("--input", help="Selection: BatchActionResponse JSON for per-thread evidence.")
@@ -452,6 +458,15 @@ def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
     same-axis conflict.
     """
     disposition = parsed.disposition or "fix"
+    if parsed.closed and (not parsed.item_id or parsed.stale or parsed.input or disposition == "trivial"):
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code=protocol_codes.RESOLVE_AXIS_CONFLICT,
+            waiting_on="resolve_axis",
+            exit_code=2,
+            message="--closed takes a single item_id with a fix, reject, clarify, or defer disposition; "
+            "it cannot be combined with --stale, --input, --files selection, or --disposition trivial.",
+        )
     files_present = bool(parsed.files) or bool(parsed.file)
     files_is_selection = files_present and disposition in ("reject", "clarify", "defer")
     selection_sources = [
@@ -609,6 +624,12 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
 
 def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
     parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
+    if parsed.closed:
+        workflow.reopen_resolved_thread_for_reply(
+            parsed.repo, parsed.pr_number, item_id=parsed.item_id, agent_id=parsed.agent_id
+        )
+        # A reopened thread must be published now: the next refresh closes it again.
+        parsed.publish = True
     disposition = parsed.disposition
     if disposition in ("reject", "clarify", "defer"):
         return workflow.decline_item(

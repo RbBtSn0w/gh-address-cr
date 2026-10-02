@@ -249,6 +249,21 @@ def evidence_add_reply(repo: str, pr_number: str, *, item_id: str = "<item_id>")
     )
 
 
+def resolve_closed_fix(repo: str, pr_number: str, item_id: str) -> str:
+    return shell_command(
+        "gh-address-cr", "agent", "resolve", repo, pr_number, item_id, "--closed",
+        "--commit", "<sha>", "--files", "<paths>", "--summary", "<text>", "--why", "<text>",
+        "--validation", "<cmd=passed>",
+    )
+
+
+def resolve_closed_clarify(repo: str, pr_number: str, item_id: str) -> str:
+    return shell_command(
+        "gh-address-cr", "agent", "resolve", repo, pr_number, item_id, "--closed",
+        "--disposition", "clarify", "--why", "<text>",
+    )
+
+
 def evidence_add_reply_with_validation(repo: str, pr_number: str, *, item_id: str) -> str:
     return shell_command(
         "gh-address-cr",

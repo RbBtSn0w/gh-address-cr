@@ -392,6 +392,88 @@ class FinalGateNextActionContractTests(AgentJourneyTestCase):
         self.assertIn(f"gh-address-cr address {self.repo} {self.pr} --lean", line)
 
 
+class ClosedThreadReplyContractTests(AgentJourneyTestCase):
+    """A thread resolved on GitHub without our reply is answered by the runtime (Spec 039 Q2).
+
+    Before, the only way out of FINAL_GATE_MISSING_REPLY_EVIDENCE was to post a reply
+    with `gh` directly, which the skill forbids.
+    """
+
+    def close_remotely(self):
+        self.runtime("address", self.repo, self.pr, "--lean")
+        state = json.loads(self.gh_state.read_text(encoding="utf-8"))
+        for thread in state["threads"]:
+            thread["isResolved"] = True
+        self.gh_state.write_text(json.dumps(state), encoding="utf-8")
+        blocked = self.final_gate()
+        self.assertIn("reason_code=FINAL_GATE_MISSING_REPLY_EVIDENCE", blocked["_output"])
+        next_action = next(row for row in blocked["_output"].splitlines() if row.startswith("Next action: "))
+        self.assertIn("--closed", next_action, "the gate must point at the runtime-owned reply path")
+
+    def thread_resolved(self):
+        state = json.loads(self.gh_state.read_text(encoding="utf-8"))
+        return all(thread["isResolved"] for thread in state["threads"])
+
+    def test_fix_reply_on_a_remotely_resolved_thread_passes_the_gate(self):
+        self.close_remotely()
+
+        result = self.runtime(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1", "--closed",
+            "--commit", self.head_sha,
+            "--files", "app.py",
+            "--summary", "Re-raise the last exception after the final retry.",
+            "--why", "Callers must see the failure instead of a stale-cache None.",
+            "--validation", "python3 -m unittest tests.test_app=passed",
+            "--agent-id", AGENT_ID,
+        )
+
+        self.assertEqual(result["_exit_code"], 0, self.describe_trace() + result["_stderr"])
+        replies = self.published_replies()
+        self.assertEqual(len(replies), 1, replies)
+        self.assertIn(self.head_sha[:7], replies[0])
+        self.assertTrue(self.thread_resolved())
+        self.assertEqual(self.final_gate()["status"], "PASSED", self.describe_trace())
+        self.assert_fake_github_covered_every_call()
+
+    def test_clarify_reply_on_a_remotely_resolved_thread_passes_the_gate(self):
+        self.close_remotely()
+
+        result = self.runtime(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1", "--closed",
+            "--disposition", "clarify",
+            "--why", "The reviewer resolved this after the retry change in the previous commit; no further change.",
+            "--agent-id", AGENT_ID,
+        )
+
+        self.assertEqual(result["_exit_code"], 0, self.describe_trace() + result["_stderr"])
+        self.assertEqual(len(self.published_replies()), 1)
+        self.assertTrue(self.thread_resolved())
+        self.assertEqual(self.final_gate()["status"], "PASSED", self.describe_trace())
+
+    def test_closed_is_rejected_for_an_open_thread(self):
+        self.runtime("address", self.repo, self.pr, "--lean")
+
+        result = self.runtime(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1", "--closed",
+            "--disposition", "clarify", "--why", "n/a", "--agent-id", AGENT_ID,
+        )
+
+        self.assertEqual(result.get("reason_code"), "THREAD_NOT_RESOLVED", result)
+        self.assertEqual(self.published_replies(), [])
+
+    def test_resolve_on_a_remotely_resolved_thread_points_at_closed(self):
+        self.close_remotely()
+
+        result = self.runtime(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1",
+            "--commit", self.head_sha, "--files", "app.py", "--summary", "s", "--why", "w",
+            "--validation", "u=passed", "--agent-id", AGENT_ID,
+        )
+
+        self.assertEqual(result.get("reason_code"), "THREAD_ALREADY_RESOLVED")
+        self.assertIn("--closed", result.get("next_action") or "")
+
+
 class CompletionSummaryLineContractTests(unittest.TestCase):
     def test_i3_completion_line_names_each_problem_operation_once(self):
         operation = "github.graphql"
