@@ -722,6 +722,24 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
             now_dt = None
             if parsed.now:
                 now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+            validation_payload = None
+            if parsed.validation or parsed.commit or parsed.files or parsed.file:
+                # Validation arguments next to --reply-url used to be dropped silently.
+                # Record them first: an incomplete set is rejected before anything is
+                # written, and both records are idempotent, so a corrected rerun is safe.
+                validation_payload = workflow.record_validation_evidence(
+                    parsed.repo,
+                    parsed.pr_number,
+                    item_id=parsed.item_id,
+                    thread_id=parsed.thread_id,
+                    commit_hash=parsed.commit or "",
+                    files=_parse_agent_files(parsed.files, parsed.file),
+                    validation_commands=_parse_agent_validation(parsed.validation),
+                    summary=parsed.summary,
+                    why=parsed.why,
+                    agent_id=parsed.agent_id,
+                    now=now_dt,
+                )
             author_login = parsed.author_login or _resolve_viewer_login()
             payload = workflow.record_reply_evidence(
                 parsed.repo,
@@ -733,6 +751,15 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
                 agent_id=parsed.agent_id,
                 now=now_dt,
             )
+            if validation_payload is not None:
+                payload = {
+                    "status": "REPLY_AND_VALIDATION_EVIDENCE_RECORDED",
+                    "repo": payload["repo"],
+                    "pr_number": payload["pr_number"],
+                    "item_id": payload["item_id"],
+                    "reply_evidence": payload,
+                    "validation_evidence": validation_payload,
+                }
         elif not parsed.name and (parsed.item_id or parsed.thread_id) and parsed.validation:
             now_dt = None
             if parsed.now:

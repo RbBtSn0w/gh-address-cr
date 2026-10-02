@@ -66,6 +66,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>`
   - Reconciles current validation for an already-terminal GitHub thread or local finding. On a stacked member, the runtime discovers and attaches the current revision binding after validating the item kind and state.
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login> [--commit <sha> --files <paths> --validation <cmd=passed>]`
+  - Records reply evidence for a thread resolved outside the runtime. With the validation arguments it also records validation evidence in the same call (`REPLY_AND_VALIDATION_EVIDENCE_RECORDED`); an incomplete validation set is rejected before anything is recorded.
 
 `gh-address-cr agent resolve` is the current GitHub review-thread shortcut.
 Use only the supported command shapes below; selection, disposition, and stale
