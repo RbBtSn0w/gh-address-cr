@@ -363,8 +363,12 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict[str, 
         "audit_summary_sha256": None,
         "efficiency_report_sha256": None,
     }
-    if not repo or not pr_number:
+    # A malformed target names no session, and must not become a state path.
+    if not _is_well_formed(core_paths.validate_repo, repo) or not _is_well_formed(
+        core_paths.validate_pr_number, pr_number
+    ):
         return context
+    assert repo is not None and pr_number is not None
 
     summary_path = last_machine_summary_file(repo, pr_number)
     summary_payload = load_json_file(summary_path, context["errors"], label="last-machine-summary.json")
@@ -641,7 +645,26 @@ def validate_created_issue_response(response: object) -> tuple[int | None, str |
 
 
 def audit_scope(args: argparse.Namespace) -> tuple[str, str]:
-    return args.using_repo or args.target_repo, args.using_pr or DEFAULT_FEEDBACK_PR
+    """Audit beside the reported PR session only when its context is a well-formed target.
+
+    `--using-repo`/`--using-pr` are free-form reporter context (the issue body
+    sanitizes them), so a malformed value must not become a state path.
+    """
+    if not _is_well_formed(core_paths.validate_repo, args.using_repo):
+        return args.target_repo, DEFAULT_FEEDBACK_PR
+    if not _is_well_formed(core_paths.validate_pr_number, args.using_pr):
+        return args.using_repo, DEFAULT_FEEDBACK_PR
+    return args.using_repo, args.using_pr
+
+
+def _is_well_formed(validate: Any, value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        validate(value)
+    except core_paths.PathResolutionError:
+        return False
+    return True
 
 
 def write_feedback_audit(args: argparse.Namespace, status: str, message: str, details: dict[str, Any]) -> None:

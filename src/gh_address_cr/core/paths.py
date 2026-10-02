@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 from pathlib import Path
 
 
@@ -11,9 +12,34 @@ class PathResolutionError(RuntimeError):
         super().__init__(detail)
 
 
+# GitHub owner logins are alphanumeric with inner hyphens; repository names also
+# allow `.` and `_`. Anything else (spaces, a second slash, `.`/`..`) would name a
+# different or escaping state path, so it is rejected before any path is built.
+_REPO_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
+_PR_NUMBER_PATTERN = re.compile(r"[1-9][0-9]*")
+_TARGET_HINT = "Pass owner/repo and the PR number as two separate arguments."
+
+
+def validate_repo(repo: str) -> None:
+    if not isinstance(repo, str) or not _REPO_PATTERN.fullmatch(repo) or repo.split("/", 1)[1] in (".", ".."):
+        raise PathResolutionError("INVALID_REPO", f"Repository must be in owner/repo form. {_TARGET_HINT}")
+
+
+def validate_pr_number(pr_number: str | int) -> None:
+    if not _PR_NUMBER_PATTERN.fullmatch(str(pr_number)):
+        raise PathResolutionError(
+            "INVALID_PR_NUMBER",
+            f"Pull request number must be a positive integer. {_TARGET_HINT}",
+        )
+
+
+def validate_pr_target(repo: str, pr_number: str | int) -> None:
+    validate_repo(repo)
+    validate_pr_number(pr_number)
+
+
 def normalize_repo(repo: str) -> str:
-    if not repo or "/" not in repo:
-        raise PathResolutionError("INVALID_REPO", "Repository must be in owner/repo form.")
+    validate_repo(repo)
     return repo.replace("/", "__")
 
 
@@ -35,6 +61,8 @@ def state_dir() -> Path:
 
 
 def workspace_dir(repo: str, pr_number: str) -> Path:
+    # Only the repository is enforced here: `submit-feedback` keeps its audit in the
+    # non-PR `pr-feedback` workspace. PR-scoped commands validate the number at entry.
     return state_dir() / normalize_repo(repo) / f"pr-{pr_number}"
 
 

@@ -512,12 +512,10 @@ def build_preflight_summary(
     diagnostics: dict | None = None,
 ) -> dict:
     if artifact_path is None:
-        try:
-            artifact_path = str(session_store.workspace_dir(repo, pr_number))
-        except session_store.SessionError:
-            # The state directory itself may be the failed prerequisite. Keep
-            # the diagnostic machine-readable without attempting another write.
-            artifact_path = None
+        # A preflight failure must not create state: the state directory or the
+        # target itself may be the failed prerequisite.
+        workspace = session_store.workspace_path_if_valid(repo, pr_number)
+        artifact_path = str(workspace) if workspace is not None else None
     summary = {
         "status": status,
         "repo": repo,
@@ -711,6 +709,21 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             str(exc),
             reason_code=exc.reason_code,
             waiting_on="state_directory",
+            next_action=str(exc),
+            exit_code=5,
+            persist=False,
+        )
+
+    try:
+        session_store.validate_pr_target(repo, pr_number)
+    except session_store.SessionError as exc:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            str(exc),
+            reason_code=exc.reason_code,
+            waiting_on="pr_scope",
             next_action=str(exc),
             exit_code=5,
             persist=False,
