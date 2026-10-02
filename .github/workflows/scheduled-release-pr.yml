@@ -77,7 +77,16 @@ jobs:
               # Wait for the PR checks ourselves, then merge with a merge commit
               # (never squash: semantic-release needs the feat/fix commits).
               echo "Auto-merge unavailable on PR #${pr}. Waiting for checks, then merging directly..."
-              gh pr checks "$pr" --watch --interval 15
+              # gh pr checks exits 1 both for failed checks and for "no checks
+              # reported" (e.g. a PR opened with GITHUB_TOKEN triggers no CI), so
+              # only the latter may proceed to the merge.
+              checks_rc=0
+              checks_out="$(gh pr checks "$pr" --watch --interval 15 2>&1)" || checks_rc=$?
+              printf '%s\n' "$checks_out"
+              if [ "$checks_rc" -ne 0 ] && ! printf '%s' "$checks_out" | grep -qi "no checks reported"; then
+                echo "::error::Checks on PR #${pr} did not pass; refusing to merge." >&2
+                exit 1
+              fi
               gh pr merge "$pr" --merge
             else
               echo "Failed to enable auto-merge on PR #${pr}." >&2
