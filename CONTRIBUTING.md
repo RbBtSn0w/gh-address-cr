@@ -7,7 +7,8 @@ We welcome contributions! Please follow these guidelines:
 1.  **Fork the Repository**: Create a fork of this repository on GitHub.
 2.  **Create a Feature Branch**: Make your changes in a dedicated branch (`git checkout -b feature/my-feature`).
 3.  **Run Tests**: Ensure your changes don't break existing functionality. Since these are shell scripts, you can test them locally with a test PR.
-4.  **Submit a Pull Request**: Provide a clear description of your changes and why they are needed.
+4.  **Dogfood Runtime Changes**: To try an unreleased runtime on a real PR, pin it with `scripts/dogfood_env.sh` (see "Dogfooding an unreleased runtime" in `README.md`).
+5.  **Submit a Pull Request**: Provide a clear description of your changes and why they are needed.
 
 ## Standards
 
