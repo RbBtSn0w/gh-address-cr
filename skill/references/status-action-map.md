@@ -106,6 +106,10 @@ If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
 If `reason_code` is `PER_THREAD_EVIDENCE_REQUIRED`:
 - **Action**: Run the returned `commands.batch_next` or `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write `batch-response-skeleton.json`. Fill common files/validation plus per-thread summary/why, then run the returned `resolve_batch` command and publish.
 
+For every blocked `final-gate`, the returned `next_action` is printed as the
+`Next action:` line under `== Gate Result ==` in the default report and as the
+`next_action` field with `--machine`.
+
 If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKING_GITHUB_ITEMS`:
 - **Action**: Run the returned `next_action` exactly. The normal recovery is `gh-address-cr address <owner/repo> <pr_number> --lean`, then `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` for shared batch evidence or per-thread `agent resolve`. Use `gh-address-cr agent resolve --why <why>` only for a homogeneous repeated concern. Follow with `gh-address-cr agent publish <owner/repo> <pr_number>` and `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
