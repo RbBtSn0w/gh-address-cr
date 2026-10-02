@@ -31,7 +31,7 @@ Final output must include:
 7. telemetry coverage label and efficiency report path
 8. audit summary path + sha256
 
-Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary. In the issue summary each error-prone operation appears once, as `<operation> failures=<n> timeouts=<n> retries=<n>`; other inefficiency flags (such as duration thresholds) follow `flags:`.
+Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary. In the issue summary each error-prone operation appears once, as `<operation> failures=<n> timeouts=<n> retries=<n>`; other inefficiency flags (such as duration thresholds) follow `flags:`, each slow operation once, with a run count when it exceeded the threshold more than once.
 
 `final-gate` also writes the advisory `cr-metrics.json` report using the
 `cr-lifecycle.v1` schema. It projects item lifecycle timing and rework from the
