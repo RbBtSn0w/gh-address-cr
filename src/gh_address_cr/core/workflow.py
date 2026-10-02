@@ -16,7 +16,7 @@ from gh_address_cr import (
     SUPPORTED_SKILL_CONTRACT_VERSIONS,
     __version__,
 )
-from gh_address_cr.core import agent_batch, agent_protocol, protocol_codes
+from gh_address_cr.core import agent_batch, agent_protocol, command_templates, protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol_submission import (
     load_response_json_object as _load_response_json_object,
@@ -33,6 +33,7 @@ from gh_address_cr.core.agent_protocol_validation import (
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import (
     GITHUB_THREAD_TERMINAL_STATES,
+    is_resolved_github_thread,
     is_stale_or_outdated_github_thread,
     normalized_thread_state,
 )
@@ -883,6 +884,7 @@ def fast_fix_item(
         review_priority=review_priority,
     )
     _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
+    _assert_thread_not_resolved_remotely(repo, pr_number, item_id=item_id)
     classification = agent_protocol.record_classification(
         repo,
         pr_number,
@@ -1109,6 +1111,31 @@ def _assert_item_publishable(repo: str, pr_number: str, *, item_id: str, publish
             message="--publish is only supported for GitHub review-thread responses.",
             payload={"item_id": item_id},
         )
+
+
+def _assert_thread_not_resolved_remotely(repo: str, pr_number: str, *, item_id: str) -> None:
+    """Reject a fix for a thread already resolved on GitHub before classifying it.
+
+    The claim that follows would fail with NO_ELIGIBLE_ITEM, but only after
+    `record_classification` had stored `decision: fix`, which then made final-gate
+    demand validation evidence for a thread nobody could claim (app-store-creative#8).
+    """
+    item = _items(session_store.load_session(repo, pr_number)).get(item_id)
+    if not isinstance(item, dict) or item.get("item_kind") != "github_thread" or not is_resolved_github_thread(item):
+        return
+    reconcile = command_templates.evidence_add_reply_with_validation(repo, pr_number, item_id=item_id)
+    raise WorkflowError(
+        status=protocol_codes.FAST_FIX_REJECTED,
+        reason_code="THREAD_ALREADY_RESOLVED",
+        waiting_on="reply_evidence",
+        exit_code=4,
+        message=(
+            f"{item_id} is already resolved on GitHub, so it cannot be claimed; no classification was recorded. "
+            f"Record its evidence instead with `{reconcile}` (omit --commit/--files/--validation when no code "
+            f"change was made), then rerun `gh-address-cr final-gate {repo} {pr_number}`."
+        ),
+        payload={"item_id": item_id},
+    )
 
 
 def decline_item(

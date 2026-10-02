@@ -176,6 +176,41 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertEqual(json.loads(result.stdout)["status"], "REPLY_EVIDENCE_RECORDED")
 
+    def test_resolve_on_a_thread_closed_remotely_leaves_no_classification(self):
+        """`agent resolve` used to record `decision: fix` and then fail with NO_ELIGIBLE_ITEM,
+        which made the gate demand validation evidence (app-store-creative#8, ACT-04)."""
+        closed_unclassified = open_item(
+            "github-thread:PRRT_recon",
+            item_kind="github_thread",
+            source="github",
+            path="src/recon.py",
+            body="Unused import.",
+            state="closed",
+            status="CLOSED",
+            thread_id="PRRT_recon",
+        )
+        self.write_session(items=[closed_unclassified])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_recon",
+            "--commit", "abc1234",
+            "--files", "src/recon.py",
+            "--summary", "Removed the import.",
+            "--why", "It was unused.",
+            "--validation", "python3 -m unittest=passed",
+        )
+
+        self.assertEqual(result.returncode, 4, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "THREAD_ALREADY_RESOLVED")
+        self.assertIn(
+            f"gh-address-cr agent evidence add {self.repo} {self.pr} --item-id github-thread:PRRT_recon --reply-url",
+            payload["next_action"],
+        )
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertNotIn("decision", item)
+        self.assertNotIn("classification_evidence", item)
+
     def test_failing_validation_result_is_rejected(self):
         """A failing verdict must not satisfy the gate (#117 carried forward)."""
         self.write_session(items=[_resolved_fix_thread()])

@@ -120,6 +120,9 @@ If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 If `reason_code` is `COMMIT_NOT_IN_PR`:
 - **Action**: The commit a fix reply would cite is not one of the pull request's commits, so nothing was posted. On `agent resolve` / `agent submit` (`ACTION_REJECTED` or `BATCH_ACTION_REJECTED`), the explicit `--commit` or `fix_reply.commit_hash` is wrong: push the fix to the PR branch and resubmit with that commit. On `agent publish` (`PUBLISH_BLOCKED`), the fix gave no commit and the local `HEAD` fallback is outside the PR: push the fix, check out the PR head branch named in `next_action` at the pushed commit, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`. Abbreviated SHAs of at least four characters are accepted.
 
+If `reason_code` is `THREAD_ALREADY_RESOLVED`:
+- **Action**: `agent resolve` was called for a thread already resolved on GitHub. Nothing was recorded. Run the `agent evidence add ... --reply-url <reply_url> --author-login <login>` command from `next_action`, keeping `--commit <sha> --files <paths> --validation <cmd=passed>` when you made a code fix so both evidence kinds land in one call, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
+
 If `reason_code` is `PUBLISH_RECONCILE_REQUIRED`:
 - **Action**: Inspect the named GitHub thread and do not retry `agent publish` blindly. The canonical outbox says an interrupted reply may already have been posted, but the runtime could not match it automatically. If the reply exists, record its exact URL and author with the returned item-scoped `gh-address-cr agent evidence add ... --reply-url ... --author-login ...` command, then rerun publish and final-gate. If no matching reply can be identified, stop for manual reconciliation rather than posting a duplicate.
 
