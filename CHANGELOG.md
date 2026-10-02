@@ -1,3 +1,27 @@
+## [3.17.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.16.0...v3.17.0) (2026-10-02)
+
+### Features
+
+* **agent:** reply on a thread resolved on GitHub without one via --closed ([#324](https://github.com/RbBtSn0w/gh-address-cr/issues/324)) ([6df34e5](https://github.com/RbBtSn0w/gh-address-cr/commit/6df34e5e0fda0eeb0f4a968f00c9b492128453a7)), closes [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308) [app-store-creative#8](https://github.com/RbBtSn0w/app-store-creative/issues/8) [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308)
+* **telemetry:** record the runtime build in efficiency reports and compare by it ([#327](https://github.com/RbBtSn0w/gh-address-cr/issues/327)) ([2423ea5](https://github.com/RbBtSn0w/gh-address-cr/commit/2423ea570beaf48eca7579538dfdf1a415e2042d))
+
+### Bug Fixes
+
+* **agent:** name the exact item id and flag when agent input is a near miss ([#325](https://github.com/RbBtSn0w/gh-address-cr/issues/325)) ([97bfff5](https://github.com/RbBtSn0w/gh-address-cr/commit/97bfff5c54bd004a8dd2e1911c7cd8488ca7d2d1)), closes [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308) [app-store-creative#8](https://github.com/RbBtSn0w/app-store-creative/issues/8) [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308)
+* **agent:** reject resolve on a remotely resolved thread before classifying ([#320](https://github.com/RbBtSn0w/gh-address-cr/issues/320)) ([087380d](https://github.com/RbBtSn0w/gh-address-cr/commit/087380d0ae916afcfd93fbe10f19ab42a16bd7ac)), closes [app-store-creative#8](https://github.com/RbBtSn0w/app-store-creative/issues/8)
+* **ci:** restrict GITHUB_TOKEN permissions in pr-target workflow ([#306](https://github.com/RbBtSn0w/gh-address-cr/issues/306)) ([b139952](https://github.com/RbBtSn0w/gh-address-cr/commit/b1399521a60acf7c351a6f4c0c543cc2ebfce24c)), closes [#2](https://github.com/RbBtSn0w/gh-address-cr/issues/2)
+* **evidence:** record reply and validation evidence in one call ([#319](https://github.com/RbBtSn0w/gh-address-cr/issues/319)) ([d3f03db](https://github.com/RbBtSn0w/gh-address-cr/commit/d3f03db473776948df4b6c83e143b8295ac2afa6)), closes [app-store-creative#8](https://github.com/RbBtSn0w/app-store-creative/issues/8)
+* **final-gate:** block with a verdict when required checks do not exist ([#323](https://github.com/RbBtSn0w/gh-address-cr/issues/323)) ([7f5bbea](https://github.com/RbBtSn0w/gh-address-cr/commit/7f5bbea55e21564fd8d2e03974d0209033543fa7))
+* **final-gate:** name each error-prone operation once in the completion line ([#316](https://github.com/RbBtSn0w/gh-address-cr/issues/316)) ([77c3f71](https://github.com/RbBtSn0w/gh-address-cr/commit/77c3f718465d81481970f18a1dd4e2c15f3a32eb))
+* **final-gate:** print next action for blocked single-PR gates ([#313](https://github.com/RbBtSn0w/gh-address-cr/issues/313)) ([a6fe8a5](https://github.com/RbBtSn0w/gh-address-cr/commit/a6fe8a548b4a772ff3eef3fb785d167f63a442b6)), closes [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308) [#308](https://github.com/RbBtSn0w/gh-address-cr/issues/308)
+* **github:** treat a PR without check runs as a state, not an API failure ([#318](https://github.com/RbBtSn0w/gh-address-cr/issues/318)) ([4a73f19](https://github.com/RbBtSn0w/gh-address-cr/commit/4a73f1924273c17063e7755cb24a83ff2eb078a7)), closes [app-store-creative#8](https://github.com/RbBtSn0w/app-store-creative/issues/8)
+* **publish:** cite only commits that belong to the pull request ([#315](https://github.com/RbBtSn0w/gh-address-cr/issues/315)) ([10e36f4](https://github.com/RbBtSn0w/gh-address-cr/commit/10e36f44b0eac93967b1d8d11aafd7dfaf85df6b))
+* **release:** harden develop->main promotion against squash and auto-merge failure ([#305](https://github.com/RbBtSn0w/gh-address-cr/issues/305)) ([0b941cf](https://github.com/RbBtSn0w/gh-address-cr/commit/0b941cf9d257f1e8aae99f0bf2ed4ed230ce8892))
+* **runtime:** mark a truncated review excerpt and name the full-body command ([#317](https://github.com/RbBtSn0w/gh-address-cr/issues/317)) ([cd161f3](https://github.com/RbBtSn0w/gh-address-cr/commit/cd161f397c4e10d519b903433f94a25c5e730892))
+* **runtime:** recommend agent resolve for unresolved review threads ([#312](https://github.com/RbBtSn0w/gh-address-cr/issues/312)) ([e3c6a72](https://github.com/RbBtSn0w/gh-address-cr/commit/e3c6a72fc86e9d49dab753a5d2cf505dca971a69))
+* **telemetry:** count needs-action exits separately from failures ([#314](https://github.com/RbBtSn0w/gh-address-cr/issues/314)) ([d95647b](https://github.com/RbBtSn0w/gh-address-cr/commit/d95647b3703d1f298fd59ec8dc48c018edc38062)), closes [#307](https://github.com/RbBtSn0w/gh-address-cr/issues/307) [#307](https://github.com/RbBtSn0w/gh-address-cr/issues/307)
+* **telemetry:** flag each slow operation once with its run count ([#329](https://github.com/RbBtSn0w/gh-address-cr/issues/329)) ([60372bb](https://github.com/RbBtSn0w/gh-address-cr/commit/60372bb9b1b76d937328aa0f504a5ca3deacc659))
+
 ## [3.16.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.3...v3.16.0) (2026-10-02)
 
 ### Features
