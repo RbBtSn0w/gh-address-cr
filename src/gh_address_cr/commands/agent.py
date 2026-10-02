@@ -193,7 +193,12 @@ def _parse_with_scope(
     scope_args, scope_error = _agent_args_with_scope(repo, passthrough)
     if scope_error is not None:
         return None, _emit_scope_resolution_error(scope_error)
-    return parser.parse_args(scope_args), 0
+    parsed = parser.parse_args(scope_args)
+    try:
+        session_store.validate_pr_target(parsed.repo, parsed.pr_number)
+    except session_store.SessionError as exc:
+        return None, output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    return parsed, 0
 
 
 def handle_agent_classify(repo: str | None, passthrough: list[str]) -> int:

@@ -156,8 +156,8 @@ A task is complete only when:
 - The requested change is implemented and verified.
 - The relevant contract docs remain consistent.
 - `final-gate` passes (for PR-session handling work).
-- PR-session completion evidence includes the `final-gate` compact metrics line
-  (`completion_summary_line`, or the first bracketed line within
+- PR-session completion evidence includes the readable `final-gate` metrics summary
+  (`completion_summary.markdown`, or the rendered Markdown within
   `PR Completion Summary Guidance`) with telemetry coverage and report
   artifacts. Telemetry failures are fail-open for review completion, but
   telemetry diagnostics must remain visible.

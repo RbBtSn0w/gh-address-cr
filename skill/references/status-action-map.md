@@ -59,6 +59,14 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
   `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
   do not change `HOME` or create a second state directory mid-session.
 
+If `reason_code` is `INVALID_REPO` or `INVALID_PR_NUMBER` (`waiting_on=pr_scope`):
+- **Action**: The PR target is malformed: the repository is not `owner/repo`,
+  or the PR number is not a positive integer. The runtime rejected it before
+  reading or creating any session state. Pass the repository and the PR number
+  as two separate arguments; a shell variable holding `owner/repo 123` is passed
+  as one argument when the shell does not word-split it (zsh, or `"$VAR"`).
+  Rerun the same command with the corrected target.
+
 ## Runtime Persistence
 
 Commands that fail on the runtime store return `waiting_on=runtime_store`, keep
@@ -164,7 +172,7 @@ If `status` is `WAITING_FOR_EXTERNAL_REVIEW`:
 ## Stop Conditions
 
 If `status` is `NO_ELIGIBLE_ITEM` or `PASSED`:
-- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success. The final response must include the exact `completion_summary_line` from `final-gate --machine` or the first bracketed line from `PR Completion Summary Guidance`; explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present.
+- **Action**: The orchestration is complete or paused. If `PASSED`, ensure `gh-address-cr final-gate` was executed and reported success. The final response must include the rendered `completion_summary.markdown` from `final-gate --machine` or the readable Markdown block from `PR Completion Summary Guidance`; explain abnormal coverage, diagnostics, success-rate drops, or inefficiency flags when present.
 - **Telemetry note**: `runtime-only` coverage is advisory for local loops when host telemetry was not imported. Report it honestly, but do not escalate it as a review-resolution blocker by itself.
 
 If `status` is `NO_ACTIVE_PR`:

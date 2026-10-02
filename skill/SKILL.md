@@ -161,8 +161,8 @@ gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> \
 gh-address-cr final-gate <owner/repo> <pr_number>
 ```
 
-Completion requires a freshly passing final gate. Include its exact
-`completion_summary_line` in the final response. Coverage is `complete`,
+Completion requires a freshly passing final gate. Present `completion_summary.markdown` as rendered Markdown in the final response;
+do not put the summary in a code fence or paste the compact metrics line. Coverage is `complete`,
 `partial`, `runtime-only`, or `unavailable`. Telemetry degradation is
 diagnostic, not review-resolution failure; explain abnormal diagnostics. Read
 `references/completion-contract.md` before claiming completion.
