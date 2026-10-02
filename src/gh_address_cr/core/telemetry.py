@@ -10,6 +10,7 @@ from typing import Any
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.runtime_build import runtime_build
 from gh_address_cr.core.telemetry_adapters import (
     CodexHostJsonAdapter,
     GenericAgentJsonlAdapter,
@@ -515,6 +516,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         "confidence": _confidence_for_coverage(coverage_label),
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "report_artifact": str(report_path),
+        "runtime": runtime_build(),
     }
     try:
         report_path.parent.mkdir(parents=True, exist_ok=True)
