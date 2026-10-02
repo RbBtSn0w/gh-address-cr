@@ -7,7 +7,9 @@ from typing import Any, Callable
 
 from gh_address_cr.core import command_templates, protocol_codes, side_effect_outbox
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.commit_membership import commit_in_pr
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.primary_action import project_context_summary
 from gh_address_cr.core.reply_templates import (
     KNOWN_REPLY_ATTRIBUTIONS,
 )
@@ -59,6 +61,7 @@ def _build_publish_plans(
     repo: str,
     pr_number: str,
     agent_id: str,
+    client: Any,
 ) -> list[dict[str, Any]]:
     default_commit_hash = None
     plans: list[dict[str, Any]] = []
@@ -99,6 +102,7 @@ def _build_publish_plans(
         if need_default:
             if default_commit_hash is None:
                 default_commit_hash = _default_commit_hash_for_publish(session)
+                _require_fallback_commit_in_pr(session, ledger, item_id, agent_id, repo, pr_number, client, default_commit_hash)
             resolved_commit_hash = default_commit_hash
 
         hydrated_response = _hydrate_publish_response(session, item, response, default_commit_hash=resolved_commit_hash)
@@ -436,7 +440,7 @@ def _publish_once(
     _verify_publish_revision_bindings(repo, str(pr_number), session, publish_items, client)
     publisher_login = _publisher_login(client, fallback=agent_id)
 
-    plans = _build_publish_plans(session, ledger, publish_items, repo, pr_number, agent_id)
+    plans = _build_publish_plans(session, ledger, publish_items, repo, pr_number, agent_id, client)
 
     published: list[str] = []
     for plan in plans:
@@ -597,6 +601,42 @@ def _hydrate_publish_response(
             hydrated_fix_reply["commit_hash"] = commit_hash
     hydrated["fix_reply"] = hydrated_fix_reply
     return hydrated
+
+
+def _require_fallback_commit_in_pr(
+    session: dict[str, Any],
+    ledger: Any,
+    item_id: str,
+    agent_id: str,
+    repo: str,
+    pr_number: str,
+    client: Any,
+    commit: str,
+) -> None:
+    """Block before posting when the local-HEAD fallback is not a commit of this PR.
+
+    The fallback reads the checkout's HEAD, so a checkout on another branch, or an
+    unpushed fix, would cite a commit reviewers cannot find in the PR (Spec 039 R3).
+    It is recomputed on every publish, so checking out the pushed PR branch recovers.
+    """
+    if not commit or commit_in_pr(commit, client.list_pr_commit_shas(repo, str(pr_number))):
+        return
+    head_ref = project_context_summary(session, selected_item_id=None)["pull_request"]["head_ref"]
+    branch = f"`{head_ref}`" if head_ref else "the pull request's head branch"
+    _record_publish_blocked(session, ledger, item_id, agent_id, protocol_codes.COMMIT_NOT_IN_PR)
+    session_store.save_session(repo, pr_number, session)
+    raise WorkflowError(
+        status=protocol_codes.PUBLISH_BLOCKED,
+        reason_code=protocol_codes.COMMIT_NOT_IN_PR,
+        waiting_on="commit_evidence",
+        exit_code=5,
+        message=(
+            f"The fix reply would cite the local HEAD {commit[:7]}, which is not a commit of this pull request. "
+            f"Push the fix, check out {branch} at the pushed commit, then rerun "
+            f"`gh-address-cr agent publish {repo} {pr_number}`."
+        ),
+        payload={"item_id": item_id},
+    )
 
 
 def _default_commit_hash_for_publish(session: dict[str, Any]) -> str:

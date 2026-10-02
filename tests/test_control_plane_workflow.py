@@ -48,6 +48,10 @@ def github_thread(item_id: str, *, path: str = "src/shared.py", body: str = "Ple
 
 
 class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
+    def setUp(self):
+        super().setUp()
+        self.install_fake_pr_commits()
+
     def write_session(self, *, items, leases=None):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         payload = {

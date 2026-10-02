@@ -419,6 +419,22 @@ class GitHubClient:
                 return files
             page += 1
 
+    def list_pr_commit_shas(self, repo: str, pr_number: str) -> list[str]:
+        """SHAs of the commits in the pull request (GitHub lists at most 250)."""
+        page = 1
+        shas: list[str] = []
+        while True:
+            payload = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}/commits?per_page=100&page={page}"])
+            if not isinstance(payload, list):
+                raise GitHubError(
+                    protocol_codes.GITHUB_INCOMPLETE_RESPONSE,
+                    "GitHub pull request commits response must be a JSON array.",
+                )
+            shas.extend(str(row["sha"]) for row in payload if isinstance(row, dict) and row.get("sha"))
+            if len(payload) < 100:
+                return shas
+            page += 1
+
     def viewer_login(self) -> str:
         payload = self._read_json(["api", "user"])
         login = payload.get("login")

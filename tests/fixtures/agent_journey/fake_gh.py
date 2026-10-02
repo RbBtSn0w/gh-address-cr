@@ -127,6 +127,8 @@ def rest(endpoint, state):
         emit([])
     if endpoint.startswith(f"{prefix}/files"):
         emit(state["files"] if endpoint.endswith("page=1") else [])
+    if endpoint.startswith(f"{prefix}/commits"):
+        emit([{"sha": sha} for sha in state["commits"]] if endpoint.endswith("page=1") else [])
     unhandled(f"unhandled gh api endpoint: {endpoint}")
 
 

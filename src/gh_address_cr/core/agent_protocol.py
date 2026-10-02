@@ -23,6 +23,7 @@ from gh_address_cr.core.agent_protocol_submission import (
     prepare_action_response_submission,
     refresh_stack_context_for_request,
     response_skeleton_for_request,
+    verify_cited_commit_in_pr,
     verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
@@ -727,6 +728,16 @@ def _accept_action_response(
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
+        verify_cited_commit_in_pr(
+            repo,
+            pr_number,
+            session,
+            preflight,
+            response,
+            github_client=github_client,
+            ledger=ledger,
+            rejected_status=protocol_codes.ACTION_REJECTED,
+        )
     except WorkflowError:
         _persist_loaded_scope(
             repo,

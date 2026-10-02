@@ -7,7 +7,8 @@ journey invariants that unit tests of individual surfaces cannot see:
 - I1 every executed `primary_action.command` is accepted
 - I2 a session completed through the documented path reports clean telemetry
 - I3 the completion line names each problem operation once
-- I4 a published fix reply never cites a commit outside the PR
+- I4 a published fix reply never cites a commit outside the PR, and a blocked
+  agent can recover
 - I5 the lean path exposes the full review body or marks it truncated
 - I6 a blocked final-gate prints its next action in the terminal report
 
@@ -77,6 +78,8 @@ class AgentJourneyTestCase(PythonScriptTestCase):
                     "head_ref": "feature/journey",
                     "head_sha": self.head_sha,
                     "base_sha": self.base_sha,
+                    # Commits that belong to the PR: only the fix, never the base.
+                    "commits": [self.head_sha],
                     "files": [{"filename": "app.py", "status": "modified", "additions": 1, "deletions": 1, "changes": 2}],
                     "threads": [
                         {
@@ -276,11 +279,9 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         self.assertEqual(report["inefficiency_flags"], [])
         self.assertGreaterEqual(report["needs_action_count"], 3)
 
-    # Known defect, Spec 039 R3: publish falls back to the local HEAD without checking the PR. The fix PR removes this decorator.
-    @unittest.expectedFailure
-    def test_i4_published_reply_cites_the_pr_fix_not_the_local_checkout(self):
-        # The agent submits through the skeleton (no commit field is offered) and
-        # publishes from a checkout that is not on the PR branch.
+    def test_i4_publish_blocks_a_fallback_commit_outside_the_pr_and_recovers(self):
+        # The agent submits through the skeleton without a commit and publishes from a
+        # checkout that is not on the PR branch, so the fallback would cite the base.
         summary = self.runtime("address", self.repo, self.pr, "--lean")
         item_id = summary["primary_action"]["item_id"]
         self.runtime("agent", "classify", self.repo, self.pr, item_id, "--classification", "fix", "--note", "valid")
@@ -289,13 +290,43 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         self.runtime("agent", "submit", self.repo, self.pr, "--input", str(response))
 
         _git(self.checkout, "checkout", "-q", "main")
-        self.runtime("agent", "publish", self.repo, self.pr)
+        blocked = self.runtime("agent", "publish", self.repo, self.pr)
 
+        self.assertEqual(blocked.get("reason_code"), "COMMIT_NOT_IN_PR", self.describe_trace())
+        self.assertEqual(self.published_replies(), [], "nothing may be posted with a commit outside the PR")
+        self.assertIn("feature/journey", blocked.get("next_action") or "")
+
+        # Recovery the message names: check out the PR branch, then publish again.
+        _git(self.checkout, "checkout", "-q", "feature/journey")
+        published = self.runtime("agent", "publish", self.repo, self.pr)
+
+        self.assertEqual(published.get("status"), "PUBLISH_COMPLETE", self.describe_trace())
         replies = self.published_replies()
-        self.assertFalse(
-            any(self.base_sha[:7] in body for body in replies),
-            f"reply cites base commit {self.base_sha[:7]}, which is not part of the PR fix: {replies}",
+        self.assertEqual(len(replies), 1, replies)
+        self.assertIn(self.head_sha[:7], replies[0])
+        self.assertNotIn(self.base_sha[:7], replies[0])
+
+    def test_i4_explicit_commit_outside_the_pr_is_rejected_before_acceptance(self):
+        summary = self.runtime("address", self.repo, self.pr, "--lean")
+        item_id = summary["primary_action"]["item_id"]
+        resolve_args = (
+            "--files", "app.py",
+            "--summary", "Re-raise the last exception after the final retry.",
+            "--why", "Callers must see the failure instead of a stale-cache None.",
+            "--validation", "python3 -m unittest tests.test_app=passed",
+            "--agent-id", AGENT_ID,
         )
+
+        rejected = self.runtime("agent", "resolve", self.repo, self.pr, item_id, "--commit", self.base_sha, *resolve_args)
+        self.assertEqual(rejected.get("reason_code"), "COMMIT_NOT_IN_PR", self.describe_trace())
+
+        # Rejected before acceptance, so the agent can resubmit with the right commit.
+        accepted = self.runtime("agent", "resolve", self.repo, self.pr, item_id, "--commit", self.head_sha, *resolve_args)
+        self.assertEqual(accepted.get("status"), "FAST_FIX_ACCEPTED", self.describe_trace())
+        self.runtime("agent", "publish", self.repo, self.pr)
+        replies = self.published_replies()
+        self.assertEqual(len(replies), 1, replies)
+        self.assertIn(self.head_sha[:7], replies[0])
 
     # Known defect, Spec 039 R5: lean excerpt is truncated without a marker. The fix PR removes this decorator.
     @unittest.expectedFailure
