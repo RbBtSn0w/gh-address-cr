@@ -117,6 +117,9 @@ If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKI
 If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 - **Action**: Follow the returned `next_action`. If accepted publish-ready evidence exists, this may still route to `gh-address-cr agent publish <owner/repo> <pr_number>`. If the blocking thread is already terminal and not claimable, the recovery path must instead use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>`, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`. For a thread classified `fix`, add `--commit <sha> --files <paths> --validation <cmd=passed>` to the same call so its validation evidence is recorded too and the gate does not block again on `FINAL_GATE_LOGIC_VALIDATION_BLOCKING`.
 
+If `reason_code` is `FINAL_GATE_REQUIRED_CHECKS_MISSING`:
+- **Action**: `final-gate` ran with `--require-checks` or `--require-required-checks`, but the PR has no check runs, or its base branch has no required status checks. This is a verdict, not a GitHub failure. Either configure CI or required status checks and rerun, or rerun `gh-address-cr final-gate <owner/repo> <pr_number>` without the flag when the PR workflow does not need checks.
+
 If `reason_code` is `COMMIT_NOT_IN_PR`:
 - **Action**: The commit a fix reply would cite is not one of the pull request's commits, so nothing was posted. On `agent resolve` / `agent submit` (`ACTION_REJECTED` or `BATCH_ACTION_REJECTED`), the explicit `--commit` or `fix_reply.commit_hash` is wrong: push the fix to the PR branch and resubmit with that commit. On `agent publish` (`PUBLISH_BLOCKED`), the fix gave no commit and the local `HEAD` fallback is outside the PR: push the fix, check out the PR head branch named in `next_action` at the pushed commit, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`. Abbreviated SHAs of at least four characters are accepted.
 

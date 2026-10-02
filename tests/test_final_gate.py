@@ -671,6 +671,7 @@ class FinalGateTestCase(unittest.TestCase):
                 "pr_checks_not_green_count": 0,
                 "logic_validation_blocking_count": 0,
                 "logic_validation_advisory_count": 0,
+                "pr_checks_missing_count": 0,
             },
         )
 

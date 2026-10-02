@@ -143,7 +143,8 @@ def main():
         # Mirrors real gh on a PR with no check runs: exit 1, empty stdout, message
         # on stderr (observed on RbBtSn0w/app-store-creative#8 under 3.16.0).
         if not state.get("checks"):
-            sys.stderr.write(f"no checks reported on the '{state['head_ref']}' branch\n")
+            kind = "required checks" if "--required" in args else "checks"
+            sys.stderr.write(f"no {kind} reported on the '{state['head_ref']}' branch\n")
             raise SystemExit(1)
         emit(state["checks"])
     if args[:2] == ["api", "graphql"]:
