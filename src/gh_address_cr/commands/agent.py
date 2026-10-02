@@ -625,9 +625,7 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
 def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
     parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
     if parsed.closed:
-        workflow.reopen_resolved_thread_for_reply(
-            parsed.repo, parsed.pr_number, item_id=parsed.item_id, agent_id=parsed.agent_id
-        )
+        workflow.reopen_resolved_thread_for_reply(parsed.repo, parsed.pr_number, item_id=parsed.item_id)
         # A reopened thread must be published now: the next refresh closes it again.
         parsed.publish = True
     disposition = parsed.disposition

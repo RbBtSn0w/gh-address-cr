@@ -1140,7 +1140,7 @@ def _assert_thread_not_resolved_remotely(repo: str, pr_number: str, *, item_id: 
     )
 
 
-def reopen_resolved_thread_for_reply(repo: str, pr_number: str, *, item_id: str, agent_id: str) -> None:
+def reopen_resolved_thread_for_reply(repo: str, pr_number: str, *, item_id: str) -> None:
     """Make a thread resolved on GitHub without our reply claimable again (Spec 039 Q2).
 
     Only the threads final-gate blocks on qualify: resolved remotely, no reply
