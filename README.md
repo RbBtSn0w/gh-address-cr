@@ -135,7 +135,7 @@ Completion means the latest final gate reports:
 - zero pending reviews for the authenticated login
 - no blocking session items
 - terminal GitHub threads have durable reply evidence
-- a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
+- a readable Markdown summary via `completion_summary.markdown` or `PR Completion Summary Guidance`
 - a telemetry coverage label and structured efficiency report path; a command
   that exits 5 because the PR still needs work (for example `address` or
   `final-gate` blocking on an open thread) counts in `needs_action_count`, not as

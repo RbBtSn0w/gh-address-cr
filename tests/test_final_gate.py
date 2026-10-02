@@ -328,6 +328,8 @@ class FinalGateTestCase(unittest.TestCase):
                     self.assertEqual(payload["stack_gate"]["check_requirement"], "required")
                     self.assertEqual(payload["completion_summary"]["line"], payload["completion_summary_line"])
                     self.assertIn("scope: stack segment through PR #102", payload["completion_summary_line"])
+                    self.assertIn("**gh-address-cr stack: PASSED**", payload["completion_summary"]["markdown"])
+                    self.assertIn("stack segment through PR #102", payload["completion_summary"]["markdown"])
                     self.assertIn("threads: 0", payload["completion_summary_line"])
                     self.assertIn("reviews: 0", payload["completion_summary_line"])
                     self.assertIn("duration:", payload["completion_summary_line"])
@@ -1001,6 +1003,13 @@ class FinalGateTestCase(unittest.TestCase):
             "report_artifact": "path/to/report.json",
         }
         guidance = build_completion_summary_guidance(result, telemetry_report, summary_path=None)
+        from gh_address_cr.commands.final_gate import build_completion_summary_model
+        readable = build_completion_summary_model(result, telemetry_report)["markdown"]
+        self.assertIn("**gh-address-cr: PASSED**", readable)
+        self.assertIn("| Unresolved threads | 0 |", readable)
+        self.assertIn("| Checks | Not required |", readable)
+        self.assertIn("**Telemetry**", readable)
+        self.assertNotIn("```", readable)
         summary_line = build_completion_summary_line(result, telemetry_report)
 
         self.assertEqual(
@@ -1008,6 +1017,8 @@ class FinalGateTestCase(unittest.TestCase):
             "[gh-address-cr: PASSED | threads: 0 | reviews: 0 | checks: N/A | telemetry: complete/high (10 events, 100.0%) | sources: runtime 2; codex 8 | duration: 91.2s observed | slowest: run unit tests 89.1s success | issues: none]",
         )
         self.assertEqual(guidance.count(summary_line), 1)
+        self.assertIn(readable, guidance)
+        self.assertNotIn("```text", guidance)
         self.assertNotIn("Attention Items", guidance)
         self.assertNotIn("IMPLICATION PROMPT", guidance)
 

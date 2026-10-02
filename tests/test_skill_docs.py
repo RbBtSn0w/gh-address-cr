@@ -586,7 +586,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
         self.assertIn("completion_summary_line", combined)
         self.assertIn("PR Completion Summary Guidance", combined)
-        self.assertIn("first bracketed line", combined)
+        self.assertIn("completion_summary.markdown", combined)
         self.assertIn("[gh-address-cr: PASSED | threads:", completion_text)
         self.assertIn("telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary", combined)
         self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
@@ -922,7 +922,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("completion_summary_line", cli_text)
         self.assertIn("completion_summary_line", readme_text)
         self.assertIn("completion_summary", cli_text)
-        self.assertIn("compact metrics line", readme_text)
+        self.assertIn("readable Markdown summary", readme_text)
 
     def test_skill_documents_runtime_telemetry_summary_contract(self):
         skill_text = SKILL_MD.read_text(encoding="utf-8")
