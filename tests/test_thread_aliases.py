@@ -6,6 +6,10 @@ from tests.test_control_plane_workflow import github_thread, open_item
 
 
 class ThreadAliasTest(PythonScriptTestCase):
+    def setUp(self):
+        super().setUp()
+        self.install_fake_pr_commits()
+
     def write_session(self, *, items):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         payload = {

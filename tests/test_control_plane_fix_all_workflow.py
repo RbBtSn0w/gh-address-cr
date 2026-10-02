@@ -10,6 +10,10 @@ NOW = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
 
 
 class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
+    def setUp(self):
+        super().setUp()
+        self.install_fake_pr_commits()
+
     def write_session(self, *, items, leases=None):
         self.workspace_dir().mkdir(parents=True, exist_ok=True)
         payload = {
