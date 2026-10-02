@@ -15,10 +15,12 @@ from gh_address_cr.github.errors import (
     GitHubEnvironmentError,
     GitHubError,
     GitHubNetworkError,
+    GitHubNoChecksError,
     GitHubNotFoundError,
     GitHubRateLimitError,
     GitHubTransientError,
 )
+from gh_address_cr.github.pr_checks import pr_checks_result
 from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
@@ -372,7 +374,15 @@ class GitHubClient:
         if required:
             cmd.append("--required")
         result = self._run_gh(cmd, retries=1)
-        if result.returncode not in {0, 1, 8} or (result.returncode != 0 and not result.stdout.strip()):
+        outcome = pr_checks_result(result.returncode, result.stdout, result.stderr)
+        if outcome == "no_checks":
+            raise GitHubNoChecksError(
+                f"Pull request #{pr_number} has no check runs.",
+                diagnostics=classify_github_failure(
+                    result.stderr, result.stdout, result.returncode, _completed_command(result)
+                ),
+            )
+        if outcome == "error":
             _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
         try:
             payload = json.loads(result.stdout or "[]")
@@ -417,6 +427,22 @@ class GitHubClient:
                 )
             if len(payload) < 100:
                 return files
+            page += 1
+
+    def list_pr_commit_shas(self, repo: str, pr_number: str) -> list[str]:
+        """SHAs of the commits in the pull request (GitHub lists at most 250)."""
+        page = 1
+        shas: list[str] = []
+        while True:
+            payload = self._read_json(["api", f"repos/{repo}/pulls/{pr_number}/commits?per_page=100&page={page}"])
+            if not isinstance(payload, list):
+                raise GitHubError(
+                    protocol_codes.GITHUB_INCOMPLETE_RESPONSE,
+                    "GitHub pull request commits response must be a JSON array.",
+                )
+            shas.extend(str(row["sha"]) for row in payload if isinstance(row, dict) and row.get("sha"))
+            if len(payload) < 100:
+                return shas
             page += 1
 
     def viewer_login(self) -> str:

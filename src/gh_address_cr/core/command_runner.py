@@ -220,12 +220,27 @@ def run_cmd(
             start_time=start_time,
             end_time=end_time,
             exit_code=exit_code,
+            outcome=_subprocess_outcome(cmd, result),
         )
     except Exception as telemetry_exc:
         if telemetry_debug_enabled():
             sys.stderr.write(f"Telemetry recording failed: {telemetry_exc}\n")
 
     return result
+
+
+def _subprocess_outcome(cmd: list[str], result: subprocess.CompletedProcess[str]) -> str | None:
+    """Telemetry outcome for subprocesses whose non-zero exits can be PR states.
+
+    `None` keeps the exit-code meaning. The OTel span above still records the
+    honest exit code; only the session efficiency report reads this.
+    """
+    from gh_address_cr.github.pr_checks import is_pr_checks_command, pr_checks_result
+
+    # Only a recognized PR state is overridden; errors and timeouts keep the exit-code meaning.
+    if is_pr_checks_command(cmd) and pr_checks_result(result.returncode, result.stdout, result.stderr) != "error":
+        return "success"
+    return None
 
 
 def _classify_subprocess_error(result: subprocess.CompletedProcess[str]) -> tuple[str, str, bool]:

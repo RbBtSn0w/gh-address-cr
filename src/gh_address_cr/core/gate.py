@@ -23,6 +23,7 @@ from gh_address_cr.core.runtime_kernel.final_gate import (
     FINAL_GATE_MISSING_VALIDATION_EVIDENCE,
     FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW,
     FINAL_GATE_PR_CHECKS_NOT_GREEN,
+    FINAL_GATE_REQUIRED_CHECKS_MISSING,
     FINAL_GATE_UNRESOLVED_REMOTE_THREADS,
     build_final_gate_facts,
     evaluate_final_gate_policy,
@@ -42,6 +43,7 @@ from gh_address_cr.core.severity import (
     severity_evidence,
 )
 from gh_address_cr.github.client import GitHubClient
+from gh_address_cr.github.errors import GitHubNoChecksError
 
 PASS_EXIT_CODE = 0
 FAIL_EXIT_CODE = 5
@@ -175,11 +177,13 @@ class Gatekeeper:
             else self.github_client.list_threads(repo, str(pr_number))
         )
         pending_reviews = self.github_client.list_pending_reviews(repo, str(pr_number), current_login)
-        check_runs = (
-            self.github_client.list_pr_checks(repo, str(pr_number), required=require_required_checks)
-            if require_checks or require_required_checks
-            else []
-        )
+        check_runs: list[dict[str, Any]] = []
+        if require_checks or require_required_checks:
+            try:
+                check_runs = self.github_client.list_pr_checks(repo, str(pr_number), required=require_required_checks)
+            except GitHubNoChecksError:
+                # No (required) check runs: evaluated as FINAL_GATE_REQUIRED_CHECKS_MISSING.
+                check_runs = []
         previous_item_ids = set(map(str, session.get("items") or {}))
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
         from gh_address_cr.evidence.ledger import record_new_item_observations
@@ -514,12 +518,15 @@ def _next_action_with_pr(
             None,
         )
         if reconcile_blocker is not None:
-            reconcile = command_templates.evidence_add_reply(
-                repo,
-                pr_number,
-                item_id=str(reconcile_blocker.get("item_id") or "<item_id>"),
+            item_id = str(reconcile_blocker.get("item_id") or "<item_id>")
+            reply = command_templates.resolve_closed_fix(repo, pr_number, item_id)
+            explain = command_templates.resolve_closed_clarify(repo, pr_number, item_id)
+            reconcile = command_templates.evidence_add_reply(repo, pr_number, item_id=item_id)
+            return (
+                f"The thread was resolved without a reply from this session. Let the runtime reply: `{reply}` "
+                f"after a code fix, or `{explain}` when no change was needed. If you already replied, record it "
+                f"with `{reconcile}`. Then rerun {final_gate}."
             )
-            return f"Record terminal-thread reply evidence with `{reconcile}`, then rerun {final_gate}."
         return f"Run `gh-address-cr agent publish {repo} {pr_number}`, then rerun {final_gate}."
     if reason_code == FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW:
         return f"Submit or dismiss pending reviews for the current GitHub login, then rerun {final_gate}."
@@ -539,6 +546,12 @@ def _next_action_with_pr(
         return _revision_validation_next_action(repo, pr_number, logic_validation_signals)
     if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
         return f"Wait for PR checks to pass or fix failing checks, then rerun {final_gate}."
+    if reason_code == FINAL_GATE_REQUIRED_CHECKS_MISSING:
+        return (
+            "This PR has no check runs (or its base branch requires none), so `--require-checks` / "
+            "`--require-required-checks` cannot be satisfied. Configure CI or required status checks, "
+            f"or rerun {final_gate} without that flag."
+        )
     if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
         return _logic_validation_next_action(repo, pr_number, logic_validation_signals)
     return None
@@ -559,6 +572,8 @@ def _next_action_generic(reason_code: str) -> str:
         return "Record validation evidence for terminal local findings, then rerun final-gate."
     if reason_code == FINAL_GATE_PR_CHECKS_NOT_GREEN:
         return "Wait for PR checks to pass or fix failing checks, then rerun final-gate."
+    if reason_code == FINAL_GATE_REQUIRED_CHECKS_MISSING:
+        return "Configure CI or required status checks, or rerun final-gate without the checks requirement."
     if reason_code == FINAL_GATE_LOGIC_VALIDATION_BLOCKING:
         return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."
     return "Inspect final-gate diagnostics, fix blockers, then rerun final-gate."

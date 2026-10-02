@@ -618,6 +618,10 @@ class Issue78AutopilotTests(PythonScriptTestCase):
 
 
 class Issue78TrivialFastPathTests(PythonScriptTestCase):
+    def setUp(self):
+        super().setUp()
+        self.install_fake_pr_commits()
+
     def test_trivial_docs_fast_path_accepts_words_containing_sensitive_substrings(self):
         manager = session_store.SessionManager(self.repo, self.pr)
         session = manager.create(status="ACTIVE")

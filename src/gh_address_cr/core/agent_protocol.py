@@ -23,6 +23,7 @@ from gh_address_cr.core.agent_protocol_submission import (
     prepare_action_response_submission,
     refresh_stack_context_for_request,
     response_skeleton_for_request,
+    verify_cited_commit_in_pr,
     verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
@@ -104,6 +105,18 @@ def _persist_loaded_scope(
     )
 
 
+def item_not_found_message(session: dict[str, Any], item_id: str) -> str:
+    """Name the exact item id when the input is a near miss; never rewrite it (Spec 039 Q3)."""
+    message = f"Work item not found: {item_id}."
+    candidate = f"github-thread:{item_id}"
+    if not item_id.startswith("github-thread:") and candidate in _items(session):
+        return f"{message} Did you mean `{candidate}`? Item ids keep their `github-thread:` prefix."
+    return (
+        f"{message} Use the item_id from `gh-address-cr address <owner/repo> <pr_number> --lean` "
+        "(for example `github-thread:PRRT_...`); a T1..Tn alias works only while the thread list is unchanged."
+    )
+
+
 def record_classification(
     repo: str,
     pr_number: str,
@@ -141,7 +154,7 @@ def record_classification(
                 reason_code="ITEM_NOT_FOUND",
                 waiting_on="work_item",
                 exit_code=5,
-                message=f"Work item not found: {item_id}",
+                message=item_not_found_message(session, item_id),
                 payload={"item_id": item_id},
             )
 
@@ -179,7 +192,10 @@ def record_classification(
     record, released_lease_id = session_store.transact_working_set(
         repo,
         pr_number,
-        WorkingSetRequest(item_ids=(item_id,)),
+        # Load the prefixed form too, so a bare thread id can be answered with the exact id.
+        WorkingSetRequest(
+            item_ids=(item_id,) if item_id.startswith("github-thread:") else (item_id, f"github-thread:{item_id}")
+        ),
         classify,
         operation="session_update",
     ).value
@@ -727,6 +743,16 @@ def _accept_action_response(
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
+        verify_cited_commit_in_pr(
+            repo,
+            pr_number,
+            session,
+            preflight,
+            response,
+            github_client=github_client,
+            ledger=ledger,
+            rejected_status=protocol_codes.ACTION_REJECTED,
+        )
     except WorkflowError:
         _persist_loaded_scope(
             repo,

@@ -66,6 +66,8 @@ High-level commands emit structured JSON by default. Agents must consume these f
   - Records reusable commit/files/validation evidence for later `evidence_ref` use.
 - `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --commit <sha> --files <paths> --validation <cmd=passed@<ms>ms>`
   - Reconciles current validation for an already-terminal GitHub thread or local finding. On a stacked member, the runtime discovers and attaches the current revision binding after validating the item kind and state.
+- `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login> [--commit <sha> --files <paths> --validation <cmd=passed>]`
+  - Records reply evidence for a thread resolved outside the runtime. With the validation arguments it also records validation evidence in the same call (`REPLY_AND_VALIDATION_EVIDENCE_RECORDED`); an incomplete validation set is rejected before anything is recorded.
 
 `gh-address-cr agent resolve` is the current GitHub review-thread shortcut.
 Use only the supported command shapes below; selection, disposition, and stale
@@ -79,6 +81,8 @@ Local findings instead use `agent classify` → `agent next` → response skelet
   - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition reject|clarify|defer --why <text> [--stale] [--publish]`
   - Decline exactly one thread, fresh or stale, with a reason. No `--commit`/`--files`/`--validation`.
+- `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --closed [--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed> | --disposition clarify|reject|defer --why <text>]`
+  - For a thread resolved on GitHub without a reply from this session (the case final-gate blocks with `FINAL_GATE_MISSING_REPLY_EVIDENCE`): reopens it locally and runs the normal claim, submit, and publish in one call, so the runtime posts the reply and resolves the thread again. Rejected with `THREAD_NOT_RESOLVED` for an open thread and `CLOSED_THREAD_NEEDS_NO_REPLY` when no reply is required.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition defer --why <text> [--stale] [--publish]`
   - Canonical defer form for one GitHub review thread; stale handling remains optional.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json> [--publish]`

@@ -1,6 +1,6 @@
 # Completion Contract
 
-`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
+`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green. With either flag, a PR that has no check runs (or whose base branch requires none) blocks with `FINAL_GATE_REQUIRED_CHECKS_MISSING` and `pr_checks_missing_count=1`: zero checks cannot prove the checks are green.
 
 `completion_scope: "pull_request"` proves only the selected layer. Use
 `gh-address-cr final-gate <owner/repo> <pr_number> --stack` for a bottom-up
@@ -31,7 +31,7 @@ Final output must include:
 7. telemetry coverage label and efficiency report path
 8. audit summary path + sha256
 
-Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary.
+Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary. In the issue summary each error-prone operation appears once, as `<operation> failures=<n> timeouts=<n> retries=<n>`; other inefficiency flags (such as duration thresholds) follow `flags:`, each slow operation once, with a run count when it exceeded the threshold more than once.
 
 `final-gate` also writes the advisory `cr-metrics.json` report using the
 `cr-lifecycle.v1` schema. It projects item lifecycle timing and rework from the
@@ -44,7 +44,7 @@ Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavail
 
 For local development loops, `runtime-only` is advisory rather than abnormal by itself. Report the label and its implication, but do not expand it into a blocker or mandatory exception narrative unless additional telemetry diagnostics, inefficiency flags, or gate blockers are also present.
 
-If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
+If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. Status checks that block because the PR still needs work (`address`, `threads`, or `final-gate` returning a documented needs-action reason code) are reported in `needs_action_count` and do not lower `success_rate`; only crashes, errors, and rejected commands do. Likewise a `gh pr checks` probe that finds pending checks or no check runs at all is a successful probe, not a GitHub failure. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
 
 Final-gate machine output may include `logic_validation_signals`. Each generated
 signal identifies its `item_kind` so runtime recovery can distinguish local

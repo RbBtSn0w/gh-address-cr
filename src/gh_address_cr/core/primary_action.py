@@ -31,6 +31,7 @@ _ENVIRONMENT_WAITING_ON = {
     "state_directory",
 }
 _SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+COMMENT_EXCERPT_LIMIT = 500
 
 
 def _mapping(value: object) -> dict[str, Any]:
@@ -117,6 +118,12 @@ def project_context_summary(session: dict[str, Any], *, selected_item_id: str | 
     raw_items = session.get("items")
     items = raw_items if isinstance(raw_items, dict) else {}
     selected = _mapping(items.get(selected_item_id)) if selected_item_id else {}
+    body = str(selected.get("body") or "") if selected else ""
+    truncated = len(body) > COMMENT_EXCERPT_LIMIT
+    repo, pr_number = str(session.get("repo") or ""), str(session.get("pr_number") or "")
+    # Classification happens before `agent next` hands over the full untrusted body,
+    # so a truncated excerpt names where to read the rest (Spec 039 R5).
+    full_comment_command = command_templates.threads_full(repo, pr_number) if truncated and repo and pr_number else None
     changed_files = metadata.get("changed_files") if isinstance(metadata.get("changed_files"), list) else []
     check_summary = metadata.get("check_summary") if isinstance(metadata.get("check_summary"), dict) else None
     return {
@@ -131,7 +138,9 @@ def project_context_summary(session: dict[str, Any], *, selected_item_id: str | 
             "item_id": selected.get("item_id") if selected else None,
             "path": selected.get("path") if selected else None,
             "line": selected.get("line") if selected else None,
-            "comment_excerpt": str(selected.get("body") or "")[:500] if selected else None,
+            "comment_excerpt": body[:COMMENT_EXCERPT_LIMIT] if selected else None,
+            "comment_excerpt_truncated": truncated if selected else None,
+            "full_comment_command": full_comment_command,
         },
         "relevant_diff": {"availability": "on_demand"},
         "codeowners": {"availability": "on_demand", "advisory": True},
@@ -231,11 +240,13 @@ def project_primary_action(
                 item_id=item_id,
                 why_now="The remote review thread has not converged after the recorded side effect.",
             )
+        # `agent resolve` records classification itself; `agent next` would be
+        # rejected until a separate `agent classify` ran (Spec 039 R2).
         return _action(
-            "claim",
-            command=command_templates.next_fixer_for_item(repo, pr_number, item_id or "<item_id>"),
+            "resolve",
+            command=command_templates.resolve_item(repo, pr_number, item_id or "<item_id>"),
             item_id=item_id,
-            why_now="This is the highest-priority unresolved review thread.",
+            why_now="This is the highest-priority unresolved review thread; fix it, then fill in the evidence placeholders.",
         )
 
     local_items = sorted(

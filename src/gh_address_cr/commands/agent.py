@@ -161,6 +161,31 @@ def _route_agent_command(args: argparse.Namespace) -> int:
     return 2
 
 
+# Flags agents reach for that these commands do not have. They are rejected with the
+# real flag named, not accepted as aliases (Spec 039 Q3; AGENTS.md compatibility policy).
+_FLAG_NEAR_MISSES = {"--reason": "--why"}
+
+
+def _reject_flag_near_misses(command: str, repo: str | None, passthrough: list[str]) -> int | None:
+    for token in passthrough:
+        flag = token.split("=", 1)[0]
+        if flag in _FLAG_NEAR_MISSES:
+            positional = [arg for arg in passthrough if not arg.startswith("-")]
+            exc = WorkflowError(
+                status="INPUT_REJECTED",
+                reason_code="UNSUPPORTED_FLAG",
+                waiting_on="command_input",
+                exit_code=2,
+                message=f"`{command}` has no {flag} option; use {_FLAG_NEAR_MISSES[flag]} <text>.",
+            )
+            return output_workflow_error(
+                exc,
+                repo=repo or (positional[0] if positional else ""),
+                pr_number=positional[1] if len(positional) > 1 else "",
+            )
+    return None
+
+
 def _parse_with_scope(
     parser: argparse.ArgumentParser, repo: str | None, passthrough: list[str]
 ) -> tuple[argparse.Namespace | None, int]:
@@ -347,6 +372,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     through the same lease/evidence/publish contract. Classification is recorded
     internally, so no separate `agent classify` round-trip is required on this path.
     """
+    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent resolve", repo, passthrough)
+    if near_miss_rc is not None:
+        return near_miss_rc
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent resolve",
         description=(
@@ -366,6 +394,12 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
         "fix (default), trivial (doc/typo fast path), reject, clarify, or defer.",
     )
     parser.add_argument("--stale", action="store_true", help="Condition (primary axis): resolve matching STALE/outdated threads.")
+    parser.add_argument(
+        "--closed",
+        action="store_true",
+        help="Condition: reply on a single thread resolved on GitHub without a reply from this session; "
+        "the runtime posts the reply and resolves again in the same call.",
+    )
     parser.add_argument("--files", help="Selection: files-scope collective, instead of a single item_id.")
     parser.add_argument("--file", action="append", default=[], help="Selection: repeatable single-path form of --files.")
     parser.add_argument("--input", help="Selection: BatchActionResponse JSON for per-thread evidence.")
@@ -452,6 +486,15 @@ def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
     same-axis conflict.
     """
     disposition = parsed.disposition or "fix"
+    if parsed.closed and (not parsed.item_id or parsed.stale or parsed.input or disposition == "trivial"):
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code=protocol_codes.RESOLVE_AXIS_CONFLICT,
+            waiting_on="resolve_axis",
+            exit_code=2,
+            message="--closed takes a single item_id with a fix, reject, clarify, or defer disposition; "
+            "it cannot be combined with --stale, --input, --files selection, or --disposition trivial.",
+        )
     files_present = bool(parsed.files) or bool(parsed.file)
     files_is_selection = files_present and disposition in ("reject", "clarify", "defer")
     selection_sources = [
@@ -607,20 +650,7 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
     )
 
 
-def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
-    parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
-    disposition = parsed.disposition
-    if disposition in ("reject", "clarify", "defer"):
-        return workflow.decline_item(
-            parsed.repo,
-            parsed.pr_number,
-            item_id=parsed.item_id,
-            agent_id=parsed.agent_id,
-            resolution=disposition,
-            why=parsed.why,
-            publish=parsed.publish,
-            now=now_dt,
-        )
+def _require_single_fix_args(parsed: argparse.Namespace) -> None:
     missing = [
         flag
         for flag, value in (
@@ -637,6 +667,47 @@ def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: date
             waiting_on="fast_fix_input",
             exit_code=2,
             message=f"agent resolve {parsed.item_id} requires {', '.join(missing)} for a single-thread fix.",
+        )
+
+
+def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
+    disposition = parsed.disposition
+    # Validate every input before --closed reopens the thread, so a rejected call
+    # leaves no state behind.
+    if disposition in ("reject", "clarify", "defer"):
+        workflow.validate_decline_input(item_id=parsed.item_id, resolution=disposition, why=parsed.why)
+    else:
+        _require_single_fix_args(parsed)
+        if parsed.closed:
+            # The same checks fast_fix_item runs, so new required inputs are covered too.
+            workflow.validate_fast_fix_inputs(
+                parsed.repo,
+                parsed.pr_number,
+                item_id=parsed.item_id,
+                files=_parse_agent_files(parsed.files, parsed.file),
+                validation_commands=_parse_agent_validation(parsed.validation),
+                commit_hash=parsed.commit,
+                summary=parsed.summary,
+                why=parsed.why,
+                severity=parsed.severity,
+                severity_note=parsed.severity_note,
+                review_priority=parsed.review_priority,
+            )
+    if parsed.closed:
+        workflow.reopen_resolved_thread_for_reply(parsed.repo, parsed.pr_number, item_id=parsed.item_id)
+        # A reopened thread must be published now: the next refresh closes it again.
+        parsed.publish = True
+    if disposition in ("reject", "clarify", "defer"):
+        return workflow.decline_item(
+            parsed.repo,
+            parsed.pr_number,
+            item_id=parsed.item_id,
+            agent_id=parsed.agent_id,
+            resolution=disposition,
+            why=parsed.why,
+            publish=parsed.publish,
+            now=now_dt,
         )
     shared_kwargs = {
         "repo": parsed.repo,
@@ -693,6 +764,9 @@ def _resolve_viewer_login() -> str:
 
 
 def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
+    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent evidence", repo, passthrough)
+    if near_miss_rc is not None:
+        return near_miss_rc
     parser = argparse.ArgumentParser(prog="gh-address-cr agent evidence")
     parser.add_argument("subcommand", choices=["add", "list"])
     parser.add_argument("repo")
@@ -722,6 +796,24 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
             now_dt = None
             if parsed.now:
                 now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+            validation_payload = None
+            if parsed.validation or parsed.commit or parsed.files or parsed.file:
+                # Validation arguments next to --reply-url used to be dropped silently.
+                # Record them first: an incomplete set is rejected before anything is
+                # written, and both records are idempotent, so a corrected rerun is safe.
+                validation_payload = workflow.record_validation_evidence(
+                    parsed.repo,
+                    parsed.pr_number,
+                    item_id=parsed.item_id,
+                    thread_id=parsed.thread_id,
+                    commit_hash=parsed.commit or "",
+                    files=_parse_agent_files(parsed.files, parsed.file),
+                    validation_commands=_parse_agent_validation(parsed.validation),
+                    summary=parsed.summary,
+                    why=parsed.why,
+                    agent_id=parsed.agent_id,
+                    now=now_dt,
+                )
             author_login = parsed.author_login or _resolve_viewer_login()
             payload = workflow.record_reply_evidence(
                 parsed.repo,
@@ -733,6 +825,15 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
                 agent_id=parsed.agent_id,
                 now=now_dt,
             )
+            if validation_payload is not None:
+                payload = {
+                    "status": "REPLY_AND_VALIDATION_EVIDENCE_RECORDED",
+                    "repo": payload["repo"],
+                    "pr_number": payload["pr_number"],
+                    "item_id": payload["item_id"],
+                    "reply_evidence": payload,
+                    "validation_evidence": validation_payload,
+                }
         elif not parsed.name and (parsed.item_id or parsed.thread_id) and parsed.validation:
             now_dt = None
             if parsed.now:

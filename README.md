@@ -136,7 +136,16 @@ Completion means the latest final gate reports:
 - no blocking session items
 - terminal GitHub threads have durable reply evidence
 - a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
-- a telemetry coverage label and structured efficiency report path
+- a telemetry coverage label and structured efficiency report path; a command
+  that exits 5 because the PR still needs work (for example `address` or
+  `final-gate` blocking on an open thread) counts in `needs_action_count`, not as
+  a failure in `success_rate` or the inefficiency flags
+- the efficiency report's `runtime` (`version`, `origin` of `package`, `editable`,
+  `vcs`, or `local` for another non-editable local install, and the `commit` for
+  a git install), so reports from a development
+  checkout and from a release can be compared with
+  `python3 scripts/compare_telemetry_by_runtime.py` (add `--baseline` and
+  `--candidate` runtime labels to fail on a success-rate drop or new flag kinds)
 - an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
   aggregates exclude inferred observation times, and report failures never
   change the gate verdict or exit code
@@ -468,7 +477,10 @@ Stable machine summary fields:
 - `waiting_on`
 - `next_action`
 - `primary_action` (`kind`, `command`, `item_id`, `why_now`, `requires_human`)
-- `context` (bounded PR, check, changed-file, and selected-item context)
+- `context` (bounded PR, check, changed-file, and selected-item context). The
+  selected item's `comment_excerpt` holds at most 500 characters; when it is cut,
+  `comment_excerpt_truncated` is `true` and `full_comment_command` names the
+  `threads` command whose rows carry the full review body
 - `commands`
 - `exit_code`
 
@@ -484,7 +496,10 @@ query failures never fall back to potentially stale cached state.
 
 For the shortest repeatable loop, run `gh-address-cr address`, execute the one
 `primary_action.command` when it is non-null, and run `gh-address-cr address`
-again. The action vocabulary is deliberately small: `claim`, `resolve`,
+again. Before executing, fill any evidence placeholders (`<sha>`, `<paths>`,
+`<text>`, `<cmd=passed>`) from the fix you made; an unresolved review thread is
+recommended as an item-scoped `agent resolve`, which records classification
+itself. The action vocabulary is deliberately small: `claim`, `resolve`,
 `publish`, `wait`, `run_final_gate`, `repair_environment`, and `complete`.
 `command=null` is valid whenever the next step needs new human/agent evidence,
 waiting, environment repair, or represents completion; read `why_now` rather

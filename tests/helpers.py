@@ -106,6 +106,31 @@ class PythonScriptTestCase(unittest.TestCase):
             os.environ["GH_ADDRESS_CR_STATE_DIR"] = self.original_process_state_dir
         self.temp_dir.cleanup()
 
+    def install_fake_pr_commits(self, *shas):
+        """Put a `gh` on PATH that lists these SHAs as the PR's commits and fails every other call.
+
+        Fix submissions check the cited commit against the PR's commits (Spec 039 R3);
+        this keeps tests that submit fixes off the real GitHub API.
+        """
+        rows = [{"sha": sha} for sha in (shas or ("abc123".ljust(40, "0"),))]
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, re, sys",
+                    "args = sys.argv[1:]",
+                    "if len(args) == 2 and args[0] == 'api' and re.match(r'repos/[^/]+/[^/]+/pulls/\\d+/commits\\?', args[1]):",
+                    f"    print(json.dumps({rows!r} if args[1].endswith('page=1') else []))",
+                    "    raise SystemExit(0)",
+                    "raise SystemExit(f'unhandled gh args: {args}')",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
     def run_cmd(self, cmd, check=False, stdin=None):
         cmd = list(cmd)
         in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"

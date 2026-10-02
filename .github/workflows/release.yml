@@ -92,6 +92,16 @@ jobs:
             echo "version=0.0.0.dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Guard against squash-merged release promotion
+        if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'false'
+        run: |
+          subject="$(git log -1 --format=%s)"
+          parents="$(git log -1 --format=%p | wc -w)"
+          if [ "$parents" -eq 1 ] && printf '%s' "$subject" | grep -q '^chore(release): promote'; then
+            echo "::error::Release promotion was squash-merged, so semantic-release saw only a chore commit and published nothing. Re-promote develop -> main with a merge commit."
+            exit 1
+          fi
+
       - name: Setup Python
         if: steps.package-version.outputs.released == 'true'
         uses: actions/setup-python@v5

@@ -118,6 +118,100 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
 
         self.assertIn("validation_evidence_recorded", [r.get("event_type") for r in self.ledger_rows()])
 
+    REPLY_URL = "https://github.com/octo/example/pull/77#discussion_r1"
+
+    def test_reply_url_with_validation_records_both_and_clears_gate(self):
+        """One call reconciles a thread closed out-of-band (app-store-creative#8, ACT-03)."""
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self._add_validation(
+            "--validation", "python3 -m unittest=passed",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "REPLY_AND_VALIDATION_EVIDENCE_RECORDED")
+        self.assertEqual(payload["validation_evidence"]["status"], "VALIDATION_EVIDENCE_RECORDED")
+        self.assertEqual(payload["reply_evidence"]["status"], "REPLY_EVIDENCE_RECORDED")
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertTrue(item.get("validation_evidence"))
+        self.assertEqual(item["reply_evidence"]["reply_url"], self.REPLY_URL)
+        blocking = [s for s in generate_logic_validation_signals(self.load_session()) if s.gate_effect == "blocking"]
+        self.assertEqual(blocking, [])
+
+    def test_reply_url_with_incomplete_validation_records_nothing(self):
+        """Validation arguments next to --reply-url are never dropped silently."""
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self.run_runtime_module(
+            "agent", "evidence", "add", self.repo, self.pr,
+            "--item-id", "github-thread:PRRT_recon",
+            "--commit", "abc1234",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "MISSING_VALIDATION_FILES")
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertNotEqual(
+            (item.get("reply_evidence") or {}).get("reply_url"),
+            self.REPLY_URL,
+            "nothing may be recorded when part of the input is rejected",
+        )
+        self.assertFalse(item.get("validation_evidence"))
+
+    def test_reply_url_alone_keeps_recording_reply_evidence_only(self):
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self.run_runtime_module(
+            "agent", "evidence", "add", self.repo, self.pr,
+            "--item-id", "github-thread:PRRT_recon",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "REPLY_EVIDENCE_RECORDED")
+
+    def test_resolve_on_a_thread_closed_remotely_leaves_no_classification(self):
+        """`agent resolve` used to record `decision: fix` and then fail with NO_ELIGIBLE_ITEM,
+        which made the gate demand validation evidence (app-store-creative#8, ACT-04)."""
+        closed_unclassified = open_item(
+            "github-thread:PRRT_recon",
+            item_kind="github_thread",
+            source="github",
+            path="src/recon.py",
+            body="Unused import.",
+            state="closed",
+            status="CLOSED",
+            thread_id="PRRT_recon",
+        )
+        self.write_session(items=[closed_unclassified])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_recon",
+            "--commit", "abc1234",
+            "--files", "src/recon.py",
+            "--summary", "Removed the import.",
+            "--why", "It was unused.",
+            "--validation", "python3 -m unittest=passed",
+        )
+
+        self.assertEqual(result.returncode, 4, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reason_code"], "THREAD_ALREADY_RESOLVED")
+        # The runtime posts the missing reply itself (Spec 039 Q2) instead of asking for an out-of-band one.
+        self.assertIn(
+            f"gh-address-cr agent resolve {self.repo} {self.pr} github-thread:PRRT_recon --closed",
+            payload["next_action"],
+        )
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertNotIn("decision", item)
+        self.assertNotIn("classification_evidence", item)
+
     def test_failing_validation_result_is_rejected(self):
         """A failing verdict must not satisfy the gate (#117 carried forward)."""
         self.write_session(items=[_resolved_fix_thread()])

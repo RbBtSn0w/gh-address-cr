@@ -376,6 +376,10 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
 
 
 class CrossAxisCompositionCLITest(PythonScriptTestCase):
+    def setUp(self):
+        super().setUp()
+        self.install_fake_pr_commits()
+
     """T017: the full cross-axis product — every valid cell resolves, every
     same-axis conflict / incoherent-evidence cell yields one directive
     reason code."""

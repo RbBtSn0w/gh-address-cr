@@ -112,6 +112,18 @@ jobs:
           run_domain_smoke gh-address-cr agent orchestrate status owner/repo 123
           run_domain_smoke gh-address-cr final-gate owner/repo 123
 
+      - name: Installed wheel agent journey
+        # Spec 039 L2: run the agent journey contract against the built wheel, not
+        # src/, so packaging drift (missing package data, entry points) fails here.
+        run: |
+          . .venv-package-smoke/bin/activate
+          python - <<'PY'
+          import gh_address_cr
+
+          assert "site-packages" in gh_address_cr.__file__, gh_address_cr.__file__
+          PY
+          python -m unittest tests.contract.test_agent_journey_contract
+
   pr-dev-preview:
     name: Publish PR Dev Preview
     needs: lint-and-test

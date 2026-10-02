@@ -32,6 +32,7 @@ from gh_address_cr.core.agent_protocol_validation import (
     normalize_validation_command_records,
     record_validation_command_telemetry,
 )
+from gh_address_cr.core.commit_membership import cited_commit, commit_in_pr
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_claimable_github_thread, is_stale_github_thread_item
 from gh_address_cr.core.leases import LeaseSubmissionError, accept_lease, submit_lease
@@ -608,6 +609,13 @@ def _response_rejection_message(payload_name: str, reason_code: str, *, repo: st
             'Add "resolution": "fix|clarify|defer|reject" to the ActionResponse JSON and rerun '
             f"`gh-address-cr agent submit {repo} {pr_number} --input <response.json>`."
         )
+    if reason_code == protocol_codes.COMMIT_NOT_IN_PR:
+        return (
+            f"{payload_name} rejected: COMMIT_NOT_IN_PR. The cited commit is not one of this pull request's "
+            "commits. Push the fix to the PR branch, then resubmit citing that commit "
+            f"(`gh-address-cr agent resolve {repo} {pr_number} <item_id> --commit <sha> ...` or "
+            '`"fix_reply": {"commit_hash": "<sha>"}`).'
+        )
     return f"{payload_name} rejected: {reason_code}"
 
 
@@ -638,6 +646,41 @@ def _validate_fix_response(response: dict[str, Any], item: dict[str, Any]) -> st
         if submit_error:
             return submit_error
     return None
+
+
+def verify_cited_commit_in_pr(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    prepared: dict[str, Any],
+    response: dict[str, Any],
+    *,
+    github_client: Any | None,
+    ledger: EvidenceLedger,
+    rejected_status: str,
+) -> None:
+    """Reject a fix that cites a commit outside the PR while it can still be resubmitted.
+
+    Once a response is accepted its commit can no longer be changed, so an explicit
+    commit is checked here, before acceptance. A fix without one is checked at
+    publish time, where the local-HEAD fallback is recomputed on every run.
+    """
+    commit = cited_commit(response)
+    if not commit:
+        return
+    if github_client is None:
+        github_client = GitHubClient()
+    if commit_in_pr(commit, github_client.list_pr_commit_shas(repo, str(pr_number))):
+        return
+    raise_response_rejected(
+        session,
+        ledger,
+        response,
+        protocol_codes.COMMIT_NOT_IN_PR,
+        status=rejected_status,
+        item_id=str(prepared["item_id"]),
+        lease_id=str(prepared["lease_id"]),
+    )
 
 
 def validate_response(response: dict[str, Any], item: dict[str, Any]) -> str | None:

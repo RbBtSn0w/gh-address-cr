@@ -26,6 +26,56 @@ def _log_telemetry_failure(action: str, exc: BaseException) -> None:
         sys.stderr.write(f"Telemetry {action} failed: {type(exc).__name__}: {exc}\n")
 
 
+NEEDS_ACTION_EXIT_CODE = 5
+# Reason codes that mean "the command worked and the PR still needs work". Exit 5
+# is shared with errors and rejected agent input, so only these are needs-action
+# (Spec 039 R1, issue #307); anything else non-zero stays a failure.
+NEEDS_ACTION_REASON_CODES = frozenset(
+    {
+        "WAITING_FOR_SIMPLE_ADDRESS",
+        "BLOCKING_ITEMS_REMAIN",
+        "WAITING_FOR_FIX",
+        "AUTO_SIMPLE_NOT_ELIGIBLE",
+        "FINAL_GATE_UNRESOLVED_REMOTE_THREADS",
+        "FINAL_GATE_MISSING_REPLY_EVIDENCE",
+        "FINAL_GATE_PENDING_CURRENT_LOGIN_REVIEW",
+        "FINAL_GATE_BLOCKING_GITHUB_ITEMS",
+        "FINAL_GATE_BLOCKING_LOCAL_ITEMS",
+        "FINAL_GATE_MISSING_VALIDATION_EVIDENCE",
+        "FINAL_GATE_PR_CHECKS_NOT_GREEN",
+        "FINAL_GATE_REQUIRED_CHECKS_MISSING",
+        "FINAL_GATE_LOGIC_VALIDATION_BLOCKING",
+        "FINAL_GATE_STALE_REVISION_EVIDENCE",
+        "FINAL_GATE_UNBOUND_REVISION_EVIDENCE",
+    }
+)
+
+_COMMAND_REASON_CODE: ContextVar[str | None] = ContextVar("gh_address_cr_command_reason_code", default=None)
+
+
+def classify_command_outcome(exit_code: int, reason_code: str | None) -> str:
+    if exit_code == 0:
+        return "success"
+    if exit_code == 124:
+        return "timeout"
+    if exit_code == NEEDS_ACTION_EXIT_CODE and reason_code in NEEDS_ACTION_REASON_CODES:
+        return "needs_action"
+    return "failure"
+
+
+def note_command_reason_code(reason_code: str | None) -> None:
+    """Record the reason code the current command emitted, for its outcome metric."""
+    _COMMAND_REASON_CODE.set(reason_code)
+
+
+def reset_command_reason_code() -> None:
+    _COMMAND_REASON_CODE.set(None)
+
+
+def command_reason_code() -> str | None:
+    return _COMMAND_REASON_CODE.get()
+
+
 _ACTIVE_SESSION_TELEMETRY: ContextVar["SessionTelemetry | None"] = ContextVar(
     "gh_address_cr_active_session_telemetry",
     default=None,
@@ -138,6 +188,7 @@ class SessionTelemetry:
                 execution_id=str(payload.get("execution_id") or ""),
                 persistence_ms=_optional_float(payload.get("persistence_ms")),
                 lock_wait_ms=_optional_float(payload.get("lock_wait_ms")),
+                outcome=_optional_outcome(payload.get("outcome")),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -152,10 +203,12 @@ class SessionTelemetry:
         execution_id: str | None = None,
         persistence_ms: float | None = None,
         lock_wait_ms: float | None = None,
+        outcome: str | None = None,
     ) -> None:
         is_retry = False
         last_metric = self._last_metric()
-        if last_metric is not None and last_metric.command == command and not last_metric.is_success:
+        # Rerunning `address` after a needs-action block is the documented loop, not a retry.
+        if last_metric is not None and last_metric.command == command and last_metric.counts_as_failure:
             is_retry = True
 
         metric = ExecutionMetric(
@@ -168,6 +221,7 @@ class SessionTelemetry:
             execution_id=execution_id if execution_id is not None else uuid.uuid4().hex,
             persistence_ms=persistence_ms,
             lock_wait_ms=lock_wait_ms,
+            outcome=outcome,
         )
         persisted = self._persist_metric(metric)
         # With history not yet loaded, a persisted line arrives with it later; keep the
@@ -287,6 +341,10 @@ class SessionTelemetry:
             summary += "\n> ⚠️ **Inefficiencies Detected**:\n"
             summary += "\n".join(f"> - {flag}" for flag in report.flagged_inefficiencies)
         return summary
+
+
+def _optional_outcome(value: Any) -> str | None:
+    return value if value in {"success", "needs_action", "timeout", "failure"} else None
 
 
 def _optional_float(value: Any) -> float | None:

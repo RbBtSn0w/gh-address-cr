@@ -10,6 +10,7 @@ from typing import Any
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.runtime_build import runtime_build
 from gh_address_cr.core.telemetry_adapters import (
     CodexHostJsonAdapter,
     GenericAgentJsonlAdapter,
@@ -29,6 +30,7 @@ from gh_address_cr.core.telemetry_external_events import (
 )
 from gh_address_cr.core.telemetry_models import (
     EfficiencyReportPayload,
+    ExecutionMetric,
     ExternalTelemetryEvent,
     TelemetryParseResult,
 )
@@ -467,7 +469,9 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         coverage_diagnostics.extend(import_diagnostics)
     coverage_label = _coverage_label(runtime_events, external_events, coverage_diagnostics)
     total_events = len(events)
-    known_status_events = [event for event in events if event.status != "unknown"]
+    # needs_action is counted on its own: the command worked and the PR still needs work.
+    needs_action_count = sum(1 for event in events if event.status == "needs_action")
+    known_status_events = [event for event in events if event.status not in {"unknown", "needs_action"}]
     success_count = sum(1 for event in known_status_events if event.status == "success")
     success_rate = (success_count / len(known_status_events)) * 100.0 if known_status_events else 0.0
     total_duration = sum(event.duration_ms for event in events)
@@ -489,6 +493,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         "sources": sources,
         "total_events": total_events,
         "success_rate": success_rate,
+        "needs_action_count": needs_action_count,
         "total_observed_duration_ms": total_duration,
         "duration_observed": duration_observed,
         "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
@@ -511,6 +516,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         "confidence": _confidence_for_coverage(coverage_label),
         "report_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "report_artifact": str(report_path),
+        "runtime": runtime_build(),
     }
     try:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -748,6 +754,10 @@ def _has_unrecovered_import_diagnostics(paths: core_paths.SessionPaths) -> bool:
     return any(unrecovered_by_source.values())
 
 
+def _runtime_event_status(metric: ExecutionMetric) -> str:
+    return metric.effective_outcome
+
+
 def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEvent]:
     tracker = SessionTelemetry()
     tracker.configure_file(paths.workspace_dir / "telemetry.jsonl")
@@ -767,7 +777,7 @@ def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEve
             event_id=event_id,
             kind="command",
             operation=_safe_runtime_operation(metric.command),
-            status="success" if metric.is_success else ("timeout" if metric.exit_code == 124 else "failure"),
+            status=_runtime_event_status(metric),
             duration_ms=max(0, int(metric.duration * 1000)),
             started_at=datetime.fromtimestamp(metric.start_time, timezone.utc).isoformat().replace("+00:00", "Z"),
             ended_at=datetime.fromtimestamp(metric.end_time, timezone.utc).isoformat().replace("+00:00", "Z"),

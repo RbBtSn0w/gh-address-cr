@@ -29,6 +29,8 @@ from gh_address_cr.core import session as session_store
 from gh_address_cr.core import stack_gate as core_stack_gate
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.telemetry_reporting import error_prone_flag
+from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 from gh_address_cr.github.client import GitHubClient
 
 
@@ -219,6 +221,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         else:
             print(message, file=sys.stderr)
         return 5
+    note_command_reason_code(stack_result.blocking_reason_code)
     stack_payload = stack_result.to_machine_summary()
     stack_artifact, stack_telemetry = write_stack_final_gate_artifacts(
         parsed.repo,
@@ -325,6 +328,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             print(message, file=sys.stderr)
         return 5
 
+    note_command_reason_code(result.reason_code)
     telemetry_report: EfficiencyReportPayload | None
     summary_path, telemetry_report = write_native_final_gate_artifacts(
         parsed.repo, parsed.pr_number, parsed.audit_id, result
@@ -899,19 +903,30 @@ def _issue_summary(telemetry_report: EfficiencyReportPayload, *, success_rate: f
     parts: list[str] = []
     if total_events > 0 and success_rate < 100.0:
         parts.append(f"success {success_rate:.1f}%")
-    flags = _string_list(telemetry_report.get("inefficiency_flags"))
-    if flags:
-        parts.append("flags: " + "; ".join(flags))
+    operation_parts: list[str] = []
+    # Each error-prone row also yields an inefficiency flag; the compact form below
+    # replaces that flag so the line names every operation once (Spec 039 R4).
+    covered_flags: set[str] = set()
     error_rows = telemetry_report.get("error_prone_operations")
     if isinstance(error_rows, list):
         for row in error_rows[:2]:
             if not isinstance(row, dict):
                 continue
-            operation = str(row.get("operation") or "unknown")
-            failures = _safe_int(row.get("failures"), default=0)
-            timeouts = _safe_int(row.get("timeouts"), default=0)
-            retries = _safe_int(row.get("retries"), default=0)
-            parts.append(f"{operation} failures={failures} timeouts={timeouts} retries={retries}")
+            normalized = {
+                "operation": str(row.get("operation") or "unknown"),
+                "failures": _safe_int(row.get("failures"), default=0),
+                "timeouts": _safe_int(row.get("timeouts"), default=0),
+                "retries": _safe_int(row.get("retries"), default=0),
+            }
+            covered_flags.add(error_prone_flag(normalized))
+            operation_parts.append(
+                f"{normalized['operation']} failures={normalized['failures']} "
+                f"timeouts={normalized['timeouts']} retries={normalized['retries']}"
+            )
+    flags = [flag for flag in _string_list(telemetry_report.get("inefficiency_flags")) if flag not in covered_flags]
+    if flags:
+        parts.append("flags: " + "; ".join(flags))
+    parts.extend(operation_parts)
     diagnostics = _string_list(telemetry_report.get("diagnostics"))
     if diagnostics:
         parts.append("diagnostics: " + "; ".join(diagnostics[:2]))
@@ -1173,6 +1188,7 @@ def emit_final_gate_result(
         print("Final gate BLOCKED")
         print("\n== Gate Result ==")
         print(f"Gate FAILED: {final_gate_failure_message(result)}")
+        print(f"Next action: {result.to_machine_summary()['next_action']}")
     print()
     print("== Machine Gate Diagnostics ==")
     for key in core_gate.COUNT_KEYS:
@@ -1381,6 +1397,8 @@ def final_gate_failure_message(result: core_gate.GateResult) -> str:
         )
     if result.counts["pr_checks_not_green_count"]:
         reasons.append(f"{result.counts['pr_checks_not_green_count']} non-green PR check(s)")
+    if result.counts["pr_checks_missing_count"]:
+        reasons.append("no PR checks to satisfy the checks requirement")
     return " and ".join(reasons) or "gate checks reported failure"
 
 

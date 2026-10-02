@@ -38,6 +38,7 @@ from gh_address_cr.core.agent_protocol_submission import (
     raise_response_rejected,
     refresh_stack_context_for_request,
     response_skeleton_for_request,
+    verify_cited_commit_in_pr,
     verify_request_revision_binding,
 )
 from gh_address_cr.core.errors import WorkflowError
@@ -60,13 +61,23 @@ _BATCH_CLASSIFICATION_NOTE = "Batch fix skeleton requested by agent next --batch
 
 
 class _CoherentStackContextClient:
-    """Lazily reuse one stack observation for an atomic batch submission."""
+    """Lazily reuse one stack observation, and one PR commit list, for an atomic batch submission."""
 
     def __init__(self, delegate: Any | None):
         self.delegate = delegate
         self._attempted = False
         self._context: Any | None = None
         self._error: Exception | None = None
+        self._commit_shas: list[str] | None = None
+
+    def list_pr_commit_shas(self, repo: str, pr_number: str) -> list[str]:
+        if self._commit_shas is None:
+            if self.delegate is None:
+                from gh_address_cr.github.client import GitHubClient
+
+                self.delegate = GitHubClient()
+            self._commit_shas = list(self.delegate.list_pr_commit_shas(repo, pr_number))
+        return self._commit_shas
 
     def get_stack_context(self, repo: str, pr_number: str) -> Any:
         if not self._attempted:
@@ -746,6 +757,16 @@ def submit_batch_action_response(
             )
             if binding is not None:
                 response["_runtime_revision_binding"] = binding
+            verify_cited_commit_in_pr(
+                repo,
+                pr_number,
+                session,
+                prepared,
+                response,
+                github_client=stack_context_client,
+                ledger=ledger,
+                rejected_status=protocol_codes.BATCH_ACTION_REJECTED,
+            )
 
         telemetry_seen: set[tuple[str, str, str, str, str, str]] = set()
         accepted = [

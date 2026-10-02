@@ -72,8 +72,21 @@ jobs:
           if ! gh pr merge "$pr" --auto --merge 2>&1 | tee /tmp/merge.log; then
             if grep -Eqi "already|pull request is already" /tmp/merge.log; then
               echo "Auto-merge already active on PR #${pr}."
-            elif grep -Eqi "clean status" /tmp/merge.log; then
-              echo "PR #${pr} is already in clean status (no pending required checks). Merging directly..."
+            elif grep -Eqi "clean status|protected branch rules" /tmp/merge.log; then
+              # main has no required status checks, so GitHub refuses auto-merge.
+              # Wait for the PR checks ourselves, then merge with a merge commit
+              # (never squash: semantic-release needs the feat/fix commits).
+              echo "Auto-merge unavailable on PR #${pr}. Waiting for checks, then merging directly..."
+              # gh pr checks exits 1 both for failed checks and for "no checks
+              # reported" (e.g. a PR opened with GITHUB_TOKEN triggers no CI), so
+              # only the latter may proceed to the merge.
+              checks_rc=0
+              checks_out="$(gh pr checks "$pr" --watch --interval 15 2>&1)" || checks_rc=$?
+              printf '%s\n' "$checks_out"
+              if [ "$checks_rc" -ne 0 ] && ! printf '%s' "$checks_out" | grep -qi "no checks reported"; then
+                echo "::error::Checks on PR #${pr} did not pass; refusing to merge." >&2
+                exit 1
+              fi
               gh pr merge "$pr" --merge
             else
               echo "Failed to enable auto-merge on PR #${pr}." >&2

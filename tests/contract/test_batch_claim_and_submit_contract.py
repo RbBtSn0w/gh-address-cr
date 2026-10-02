@@ -108,6 +108,14 @@ class BatchClaimRollbackTest(unittest.TestCase):
 
 
 class BatchPartialAcceptanceRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        from gh_address_cr.github.client import GitHubClient
+
+        # The fixture PR contains the commit the batch cites, without calling GitHub.
+        commits = patch.object(GitHubClient, "list_pr_commit_shas", return_value=["abc123".ljust(40, "0")])
+        commits.start()
+        self.addCleanup(commits.stop)
+
     def _claim_and_fill(self, repo, pr_number):
         from gh_address_cr.core import agent_batch
         from gh_address_cr.core.session import SessionManager
@@ -169,6 +177,24 @@ class BatchPartialAcceptanceRecoveryTest(unittest.TestCase):
                 self.assertNotIn("no partial evidence was accepted", message)
                 self.assertEqual(ctx.exception.payload["accepted_item_ids"], ["github-thread:T1"])
                 self.assertEqual(ctx.exception.payload["recovery_action"], "regenerate_batch_response_skeleton")
+
+    def test_batch_citing_a_commit_outside_the_pr_is_rejected_before_any_row_is_accepted(self):
+        # Spec 039 R3: a commit cannot be changed after acceptance, so it is checked first.
+        from gh_address_cr.core import agent_batch
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.github.client import GitHubClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager, skeleton_path = self._claim_and_fill("owner/repo", "906")
+
+                other_commits = patch.object(GitHubClient, "list_pr_commit_shas", return_value=["f" * 40])
+                with other_commits, self.assertRaises(WorkflowError) as ctx:
+                    agent_batch.submit_batch_action_response("owner/repo", "906", batch_path=skeleton_path)
+
+                self.assertEqual(ctx.exception.reason_code, "COMMIT_NOT_IN_PR")
+                statuses = sorted(lease["status"] for lease in manager.load()["leases"].values())
+                self.assertNotIn("accepted", statuses)
 
     def test_resubmitting_the_same_file_names_the_accepted_rows_and_the_recovery_command(self):
         # This is the rejection the agent actually sees. It fails while *preparing* the

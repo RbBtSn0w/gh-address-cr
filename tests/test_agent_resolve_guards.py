@@ -31,7 +31,7 @@ class TrivialResolveGuardTest(unittest.TestCase):
         base = dict(
             repo="o/r", pr_number="1", item_id=None, agent_id="a", commit=None, files=None, file=[],
             summary=None, why=None, severity=None, severity_note=None, review_priority=None, validation=[],
-            input=None, stale=False, disposition=None, publish=False, now=None,
+            input=None, stale=False, closed=False, disposition=None, publish=False, now=None,
         )
         base.update(kw)
         return argparse.Namespace(**base)

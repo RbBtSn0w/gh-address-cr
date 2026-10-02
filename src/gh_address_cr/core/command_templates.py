@@ -50,6 +50,11 @@ def threads(repo: str, pr_number: str) -> str:
     return shell_command("gh-address-cr", "threads", repo, pr_number, "--lean")
 
 
+def threads_full(repo: str, pr_number: str) -> str:
+    """Thread rows with full review bodies (the lean form omits them)."""
+    return shell_command("gh-address-cr", "threads", repo, pr_number)
+
+
 def classify(repo: str, pr_number: str) -> str:
     return shell_command(
         "gh-address-cr",
@@ -129,13 +134,17 @@ def submit(repo: str, pr_number: str, *, input_path: str = "response.json") -> s
 
 
 def resolve_single(repo: str, pr_number: str) -> str:
+    return resolve_item(repo, pr_number, "<item_id>")
+
+
+def resolve_item(repo: str, pr_number: str, item_id: str) -> str:
     return shell_command(
         "gh-address-cr",
         "agent",
         "resolve",
         repo,
         pr_number,
-        "<item_id>",
+        item_id,
         "--commit",
         "<sha>",
         "--files",
@@ -237,6 +246,44 @@ def evidence_add_reply(repo: str, pr_number: str, *, item_id: str = "<item_id>")
         "<reply_url>",
         "--author-login",
         "<login>",
+    )
+
+
+def resolve_closed_fix(repo: str, pr_number: str, item_id: str) -> str:
+    return shell_command(
+        "gh-address-cr", "agent", "resolve", repo, pr_number, item_id, "--closed",
+        "--commit", "<sha>", "--files", "<paths>", "--summary", "<text>", "--why", "<text>",
+        "--validation", "<cmd=passed>",
+    )
+
+
+def resolve_closed_clarify(repo: str, pr_number: str, item_id: str) -> str:
+    return shell_command(
+        "gh-address-cr", "agent", "resolve", repo, pr_number, item_id, "--closed",
+        "--disposition", "clarify", "--why", "<text>",
+    )
+
+
+def evidence_add_reply_with_validation(repo: str, pr_number: str, *, item_id: str) -> str:
+    return shell_command(
+        "gh-address-cr",
+        "agent",
+        "evidence",
+        "add",
+        repo,
+        pr_number,
+        "--item-id",
+        item_id,
+        "--reply-url",
+        "<reply_url>",
+        "--author-login",
+        "<login>",
+        "--commit",
+        "<sha>",
+        "--files",
+        "<paths>",
+        "--validation",
+        "<cmd=passed>",
     )
 
 

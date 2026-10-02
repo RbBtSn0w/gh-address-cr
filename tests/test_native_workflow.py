@@ -11,6 +11,17 @@ from gh_address_cr.core.runtime_kernel.stack import project_stack_context
 
 
 class UnstackedGitHubClient:
+    # The fixture PR's commits; every commit these tests cite or hydrate is one of them.
+    PR_COMMIT_SHAS = (
+        "a" * 40,
+        "abc1234".ljust(40, "0"),
+        "abcdef1234567890".ljust(40, "0"),
+        "b35d5ef24ea2d481ff29081d3927db2c2c6e7e7d",
+    )
+
+    def list_pr_commit_shas(self, repo, pr_number):
+        return list(self.PR_COMMIT_SHAS)
+
     def get_stack_context(self, repo, pr_number):
         return project_stack_context(
             {
@@ -313,7 +324,7 @@ class NativeWorkflowTests(unittest.TestCase):
         pr_number = "102"
         original = project_stack_context(stack_observation(selected_pr_number=pr_number))
 
-        class MutatingAfterFirstReadClient:
+        class MutatingAfterFirstReadClient(UnstackedGitHubClient):
             calls = 0
 
             def get_stack_context(self, repo, pr_number):
