@@ -1,3 +1,30 @@
+## [3.16.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.3...v3.16.0) (2026-10-02)
+
+### Features
+
+* add CR lifecycle decision metrics ([#300](https://github.com/RbBtSn0w/gh-address-cr/issues/300)) ([1c63582](https://github.com/RbBtSn0w/gh-address-cr/commit/1c635827aba35c515e1135670a791b3ac99c2159))
+* add crash-consistent outbox recovery ([#290](https://github.com/RbBtSn0w/gh-address-cr/issues/290)) ([87ba811](https://github.com/RbBtSn0w/gh-address-cr/commit/87ba811e8ae797958c43fd22a0911a3447581484))
+* add transactional runtime store ([#288](https://github.com/RbBtSn0w/gh-address-cr/issues/288)) ([c12cdad](https://github.com/RbBtSn0w/gh-address-cr/commit/c12cdadbe920e1ac277f10c5f177ce81bcd09929))
+* converge orchestrator lease authority ([#292](https://github.com/RbBtSn0w/gh-address-cr/issues/292)) ([dc7fe0f](https://github.com/RbBtSn0w/gh-address-cr/commit/dc7fe0f381ccfa7a64d57bc74206f8d34e4f4d20))
+* **otel:** default dev and preview builds to the development gateway ([#282](https://github.com/RbBtSn0w/gh-address-cr/issues/282)) ([d779df1](https://github.com/RbBtSn0w/gh-address-cr/commit/d779df185d2389ad74109eefd00e88b8af658725))
+* **skill:** converge guidance on the 3.16 runtime contract ([#301](https://github.com/RbBtSn0w/gh-address-cr/issues/301)) ([f776528](https://github.com/RbBtSn0w/gh-address-cr/commit/f776528d473793456891305a985f7543ced552e6))
+
+### Bug Fixes
+
+* **agent:** let a fixer re-enter its own active lease instead of locking it out ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#279](https://github.com/RbBtSn0w/gh-address-cr/issues/279)) ([d7e5010](https://github.com/RbBtSn0w/gh-address-cr/commit/d7e50105808aabaf474061612991a192dcf27d9f))
+* **agent:** make the lease recovery surface name a recovery step ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#277](https://github.com/RbBtSn0w/gh-address-cr/issues/277)) ([4ca0080](https://github.com/RbBtSn0w/gh-address-cr/commit/4ca0080c34a4f499ca31073a2af0ce9eeca7b28a))
+* **agent:** publish single-thread reject/clarify without orphaning a lease ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#274](https://github.com/RbBtSn0w/gh-address-cr/issues/274)) ([94006a5](https://github.com/RbBtSn0w/gh-address-cr/commit/94006a5ea072b4a8736003d507c103eeb25589a6))
+* **agent:** record request_issued when re-entry rebuilds a lost ActionRequest ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#283](https://github.com/RbBtSn0w/gh-address-cr/issues/283)) ([54d363d](https://github.com/RbBtSn0w/gh-address-cr/commit/54d363d2421d19b53390562ac07a1cde15e487f1))
+* **agent:** release a one-shot lease when its claiming action is rejected ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#275](https://github.com/RbBtSn0w/gh-address-cr/issues/275)) ([19ed830](https://github.com/RbBtSn0w/gh-address-cr/commit/19ed830ce954e8d910d4dc1435ad6dc75ec73258))
+* **agent:** stop batch recovery text from denying partially accepted rows ([#273](https://github.com/RbBtSn0w/gh-address-cr/issues/273)) ([#278](https://github.com/RbBtSn0w/gh-address-cr/issues/278)) ([290d722](https://github.com/RbBtSn0w/gh-address-cr/commit/290d722b169086598da045be181487208a539256))
+* **release:** drop manual changelog section and unpin runtime version test ([#302](https://github.com/RbBtSn0w/gh-address-cr/issues/302)) ([bad0bd9](https://github.com/RbBtSn0w/gh-address-cr/commit/bad0bd959dc8c640eb01b3cc5daca183590f5277))
+* **runtime:** close revision-token, evidence, and boundary gaps before 3.16.0 ([#303](https://github.com/RbBtSn0w/gh-address-cr/issues/303)) ([f625d3f](https://github.com/RbBtSn0w/gh-address-cr/commit/f625d3fd25a681f8d20b9ed1ce6be9fe52fb0268))
+* **runtime:** make store initialization and legacy migration exactly-once (035a) ([#294](https://github.com/RbBtSn0w/gh-address-cr/issues/294)) ([f3271c2](https://github.com/RbBtSn0w/gh-address-cr/commit/f3271c2d17a0d7d081a99b62ec12257baf006958))
+
+### Performance Improvements
+
+* bound runtime transaction hot path ([#299](https://github.com/RbBtSn0w/gh-address-cr/issues/299)) ([907be6b](https://github.com/RbBtSn0w/gh-address-cr/commit/907be6bc771ac0fa02a6629640071a2f6b66dc5d))
+
 ## [3.15.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.2...v3.15.3) (2026-09-18)
 
 ## [3.15.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.15.1...v3.15.2) (2026-09-11)
