@@ -231,11 +231,13 @@ def project_primary_action(
                 item_id=item_id,
                 why_now="The remote review thread has not converged after the recorded side effect.",
             )
+        # `agent resolve` records classification itself; `agent next` would be
+        # rejected until a separate `agent classify` ran (Spec 039 R2).
         return _action(
-            "claim",
-            command=command_templates.next_fixer_for_item(repo, pr_number, item_id or "<item_id>"),
+            "resolve",
+            command=command_templates.resolve_item(repo, pr_number, item_id or "<item_id>"),
             item_id=item_id,
-            why_now="This is the highest-priority unresolved review thread.",
+            why_now="This is the highest-priority unresolved review thread; fix it, then fill in the evidence placeholders.",
         )
 
     local_items = sorted(

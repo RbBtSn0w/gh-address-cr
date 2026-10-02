@@ -188,14 +188,15 @@ class AgentJourneyTestCase(PythonScriptTestCase):
     # -- agent policies ---------------------------------------------------
 
     def literal_follower(self) -> dict:
-        """Execute only what `primary_action` says; fill skeletons with a fix."""
+        """Run the README loop: execute a non-null `primary_action.command`, then
+        rerun `address`. Skeletons and placeholders are filled with the agent's fix."""
         summary = self.runtime("address", self.repo, self.pr, "--lean")
         for _ in range(MAX_STEPS):
             action = summary.get("primary_action") or {}
             kind = action.get("kind")
             if kind == "complete":
                 return summary
-            if kind in {"claim", "publish", "run_final_gate"}:
+            if action.get("command"):
                 result = self.run_command_line(action["command"])
                 if result.get("status") == "REQUEST_REJECTED":
                     return result
@@ -243,8 +244,6 @@ class AgentJourneyHarnessTests(AgentJourneyTestCase):
 
 
 class AgentJourneyContractTests(AgentJourneyTestCase):
-    # Known defect, Spec 039 R2: primary_action recommends a claim that is rejected without classification. The fix PR removes this decorator.
-    @unittest.expectedFailure
     def test_i1_every_primary_action_command_is_accepted(self):
         result = self.literal_follower()
 

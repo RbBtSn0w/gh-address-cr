@@ -123,9 +123,9 @@ class PrimaryActionProjectionTests(unittest.TestCase):
             session=session,
         )
 
-        self.assertEqual(action["kind"], "claim")
+        self.assertEqual(action["kind"], "resolve")
         self.assertEqual(action["item_id"], "github-thread:z")
-        self.assertIn("--item-id github-thread:z", action["command"])
+        self.assertTrue(action["command"].startswith("gh-address-cr agent resolve octo/example 77 github-thread:z "))
 
     def test_published_side_effect_waits_for_remote_convergence(self):
         session = {

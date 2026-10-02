@@ -129,13 +129,17 @@ def submit(repo: str, pr_number: str, *, input_path: str = "response.json") -> s
 
 
 def resolve_single(repo: str, pr_number: str) -> str:
+    return resolve_item(repo, pr_number, "<item_id>")
+
+
+def resolve_item(repo: str, pr_number: str, item_id: str) -> str:
     return shell_command(
         "gh-address-cr",
         "agent",
         "resolve",
         repo,
         pr_number,
-        "<item_id>",
+        item_id,
         "--commit",
         "<sha>",
         "--files",
