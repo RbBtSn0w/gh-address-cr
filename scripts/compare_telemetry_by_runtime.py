@@ -61,6 +61,13 @@ def collect_reports(state_dir: Path) -> list[dict[str, Any]]:
     return reports
 
 
+def _count(value: Any) -> int:
+    """A non-negative integer count; malformed archived values count as zero."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(value, 0)
+
+
 def summarize(reports: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for report in reports:
@@ -77,7 +84,7 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         summary[label] = {
             "sessions": len(rows),
             "median_success_rate": statistics.median(rates) if rates else None,
-            "needs_action_total": sum(int(row.get("needs_action_count") or 0) for row in rows),
+            "needs_action_total": sum(_count(row.get("needs_action_count")) for row in rows),
             "flag_kinds": dict(sorted(kinds.items())),
         }
     return dict(sorted(summary.items()))

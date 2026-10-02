@@ -60,6 +60,14 @@ class CompareTelemetryByRuntimeTests(unittest.TestCase):
 
         self.assertEqual(kinds, {"error_prone:gh-address-cr address": 3})
 
+    def test_malformed_needs_action_count_counts_as_zero(self):
+        write_report(self.root, "o__r/pr-21", runtime=RELEASE_3153, success_rate=100.0, flags=[], needs_action="many")
+        write_report(self.root, "o__r/pr-22", runtime=RELEASE_3153, success_rate=100.0, flags=[], needs_action=2)
+
+        groups = summarize(collect_reports(self.root))
+
+        self.assertEqual(groups["3.15.3 package"]["needs_action_total"], 2)
+
     def test_check_reports_the_316_regression_against_315(self):
         groups = summarize(collect_reports(self.root))
 
