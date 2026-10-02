@@ -401,6 +401,7 @@ def build_stack_completion_summary_model(
         f"[gh-address-cr stack: {status} | scope: stack segment through PR #{result.selected_pr_number} | "
         f"members: {len(result.covered_pr_numbers)} | {suffix}"
     )
+    model["markdown"] = _completion_markdown(model["line"])
     return model
 
 
@@ -418,6 +419,11 @@ def build_stack_completion_summary_guidance(
         summary_path=summary_path,
         include_sha256=True,
         lifecycle_report=lifecycle_report,
+    )
+    guidance = guidance.replace(
+        _completion_markdown(build_completion_summary_line(projection, telemetry_report, lifecycle_report=lifecycle_report)),
+        _completion_markdown(build_stack_completion_summary_line(result, telemetry_report, lifecycle_report=lifecycle_report)),
+        1,
     )
     return guidance.replace(
         build_completion_summary_line(projection, telemetry_report, lifecycle_report=lifecycle_report),
@@ -803,6 +809,7 @@ def build_completion_summary_model(
         f"issues: {issue_summary}]"
     )
     return {
+        "markdown": _completion_markdown(line),
         "line": line,
         "coverage_note": coverage_note,
         "source_summary": source_summary,
@@ -816,6 +823,25 @@ def build_completion_summary_model(
         "lifecycle_diagnostic_count": str(lifecycle_diagnostic_count),
         "lifecycle_artifact_summary": lifecycle_artifact_summary,
     }
+
+
+def _completion_markdown(line: str) -> str:
+    """Render the canonical compact metrics as readable, non-authoritative Markdown."""
+    fields = line.removeprefix("[").removesuffix("]").split(" | ")
+    rows = [f"**{fields[0]}**", "", "| Review status | Value |", "| --- | --- |"]
+    labels = {"threads": "Unresolved threads", "reviews": "Pending reviews", "checks": "Checks"}
+    details = []
+    for field in fields[1:]:
+        key, _, value = field.partition(": ")
+        if key in labels:
+            if key == "checks":
+                value = "Not required" if value == "N/A" else f"{value} (failed/pending)"
+            rows.append(f"| {labels[key]} | {value} |")
+        elif key == "issues" and value != "none":
+            details.extend(["", "**Attention**", "", *[f"- {item}" for item in value.split("; ")]])
+        else:
+            details.append(f"- **{key.capitalize()}**: {value}")
+    return "\n".join([*rows, "", *details])
 
 
 def _lifecycle_summary(report: dict[str, Any] | None) -> str:
@@ -1132,8 +1158,10 @@ def build_completion_summary_guidance(
     lines = [
         header,
         "",
-        "```text",
-        f"{metrics_line}",
+        _completion_markdown(metrics_line),
+        "",
+        "Report artifacts:",
+        "",
         f"{audit_summary_line}",
         f"- Efficiency Report: {report_artifact}",
         *(
@@ -1141,7 +1169,9 @@ def build_completion_summary_guidance(
             if lifecycle_report is not None
             else []
         ),
-        "```",
+        "",
+        "Machine compatibility reference (do not paste into the user-facing summary):",
+        f"{metrics_line}",
     ]
 
     if abnormal_implications:
