@@ -61,6 +61,16 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
     return session_store.workspace_dir(repo, pr_number)
 
 
+def _default_artifact_path(repo: str, pr_number: str) -> str | None:
+    """The workspace path, or None when the target is too malformed to name one."""
+    try:
+        return str(_workspace_root(repo, pr_number))
+    except session_store.SessionError as exc:
+        if exc.reason_code in session_store.PR_TARGET_REASONS:
+            return None
+        raise
+
+
 def _persist_machine_summary(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
     path = _workspace_root(repo, pr_number) / "last-machine-summary.json"
     write_json_atomic(path, payload)
@@ -359,7 +369,7 @@ def _native_summary(
             "unresolved_github_threads_count": metrics.get("unresolved_github_threads_count", 0),
             "needs_human_items_count": metrics.get("needs_human_items_count", 0),
         },
-        "artifact_path": artifact_path or str(_workspace_root(repo, pr_number)),
+        "artifact_path": artifact_path or _default_artifact_path(repo, pr_number),
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,

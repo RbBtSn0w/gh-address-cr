@@ -59,6 +59,14 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
   `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
   do not change `HOME` or create a second state directory mid-session.
 
+If `reason_code` is `INVALID_REPO` or `INVALID_PR_NUMBER` (`waiting_on=pr_scope`):
+- **Action**: The PR target is malformed: the repository is not `owner/repo`,
+  or the PR number is not a positive integer. The runtime rejected it before
+  reading or creating any session state. Pass the repository and the PR number
+  as two separate arguments; a shell variable holding `owner/repo 123` is passed
+  as one argument when the shell does not word-split it (zsh, or `"$VAR"`).
+  Rerun the same command with the corrected target.
+
 ## Runtime Persistence
 
 Commands that fail on the runtime store return `waiting_on=runtime_store`, keep

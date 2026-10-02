@@ -30,6 +30,7 @@ class SessionError(RuntimeError):
 
 # Persistence outcomes an agent may retry by rerunning the same command.
 RETRYABLE_SESSION_REASONS = frozenset({"STALE_REVISION", "PERSISTENCE_BUSY"})
+PR_TARGET_REASONS = frozenset({"INVALID_REPO", "INVALID_PR_NUMBER"})
 STALE_REVISION_ATTEMPTS = 3
 
 _PERSISTENCE_NEXT_ACTIONS = {
@@ -55,7 +56,12 @@ def session_error_guidance(exc: SessionError) -> dict[str, Any]:
         waiting_on = "runtime_store"
         next_action = f"{_PERSISTENCE_NEXT_ACTIONS[reason_code]} ({exc})"
     else:
-        waiting_on = "state_directory" if reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
+        if reason_code == "STATE_DIR_NOT_WRITABLE":
+            waiting_on = "state_directory"
+        elif reason_code in PR_TARGET_REASONS:
+            waiting_on = "pr_scope"
+        else:
+            waiting_on = "session"
         next_action = str(exc)
     return {
         "reason_code": reason_code,
@@ -100,6 +106,14 @@ def state_dir() -> Path:
         raise SessionError(exc.reason_code, str(exc)) from exc
     _ensure_writable_state_directory(path)
     return path
+
+
+def validate_pr_target(repo: str, pr_number: str) -> None:
+    """Reject a malformed target before any command reads or creates its workspace."""
+    try:
+        paths.validate_pr_target(repo, pr_number)
+    except paths.PathResolutionError as exc:
+        raise SessionError(exc.reason_code, str(exc)) from exc
 
 
 def normalize_repo(repo: str) -> str:

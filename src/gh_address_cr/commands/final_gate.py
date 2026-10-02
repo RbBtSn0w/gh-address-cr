@@ -294,6 +294,10 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     if error_code is not None:
         return error_code
     assert parsed is not None
+    try:
+        session_store.validate_pr_target(parsed.repo, parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
 
     machine_requested = bool(parsed.machine)
 

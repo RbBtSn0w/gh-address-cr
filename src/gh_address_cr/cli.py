@@ -716,6 +716,21 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             persist=False,
         )
 
+    try:
+        session_store.validate_pr_target(repo, pr_number)
+    except session_store.SessionError as exc:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            str(exc),
+            reason_code=exc.reason_code,
+            waiting_on="pr_scope",
+            next_action=str(exc),
+            exit_code=5,
+            persist=False,
+        )
+
     if args.command == "adapter" and len(args.args) < 3:
         return output_preflight_error(
             args,
