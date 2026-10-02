@@ -37,11 +37,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-repo_root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 venv="${home}/venv"
 state="${home}/state"
 
 if [ "$install" -eq 1 ]; then
+    repo_root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
     if ! sha="$(git -C "$repo_root" rev-parse --verify --quiet "${ref}^{commit}")"; then
         echo "dogfood_env: '${ref}' is not a commit in ${repo_root}" >&2
         exit 2
@@ -77,8 +77,6 @@ label="$("${venv}/bin/python" - <<'PY'
 import json
 from importlib import metadata
 
-import gh_address_cr
-
 raw = metadata.distribution("gh-address-cr").read_text("direct_url.json")
 direct_url = json.loads(raw) if raw else {}
 commit = (direct_url.get("vcs_info") or {}).get("commit_id")
@@ -88,7 +86,7 @@ elif (direct_url.get("dir_info") or {}).get("editable"):
     origin = "editable"
 else:
     origin = "package" if not direct_url else "local"
-print(f"{gh_address_cr.__version__} {origin}")
+print(f"{metadata.version('gh-address-cr')} {origin}")
 PY
 )"
 echo "dogfood_env: runtime ${label}" >&2

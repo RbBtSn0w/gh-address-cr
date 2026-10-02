@@ -15,7 +15,11 @@ SCRIPT = ROOT / "scripts" / "dogfood_env.sh"
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, timeout=600, env=env or os.environ.copy()
+        ["bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=os.environ.copy() if env is None else env,
     )
 
 
@@ -64,7 +68,9 @@ class DogfoodEnvScriptTests(unittest.TestCase):
         "set GH_ADDRESS_CR_DOGFOOD_INSTALL_TEST=1 to run the real pip install (needs network and full git history)",
     )
     def test_install_pins_the_resolved_commit(self):
-        sha = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        sha = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True
+        ).stdout.strip()
 
         result = run("--ref", "HEAD", "--home", str(self.home))
 
