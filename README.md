@@ -471,7 +471,10 @@ Stable machine summary fields:
 - `waiting_on`
 - `next_action`
 - `primary_action` (`kind`, `command`, `item_id`, `why_now`, `requires_human`)
-- `context` (bounded PR, check, changed-file, and selected-item context)
+- `context` (bounded PR, check, changed-file, and selected-item context). The
+  selected item's `comment_excerpt` holds at most 500 characters; when it is cut,
+  `comment_excerpt_truncated` is `true` and `full_comment_command` names the
+  `threads` command whose rows carry the full review body
 - `commands`
 - `exit_code`
 

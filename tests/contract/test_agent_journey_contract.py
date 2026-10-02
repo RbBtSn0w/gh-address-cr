@@ -329,18 +329,24 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         self.assertEqual(len(replies), 1, replies)
         self.assertIn(self.head_sha[:7], replies[0])
 
-    # Known defect, Spec 039 R5: lean excerpt is truncated without a marker. The fix PR removes this decorator.
-    @unittest.expectedFailure
     def test_i5_lean_path_exposes_full_body_or_marks_truncation(self):
         summary = self.runtime("address", self.repo, self.pr, "--lean")
         selected = summary["context"]["selected_item"]
 
-        if selected["comment_excerpt"] != REVIEW_BODY:
-            self.assertTrue(
-                selected.get("comment_excerpt_truncated"),
-                "lean excerpt is shorter than the review body but not marked truncated; "
-                "the agent classifies without the reviewer's suggested fix",
-            )
+        if selected["comment_excerpt"] == REVIEW_BODY:
+            return
+        self.assertTrue(
+            selected.get("comment_excerpt_truncated"),
+            "lean excerpt is shorter than the review body but not marked truncated; "
+            "the agent classifies without the reviewer's suggested fix",
+        )
+        command = selected.get("full_comment_command")
+        self.assertIsNotNone(command, "a truncated excerpt must name the command that returns the full body")
+
+        full = self.run_command_line(command)
+
+        bodies = [row.get("body") for row in full.get("threads", []) if row.get("item_id") == selected["item_id"]]
+        self.assertEqual(bodies, [REVIEW_BODY])
 
 
 class FinalGateNextActionContractTests(AgentJourneyTestCase):
