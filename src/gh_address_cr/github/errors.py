@@ -38,6 +38,16 @@ class GitHubRateLimitError(GitHubError):
         super().__init__("GITHUB_RATE_LIMITED", detail, retryable=True, diagnostics=diagnostics)
 
 
+class GitHubNoChecksError(GitHubError):
+    """The pull request has no check runs: a PR state, not an API failure.
+
+    Still a GitHubError, so `final-gate --require-checks` keeps blocking on it.
+    """
+
+    def __init__(self, detail: str, *, diagnostics: dict[str, Any] | None = None):
+        super().__init__("GITHUB_PR_HAS_NO_CHECKS", detail, retryable=False, diagnostics=diagnostics)
+
+
 class GitHubNotFoundError(GitHubError):
     def __init__(self, detail: str, *, diagnostics: dict[str, Any] | None = None):
         super().__init__("GITHUB_NOT_FOUND", detail, retryable=False, diagnostics=diagnostics)

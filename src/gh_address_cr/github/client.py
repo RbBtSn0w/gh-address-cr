@@ -15,10 +15,12 @@ from gh_address_cr.github.errors import (
     GitHubEnvironmentError,
     GitHubError,
     GitHubNetworkError,
+    GitHubNoChecksError,
     GitHubNotFoundError,
     GitHubRateLimitError,
     GitHubTransientError,
 )
+from gh_address_cr.github.pr_checks import pr_checks_result
 from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
@@ -372,7 +374,15 @@ class GitHubClient:
         if required:
             cmd.append("--required")
         result = self._run_gh(cmd, retries=1)
-        if result.returncode not in {0, 1, 8} or (result.returncode != 0 and not result.stdout.strip()):
+        outcome = pr_checks_result(result.returncode, result.stdout, result.stderr)
+        if outcome == "no_checks":
+            raise GitHubNoChecksError(
+                f"Pull request #{pr_number} has no check runs.",
+                diagnostics=classify_github_failure(
+                    result.stderr, result.stdout, result.returncode, _completed_command(result)
+                ),
+            )
+        if outcome == "error":
             _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
         try:
             payload = json.loads(result.stdout or "[]")

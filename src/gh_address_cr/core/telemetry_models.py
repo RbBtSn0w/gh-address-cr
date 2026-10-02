@@ -46,8 +46,17 @@ class ExecutionMetric:
         return self.exit_code == 0
 
     @property
+    def effective_outcome(self) -> str:
+        """The recorded outcome, or the exit-code meaning for rows without one."""
+        if self.outcome is not None:
+            return self.outcome
+        if self.is_success:
+            return "success"
+        return "timeout" if self.exit_code == 124 else "failure"
+
+    @property
     def counts_as_failure(self) -> bool:
-        return not self.is_success and self.outcome != "needs_action"
+        return self.effective_outcome in {"failure", "timeout"}
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {

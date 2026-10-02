@@ -44,7 +44,7 @@ Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavail
 
 For local development loops, `runtime-only` is advisory rather than abnormal by itself. Report the label and its implication, but do not expand it into a blocker or mandatory exception narrative unless additional telemetry diagnostics, inefficiency flags, or gate blockers are also present.
 
-If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. Status checks that block because the PR still needs work (`address`, `threads`, or `final-gate` returning a documented needs-action reason code) are reported in `needs_action_count` and do not lower `success_rate`; only crashes, errors, and rejected commands do. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
+If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. Status checks that block because the PR still needs work (`address`, `threads`, or `final-gate` returning a documented needs-action reason code) are reported in `needs_action_count` and do not lower `success_rate`; only crashes, errors, and rejected commands do. Likewise a `gh pr checks` probe that finds pending checks or no check runs at all is a successful probe, not a GitHub failure. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
 
 Final-gate machine output may include `logic_validation_signals`. Each generated
 signal identifies its `item_kind` so runtime recovery can distinguish local
