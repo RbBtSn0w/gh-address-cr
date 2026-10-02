@@ -484,7 +484,10 @@ query failures never fall back to potentially stale cached state.
 
 For the shortest repeatable loop, run `gh-address-cr address`, execute the one
 `primary_action.command` when it is non-null, and run `gh-address-cr address`
-again. The action vocabulary is deliberately small: `claim`, `resolve`,
+again. Before executing, fill any evidence placeholders (`<sha>`, `<paths>`,
+`<text>`, `<cmd=passed>`) from the fix you made; an unresolved review thread is
+recommended as an item-scoped `agent resolve`, which records classification
+itself. The action vocabulary is deliberately small: `claim`, `resolve`,
 `publish`, `wait`, `run_final_gate`, `repair_environment`, and `complete`.
 `command=null` is valid whenever the next step needs new human/agent evidence,
 waiting, environment repair, or represents completion; read `why_now` rather

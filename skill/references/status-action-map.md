@@ -4,9 +4,16 @@ This document maps the `gh-address-cr` runtime `status` fields to the next safe 
 
 High-level summaries project exactly one additive `primary_action`. Prefer its
 public `command` when non-null and repeat the same high-level entrypoint after
-the action. A null command is intentional when evidence must be supplied before
-a public command can be formed, and for `wait`, `repair_environment`, or
-`complete`; follow `why_now` instead of constructing a synthetic command. The
+the action. A command may contain angle-bracket placeholders only for evidence
+the agent produces by doing the work: `<sha>`, `<paths>`, `<text>`, and
+`<cmd=passed>`. For an unresolved GitHub review thread the action is `resolve`
+with an item-scoped `agent resolve` command: make and commit the fix, then fill
+those placeholders; `agent resolve` records the triage classification itself.
+A null command is intentional when evidence must be supplied before a public
+command can be formed (for example a blocking local finding, which uses
+`agent classify` → `agent next` → `agent submit`), and for `wait`,
+`repair_environment`, or `complete`; follow `why_now` instead of constructing a
+synthetic command. The
 projection is advisory and does not change session item truth, publish
 authority, or `final-gate` semantics.
 
