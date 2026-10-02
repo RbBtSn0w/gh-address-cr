@@ -1,3 +1,14 @@
+## [3.18.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.17.0...v3.18.0) (2026-10-02)
+
+### Features
+
+* **dev:** add dogfood_env.sh to pin an unreleased runtime for dogfooding ([#330](https://github.com/RbBtSn0w/gh-address-cr/issues/330)) ([b715f9c](https://github.com/RbBtSn0w/gh-address-cr/commit/b715f9cb518ec37549f1d9fdd98ff7a9b63e2de1))
+
+### Bug Fixes
+
+* **cli:** reject a malformed PR target before any state or GitHub work ([#332](https://github.com/RbBtSn0w/gh-address-cr/issues/332)) ([c513de3](https://github.com/RbBtSn0w/gh-address-cr/commit/c513de3ad171ffd0ad7f5012749277ab644fbc36))
+* **output:** render readable completion summaries ([#331](https://github.com/RbBtSn0w/gh-address-cr/issues/331)) ([cf6c8b7](https://github.com/RbBtSn0w/gh-address-cr/commit/cf6c8b7edf448425b8c618fe4423f6bbb1882173))
+
 ## [3.17.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.16.0...v3.17.0) (2026-10-02)
 
 ### Features
