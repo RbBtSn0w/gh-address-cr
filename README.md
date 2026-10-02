@@ -140,6 +140,11 @@ Completion means the latest final gate reports:
   that exits 5 because the PR still needs work (for example `address` or
   `final-gate` blocking on an open thread) counts in `needs_action_count`, not as
   a failure in `success_rate` or the inefficiency flags
+- the efficiency report's `runtime` (`version`, `origin` of `package`, `editable`,
+  or `vcs`, and the `commit` for a git install), so reports from a development
+  checkout and from a release can be compared with
+  `python3 scripts/compare_telemetry_by_runtime.py` (add `--baseline` and
+  `--candidate` runtime labels to fail on a success-rate drop or new flag kinds)
 - an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
   aggregates exclude inferred observation times, and report failures never
   change the gate verdict or exit code

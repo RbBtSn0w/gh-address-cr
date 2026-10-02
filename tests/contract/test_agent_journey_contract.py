@@ -26,6 +26,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+import gh_address_cr
 from gh_address_cr.commands.final_gate import build_completion_summary_line
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core.telemetry_reporting import error_prone_flag
@@ -267,6 +268,8 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         # state, not a GitHub failure.
         summary = self.runtime("address", self.repo, self.pr, "--lean")
         self.assertEqual(summary["context"]["checks"], {"availability": "present", "counts": {}})
+        # Spec 039 L4: the report names the runtime build that produced it.
+        self.assertEqual(report["runtime"]["version"], gh_address_cr.__version__)
         # The opening `address` blocked on the open thread: counted, not hidden.
         self.assertGreaterEqual(report["needs_action_count"], 1)
 

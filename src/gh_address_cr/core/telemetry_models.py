@@ -170,6 +170,7 @@ class EfficiencyReportPayload(TypedDict):
     confidence: str
     report_generated_at: str
     report_artifact: str
+    runtime: dict[str, Any]
 
 
 @dataclass
