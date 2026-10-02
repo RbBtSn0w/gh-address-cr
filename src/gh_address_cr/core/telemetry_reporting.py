@@ -374,15 +374,17 @@ def _error_prone_operations(events: list[ExternalTelemetryEvent]) -> list[dict[s
     )
 
 
+def error_prone_flag(row: dict[str, Any]) -> str:
+    """The inefficiency flag derived from one error-prone operation row."""
+    return f"{row['operation']} had {row['failures']} failures, {row['timeouts']} timeouts, and {row['retries']} retries."
+
+
 def _inefficiency_flags(slowest: list[ExternalTelemetryEvent], error_prone: list[dict[str, Any]]) -> list[str]:
     flags: list[str] = []
     for event in slowest:
         if event.duration_ms > int(MAX_DURATION_SECONDS * 1000):
             flags.append(f"{event.operation} exceeded {int(MAX_DURATION_SECONDS)}s threshold.")
-    for row in error_prone:
-        flags.append(
-            f"{row['operation']} had {row['failures']} failures, {row['timeouts']} timeouts, and {row['retries']} retries."
-        )
+    flags.extend(error_prone_flag(row) for row in error_prone)
     return flags
 
 
