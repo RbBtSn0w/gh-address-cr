@@ -18,8 +18,10 @@
 # are never part of the build.
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,8p' "${script_dir}/$(basename "${BASH_SOURCE[0]}")" | sed 's/^# \{0,1\}//' >&2
     echo "Options: --ref <git-ref> (default HEAD)  --no-install  --home <dir>" >&2
     echo "Environment: GH_ADDRESS_CR_DOGFOOD_HOME (default ~/.cache/gh-address-cr-dogfood)" >&2
 }
@@ -41,7 +43,7 @@ venv="${home}/venv"
 state="${home}/state"
 
 if [ "$install" -eq 1 ]; then
-    repo_root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+    repo_root="$(git -C "$script_dir" rev-parse --show-toplevel)"
     if ! sha="$(git -C "$repo_root" rev-parse --verify --quiet "${ref}^{commit}")"; then
         echo "dogfood_env: '${ref}' is not a commit in ${repo_root}" >&2
         exit 2
