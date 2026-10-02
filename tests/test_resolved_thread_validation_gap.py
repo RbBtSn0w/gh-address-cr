@@ -118,6 +118,64 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
 
         self.assertIn("validation_evidence_recorded", [r.get("event_type") for r in self.ledger_rows()])
 
+    REPLY_URL = "https://github.com/octo/example/pull/77#discussion_r1"
+
+    def test_reply_url_with_validation_records_both_and_clears_gate(self):
+        """One call reconciles a thread closed out-of-band (app-store-creative#8, ACT-03)."""
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self._add_validation(
+            "--validation", "python3 -m unittest=passed",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "REPLY_AND_VALIDATION_EVIDENCE_RECORDED")
+        self.assertEqual(payload["validation_evidence"]["status"], "VALIDATION_EVIDENCE_RECORDED")
+        self.assertEqual(payload["reply_evidence"]["status"], "REPLY_EVIDENCE_RECORDED")
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertTrue(item.get("validation_evidence"))
+        self.assertEqual(item["reply_evidence"]["reply_url"], self.REPLY_URL)
+        blocking = [s for s in generate_logic_validation_signals(self.load_session()) if s.gate_effect == "blocking"]
+        self.assertEqual(blocking, [])
+
+    def test_reply_url_with_incomplete_validation_records_nothing(self):
+        """Validation arguments next to --reply-url are never dropped silently."""
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self.run_runtime_module(
+            "agent", "evidence", "add", self.repo, self.pr,
+            "--item-id", "github-thread:PRRT_recon",
+            "--commit", "abc1234",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "MISSING_VALIDATION_FILES")
+        item = self.load_session()["items"]["github-thread:PRRT_recon"]
+        self.assertNotEqual(
+            (item.get("reply_evidence") or {}).get("reply_url"),
+            self.REPLY_URL,
+            "nothing may be recorded when part of the input is rejected",
+        )
+        self.assertFalse(item.get("validation_evidence"))
+
+    def test_reply_url_alone_keeps_recording_reply_evidence_only(self):
+        self.write_session(items=[_resolved_fix_thread()])
+
+        result = self.run_runtime_module(
+            "agent", "evidence", "add", self.repo, self.pr,
+            "--item-id", "github-thread:PRRT_recon",
+            "--reply-url", self.REPLY_URL,
+            "--author-login", "agent-login",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "REPLY_EVIDENCE_RECORDED")
+
     def test_failing_validation_result_is_rejected(self):
         """A failing verdict must not satisfy the gate (#117 carried forward)."""
         self.write_session(items=[_resolved_fix_thread()])
