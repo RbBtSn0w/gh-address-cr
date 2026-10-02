@@ -28,6 +28,8 @@ class PrChecksResultTests(unittest.TestCase):
             (8, PENDING_JSON, "", "checks"),
             (1, PENDING_JSON, "", "checks"),
             (1, "", NO_CHECKS_STDERR, "no_checks"),
+            # `--required` on a branch without required checks (observed with gh 2.101.0).
+            (1, "", "no required checks reported on the 'develop' branch\n", "no_checks"),
             # Same exit and empty stdout, but a real failure.
             (1, "", AUTH_STDERR, "error"),
             (4, "", "", "error"),

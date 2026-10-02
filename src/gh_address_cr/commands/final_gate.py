@@ -1397,6 +1397,8 @@ def final_gate_failure_message(result: core_gate.GateResult) -> str:
         )
     if result.counts["pr_checks_not_green_count"]:
         reasons.append(f"{result.counts['pr_checks_not_green_count']} non-green PR check(s)")
+    if result.counts["pr_checks_missing_count"]:
+        reasons.append("no PR checks to satisfy the checks requirement")
     return " and ".join(reasons) or "gate checks reported failure"
 
 

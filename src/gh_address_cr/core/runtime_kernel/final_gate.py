@@ -39,6 +39,7 @@ FINAL_GATE_BLOCKING_GITHUB_ITEMS = "FINAL_GATE_BLOCKING_GITHUB_ITEMS"
 FINAL_GATE_BLOCKING_LOCAL_ITEMS = "FINAL_GATE_BLOCKING_LOCAL_ITEMS"
 FINAL_GATE_MISSING_VALIDATION_EVIDENCE = "FINAL_GATE_MISSING_VALIDATION_EVIDENCE"
 FINAL_GATE_PR_CHECKS_NOT_GREEN = "FINAL_GATE_PR_CHECKS_NOT_GREEN"
+FINAL_GATE_REQUIRED_CHECKS_MISSING = "FINAL_GATE_REQUIRED_CHECKS_MISSING"
 FINAL_GATE_LOGIC_VALIDATION_BLOCKING = "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"
 
 GITHUB_TERMINAL_STATES = GITHUB_THREAD_TERMINAL_STATES
@@ -68,6 +69,7 @@ COUNT_KEYS = (
     "pr_checks_not_green_count",
     "logic_validation_blocking_count",
     "logic_validation_advisory_count",
+    "pr_checks_missing_count",
 )
 
 FAILURE_ORDER = (
@@ -79,6 +81,7 @@ FAILURE_ORDER = (
     (FINAL_GATE_MISSING_VALIDATION_EVIDENCE, "missing_validation_evidence_count", "validation_evidence"),
     (FINAL_GATE_LOGIC_VALIDATION_BLOCKING, "logic_validation_blocking_count", "logic_validation"),
     (FINAL_GATE_PR_CHECKS_NOT_GREEN, "pr_checks_not_green_count", "checks"),
+    (FINAL_GATE_REQUIRED_CHECKS_MISSING, "pr_checks_missing_count", "checks"),
 )
 
 ADAPTER_OBSERVED_AT = "1970-01-01T00:00:00Z"
@@ -299,6 +302,8 @@ def project_final_gate(
         "pr_checks_not_green_count": len(failed_checks) + len(pending_checks) if check_requirement else 0,
         "logic_validation_blocking_count": len(blocking_logic_validation_signals),
         "logic_validation_advisory_count": len(advisory_logic_validation_signals),
+        # Checks were required but none exist: zero checks cannot prove they are green.
+        "pr_checks_missing_count": 1 if check_requirement and not check_rows else 0,
     }
     return FinalGateProjection(
         counts={key: counts[key] for key in COUNT_KEYS},
