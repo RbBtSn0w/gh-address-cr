@@ -28,6 +28,7 @@ from pathlib import Path
 
 from gh_address_cr.commands.final_gate import build_completion_summary_line
 from gh_address_cr.core import gate as core_gate
+from gh_address_cr.core.telemetry_reporting import error_prone_flag
 from tests.helpers import PythonScriptTestCase
 
 FAKE_GH = Path(__file__).resolve().parents[1] / "fixtures" / "agent_journey" / "fake_gh.py"
@@ -382,22 +383,25 @@ class FinalGateNextActionContractTests(AgentJourneyTestCase):
 
 
 class CompletionSummaryLineContractTests(unittest.TestCase):
-    # Known defect, Spec 039 R4: completion line renders each problem operation twice. The fix PR removes this decorator.
-    @unittest.expectedFailure
     def test_i3_completion_line_names_each_problem_operation_once(self):
         operation = "github.graphql"
+        row = {"operation": operation, "failures": 1, "timeouts": 0, "retries": 0}
+        slow_flag = "run unit tests exceeded 60s threshold."
         report = {
             "coverage_label": "runtime-only",
             "total_events": 4,
             "success_rate": 75.0,
-            "inefficiency_flags": [f"{operation} had 1 failures, 0 timeouts, and 0 retries."],
-            "error_prone_operations": [{"operation": operation, "failures": 1, "timeouts": 0, "retries": 0}],
+            # As build_efficiency_report produces them: one flag per error-prone row.
+            "inefficiency_flags": [slow_flag, error_prone_flag(row)],
+            "error_prone_operations": [row],
         }
         result = core_gate.GateResult(repo="octo/example", pr_number="77", counts={}, failure_codes=[])
 
         line = build_completion_summary_line(result, report)
 
         self.assertEqual(line.count(operation), 1, line)
+        self.assertIn(f"{operation} failures=1 timeouts=0 retries=0", line)
+        self.assertIn(slow_flag, line, "flags not derived from an error-prone row must stay")
 
 
 if __name__ == "__main__":
