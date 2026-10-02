@@ -126,6 +126,9 @@ If `reason_code` is `COMMIT_NOT_IN_PR`:
 If `reason_code` is `THREAD_ALREADY_RESOLVED`:
 - **Action**: `agent resolve` was called for a thread already resolved on GitHub. Nothing was recorded. Run the `agent resolve <owner/repo> <pr_number> <item_id> --closed ...` command from `next_action`: with `--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>` after a code fix, or `--disposition clarify --why <text>` when no change was made. The runtime reopens the thread locally, posts the reply, and resolves it again in the same call; then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
+If `reason_code` is `ITEM_NOT_FOUND` or `UNSUPPORTED_FLAG`:
+- **Action**: The input was rejected before anything was recorded; ids and flags are never rewritten. Use the exact id named in `next_action` (item ids keep their `github-thread:` prefix; take them from `address --lean`, and treat T1..Tn aliases as valid only while the thread list is unchanged) or the real flag it names (for example `--why`, not `--reason`), then rerun the same command.
+
 If `reason_code` is `PUBLISH_RECONCILE_REQUIRED`:
 - **Action**: Inspect the named GitHub thread and do not retry `agent publish` blindly. The canonical outbox says an interrupted reply may already have been posted, but the runtime could not match it automatically. If the reply exists, record its exact URL and author with the returned item-scoped `gh-address-cr agent evidence add ... --reply-url ... --author-login ...` command, then rerun publish and final-gate. If no matching reply can be identified, stop for manual reconciliation rather than posting a duplicate.
 

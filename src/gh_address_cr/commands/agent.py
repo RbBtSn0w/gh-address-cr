@@ -161,6 +161,31 @@ def _route_agent_command(args: argparse.Namespace) -> int:
     return 2
 
 
+# Flags agents reach for that these commands do not have. They are rejected with the
+# real flag named, not accepted as aliases (Spec 039 Q3; AGENTS.md compatibility policy).
+_FLAG_NEAR_MISSES = {"--reason": "--why"}
+
+
+def _reject_flag_near_misses(command: str, repo: str | None, passthrough: list[str]) -> int | None:
+    for token in passthrough:
+        flag = token.split("=", 1)[0]
+        if flag in _FLAG_NEAR_MISSES:
+            positional = [arg for arg in passthrough if not arg.startswith("-")]
+            exc = WorkflowError(
+                status="INPUT_REJECTED",
+                reason_code="UNSUPPORTED_FLAG",
+                waiting_on="command_input",
+                exit_code=2,
+                message=f"`{command}` has no {flag} option; use {_FLAG_NEAR_MISSES[flag]} <text>.",
+            )
+            return output_workflow_error(
+                exc,
+                repo=repo or (positional[0] if positional else ""),
+                pr_number=positional[1] if len(positional) > 1 else "",
+            )
+    return None
+
+
 def _parse_with_scope(
     parser: argparse.ArgumentParser, repo: str | None, passthrough: list[str]
 ) -> tuple[argparse.Namespace | None, int]:
@@ -347,6 +372,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     through the same lease/evidence/publish contract. Classification is recorded
     internally, so no separate `agent classify` round-trip is required on this path.
     """
+    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent resolve", repo, passthrough)
+    if near_miss_rc is not None:
+        return near_miss_rc
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent resolve",
         description=(
@@ -736,6 +764,9 @@ def _resolve_viewer_login() -> str:
 
 
 def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
+    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent evidence", repo, passthrough)
+    if near_miss_rc is not None:
+        return near_miss_rc
     parser = argparse.ArgumentParser(prog="gh-address-cr agent evidence")
     parser.add_argument("subcommand", choices=["add", "list"])
     parser.add_argument("repo")
