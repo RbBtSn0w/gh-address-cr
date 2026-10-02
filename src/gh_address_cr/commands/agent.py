@@ -622,24 +622,7 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
     )
 
 
-def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
-    parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
-    if parsed.closed:
-        workflow.reopen_resolved_thread_for_reply(parsed.repo, parsed.pr_number, item_id=parsed.item_id)
-        # A reopened thread must be published now: the next refresh closes it again.
-        parsed.publish = True
-    disposition = parsed.disposition
-    if disposition in ("reject", "clarify", "defer"):
-        return workflow.decline_item(
-            parsed.repo,
-            parsed.pr_number,
-            item_id=parsed.item_id,
-            agent_id=parsed.agent_id,
-            resolution=disposition,
-            why=parsed.why,
-            publish=parsed.publish,
-            now=now_dt,
-        )
+def _require_single_fix_args(parsed: argparse.Namespace) -> None:
     missing = [
         flag
         for flag, value in (
@@ -656,6 +639,32 @@ def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: date
             waiting_on="fast_fix_input",
             exit_code=2,
             message=f"agent resolve {parsed.item_id} requires {', '.join(missing)} for a single-thread fix.",
+        )
+
+
+def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
+    parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
+    disposition = parsed.disposition
+    # Validate every input before --closed reopens the thread, so a rejected call
+    # leaves no state behind.
+    if disposition in ("reject", "clarify", "defer"):
+        workflow.validate_decline_input(item_id=parsed.item_id, resolution=disposition, why=parsed.why)
+    else:
+        _require_single_fix_args(parsed)
+    if parsed.closed:
+        workflow.reopen_resolved_thread_for_reply(parsed.repo, parsed.pr_number, item_id=parsed.item_id)
+        # A reopened thread must be published now: the next refresh closes it again.
+        parsed.publish = True
+    if disposition in ("reject", "clarify", "defer"):
+        return workflow.decline_item(
+            parsed.repo,
+            parsed.pr_number,
+            item_id=parsed.item_id,
+            agent_id=parsed.agent_id,
+            resolution=disposition,
+            why=parsed.why,
+            publish=parsed.publish,
+            now=now_dt,
         )
     shared_kwargs = {
         "repo": parsed.repo,

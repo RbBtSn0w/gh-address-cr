@@ -450,6 +450,23 @@ class ClosedThreadReplyContractTests(AgentJourneyTestCase):
         self.assertTrue(self.thread_resolved())
         self.assertEqual(self.final_gate()["status"], "PASSED", self.describe_trace())
 
+    def test_closed_with_missing_arguments_leaves_the_thread_closed(self):
+        self.close_remotely()
+
+        for extra in ((), ("--disposition", "clarify")):
+            with self.subTest(extra=extra):
+                result = self.runtime(
+                    "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1", "--closed", *extra,
+                    "--agent-id", AGENT_ID,
+                )
+
+                self.assertNotEqual(result["_exit_code"], 0, result)
+                from gh_address_cr.core.session import load_session
+
+                item = load_session(self.repo, self.pr)["items"]["github-thread:PRRT_journey1"]
+                self.assertNotIn("reopened_for_reply_at", item, "a rejected call must not reopen the thread")
+                self.assertEqual(item["state"], "closed")
+
     def test_closed_is_rejected_for_an_open_thread(self):
         self.runtime("address", self.repo, self.pr, "--lean")
 

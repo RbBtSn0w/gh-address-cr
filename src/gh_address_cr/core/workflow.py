@@ -1204,6 +1204,28 @@ def reopen_resolved_thread_for_reply(repo: str, pr_number: str, *, item_id: str)
     )
 
 
+def validate_decline_input(*, item_id: str, resolution: str, why: str | None) -> None:
+    """Input checks for a decline, run before any state changes (also ahead of --closed reopening)."""
+    if resolution not in {"reject", "clarify", "defer"}:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
+            payload={"item_id": item_id},
+        )
+    if not why or not why.strip():
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="MISSING_RESOLVE_ARGS",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
+            payload={"item_id": item_id},
+        )
+
+
 def decline_item(
     repo: str,
     pr_number: str,
@@ -1223,24 +1245,7 @@ def decline_item(
     decline inherits identical lease-ownership and final-gate guarantees
     (spec 029 FR-002/FR-009). No new algorithm.
     """
-    if resolution not in {"reject", "clarify", "defer"}:
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
-            waiting_on="decline_input",
-            exit_code=2,
-            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
-            payload={"item_id": item_id},
-        )
-    if not why or not why.strip():
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code="MISSING_RESOLVE_ARGS",
-            waiting_on="decline_input",
-            exit_code=2,
-            message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
-            payload={"item_id": item_id},
-        )
+    validate_decline_input(item_id=item_id, resolution=resolution, why=why)
     _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
     classification = agent_protocol.record_classification(
         repo,
