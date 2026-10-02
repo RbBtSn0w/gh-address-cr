@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import unittest
+from pathlib import Path
 
 from tests import GH_GUARD_DIR, GH_GUARD_MESSAGE
 
@@ -14,7 +15,7 @@ class HermeticGitHubCliContractTest(unittest.TestCase):
         resolved = shutil.which("gh")
 
         self.assertIsNotNone(resolved)
-        self.assertEqual(str(GH_GUARD_DIR), str(__import__("pathlib").Path(resolved).parent))
+        self.assertEqual(Path(resolved).parent, GH_GUARD_DIR)
 
     def test_guard_fails_fast_without_network(self):
         result = subprocess.run(["gh", "api", "user"], capture_output=True, text=True, timeout=5)

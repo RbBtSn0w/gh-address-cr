@@ -35,9 +35,10 @@ def _install_github_cli_guard() -> Path:
     modules import this package, so the guard is active before the first test.
     """
     guard_dir = Path(tempfile.mkdtemp(prefix="gh-address-cr-gh-guard-"))
-    atexit.register(shutil.rmtree, guard_dir, True)
+    atexit.register(shutil.rmtree, guard_dir, ignore_errors=True)
     guard = guard_dir / "gh"
-    guard.write_text(f"#!/bin/sh\necho '{GH_GUARD_MESSAGE}' >&2\nexit 1\n", encoding="utf-8")
+    # A quoted heredoc prints the message verbatim, whatever quotes it contains.
+    guard.write_text(f"#!/bin/sh\ncat >&2 <<'MESSAGE'\n{GH_GUARD_MESSAGE}\nMESSAGE\nexit 1\n", encoding="utf-8")
     guard.chmod(0o755)
     os.environ["PATH"] = f"{guard_dir}{os.pathsep}{os.environ.get('PATH', '')}"
     return guard_dir
