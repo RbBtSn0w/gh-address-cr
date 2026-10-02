@@ -492,6 +492,26 @@ class ClosedThreadReplyContractTests(AgentJourneyTestCase):
         self.assertIn("--closed", result.get("next_action") or "")
 
 
+class RequiredChecksMissingContractTests(AgentJourneyTestCase):
+    """A gate that requires checks on a PR without any reports a verdict, not a crash."""
+
+    def gate_with(self, *flags):
+        result = self.run_runtime_module("final-gate", self.repo, self.pr, *flags)
+        return result.returncode, result.stdout + result.stderr
+
+    def test_require_checks_without_any_check_runs_blocks_with_a_verdict(self):
+        self.skill_follower()  # resolves the thread, so only the checks requirement remains
+        for flag in ("--require-checks", "--require-required-checks"):
+            with self.subTest(flag=flag):
+                returncode, output = self.gate_with(flag)
+
+                self.assertEqual(returncode, 5, output)
+                self.assertIn("reason_code=FINAL_GATE_REQUIRED_CHECKS_MISSING", output)
+                self.assertIn("pr_checks_missing_count=1", output)
+                next_action = next((row for row in output.splitlines() if row.startswith("Next action: ")), "")
+                self.assertIn(flag, next_action, "the next action must name the flag to drop or the checks to add")
+
+
 class CompletionSummaryLineContractTests(unittest.TestCase):
     def test_i3_completion_line_names_each_problem_operation_once(self):
         operation = "github.graphql"

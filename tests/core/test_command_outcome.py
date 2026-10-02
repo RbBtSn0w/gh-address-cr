@@ -20,6 +20,7 @@ class ClassifyCommandOutcomeTests(unittest.TestCase):
             (5, "BLOCKING_ITEMS_REMAIN", "needs_action"),
             (5, "FINAL_GATE_UNRESOLVED_REMOTE_THREADS", "needs_action"),
             (5, "FINAL_GATE_MISSING_REPLY_EVIDENCE", "needs_action"),
+            (5, "FINAL_GATE_REQUIRED_CHECKS_MISSING", "needs_action"),
             # exit 5 is also used for errors and rejected agent input; those stay failures.
             (5, None, "failure"),
             (5, "SESSION_ERROR", "failure"),

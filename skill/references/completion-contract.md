@@ -1,6 +1,6 @@
 # Completion Contract
 
-`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green.
+`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green. With either flag, a PR that has no check runs (or whose base branch requires none) blocks with `FINAL_GATE_REQUIRED_CHECKS_MISSING` and `pr_checks_missing_count=1`: zero checks cannot prove the checks are green.
 
 `completion_scope: "pull_request"` proves only the selected layer. Use
 `gh-address-cr final-gate <owner/repo> <pr_number> --stack` for a bottom-up

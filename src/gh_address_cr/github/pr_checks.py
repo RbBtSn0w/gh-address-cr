@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 
-NO_CHECKS_MESSAGE = "no checks reported"
+# `gh pr checks` says "no checks reported", or "no required checks reported" with --required.
+NO_CHECKS_PATTERN = re.compile(r"no (required )?checks reported")
 
 
 def pr_checks_result(returncode: int, stdout: str | None, stderr: str | None) -> str:
@@ -18,7 +19,7 @@ def pr_checks_result(returncode: int, stdout: str | None, stderr: str | None) ->
     has_payload = bool((stdout or "").strip())
     if returncode == 0 or (returncode in {1, 8} and has_payload):
         return "checks"
-    if returncode == 1 and NO_CHECKS_MESSAGE in (stderr or "").lower():
+    if returncode == 1 and NO_CHECKS_PATTERN.search((stderr or "").lower()):
         return "no_checks"
     return "error"
 
