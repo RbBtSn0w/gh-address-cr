@@ -38,6 +38,7 @@ from gh_address_cr.core.primary_action import (
 )
 from gh_address_cr.core.runtime_kernel.stack import unavailable_stack_context
 from gh_address_cr.core.severity import apply_severity_evidence, severity_evidence
+from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
@@ -780,6 +781,7 @@ def _run_adapter_command(argv: list[str]) -> tuple[str | None, str | None]:
 
 
 def _emit_native_summary(summary: dict, *, human: bool) -> None:
+    note_command_reason_code(summary.get("reason_code"))
     _persist_machine_summary(str(summary["repo"]), str(summary["pr_number"]), summary)
     if human:
         status = summary["status"]

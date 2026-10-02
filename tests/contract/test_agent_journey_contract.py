@@ -252,8 +252,6 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         self.assertEqual(rejected, [], f"primary_action led to a rejection:\n{self.describe_trace()}")
         self.assertEqual(result.get("status"), "PASSED", self.describe_trace())
 
-    # Known defect, Spec 039 R1: needs-action exit 5 is recorded as a failure (3.16.0 regression). The fix PR removes this decorator.
-    @unittest.expectedFailure
     def test_i2_skill_path_session_reports_clean_telemetry(self):
         result = self.skill_follower()
         self.assertEqual(result.get("status"), "PASSED", self.describe_trace())
@@ -261,6 +259,22 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         report = self.efficiency_report(result)
         self.assertEqual(report["success_rate"], 100.0, report.get("error_prone_operations"))
         self.assertEqual(report["inefficiency_flags"], [])
+        # The opening `address` blocked on the open thread: counted, not hidden.
+        self.assertGreaterEqual(report["needs_action_count"], 1)
+
+    def test_i2_status_checks_before_the_fix_are_needs_action_not_failures(self):
+        # Seen in real 3.16.0 sessions: inspect threads and try the gate before fixing.
+        self.runtime("threads", self.repo, self.pr)
+        early_gate = self.final_gate()
+        self.assertEqual(early_gate["status"], "FAILED")
+
+        result = self.skill_follower()
+        self.assertEqual(result.get("status"), "PASSED", self.describe_trace())
+
+        report = self.efficiency_report(result)
+        self.assertEqual(report["success_rate"], 100.0, report.get("error_prone_operations"))
+        self.assertEqual(report["inefficiency_flags"], [])
+        self.assertGreaterEqual(report["needs_action_count"], 3)
 
     # Known defect, Spec 039 R3: publish falls back to the local HEAD without checking the PR. The fix PR removes this decorator.
     @unittest.expectedFailure

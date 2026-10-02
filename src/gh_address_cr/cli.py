@@ -1089,8 +1089,10 @@ def main(argv: list[str] | None = None) -> int:
 def _reset_command_persistence_totals() -> None:
     try:
         from gh_address_cr.core.runtime_store import reset_persistence_totals
+        from gh_address_cr.core.telemetry_runtime import reset_command_reason_code
 
         reset_persistence_totals()
+        reset_command_reason_code()
     except Exception:
         return
 
@@ -1104,7 +1106,11 @@ def _record_command_metric(args: argparse.Namespace, *, started_at: float, exit_
     """
     try:
         from gh_address_cr.core.runtime_store import persistence_totals
-        from gh_address_cr.core.telemetry_runtime import SessionTelemetry
+        from gh_address_cr.core.telemetry_runtime import (
+            SessionTelemetry,
+            classify_command_outcome,
+            command_reason_code,
+        )
 
         tracker = SessionTelemetry.get_instance()
         if tracker.telemetry_file is None:
@@ -1117,6 +1123,7 @@ def _record_command_metric(args: argparse.Namespace, *, started_at: float, exit_
             exit_code=exit_code,
             persistence_ms=totals["persistence_ms"],
             lock_wait_ms=totals["lock_wait_ms"],
+            outcome=classify_command_outcome(exit_code, command_reason_code()),
         )
     except Exception:
         return

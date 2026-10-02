@@ -37,6 +37,15 @@ class StackGateResult:
         return 0 if self.passed else 5
 
     @property
+    def blocking_reason_code(self) -> str | None:
+        """The blocked member's gate reason when a member blocks the stack, else the stack reason."""
+        if self.reason_code == protocol_codes.STACK_MEMBER_BLOCKED:
+            for outcome in self.member_outcomes:
+                if outcome.get("pr_number") == self.first_blocked_pr_number and outcome.get("layer_reason_code"):
+                    return str(outcome["layer_reason_code"])
+        return self.reason_code
+
+    @property
     def waiting_on(self) -> str | None:
         if self.reason_code == protocol_codes.STACK_MEMBER_BLOCKED:
             blocked_outcome = next(

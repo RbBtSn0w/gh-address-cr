@@ -29,6 +29,7 @@ from gh_address_cr.core import session as session_store
 from gh_address_cr.core import stack_gate as core_stack_gate
 from gh_address_cr.core import telemetry as core_telemetry
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 from gh_address_cr.github.client import GitHubClient
 
 
@@ -219,6 +220,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         else:
             print(message, file=sys.stderr)
         return 5
+    note_command_reason_code(stack_result.blocking_reason_code)
     stack_payload = stack_result.to_machine_summary()
     stack_artifact, stack_telemetry = write_stack_final_gate_artifacts(
         parsed.repo,
@@ -325,6 +327,7 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
             print(message, file=sys.stderr)
         return 5
 
+    note_command_reason_code(result.reason_code)
     telemetry_report: EfficiencyReportPayload | None
     summary_path, telemetry_report = write_native_final_gate_artifacts(
         parsed.repo, parsed.pr_number, parsed.audit_id, result

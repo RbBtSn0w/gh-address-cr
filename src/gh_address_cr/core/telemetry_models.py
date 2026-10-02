@@ -34,6 +34,8 @@ class ExecutionMetric:
     execution_id: str = ""
     persistence_ms: float | None = None
     lock_wait_ms: float | None = None
+    # success | needs_action | timeout | failure; None for rows written before 3.16.1.
+    outcome: str | None = None
 
     @property
     def duration(self) -> float:
@@ -42,6 +44,10 @@ class ExecutionMetric:
     @property
     def is_success(self) -> bool:
         return self.exit_code == 0
+
+    @property
+    def counts_as_failure(self) -> bool:
+        return not self.is_success and self.outcome != "needs_action"
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -59,6 +65,8 @@ class ExecutionMetric:
             payload["persistence_ms"] = self.persistence_ms
         if self.lock_wait_ms is not None:
             payload["lock_wait_ms"] = self.lock_wait_ms
+        if self.outcome is not None:
+            payload["outcome"] = self.outcome
         return payload
 
 
@@ -138,6 +146,7 @@ class EfficiencyReportPayload(TypedDict):
     sources: list[dict[str, Any]]
     total_events: int
     success_rate: float
+    needs_action_count: int
     total_observed_duration_ms: int
     duration_observed: bool
     telemetry_overhead_budget_ms: int
