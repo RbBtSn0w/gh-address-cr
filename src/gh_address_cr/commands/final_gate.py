@@ -1173,6 +1173,7 @@ def emit_final_gate_result(
         print("Final gate BLOCKED")
         print("\n== Gate Result ==")
         print(f"Gate FAILED: {final_gate_failure_message(result)}")
+        print(f"Next action: {result.to_machine_summary()['next_action']}")
     print()
     print("== Machine Gate Diagnostics ==")
     for key in core_gate.COUNT_KEYS:

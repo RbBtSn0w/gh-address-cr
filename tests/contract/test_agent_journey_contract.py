@@ -9,6 +9,7 @@ journey invariants that unit tests of individual surfaces cannot see:
 - I3 the completion line names each problem operation once
 - I4 a published fix reply never cites a commit outside the PR
 - I5 the lean path exposes the full review body or marks it truncated
+- I6 a blocked final-gate prints its next action in the terminal report
 
 GitHub is replaced by a stateful fake `gh` binary, so every runtime code path
 above the subprocess boundary is the production one.
@@ -294,6 +295,45 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
                 "lean excerpt is shorter than the review body but not marked truncated; "
                 "the agent classifies without the reviewer's suggested fix",
             )
+
+
+class FinalGateNextActionContractTests(AgentJourneyTestCase):
+    """I6: a blocked final-gate tells the agent what to run next in its own output.
+
+    Agents read the terminal report, not `last-machine-summary.json`; a remediation
+    computed but not printed leaves them to discover the command (issue #308).
+    """
+
+    def resolve_thread_remotely_without_reply(self):
+        state = json.loads(self.gh_state.read_text(encoding="utf-8"))
+        for thread in state["threads"]:
+            thread["isResolved"] = True
+        self.gh_state.write_text(json.dumps(state), encoding="utf-8")
+
+    def next_action_line(self, gate: dict) -> str | None:
+        return next((row for row in gate["_output"].splitlines() if row.startswith("Next action: ")), None)
+
+    def test_i6_thread_closed_remotely_without_reply_prints_evidence_command(self):
+        self.runtime("address", self.repo, self.pr, "--lean")
+        self.resolve_thread_remotely_without_reply()
+
+        gate = self.final_gate()
+
+        self.assertEqual(gate["status"], "FAILED")
+        self.assertIn("reason_code=FINAL_GATE_MISSING_REPLY_EVIDENCE", gate["_output"])
+        line = self.next_action_line(gate)
+        self.assertIsNotNone(line, "blocked final-gate printed no Next action line")
+        self.assertIn(f"gh-address-cr agent evidence add {self.repo} {self.pr} --item-id github-thread:PRRT_journey1", line)
+
+    def test_i6_unresolved_thread_prints_next_action(self):
+        self.runtime("address", self.repo, self.pr, "--lean")
+
+        gate = self.final_gate()
+
+        self.assertEqual(gate["status"], "FAILED")
+        line = self.next_action_line(gate)
+        self.assertIsNotNone(line, "blocked final-gate printed no Next action line")
+        self.assertIn(f"gh-address-cr address {self.repo} {self.pr} --lean", line)
 
 
 class CompletionSummaryLineContractTests(unittest.TestCase):
