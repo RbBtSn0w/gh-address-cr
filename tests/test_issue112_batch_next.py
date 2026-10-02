@@ -514,10 +514,13 @@ class BatchNextTestCase(PythonScriptTestCase):
         skeleton_path.write_text(json.dumps(skeleton, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         # Artificially expire the lease in the session so it triggers EXPIRED_LEASE
-        session = self.load_session()
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(self.repo, self.pr)
+        session = manager.load()
         lease_id = list(session["leases"].keys())[0]
         session["leases"][lease_id]["expires_at"] = "2020-01-01T00:00:00Z"
-        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        manager.save(session)
 
         # Submit should fail with BATCH_ACTION_REJECTED due to expired lease and return lease recovery guidance
         rejected = self.run_runtime_module(

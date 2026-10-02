@@ -21,7 +21,6 @@ IMPLICIT_SCOPE_VALUE_OPTIONS = {
     "--format",
     "--handoff-sha256",
     "--head",
-    "--homogeneous-reason",
     "--input",
     "--item-id",
     "--max-iterations",
@@ -70,6 +69,26 @@ def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, mess
     return 5
 
 
+def output_session_error(exc: Any, *, repo: str | None, pr_number: str | None) -> int:
+    """Emit a structured failure that keeps a session/persistence error's own reason code."""
+    from gh_address_cr.core.session import session_error_guidance
+
+    guidance = session_error_guidance(exc)
+    payload = {
+        "status": "FAILED",
+        "repo": repo,
+        "pr_number": pr_number,
+        **guidance,
+        "exit_code": 5,
+        "remediation": remediation_for(
+            guidance["reason_code"], repo=repo or "<owner/repo>", pr_number=pr_number or "<pr_number>"
+        ),
+    }
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(guidance["next_action"], file=sys.stderr)
+    return 5
+
+
 def root_passthrough_args(args: argparse.Namespace) -> list[str]:
     return [*([args.repo] if args.repo else []), *([args.pr_number] if args.pr_number else []), *args.args]
 
@@ -88,7 +107,7 @@ def active_cached_sessions() -> list[tuple[str, str, Path]]:
             for pr_dir in sorted(path for path in owner_dir.iterdir() if path.is_dir() and path.name.startswith("pr-")):
                 pr_number = pr_dir.name.removeprefix("pr-")
                 session_path = pr_dir / "session.json"
-                if pr_number and cached_session_is_active(session_path):
+                if pr_number and cached_session_is_active(session_path, repo=repo, pr_number=pr_number):
                     sessions.append((repo, pr_number, session_path))
         return sessions
     except OSError:
@@ -97,7 +116,16 @@ def active_cached_sessions() -> list[tuple[str, str, Path]]:
         return []
 
 
-def cached_session_is_active(session_path: Path) -> bool:
+def cached_session_is_active(session_path: Path, *, repo: str | None = None, pr_number: str | None = None) -> bool:
+    database_path = session_path.parent / "runtime.sqlite3"
+    if database_path.is_file() and repo and pr_number:
+        from gh_address_cr.core.session import SessionError, SessionManager
+
+        try:
+            payload = SessionManager(repo, pr_number).load()
+        except (OSError, SessionError):
+            return False
+        return payload.get("status") == "ACTIVE"
     if not session_path.is_file():
         return False
     try:

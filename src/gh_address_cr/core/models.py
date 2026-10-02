@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from gh_address_cr import SUPPORTED_PROTOCOL_VERSIONS
 from gh_address_cr.agent.roles import AgentRole, parse_role
 from gh_address_cr.core import protocol_codes
 
@@ -133,6 +134,10 @@ class WorkItem:
         return payload
 
 
+class UnsupportedProtocolVersionError(ValueError):
+    """An ActionRequest written for a protocol this runtime no longer supports."""
+
+
 @dataclass(frozen=True)
 class ActionRequest:
     schema_version: str
@@ -150,8 +155,16 @@ class ActionRequest:
 
     @classmethod
     def from_dict(cls, payload: JsonDict) -> "ActionRequest":
+        # Requests are runtime-authored, so an unsupported or missing version is a
+        # request from an older runtime; re-entry reissues it at the current one.
+        schema_version = str(payload.get("schema_version") or "")
+        if schema_version not in SUPPORTED_PROTOCOL_VERSIONS:
+            raise UnsupportedProtocolVersionError(
+                f"ActionRequest schema_version {schema_version or 'missing'} is not one of "
+                f"{', '.join(SUPPORTED_PROTOCOL_VERSIONS)}."
+            )
         return cls(
-            schema_version=str(payload.get("schema_version", "1.0")),
+            schema_version=schema_version,
             request_id=str(payload["request_id"]),
             session_id=str(payload["session_id"]),
             lease_id=str(payload["lease_id"]),

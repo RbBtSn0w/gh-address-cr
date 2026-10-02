@@ -39,6 +39,8 @@ from gh_address_cr.core.telemetry_reporting import (
     _coverage_label,
     _error_prone_operations,
     _inefficiency_flags,
+    _latency_growth_flags,
+    _operation_latency,
     _safe_os_error_diagnostic,
     _source_rows,
 )
@@ -476,7 +478,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
     if events and not duration_observed and "TELEMETRY_TIMING_UNAVAILABLE" not in diagnostics:
         diagnostics.append("TELEMETRY_TIMING_UNAVAILABLE")
     error_prone = _error_prone_operations(events)
-    flags = _inefficiency_flags(slowest, error_prone)
+    flags = [*_inefficiency_flags(slowest, error_prone), *_latency_growth_flags(runtime_events)]
     report_path = paths.efficiency_report_file
     report: EfficiencyReportPayload = {
         "status": "SUCCESS",
@@ -503,6 +505,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         ],
         "error_prone_operations": error_prone,
         "inefficiency_flags": flags,
+        "operation_latency": _operation_latency(runtime_events),
         "cli_health_issues": _cli_health_issues(paths=paths, events=events, diagnostics=diagnostics),
         "diagnostics": diagnostics,
         "confidence": _confidence_for_coverage(coverage_label),
@@ -768,7 +771,11 @@ def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEve
             duration_ms=max(0, int(metric.duration * 1000)),
             started_at=datetime.fromtimestamp(metric.start_time, timezone.utc).isoformat().replace("+00:00", "Z"),
             ended_at=datetime.fromtimestamp(metric.end_time, timezone.utc).isoformat().replace("+00:00", "Z"),
-            metadata={"exit_code": metric.exit_code, "is_retry": metric.is_retry},
+            metadata={
+                "exit_code": metric.exit_code,
+                "is_retry": metric.is_retry,
+                **({"persistence_ms": metric.persistence_ms} if metric.persistence_ms is not None else {}),
+            },
         )
         events.append(ExternalTelemetryEvent(**{**event.to_dict(), "event_fingerprint": _event_fingerprint(event)}))
     return events

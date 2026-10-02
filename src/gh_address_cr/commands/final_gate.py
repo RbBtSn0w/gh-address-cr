@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import shutil
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,9 +17,11 @@ if TYPE_CHECKING:
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
     maybe_prepend_implicit_scope,
+    output_session_error,
     prepend_optional,
 )
 from gh_address_cr.core import command_templates as core_command_templates
+from gh_address_cr.core import cr_metrics as core_cr_metrics
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core import protocol_codes as core_protocol_codes
@@ -88,6 +91,16 @@ def _archive_and_clean_workspace_if_passed(
                 )
                 rewrite_archived_efficiency_report_path(summary_path, telemetry_report["report_artifact"])
                 rewrite_archived_efficiency_report_artifact(archived_report_path, telemetry_report)
+                rewrite_archived_cr_metrics_artifact(
+                    archive_target / "cr-metrics.json",
+                    original_workspace=workspace_path,
+                    archive_target=archive_target,
+                )
+                rewrite_archived_summary_paths(
+                    summary_path,
+                    original_workspace=workspace_path,
+                    archive_target=archive_target,
+                )
                 rewrite_archived_audit_artifacts(
                     archive_target,
                     original_workspace=workspace_path,
@@ -101,6 +114,7 @@ def _emit_machine_summary(
     result: core_gate.GateResult,
     summary_path: Path,
     telemetry_report: EfficiencyReportPayload | None,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> None:
     machine_summary = result.to_machine_summary()
     if summary_path:
@@ -114,11 +128,19 @@ def _emit_machine_summary(
             "inefficiency_flags": telemetry_report.get("inefficiency_flags", []),
             "diagnostics": telemetry_report.get("diagnostics", []),
         }
-        completion_summary = build_completion_summary_model(result, telemetry_report)
+        completion_summary = build_completion_summary_model(
+            result,
+            telemetry_report,
+            lifecycle_report=lifecycle_report,
+        )
         machine_summary["completion_summary"] = completion_summary
         machine_summary["completion_summary_line"] = completion_summary["line"]
         machine_summary["completion_summary_guidance"] = build_completion_summary_guidance(
-            result, telemetry_report, summary_path=summary_path, include_sha256=True
+            result,
+            telemetry_report,
+            summary_path=summary_path,
+            include_sha256=True,
+            lifecycle_report=lifecycle_report,
         )
     sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
 
@@ -211,6 +233,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         stack_telemetry,
     )
     stack_telemetry = archived_stack_telemetry or stack_telemetry
+    lifecycle_report = load_lifecycle_report(stack_artifact.parent / "cr-metrics.json")
     stack_payload["artifact_path"] = str(stack_artifact)
     stack_payload["telemetry"] = {
         "coverage_label": stack_telemetry["coverage_label"],
@@ -229,6 +252,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
         completion_summary = build_stack_completion_summary_model(
             stack_result,
             stack_telemetry,
+            lifecycle_report=lifecycle_report,
         )
         stack_payload["completion_summary"] = completion_summary
         stack_payload["completion_summary_line"] = completion_summary["line"]
@@ -236,6 +260,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
             stack_result,
             stack_telemetry,
             summary_path=stack_artifact,
+            lifecycle_report=lifecycle_report,
         )
     if machine_requested:
         sys.stdout.write(json.dumps(stack_payload, indent=2, sort_keys=True) + "\n")
@@ -273,13 +298,19 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
         return _handle_stack_final_gate(parsed, machine_requested=machine_requested)
 
     try:
-        result = core_gate.Gatekeeper().run(
-            parsed.repo,
-            parsed.pr_number,
-            snapshot_path=parsed.snapshot or None,
-            require_checks=parsed.require_checks,
-            require_required_checks=parsed.require_required_checks,
+        # The gate's GitHub calls are reads and its only write is the session save,
+        # so a rerun from fresh state after a concurrent commit is equivalent.
+        result = session_store.retry_on_stale_revision(
+            lambda: core_gate.Gatekeeper().run(
+                parsed.repo,
+                parsed.pr_number,
+                snapshot_path=parsed.snapshot or None,
+                require_checks=parsed.require_checks,
+                require_required_checks=parsed.require_required_checks,
+            )
         )
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except FileNotFoundError as exc:
         if machine_requested:
             emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2)
@@ -301,10 +332,16 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     summary_path, telemetry_report = _archive_and_clean_workspace_if_passed(
         parsed, result, summary_path, telemetry_report
     )
+    lifecycle_report = load_lifecycle_report(summary_path.parent / "cr-metrics.json")
     if parsed.machine:
-        _emit_machine_summary(result, summary_path, telemetry_report)
+        _emit_machine_summary(result, summary_path, telemetry_report, lifecycle_report)
     else:
-        emit_final_gate_result(result, summary_path=summary_path, telemetry_report=telemetry_report)
+        emit_final_gate_result(
+            result,
+            summary_path=summary_path,
+            telemetry_report=telemetry_report,
+            lifecycle_report=lifecycle_report,
+        )
     if not result.passed:
         print(f"\nGate FAILED: {final_gate_failure_message(result)}. Do not send completion summary.", file=sys.stderr)
         return result.exit_code
@@ -315,8 +352,14 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
 def build_stack_completion_summary_line(
     result: core_stack_gate.StackGateResult,
     telemetry_report: EfficiencyReportPayload,
+    *,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> str:
-    return build_stack_completion_summary_model(result, telemetry_report)["line"]
+    return build_stack_completion_summary_model(
+        result,
+        telemetry_report,
+        lifecycle_report=lifecycle_report,
+    )["line"]
 
 
 def _stack_layer_projection(result: core_stack_gate.StackGateResult) -> core_gate.GateResult:
@@ -335,8 +378,14 @@ def _stack_layer_projection(result: core_stack_gate.StackGateResult) -> core_gat
 def build_stack_completion_summary_model(
     result: core_stack_gate.StackGateResult,
     telemetry_report: EfficiencyReportPayload,
+    *,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    model = build_completion_summary_model(_stack_layer_projection(result), telemetry_report)
+    model = build_completion_summary_model(
+        _stack_layer_projection(result),
+        telemetry_report,
+        lifecycle_report=lifecycle_report,
+    )
     status = "PASSED" if result.passed else "FAILED"
     layer_prefix = f"[gh-address-cr: {status} | "
     suffix = model["line"].removeprefix(layer_prefix)
@@ -352,6 +401,7 @@ def build_stack_completion_summary_guidance(
     telemetry_report: EfficiencyReportPayload,
     *,
     summary_path: Path,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> str:
     projection = _stack_layer_projection(result)
     guidance = build_completion_summary_guidance(
@@ -359,10 +409,11 @@ def build_stack_completion_summary_guidance(
         telemetry_report,
         summary_path=summary_path,
         include_sha256=True,
+        lifecycle_report=lifecycle_report,
     )
     return guidance.replace(
-        build_completion_summary_line(projection, telemetry_report),
-        build_stack_completion_summary_line(result, telemetry_report),
+        build_completion_summary_line(projection, telemetry_report, lifecycle_report=lifecycle_report),
+        build_stack_completion_summary_line(result, telemetry_report, lifecycle_report=lifecycle_report),
         1,
     ).replace(
         "Recommended user-facing completion summary:",
@@ -427,6 +478,22 @@ def write_stack_final_gate_artifacts(
     paths.workspace_dir.mkdir(parents=True, exist_ok=True)
     artifact = paths.workspace_dir / "stack-audit-summary.md"
     telemetry_report = core_telemetry.build_efficiency_report(repo, pr_number)
+    gate_completed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat() if result.passed else None
+    lifecycle_report: dict[str, Any] | None = None
+    lifecycle_diagnostics: list[str] = []
+    try:
+        lifecycle_report = core_cr_metrics.build_cr_summary(
+            repo,
+            pr_number,
+            gate_completed_at=gate_completed_at,
+        )
+    except Exception as exc:
+        lifecycle_report = write_unavailable_lifecycle_report(
+            paths.workspace_dir / "cr-metrics.json",
+            repo=repo,
+            pr_number=pr_number,
+            error=exc,
+        )
     projection = _stack_layer_projection(result)
     lines = [
         "# Stack Audit Summary",
@@ -447,9 +514,26 @@ def write_stack_final_gate_artifacts(
         f"- telemetry_diagnostics: {telemetry_diagnostics_summary(telemetry_report)}",
         f"- telemetry_inefficiency_flags: {', '.join(telemetry_report.get('inefficiency_flags') or []) or 'none'}",
         f"- efficiency_report_artifact: {paths.efficiency_report_file.name}",
+        f"- cr_metrics_status: {lifecycle_report.get('status', 'SUCCESS') if lifecycle_report else 'UNAVAILABLE'}",
+        f"- cr_metrics_artifact: {'cr-metrics.json' if lifecycle_report else 'unavailable'}",
+        "- cr_metrics_diagnostics: "
+        + (
+            "; ".join([*lifecycle_diagnostics, *(lifecycle_report.get("diagnostics", []) if lifecycle_report else [])])
+            or "none"
+        ),
     ]
     if result.passed:
-        lines.extend(["", "## Stack Completion Summary", build_stack_completion_summary_line(result, telemetry_report)])
+        lines.extend(
+            [
+                "",
+                "## Stack Completion Summary",
+                build_stack_completion_summary_line(
+                    result,
+                    telemetry_report,
+                    lifecycle_report=lifecycle_report,
+                ),
+            ]
+        )
     write_json_atomic(paths.workspace_dir / "stack-gate-result.json", result.to_machine_summary())
     artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return artifact, telemetry_report
@@ -528,6 +612,40 @@ def rewrite_archived_efficiency_report_artifact(report_path: Path, telemetry_rep
         return
 
 
+def rewrite_archived_cr_metrics_artifact(
+    report_path: Path,
+    *,
+    original_workspace: Path,
+    archive_target: Path,
+) -> None:
+    if not report_path.is_file():
+        return
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return
+        rewritten = replace_path_occurrences(payload, str(original_workspace), str(archive_target))
+        write_json_atomic(report_path, rewritten)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return
+
+
+def rewrite_archived_summary_paths(
+    summary_path: Path,
+    *,
+    original_workspace: Path,
+    archive_target: Path,
+) -> None:
+    try:
+        text = summary_path.read_text(encoding="utf-8")
+        summary_path.write_text(
+            text.replace(str(original_workspace), str(archive_target)),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
 def rewrite_archived_audit_artifacts(
     archive_target: Path,
     *,
@@ -588,12 +706,53 @@ def read_file_sha256(path: Path) -> str:
         return "unavailable"
 
 
-def build_completion_summary_line(result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload) -> str:
-    return build_completion_summary_model(result, telemetry_report)["line"]
+def load_lifecycle_report(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_unavailable_lifecycle_report(
+    path: Path,
+    *,
+    repo: str,
+    pr_number: str,
+    error: Exception,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "schema_version": core_cr_metrics.LIFECYCLE_SCHEMA_VERSION,
+        "completeness": "unavailable",
+        "status": "UNAVAILABLE",
+        "reason_code": "CR_SUMMARY_UNAVAILABLE",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "diagnostics": [f"cr-metrics projection unavailable: {type(error).__name__}"],
+        "report_artifact": str(path),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(path, report)
+    except OSError:
+        pass
+    return report
+
+
+def build_completion_summary_line(
+    result: core_gate.GateResult,
+    telemetry_report: EfficiencyReportPayload,
+    *,
+    lifecycle_report: dict[str, Any] | None = None,
+) -> str:
+    return build_completion_summary_model(result, telemetry_report, lifecycle_report=lifecycle_report)["line"]
 
 
 def build_completion_summary_model(
-    result: core_gate.GateResult, telemetry_report: EfficiencyReportPayload
+    result: core_gate.GateResult,
+    telemetry_report: EfficiencyReportPayload,
+    *,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     status_str = "PASSED" if result.passed else "FAILED"
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
@@ -612,6 +771,16 @@ def build_completion_summary_model(
     top_operation_summary = _top_operation_summary(telemetry_report.get("slowest_operations"))
     issue_summary = _issue_summary(telemetry_report, success_rate=success_rate, total_events=total_events)
     artifact_summary = str(telemetry_report.get("report_artifact") or "N/A")
+    lifecycle_summary = _lifecycle_summary(lifecycle_report)
+    lifecycle_status = str(lifecycle_report.get("status") or "UNKNOWN") if lifecycle_report else "UNAVAILABLE"
+    lifecycle_completeness = (
+        str(lifecycle_report.get("completeness") or "unknown") if lifecycle_report else "unavailable"
+    )
+    lifecycle_diagnostics = lifecycle_report.get("diagnostics") if lifecycle_report else []
+    lifecycle_diagnostic_count = len(lifecycle_diagnostics) if isinstance(lifecycle_diagnostics, list) else 0
+    lifecycle_artifact_summary = (
+        str(lifecycle_report.get("report_artifact") or "N/A") if lifecycle_report else "N/A"
+    )
     line = (
         f"[gh-address-cr: {status_str} | "
         f"threads: {unresolved_threads} | "
@@ -622,6 +791,7 @@ def build_completion_summary_model(
         f"sources: {source_summary} | "
         f"duration: {duration_summary} | "
         f"{top_operation_summary} | "
+        f"{lifecycle_summary + ' | ' if lifecycle_summary else ''}"
         f"issues: {issue_summary}]"
     )
     return {
@@ -632,7 +802,38 @@ def build_completion_summary_model(
         "top_operation_summary": top_operation_summary,
         "issue_summary": issue_summary,
         "artifact_summary": artifact_summary,
+        "lifecycle_summary": lifecycle_summary,
+        "lifecycle_status": lifecycle_status,
+        "lifecycle_completeness": lifecycle_completeness,
+        "lifecycle_diagnostic_count": str(lifecycle_diagnostic_count),
+        "lifecycle_artifact_summary": lifecycle_artifact_summary,
     }
+
+
+def _lifecycle_summary(report: dict[str, Any] | None) -> str:
+    if not isinstance(report, dict):
+        return ""
+    aggregates = report.get("aggregates")
+    if not isinstance(aggregates, dict):
+        return ""
+    eligible = _safe_int(aggregates.get("eligible_items"), default=0)
+    if eligible <= 0:
+        return ""
+    excluded = _safe_int(aggregates.get("excluded_items"), default=0)
+    duration = aggregates.get("observed_to_verified_ms")
+    duration = duration if isinstance(duration, dict) else {}
+    median = _safe_int(duration.get("median"), default=0)
+    p90 = _safe_int(duration.get("p90"), default=0)
+    first_pass = aggregates.get("first_pass_verified_rate")
+    first_pass = first_pass if isinstance(first_pass, dict) else {}
+    numerator = _safe_int(first_pass.get("numerator"), default=0)
+    denominator = _safe_int(first_pass.get("denominator"), default=0)
+    rate = _safe_float(first_pass.get("rate"), default=0.0) * 100
+    return (
+        f"lifecycle: {eligible} eligible/{excluded} excluded, "
+        f"verified p50 {_format_duration(median)}, p90 {_format_duration(p90)}, "
+        f"first-pass {numerator}/{denominator} ({rate:.1f}%)"
+    )
 
 
 def _default_confidence_for_coverage(coverage: str) -> str:
@@ -842,6 +1043,7 @@ def build_completion_summary_guidance(
     summary_path: Path | None,
     *,
     include_sha256: bool = True,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> str:
     unresolved_threads = result.counts.get("unresolved_remote_threads_count", 0)
     pending_reviews = result.counts.get("pending_current_login_review_count", 0)
@@ -867,7 +1069,11 @@ def build_completion_summary_guidance(
     report_artifact = telemetry_report.get("report_artifact") or "N/A"
 
     summary_path_str = str(summary_path) if summary_path else "N/A"
-    metrics_line = build_completion_summary_line(result, telemetry_report)
+    metrics_line = build_completion_summary_line(
+        result,
+        telemetry_report,
+        lifecycle_report=lifecycle_report,
+    )
 
     audit_summary_line = f"- Audit Summary: {summary_path_str}"
     if include_sha256 and summary_path:
@@ -911,6 +1117,11 @@ def build_completion_summary_guidance(
         f"{metrics_line}",
         f"{audit_summary_line}",
         f"- Efficiency Report: {report_artifact}",
+        *(
+            [f"- CR Lifecycle Report: {lifecycle_report.get('report_artifact', 'N/A')}"]
+            if lifecycle_report is not None
+            else []
+        ),
         "```",
     ]
 
@@ -937,6 +1148,7 @@ def emit_final_gate_result(
     *,
     summary_path: Path | None = None,
     telemetry_report: EfficiencyReportPayload | None = None,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> None:
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {result.counts['unresolved_remote_threads_count']}")
@@ -981,13 +1193,33 @@ def emit_final_gate_result(
     else:
         print("telemetry_inefficiency_flags=none")
     print(f"Efficiency report path: {telemetry_report['report_artifact']}")
+    if lifecycle_report is not None:
+        aggregates = lifecycle_report.get("aggregates") or {}
+        diagnostics = lifecycle_report.get("diagnostics")
+        diagnostics = diagnostics if isinstance(diagnostics, list) else []
+        print()
+        print("== CR Lifecycle Summary ==")
+        print(f"cr_metrics_status={lifecycle_report.get('status', 'UNKNOWN')}")
+        print(f"cr_metrics_completeness={lifecycle_report.get('completeness', 'unknown')}")
+        print(f"cr_metrics_eligible_items={aggregates.get('eligible_items', 0)}")
+        print(f"cr_metrics_excluded_items={aggregates.get('excluded_items', 0)}")
+        print(f"cr_metrics_diagnostic_count={len(diagnostics)}")
+        print(f"CR lifecycle report path: {lifecycle_report.get('report_artifact', 'N/A')}")
     if summary_path is not None:
         print(f"Audit summary path: {summary_path}")
         summary_sha256 = read_file_sha256(summary_path)
         print(f"Audit summary sha256: {summary_sha256}")
     print()
     print("== PR Completion Summary Guidance ==")
-    print(build_completion_summary_guidance(result, telemetry_report, summary_path=summary_path, include_sha256=True))
+    print(
+        build_completion_summary_guidance(
+            result,
+            telemetry_report,
+            summary_path=summary_path,
+            include_sha256=True,
+            lifecycle_report=lifecycle_report,
+        )
+    )
 
 
 def write_native_final_gate_artifacts(
@@ -1004,6 +1236,21 @@ def write_native_final_gate_artifacts(
     audit_path = paths.audit_log_file
     trace_path = workspace / "trace.jsonl"
     status = "ok" if result.passed else "failed"
+    lifecycle_report: dict[str, Any] | None = None
+    lifecycle_diagnostics: list[str] = []
+    try:
+        lifecycle_report = core_cr_metrics.build_cr_summary(
+            repo,
+            pr_number,
+            gate_completed_at=timestamp if result.passed else None,
+        )
+    except Exception as exc:
+        lifecycle_report = write_unavailable_lifecycle_report(
+            workspace / "cr-metrics.json",
+            repo=repo,
+            pr_number=pr_number,
+            error=exc,
+        )
     summary_lines = [
         "# Audit Summary",
         "",
@@ -1029,10 +1276,27 @@ def write_native_final_gate_artifacts(
             f"- telemetry_inefficiency_flags: {', '.join(telemetry_report['inefficiency_flags']) if telemetry_report['inefficiency_flags'] else 'none'}",
         ]
     )
+    summary_lines.extend(
+        [
+            "",
+            "## CR Lifecycle Metrics",
+            f"- cr_metrics_status: {lifecycle_report.get('status', 'SUCCESS') if lifecycle_report else 'UNAVAILABLE'}",
+            f"- cr_metrics_path: {lifecycle_report.get('report_artifact') if lifecycle_report else 'unavailable'}",
+            "- cr_metrics_diagnostics: "
+            + (
+                "; ".join([*lifecycle_diagnostics, *(lifecycle_report.get("diagnostics", []) if lifecycle_report else [])])
+                or "none"
+            ),
+        ]
+    )
     if result.failure_codes:
         summary_lines.extend(["", "## Failure Codes", *[f"- {code}" for code in result.failure_codes]])
     guidance_md = build_completion_summary_guidance(
-        result, telemetry_report, summary_path=summary_path, include_sha256=False
+        result,
+        telemetry_report,
+        summary_path=summary_path,
+        include_sha256=False,
+        lifecycle_report=lifecycle_report,
     )
     summary_lines.extend(["", "## PR Completion Summary Guidance", guidance_md])
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -1120,10 +1384,47 @@ def final_gate_failure_message(result: core_gate.GateResult) -> str:
     return " and ".join(reasons) or "gate checks reported failure"
 
 
+ARCHIVE_BUSY_TIMEOUT_MS = 5_000
+_RUNTIME_DATABASE = "runtime.sqlite3"
+
+
 def archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Path | None:
+    """Archive the workspace and remove it, never copying a store mid-transaction.
+
+    The runtime store is copied with SQLite's backup API while this process holds
+    the write reservation, so the archive is a committed snapshot and no writer
+    commits into a file that is about to be removed. A store another command is
+    still writing is left in place; auto-clean is skipped rather than racing it.
+    """
     workspace = session_store.workspace_dir(repo, pr_number)
     if not workspace.exists():
         return None
+    database = workspace / _RUNTIME_DATABASE
+    if not database.is_file():
+        return _archive_files(repo, pr_number, audit_id, workspace, connection=None)
+    connection = sqlite3.connect(database, timeout=ARCHIVE_BUSY_TIMEOUT_MS / 1_000, isolation_level=None)
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {int(ARCHIVE_BUSY_TIMEOUT_MS)}")
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            print(f"Skipped auto-clean: the runtime store is still in use ({exc}).", file=sys.stderr)
+            return None
+        return _archive_files(repo, pr_number, audit_id, workspace, connection=connection)
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def _archive_files(
+    repo: str,
+    pr_number: str,
+    audit_id: str,
+    workspace: Path,
+    *,
+    connection: sqlite3.Connection | None,
+) -> Path:
     archive_root = core_paths.state_dir() / "archive" / core_paths.normalize_repo(repo) / f"pr-{pr_number}"
     archive_root.mkdir(parents=True, exist_ok=True)
     base_name = audit_id or "final-gate"
@@ -1132,7 +1433,21 @@ def archive_and_clean_workspace(repo: str, pr_number: str, audit_id: str) -> Pat
     while archive_target.exists():
         archive_target = archive_root / f"{base_name}-{suffix}"
         suffix += 1
-    shutil.copytree(workspace, archive_target)
+    shutil.copytree(
+        workspace,
+        archive_target,
+        ignore=shutil.ignore_patterns(_RUNTIME_DATABASE, f"{_RUNTIME_DATABASE}-*"),
+    )
+    if connection is not None:
+        # ``connection`` holds the write reservation; a separate reader copies the
+        # committed pages, which the reservation keeps stable until removal.
+        source = sqlite3.connect(workspace / _RUNTIME_DATABASE)
+        archived = sqlite3.connect(archive_target / _RUNTIME_DATABASE)
+        try:
+            source.backup(archived)
+        finally:
+            archived.close()
+            source.close()
     shutil.rmtree(workspace, ignore_errors=True)
     print(f"Archived PR workspace: {archive_target}", file=sys.stderr)
     print(f"Auto-cleaned PR workspace: {workspace}", file=sys.stderr)

@@ -143,8 +143,10 @@ class Gatekeeper:
         manager = SessionManager(repo, str(pr_number))
         try:
             session = manager.load()
-        except SessionError:
-            if require_existing_session:
+        except SessionError as exc:
+            # Only a missing session is replaced; a busy, stale, or invalid store
+            # keeps its own reason code instead of being masked by a fresh session.
+            if require_existing_session or exc.reason_code != "SESSION_NOT_FOUND":
                 raise
             session = manager.create(status="WAITING_FOR_GATE")
         if observed_stack_context is not None:
@@ -178,7 +180,11 @@ class Gatekeeper:
             if require_checks or require_required_checks
             else []
         )
+        previous_item_ids = set(map(str, session.get("items") or {}))
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
+        from gh_address_cr.evidence.ledger import record_new_item_observations
+
+        record_new_item_observations(merged_session, previous_item_ids)
         result = evaluate_final_gate(
             merged_session,
             remote_threads=remote_threads,

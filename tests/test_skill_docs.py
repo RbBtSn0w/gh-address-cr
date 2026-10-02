@@ -174,7 +174,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_skill_runtime_floor_covers_resolve_axis_contract(self):
         requirements = json.loads(RUNTIME_REQUIREMENTS_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(requirements["minimum_runtime_version"], "3.5.7")
+        self.assertEqual(requirements["minimum_runtime_version"], "3.16.0")
 
     def test_process_otel_has_versioned_contract_and_architecture_ownership(self):
         contract = OTEL_TRACING_CONTRACT_MD.read_text(encoding="utf-8")
@@ -313,6 +313,50 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("--input <batch-response.json>", protocol_text)
         self.assertIn("--why <why>", protocol_text)
         self.assertIn("--stale", protocol_text)
+
+    def test_skill_guidance_exposes_only_the_current_canonical_protocol(self):
+        text = read_repo_docs(SKILL_MD, AGENT_PROTOCOL_MD, STATUS_ACTION_MAP_MD, README_MD)
+
+        for current_contract in ("protocol `1.1`", "skill contract `1.1`", "`dispatch-receipt.v2`"):
+            with self.subTest(current_contract=current_contract):
+                self.assertIn(current_contract, text)
+        for historical_guidance in (
+            "protocol `1.0`",
+            "`dispatch-receipt.v1`",
+            "Markdown decision blocks remain",
+            "unmigrated compatibility path",
+            "RESOLVE_FLAG_DEPRECATED",
+            "legacy-v1-recovery/",
+        ):
+            with self.subTest(historical_guidance=historical_guidance):
+                self.assertNotIn(historical_guidance, text)
+
+    def test_skill_guidance_routes_item_kinds_through_supported_current_paths(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        combined = skill_text + "\n" + protocol_text
+
+        self.assertIn("Prefer the core machine summary fields", skill_text)
+        self.assertIn("`primary_action`", skill_text)
+        self.assertIn("state-specific additive fields", skill_text)
+        self.assertIn("GitHub review threads", combined)
+        self.assertIn("`gh-address-cr agent resolve`", combined)
+        self.assertIn("Local findings", combined)
+        self.assertRegex(
+            combined,
+            r"`agent classify` → `agent next` → response\s+skeleton\s+→ `agent submit`",
+        )
+        self.assertIn("must not publish GitHub side effects", combined)
+        self.assertIn("--disposition defer", protocol_text)
+        self.assertIn("Batch input carries a decision for each item", protocol_text)
+        self.assertNotIn("Any disposition composes with any selection and condition", protocol_text)
+
+    def test_skill_guidance_rejects_string_fix_reply_during_submit(self):
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+
+        self.assertIn("rejected by `agent submit`", protocol_text)
+        self.assertIn("`INVALID_FIX_REPLY`", protocol_text)
+        self.assertNotIn("may pass `agent submit`", protocol_text)
 
     def test_status_action_map_documents_only_codes_the_runtime_emits(self):
         # One-directional doc ⊆ runtime, mirroring
@@ -547,6 +591,14 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary", combined)
         self.assertIn("abnormal coverage, diagnostics, success-rate drops, or inefficiency flags", combined)
 
+    def test_completion_contract_documents_advisory_lifecycle_report(self):
+        completion_text = COMPLETION_CONTRACT_MD.read_text(encoding="utf-8")
+
+        self.assertIn("`cr-metrics.json`", completion_text)
+        self.assertIn("`cr-lifecycle.v1`", completion_text)
+        self.assertIn("cannot change the final-gate verdict or exit code", completion_text)
+        self.assertIn("inferred observation times are excluded", completion_text)
+
     def test_skill_identifies_as_thin_adapter(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("thin adapter", text.lower())
@@ -569,20 +621,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("--artifact <loop-request.json>", feedback_text)
         self.assertNotIn("--artifact /tmp/loop-request.json", feedback_text)
 
-    def test_feedback_documents_auto_trigger_on_skill_exceptions_only(self):
+    def test_feedback_requires_authorization_before_creating_an_issue(self):
         feedback_text = FEEDBACK_MD.read_text(encoding="utf-8")
         skill_text = SKILL_MD.read_text(encoding="utf-8")
-        # The automatic trigger is documented and scoped to genuine skill exceptions.
-        self.assertIn("Automatic feedback on skill exceptions", feedback_text)
+        # Skill exceptions trigger preparation, never an unrequested external write.
+        self.assertIn("Prepare feedback for skill exceptions", feedback_text)
         self.assertIn("--category tooling-bug", feedback_text)
-        # Allowlist: crash, or a reason_code ending in _ERROR.
         self.assertIn("ends in `_ERROR`", feedback_text)
         self.assertIn("SYSTEM_ERROR", feedback_text)
-        # Denylist keeps the scope to exceptions only (must not auto-file these).
         self.assertIn("`*_REJECTED`", feedback_text)
         self.assertIn("`WAITING_*`", feedback_text)
-        # SKILL.md surfaces the auto-trigger without duplicating the full rule.
-        self.assertIn("expected automatic step", skill_text)
+        self.assertIn("explicit user authorization", feedback_text)
+        self.assertRegex(skill_text, r"prepare\s+sanitized diagnostics")
+        self.assertNotIn("without waiting to be asked", feedback_text)
+        self.assertNotIn("expected automatic step", skill_text)
 
     def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
         cli_text = CLI_REFERENCE_MD.read_text(encoding="utf-8")
@@ -597,7 +649,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("`files`", protocol_text)
         self.assertIn("`test_command`", protocol_text)
         self.assertIn("`test_result`", protocol_text)
-        self.assertIn("MISSING_PUBLISH_REPLY", protocol_text)
+        self.assertIn("INVALID_FIX_REPLY", protocol_text)
         self.assertIn("Review signal:", cli_text)
         self.assertIn("Review signal:", protocol_text)
         self.assertNotIn("Published fix replies should surface that signal as `Reviewer priority:`", skill_text)
@@ -649,14 +701,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertTrue(path.exists(), msg=str(path))
         self.assertTrue(AGENT_FEEDBACK_ISSUE_TEMPLATE.exists(), msg=str(AGENT_FEEDBACK_ISSUE_TEMPLATE))
 
-    def test_compatibility_inventory_documents_preserved_and_removed_surfaces(self):
+    def test_current_contract_avoids_historical_migration_inventory(self):
         text = COMPATIBILITY_INVENTORY_MD.read_text(encoding="utf-8")
-        self.assertIn("Preserved Public Contracts", text)
-        self.assertIn("Unsupported historical root commands", text)
-        self.assertIn("submit-action", text)
-        self.assertIn("Removed Or Unsupported Surfaces", text)
-        self.assertIn("legacy_scripts", text)
-        self.assertIn("Internal Naming Rule", text)
+        self.assertIn("Current Public Contract", text)
+        self.assertIn("protocol `1.1`", text)
+        self.assertIn("skill contract `1.1`", text)
+        self.assertIn("`dispatch-receipt.v2`", text)
+        self.assertNotIn("Compatibility Inventory", text)
+        self.assertNotIn("Unsupported historical", text)
+        self.assertNotIn("legacy_scripts", text)
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = read_repo_docs(README_MD, CLI_REFERENCE_MD)
@@ -913,3 +966,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("address owner/repo 101", normalized_workflow)
         self.assertIn("gh stack sync", normalized_workflow)
         self.assertIn("atomic", normalized_workflow)
+
+    def test_publish_reconciliation_recovery_is_published(self):
+        protocol_text = AGENT_PROTOCOL_MD.read_text(encoding="utf-8")
+        status_text = STATUS_ACTION_MAP_MD.read_text(encoding="utf-8")
+
+        self.assertIn("PUBLISH_RECONCILE_REQUIRED", protocol_text)
+        self.assertIn("waiting_on=reply_reconciliation", protocol_text)
+        self.assertIn("PUBLISH_RECONCILE_REQUIRED", status_text)
+        self.assertIn("do not retry `agent publish` blindly", status_text)
+        self.assertIn("agent evidence add", status_text)

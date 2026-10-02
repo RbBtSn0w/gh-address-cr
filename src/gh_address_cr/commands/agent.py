@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -10,7 +9,6 @@ from datetime import datetime
 from gh_address_cr import (
     MAX_PARALLEL_CLAIMS,
     PROTOCOL_VERSION,
-    SUPPORTED_PROTOCOL_VERSIONS,
     SUPPORTED_SKILL_CONTRACT_VERSIONS,
     __version__,
 )
@@ -23,6 +21,7 @@ from gh_address_cr.commands.common import (
 )
 from gh_address_cr.commands.common import (
     output_generic_agent_error,
+    output_session_error,
     output_workflow_error,
 )
 from gh_address_cr.commands.common import (
@@ -38,6 +37,7 @@ from gh_address_cr.core import (
     workflow,
     workflow_matching,
 )
+from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 
 PUBLIC_COMMANDS = {
@@ -65,8 +65,8 @@ def build_agent_manifest() -> dict:
         "runtime_package": "gh-address-cr",
         "runtime_version": __version__,
         "agent_id": "gh-address-cr-runtime",
-        "protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
-        "supported_protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
+        "protocol_versions": [PROTOCOL_VERSION],
+        "supported_protocol_versions": [PROTOCOL_VERSION],
         "supported_skill_contract_versions": list(SUPPORTED_SKILL_CONTRACT_VERSIONS),
         "roles": [
             "coordinator",
@@ -105,6 +105,8 @@ def build_agent_manifest() -> dict:
             "evidence_record.v1",
             "evidence_profile.v1",
             "gate_report.v1",
+            "dispatch_receipt.v2",
+            "worker_packet.v2",
             "work_item_boundary.v1",
             "workflow_decision.v1",
         ],
@@ -116,6 +118,15 @@ def build_agent_manifest() -> dict:
 
 
 def handle_agent_command(args: argparse.Namespace) -> int:
+    try:
+        return _route_agent_command(args)
+    except session_store.SessionError as exc:
+        # Any agent subcommand can hit a session or persistence failure after its own
+        # error handling; surface its reason code instead of an unstructured traceback.
+        return output_session_error(exc, repo=args.pr_number, pr_number=args.args[0] if args.args else None)
+
+
+def _route_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
             "usage: gh-address-cr agent {manifest,classify,next,submit,resolve,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
@@ -339,12 +350,9 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent resolve",
         description=(
-            "Resolve one or more GitHub review threads along three independent axes: "
-            "disposition (--disposition fix|trivial|reject|clarify — what to do), "
-            "selection (an <item_id>, --files/--file, or --input — which thread(s)), "
-            "and condition (--stale — fresh by default, or the matching STALE/outdated "
-            "thread(s)). Any disposition composes with any selection and condition; "
-            "--why carries the reason for a reject/clarify disposition on any selection."
+            "Resolve GitHub review threads through the supported canonical forms: "
+            "a single <item_id>, a --files/--file selection, or per-thread decisions "
+            "from --input. Use --stale for stale/outdated single or files selections."
         ),
     )
     parser.add_argument("repo")
@@ -352,10 +360,10 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("item_id", nargs="?", help="Selection: which single thread (fresh or --stale) to resolve.")
     parser.add_argument(
         "--disposition",
-        choices=["fix", "trivial", "reject", "clarify"],
+        choices=["fix", "trivial", "reject", "clarify", "defer"],
         default=None,
         help="Disposition (primary axis): what to do with the selected thread(s) — "
-        "fix (default), trivial (doc/typo fast path), reject, or clarify.",
+        "fix (default), trivial (doc/typo fast path), reject, clarify, or defer.",
     )
     parser.add_argument("--stale", action="store_true", help="Condition (primary axis): resolve matching STALE/outdated threads.")
     parser.add_argument("--files", help="Selection: files-scope collective, instead of a single item_id.")
@@ -363,10 +371,10 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--input", help="Selection: BatchActionResponse JSON for per-thread evidence.")
     parser.add_argument(
         "--why",
-        help="Reason for a reject/clarify disposition (any selection), or the shared "
+        help="Reason for a reject/clarify/defer disposition, or the shared "
         "rationale for a homogeneous fix (files selection with a repeated concern).",
     )
-    parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--agent-id")
     parser.add_argument("--commit")
     parser.add_argument("--summary")
     parser.add_argument("--severity", choices=["P0", "P1", "P2", "P3", "P4"])
@@ -376,48 +384,18 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--now")
 
-    deprecated = parser.add_argument_group(
-        "Deprecated aliases",
-        "Still functional during the compat window; each aliases an axis-form flag above.",
-    )
-    deprecated.add_argument(
-        "--batch",
-        action="store_true",
-        help="[deprecated: implied by --input] Resolve multiple threads from a BatchActionResponse.",
-    )
-    deprecated.add_argument(
-        "--trivial", action="store_true", help="[deprecated: use --disposition trivial] Documentation/typo-only fast path."
-    )
-    deprecated.add_argument(
-        "--reject",
-        action="store_true",
-        help="[deprecated: use --disposition reject] Decline matching threads (reject) with a shared --why.",
-    )
-    deprecated.add_argument(
-        "--clarify",
-        action="store_true",
-        help="[deprecated: use --disposition clarify] Decline matching threads (clarify) with a shared --why.",
-    )
-    deprecated.add_argument(
-        "--homogeneous-reason", help="[deprecated: use --why] Rationale for the homogeneous repeated-concern shortcut."
-    )
-    deprecated.add_argument("--concern-label", help="[deprecated] Short label for the homogeneous repeated concern.")
-    deprecated.add_argument(
-        "--match-files", action="store_true", help="[deprecated: implied by --files/--file] Keep resolution file-scoped."
-    )
-    deprecated.add_argument("--include-stale", action="store_true", help="[deprecated: use --stale]")
     parsed, scope_rc = _parse_with_scope(parser, repo, passthrough)
     if parsed is None:
         return scope_rc
 
-    _normalize_disposition(parsed)
     try:
-        _check_deprecated_resolve_flags(parsed)
         _validate_resolve_mode(parsed)
         _validate_resolve_axes(parsed)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
 
+    parsed.disposition = parsed.disposition or "fix"
+    parsed.agent_id = parsed.agent_id or "agent"
     try:
         now_dt = None
         if parsed.now:
@@ -448,97 +426,6 @@ def _resolve_published_flag(payload: dict) -> bool:
     return False
 
 
-def _normalize_disposition(parsed: argparse.Namespace) -> None:
-    """Resolve `parsed.disposition` from the new `--disposition` enum flag or
-    the legacy `--trivial`/`--reject`/`--clarify` boolean aliases — both
-    spellings work during the deprecation window (T028 adds the visible
-    notice on top of this normalization). Records a same-axis conflict on
-    `parsed._disposition_conflict` when more than one distinct value is
-    implied, for `_validate_resolve_axes` to reject (spec 029 R-4/T015).
-    """
-    legacy_flags = []
-    if parsed.trivial:
-        legacy_flags.append("--trivial")
-    if parsed.reject:
-        legacy_flags.append("--reject")
-    if parsed.clarify:
-        legacy_flags.append("--clarify")
-    legacy_values = {flag.lstrip("-") for flag in legacy_flags}
-
-    explicit = parsed.disposition
-    all_values = set(legacy_values)
-    if explicit is not None:
-        all_values.add(explicit)
-
-    parsed._disposition_via_legacy_flag = bool(legacy_flags)
-    if len(all_values) > 1:
-        labels = sorted(legacy_flags)
-        if explicit is not None:
-            labels.append(f"--disposition {explicit}")
-        parsed._disposition_conflict = ", ".join(labels)
-        parsed.disposition = None
-        return
-
-    parsed._disposition_conflict = None
-    parsed.disposition = next(iter(all_values), "fix")
-
-
-# spec 029 T031: flips to False when the deprecation window for the legacy
-# `agent resolve` mode-preset flags closes. While open, legacy flags keep
-# working (aliased, with a visible notice); once closed, using one raises
-# RESOLVE_FLAG_DEPRECATED instead of silently aliasing.
-RESOLVE_DEPRECATION_WINDOW_OPEN = False
-
-
-def is_resolve_deprecation_window_open() -> bool:
-    env_val = os.environ.get("GH_ADDRESS_CR_RESOLVE_DEPRECATION_WINDOW_OPEN")
-    if env_val is not None:
-        return env_val.strip() in ("1", "true", "True")
-    return RESOLVE_DEPRECATION_WINDOW_OPEN
-
-# spec 029 T028/data-model Entity 3: legacy flag -> axis-equivalent replacement text.
-_DEPRECATED_RESOLVE_FLAGS: tuple[tuple[str, str], ...] = (
-    ("trivial", "--disposition trivial"),
-    ("reject", "--disposition reject"),
-    ("clarify", "--disposition clarify"),
-    ("batch", "--input alone (--batch adds no behavior beyond --input's presence)"),
-    ("match_files", "nothing — implied by --files/--file"),
-    ("include_stale", "--stale"),
-    ("homogeneous_reason", "--why"),
-    ("concern_label", "nothing — no longer needed"),
-)
-
-
-def _detect_deprecated_resolve_flags(parsed: argparse.Namespace) -> list[tuple[str, str]]:
-    detected: list[tuple[str, str]] = []
-    for attr, replacement in _DEPRECATED_RESOLVE_FLAGS:
-        value = getattr(parsed, attr, None)
-        if value:
-            detected.append((f"--{attr.replace('_', '-')}", replacement))
-    return detected
-
-
-def _check_deprecated_resolve_flags(parsed: argparse.Namespace) -> None:
-    """T028/T031: warn (window open) or fail loudly (window closed) on legacy flags."""
-    detected = _detect_deprecated_resolve_flags(parsed)
-    if not detected:
-        return
-    if not is_resolve_deprecation_window_open():
-        names = ", ".join(flag for flag, _ in detected)
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code=protocol_codes.RESOLVE_FLAG_DEPRECATED,
-            waiting_on="resolve_axis",
-            exit_code=2,
-            message=(
-                f"agent resolve: {names} {'is' if len(detected) == 1 else 'are'} no longer "
-                "supported past the deprecation window; use the axis-based replacement instead."
-            ),
-        )
-    for flag, replacement in detected:
-        sys.stderr.write(f"[deprecated] agent resolve {flag} is deprecated; use {replacement} instead.\n")
-
-
 def _validate_resolve_mode(parsed: argparse.Namespace) -> None:
     """Retained per spec 029 F2: `disposition=trivial` requires
     `selection=single` — the one intentional, documented cross-axis
@@ -555,10 +442,7 @@ def _validate_resolve_mode(parsed: argparse.Namespace) -> None:
 
 
 def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
-    """Axis-coherence validator (spec 029 T005/C-A1/C-A3/C-A4): only
-    same-axis conflicts and disposition/evidence incoherence are rejected.
-    No valid cross-axis combination is rejected — explicitly including
-    `item_id` + `--stale` + `--disposition reject|clarify` (closes #204).
+    """Reject conflicting selections and unsupported disposition/evidence shapes.
 
     `--files`/`--file` is overloaded: for fix/trivial it is **evidence**
     (which files were touched — always compatible with `item_id`, the normal
@@ -567,8 +451,9 @@ def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
     consume) — only then does `item_id` + `--files` become a genuine
     same-axis conflict.
     """
+    disposition = parsed.disposition or "fix"
     files_present = bool(parsed.files) or bool(parsed.file)
-    files_is_selection = files_present and parsed.disposition in ("reject", "clarify")
+    files_is_selection = files_present and disposition in ("reject", "clarify", "defer")
     selection_sources = [
         name
         for name, present in (
@@ -590,59 +475,76 @@ def _validate_resolve_axes(parsed: argparse.Namespace) -> None:
                 "--files/--file, or --input — not more than one."
             ),
         )
-    if parsed._disposition_conflict:
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code=protocol_codes.RESOLVE_AXIS_CONFLICT,
-            waiting_on="resolve_axis",
-            exit_code=2,
-            message=f"agent resolve accepts exactly one disposition; got {parsed._disposition_conflict}.",
-        )
-    if parsed.disposition in ("reject", "clarify") and (parsed.commit or parsed.validation):
+    if disposition in ("reject", "clarify", "defer") and (parsed.commit or parsed.validation):
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code=protocol_codes.RESOLVE_EVIDENCE_INCOHERENT,
             waiting_on="resolve_axis",
             exit_code=2,
             message=(
-                f"agent resolve --disposition {parsed.disposition} declines threads with a "
+                f"agent resolve --disposition {disposition} declines threads with a "
                 "reason and does not accept --commit or --validation (use --disposition fix "
                 "for code changes)."
             ),
         )
-    if parsed.input and parsed.disposition in ("reject", "clarify"):
-        # selection=batch (--input) always routes to fast_fix_from_batch_input,
-        # which is fix-only — each item's own resolution lives inside the
-        # BatchActionResponse JSON. A non-fix --disposition here would be
-        # silently ignored rather than honored (PR #206 CR).
+    if parsed.input and parsed.disposition is not None:
+        # Every batch item's resolution lives inside the BatchActionResponse.
+        # A top-level disposition would duplicate or override those decisions.
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code=protocol_codes.RESOLVE_EVIDENCE_INCOHERENT,
             waiting_on="resolve_axis",
             exit_code=2,
             message=(
-                f"agent resolve --input <batch-response.json> is fix-only; "
-                f"--disposition {parsed.disposition} has no effect on a batch selection. "
-                "Set each item's resolution inside the BatchActionResponse JSON instead, "
-                "or drop --input and use a single item_id / --files selection to decline."
+                "agent resolve --input <batch-response.json> does not accept a top-level "
+                "--disposition. Set each item's resolution inside the BatchActionResponse "
+                "JSON instead."
             ),
         )
+    if parsed.input:
+        unsupported_batch_flags = [
+            flag
+            for flag, present in (
+                ("--agent-id", parsed.agent_id is not None),
+                ("--commit", bool(parsed.commit)),
+                ("--files/--file", files_present),
+                ("--summary", bool(parsed.summary)),
+                ("--why", bool(parsed.why)),
+                ("--severity", bool(parsed.severity)),
+                ("--severity-note", bool(parsed.severity_note)),
+                ("--review-priority", bool(parsed.review_priority)),
+                ("--validation", bool(parsed.validation)),
+                ("--stale", bool(parsed.stale)),
+            )
+            if present
+        ]
+        if unsupported_batch_flags:
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_REJECTED,
+                reason_code=protocol_codes.RESOLVE_EVIDENCE_INCOHERENT,
+                waiting_on="resolve_axis",
+                exit_code=2,
+                message=(
+                    "agent resolve --input <batch-response.json> does not accept top-level flags: "
+                    f"{', '.join(unsupported_batch_flags)}. Put per-item decisions and evidence "
+                    "inside the BatchActionResponse JSON."
+                ),
+            )
 
 
 def _dispatch_decline_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
     resolution = parsed.disposition
-    # --match-files/--commit/--validation gating is handled once, up front,
-    # by _validate_resolve_axes (T020/T021) — --files/--file alone is
-    # sufficient for selection=files (C-A1/C-A5).
+    # Disposition/evidence coherence is validated once, before dispatch;
+    # --files/--file alone selects the files-scoped collective path.
     return workflow_matching.decline_matching_threads(
         parsed.repo,
         parsed.pr_number,
         agent_id=parsed.agent_id,
         files=_parse_agent_files(parsed.files, parsed.file),
         resolution=resolution,
-        homogeneous_reason=parsed.why or parsed.homogeneous_reason,
-        concern_label=parsed.concern_label,
-        include_stale=parsed.stale or parsed.include_stale,
+        homogeneous_reason=parsed.why,
+        concern_label=None,
+        include_stale=parsed.stale,
         stale_only=parsed.stale,
         publish=parsed.publish,
         now=now_dt,
@@ -650,8 +552,7 @@ def _dispatch_decline_resolution(parsed: argparse.Namespace, *, now_dt: datetime
 
 
 def _dispatch_stale_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
-    # --match-files is deprecated/implied by --files/--file (C-A1/C-A5); no
-    # longer gates stale-fix dispatch (T021).
+    # A files selection is sufficient to route stale fixes.
     if not parsed.commit:
         raise WorkflowError(
             status="STALE_RESOLUTION_REJECTED",
@@ -696,11 +597,11 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
         commit_hash=parsed.commit,
         files=files,
         validation_commands=_parse_agent_validation(parsed.validation),
-        include_stale=parsed.include_stale,
+        include_stale=False,
         severity=parsed.severity,
         severity_note=parsed.severity_note,
-        homogeneous_reason=parsed.why or parsed.homogeneous_reason,
-        concern_label=parsed.concern_label,
+        homogeneous_reason=parsed.why,
+        concern_label=None,
         publish=parsed.publish,
         now=now_dt,
     )
@@ -709,14 +610,14 @@ def _dispatch_match_all_resolution(parsed: argparse.Namespace, *, now_dt: dateti
 def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: datetime | None) -> dict:
     parsed.item_id = workflow.resolve_thread_alias(parsed.repo, parsed.pr_number, parsed.item_id)
     disposition = parsed.disposition
-    if disposition in ("reject", "clarify"):
+    if disposition in ("reject", "clarify", "defer"):
         return workflow.decline_item(
             parsed.repo,
             parsed.pr_number,
             item_id=parsed.item_id,
             agent_id=parsed.agent_id,
             resolution=disposition,
-            why=parsed.why or parsed.homogeneous_reason,
+            why=parsed.why,
             publish=parsed.publish,
             now=now_dt,
         )
@@ -770,19 +671,11 @@ def _dispatch_agent_resolve(parsed: argparse.Namespace, *, now_dt: datetime | No
     """
     if parsed.item_id:
         return _dispatch_single_item_resolution(parsed, now_dt=now_dt)
-    if parsed.batch or parsed.input:
-        if not parsed.input:
-            raise WorkflowError(
-                status=protocol_codes.FAST_FIX_ALL_REJECTED,
-                reason_code="MISSING_BATCH_INPUT",
-                waiting_on="batch_action_response",
-                exit_code=2,
-                message="agent resolve requires --input <batch-response.json> for a batch selection.",
-            )
+    if parsed.input:
         return workflow.fast_fix_from_batch_input(
             parsed.repo, parsed.pr_number, batch_path=parsed.input, publish=parsed.publish, now=now_dt
         )
-    if parsed.disposition in ("reject", "clarify"):
+    if parsed.disposition in ("reject", "clarify", "defer"):
         return _dispatch_decline_resolution(parsed, now_dt=now_dt)
     if parsed.stale:
         return _dispatch_stale_resolution(parsed, now_dt=now_dt)
@@ -912,6 +805,8 @@ def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
         )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, "PUBLISH_ERROR", str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -929,6 +824,8 @@ def handle_agent_leases(repo: str | None, passthrough: list[str]) -> int:
         payload = leases.list_leases(parsed.repo, parsed.pr_number)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -948,6 +845,8 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
         payload = leases.reclaim_leases(parsed.repo, parsed.pr_number, now=now)
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
+    except session_store.SessionError as exc:
+        return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")

@@ -3,9 +3,9 @@ from __future__ import annotations
 import subprocess
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
-from gh_address_cr.core import command_templates, protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes, side_effect_outbox
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.reply_templates import (
@@ -24,6 +24,7 @@ from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revisi
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
+from gh_address_cr.core.side_effect_outbox import reconcile_side_effect_no_effect
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
 )
@@ -143,10 +144,14 @@ def _execute_single_publish_plan(
     reply_url = item.get("reply_url") if item.get("reply_posted") else None
     reply_key = _side_effect_key(session, item_id, "github_reply")
     resolve_key = _side_effect_key(session, item_id, "github_resolve")
-    existing_reply_url = ledger.successful_side_effect_url(reply_key, "github_reply")
-    if existing_reply_url:
-        reply_url = existing_reply_url
-    if not reply_url and ledger.latest_side_effect_status(reply_key, "github_reply") == "in_flight":
+    reply_state = side_effect_outbox.side_effect_state(
+        session, effect_type="github_reply", idempotency_key=reply_key
+    )
+    if reply_state is not None and reply_state["status"] == "succeeded" and reply_state["external_result_reference"]:
+        reply_url = str(reply_state["external_result_reference"])
+    if not reply_url and reply_state is not None and reply_state["owner_alive"]:
+        raise side_effect_outbox.side_effect_in_progress(session, effect_type="github_reply")
+    if not reply_url and reply_state is not None and reply_state["status"] == "unknown":
         reconciled_url = _reconcile_in_flight_reply(client, repo, str(pr_number), thread_id, publisher_login)
         if reconciled_url is None:
             # The narrow latest-comment match found nothing. That alone doesn't tell us
@@ -171,6 +176,11 @@ def _execute_single_publish_plan(
                     ),
                     payload={"item_id": item_id},
                 )
+            reconcile_side_effect_no_effect(
+                session,
+                effect_type="github_reply",
+                idempotency_key=reply_key,
+            )
             # Nothing was ever posted, so falling through to the normal post-reply path
             # below (which re-records a fresh in_flight attempt) is safe.
         else:
@@ -198,45 +208,19 @@ def _execute_single_publish_plan(
                 timestamp=timestamp,
             )
     if not reply_url:
-        _record_side_effect_attempt(
+        reply_url = _execute_github_side_effect(
             ledger,
             session=session,
+            repo=repo,
+            pr_number=pr_number,
             item_id=item_id,
             lease_id=lease_id,
             agent_id=agent_id,
             side_effect_type="github_reply",
             idempotency_key=reply_key,
-            status="in_flight",
             timestamp=timestamp,
-        )
-        try:
-            reply_url = client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"]))
-        except GitHubError as exc:
-            _record_side_effect_attempt(
-                ledger,
-                session=session,
-                item_id=item_id,
-                lease_id=lease_id,
-                agent_id=agent_id,
-                side_effect_type="github_reply",
-                idempotency_key=reply_key,
-                status="failed",
-                timestamp=timestamp,
-                last_error=str(exc),
-            )
-            session_store.save_session(repo, pr_number, session)
-            raise _publish_error(repo, pr_number, item_id, exc) from exc
-        _record_side_effect_attempt(
-            ledger,
-            session=session,
-            item_id=item_id,
-            lease_id=lease_id,
-            agent_id=agent_id,
-            side_effect_type="github_reply",
-            idempotency_key=reply_key,
-            status="succeeded",
-            timestamp=timestamp,
-            external_url=reply_url,
+            call=lambda: client.post_reply(repo, str(pr_number), thread_id, str(plan["reply_body"])),
+            external_url=lambda result: result,
         )
         ledger.append_event(
             session_id=str(session["session_id"]),
@@ -252,36 +236,26 @@ def _execute_single_publish_plan(
     item["reply_url"] = reply_url
     item["reply_evidence"] = {"reply_url": reply_url, "author_login": publisher_login}
 
-    existing_resolve = ledger.successful_side_effect_url(resolve_key, "github_resolve")
-    if not existing_resolve and not item.get("thread_resolved"):
-        try:
-            client.resolve_thread(repo, str(pr_number), thread_id)
-        except GitHubError as exc:
-            _record_side_effect_attempt(
-                ledger,
-                session=session,
-                item_id=item_id,
-                lease_id=lease_id,
-                agent_id=agent_id,
-                side_effect_type="github_resolve",
-                idempotency_key=resolve_key,
-                status="failed",
-                timestamp=timestamp,
-                last_error=str(exc),
-            )
-            session_store.save_session(repo, pr_number, session)
-            raise _publish_error(repo, pr_number, item_id, exc) from exc
-        _record_side_effect_attempt(
+    resolve_state = side_effect_outbox.side_effect_state(
+        session, effect_type="github_resolve", idempotency_key=resolve_key
+    )
+    resolved = resolve_state is not None and resolve_state["status"] == "succeeded"
+    if not resolved and not item.get("thread_resolved"):
+        if resolve_state is not None and resolve_state["owner_alive"]:
+            raise side_effect_outbox.side_effect_in_progress(session, effect_type="github_resolve")
+        _execute_github_side_effect(
             ledger,
             session=session,
+            repo=repo,
+            pr_number=pr_number,
             item_id=item_id,
             lease_id=lease_id,
             agent_id=agent_id,
             side_effect_type="github_resolve",
             idempotency_key=resolve_key,
-            status="succeeded",
             timestamp=timestamp,
-            external_url=thread_id,
+            call=lambda: client.resolve_thread(repo, str(pr_number), thread_id),
+            external_url=lambda _result: thread_id,
         )
         ledger.append_event(
             session_id=str(session["session_id"]),
@@ -426,6 +400,24 @@ def publish_github_thread_responses(
     github_client: Any | None = None,
     agent_id: str = "gh-address-cr-publisher",
     now: datetime | None = None,
+) -> dict[str, Any]:
+    """Publish accepted responses, replaying from fresh state when another writer committed first.
+
+    Every GitHub mutation runs through the canonical outbox, so a replay reuses
+    each recorded result and performs no new mutation for work already done.
+    """
+    return session_store.retry_on_stale_revision(
+        lambda: _publish_once(repo, pr_number, github_client=github_client, agent_id=agent_id, now=now)
+    )
+
+
+def _publish_once(
+    repo: str,
+    pr_number: str,
+    *,
+    github_client: Any | None,
+    agent_id: str,
+    now: datetime | None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
     timestamp = _format_timestamp(current_time)
@@ -692,6 +684,58 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
 
 def _side_effect_key(session: dict[str, Any], item_id: str, side_effect_type: str) -> str:
     return f"{session['session_id']}:{item_id}:{side_effect_type}"
+
+
+def _execute_github_side_effect(
+    ledger: EvidenceLedger,
+    *,
+    session: dict[str, Any],
+    repo: str,
+    pr_number: str,
+    item_id: str,
+    lease_id: str | None,
+    agent_id: str,
+    side_effect_type: str,
+    idempotency_key: str,
+    timestamp: str,
+    call: Callable[[], Any],
+    external_url: Callable[[Any], str],
+) -> Any:
+    """Run one GitHub mutation under its outbox execution guard.
+
+    The guard is held from the committed ``in_flight`` attempt until the result
+    commits, so a concurrent publisher sees the command as running instead of
+    reconciling or repeating it. If the process dies mid-call, the lock is
+    released by the OS and the next load demotes the attempt to ``unknown``.
+    """
+
+    def record(status: str, *, external_url: str | None = None, last_error: str | None = None) -> None:
+        _record_side_effect_attempt(
+            ledger,
+            session=session,
+            item_id=item_id,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            side_effect_type=side_effect_type,
+            idempotency_key=idempotency_key,
+            status=status,
+            timestamp=timestamp,
+            external_url=external_url,
+            last_error=last_error,
+        )
+
+    with side_effect_outbox.execution_guard(
+        session, effect_type=side_effect_type, idempotency_key=idempotency_key
+    ):
+        record("in_flight")
+        try:
+            result = call()
+        except GitHubError as exc:
+            record("failed", last_error=str(exc))
+            session_store.save_session(repo, pr_number, session)
+            raise _publish_error(repo, pr_number, item_id, exc) from exc
+        record("succeeded", external_url=external_url(result))
+    return result
 
 
 def _record_side_effect_attempt(

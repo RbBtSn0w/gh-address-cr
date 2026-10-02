@@ -63,7 +63,9 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def ledger_rows(self):
         ledger = self.workspace_dir() / "evidence.jsonl"
@@ -78,7 +80,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "compatible")
         self.assertEqual(payload["runtime_package"], "gh-address-cr")
-        self.assertIn("1.0", payload["supported_protocol_versions"])
+        self.assertEqual(payload["supported_protocol_versions"], ["1.1"])
 
     def test_agent_next_rejects_fixer_without_classification_before_lease(self):
         self.write_session(items=[open_item()])
@@ -1401,9 +1403,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         first_request = json.loads(Path(json.loads(first.stdout)["request_path"]).read_text(encoding="utf-8"))
         second_request = json.loads(Path(json.loads(second.stdout)["request_path"]).read_text(encoding="utf-8"))
-        session = self.load_session()
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(self.repo, self.pr)
+        session = manager.load()
         session["leases"][second_request["lease_id"]]["expires_at"] = (NOW - timedelta(seconds=1)).isoformat()
-        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        manager.save(session)
         batch_path = self.workspace_dir() / "expired-batch-action-response.json"
         batch_path.write_text(
             json.dumps(

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from gh_address_cr import __version__
@@ -205,7 +206,7 @@ def alias_help(command: str) -> str:
             "Use --auto-simple for a lightweight GitHub thread-only path that does not wait for external review findings.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "address":
         return (
@@ -215,7 +216,7 @@ def alias_help(command: str) -> str:
             "This command does not wait for external review findings and does not ingest local findings.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "threads":
         return (
@@ -224,7 +225,7 @@ def alias_help(command: str) -> str:
             "Use when only GitHub review threads need processing.\n"
             "Use --lean or --summary to omit verbose thread body/url/reply_evidence fields.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "findings":
         return (
@@ -234,7 +235,7 @@ def alias_help(command: str) -> str:
             "Missing --input fails immediately instead of waiting on stdin.\n"
             "`--sync` requires --source so auto-closing stays scoped to one producer.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     if command == "adapter":
         return (
@@ -245,7 +246,7 @@ def alias_help(command: str) -> str:
             "Arguments after <adapter_cmd...> are passed through to the adapter command unchanged.\n"
             "Use global --human/--machine before `adapter` to change wrapper output mode.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
 
     if command == "submit-action":
@@ -262,7 +263,7 @@ def alias_help(command: str) -> str:
             "Runtime diagnostics entrypoint.\n\n"
             "Checks GitHub CLI availability/authentication, optional repository access, and writable state directories.\n"
             "Default output is a structured JSON summary with stable checks, reason_code, and diagnostics fields.\n"
-            "--machine remains a compatibility alias for the default machine summary.\n"
+            "--machine explicitly requests the structured machine summary.\n"
         )
     return ""
 
@@ -374,12 +375,9 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
 
 
 def load_session_payload(repo: str, pr_number: str) -> dict:
-    path = workspace_root(repo, pr_number) / "session.json"
-    if not path.exists():
-        return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        return session_store.load_session(repo, pr_number)
+    except session_store.SessionError:
         return {}
 
 
@@ -818,7 +816,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--machine",
         action="store_true",
-        help="Compatibility alias for the default structured JSON summary.",
+        help="Explicitly request the structured JSON summary.",
     )
     parser.add_argument(
         "--human",
@@ -908,8 +906,9 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
         return handle_command_session(_root_passthrough_args(args))
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
-        sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
-        return 0
+        compatibility = workflow.runtime_compatibility()
+        sys.stdout.write(json.dumps(compatibility, indent=2, sort_keys=True) + "\n")
+        return int(compatibility["exit_code"])
 
     return None
 
@@ -1051,6 +1050,8 @@ def main(argv: list[str] | None = None) -> int:
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
     args = parse_args(argv)
+    started_at = time.time()
+    _reset_command_persistence_totals()
     span_attributes = _command_span_attributes(effective_argv, args)
     prior_command_attributes = get_current_span_attributes(
         ["gh_address_cr.command.name", "gh_address_cr.command.path"]
@@ -1062,6 +1063,7 @@ def main(argv: list[str] | None = None) -> int:
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)
         if rc is not None:
@@ -1079,8 +1081,45 @@ def main(argv: list[str] | None = None) -> int:
         set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
     finally:
+        _record_command_metric(args, started_at=started_at, exit_code=rc if isinstance(rc, int) else 1)
         if restore_command_scope:
             set_current_span_attributes(prior_command_attributes)
+
+
+def _reset_command_persistence_totals() -> None:
+    try:
+        from gh_address_cr.core.runtime_store import reset_persistence_totals
+
+        reset_persistence_totals()
+    except Exception:
+        return
+
+
+def _record_command_metric(args: argparse.Namespace, *, started_at: float, exit_code: int) -> None:
+    """Record this gh-address-cr command in the PR session's local telemetry (fail-open).
+
+    Only commands that bound a PR session are recorded, so the efficiency report
+    can compare the same command's latency early and late in the session. The
+    label is the bounded span name, never arguments or paths.
+    """
+    try:
+        from gh_address_cr.core.runtime_store import persistence_totals
+        from gh_address_cr.core.telemetry_runtime import SessionTelemetry
+
+        tracker = SessionTelemetry.get_instance()
+        if tracker.telemetry_file is None:
+            return
+        totals = persistence_totals()
+        tracker.record(
+            command=f"gh-address-cr {_command_span_name(args)}",
+            start_time=started_at,
+            end_time=time.time(),
+            exit_code=exit_code,
+            persistence_ms=totals["persistence_ms"],
+            lock_wait_ms=totals["lock_wait_ms"],
+        )
+    except Exception:
+        return
 
 
 if __name__ == "__main__":

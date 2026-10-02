@@ -1,25 +1,29 @@
 <!--
 Sync Impact Report
-Version change: 2.0.0 -> 2.1.0
+Version change: 2.1.0 -> 2.2.0
 Amendment reason:
-- Adopt the layered OpenTelemetry workflow model (spec 027-otel-layered-model) as default
-  governance guidance under Principle VIII, with explicit evidence-gated exceptions.
+- Adopt the Spec 034 persistence-authority model: every PR session has exactly one
+  versioned authoritative runtime store, compatibility artifacts are projections, and
+  authority migrations prohibit dual-primary operation.
 Version bump rationale:
-- MINOR: Materially expands Principle VIII with new normative layered-span guidance; no
-  existing principle is removed or redefined incompatibly.
+- MINOR: Materially expands Principle I with persistence-boundary and migration
+  governance while preserving the existing control-plane ownership principle.
 Modified principles:
-- VIII. Telemetry Is Attributed Observed Evidence (added Layered Workflow Telemetry Model)
+- I. Control Plane Owns Runtime State (defined versioned persistence authority,
+  projection boundaries, and migration safety)
 Added sections:
 - None
 Removed sections:
 - None
 Templates requiring updates:
-- AGENTS.md: ✅ consistent (points to Principle VIII by reference; no edit needed)
-- .specify/templates/plan-template.md: ✅ reviewed, generic telemetry-boundary check still valid
-- .specify/templates/spec-template.md: ✅ reviewed, generic telemetry-boundary check still valid
-- specs/027-otel-layered-model/*: ✅ source of amendment (spec/plan/contract/research)
+- AGENTS.md: ✅ consistent (Architecture Preflight already requires authority,
+  artifact-truth, recovery, replay, and contract-test analysis)
+- .specify/templates/plan-template.md: ✅ updated with single-authority and migration checks
+- .specify/templates/spec-template.md: ✅ updated with persistence-boundary impact prompts
+- specs/034-transactional-lease-runtime/*: ✅ source of amendment
 Runtime guidance requiring updates:
-- None (runtime already implements the layered model; this codifies it as governance)
+- Phase A implementation remains blocked until this amendment is accepted; the current
+  `session.json` authority remains valid until a versioned migration commits a replacement.
 Follow-up items:
 - Prior 2.0.0 reduction follow-up remains: keep repo-root docs and packaged-skill guidance
   aligned whenever a reduced surface removes a documented command or architecture.
@@ -32,20 +36,34 @@ Follow-up items:
 
 `gh-address-cr` is a PR-scoped control plane for AI coding agents. Runtime
 state, intake routing, GitHub side effects, reply evidence, session metrics,
-loop safety, and final gating MUST be owned by deterministic code. Markdown
+loop safety, and final gating MUST be owned by deterministic code. Each PR
+session MUST have exactly one deterministic, versioned persistence boundary
+designated as its authoritative runtime store. Markdown
 files and agent hints MAY describe how to use the system, but they MUST NOT be
 the authoritative implementation of state transitions or completion checks.
 Telemetry state, import ledgers, fingerprint ledgers, coverage calculations,
 efficiency report artifacts, and telemetry diagnostics MUST also be owned by
 the runtime.
-**Orchestration state (leases, active worker queues) is a volatile, transient
-shadow of the authoritative Runtime state (`session.json`). The control plane
-MUST reconcile orchestration state from the runtime truth before every major
-action.**
+
+The currently designated store remains authoritative until a versioned
+migration atomically designates its replacement. Compatibility files, reports,
+materialized views, and other artifacts MUST be derived projections and MUST
+NOT accept authoritative writes. A persistence-authority migration MUST
+preserve recovery and replay, fail loudly on divergence, and MUST NOT permit
+dual-primary operation.
+
+Orchestration state, including leases and active worker queues, MAY be
+materialized for resume and delivery, but it remains subordinate to the
+authoritative runtime store. It MUST NOT independently own lease-conflict,
+expiry, status, or release policy, and the control plane MUST reconcile it from
+runtime truth before every major action. Until a versioned migration commits a
+replacement, `session.json` remains the designated authoritative store.
 
 Rationale: PR review handling has external side effects and resumable state.
 The workflow must be auditable after interruptions and reproducible without
-depending on an agent's conversational memory.
+depending on an agent's conversational memory. A single explicit persistence
+authority prevents split-brain decisions while versioned, atomic migration
+keeps storage evolution recoverable.
 
 ### II. CLI Is The Stable Public Interface
 
@@ -362,4 +380,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 2.1.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-07-03
+**Version**: 2.2.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-09-24

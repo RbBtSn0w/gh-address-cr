@@ -10,10 +10,6 @@ It is not a code-review producer and not a generic GitHub bot. The runtime owns
 state and side effects; agents return structured evidence and the runtime
 publishes GitHub replies/resolves.
 
-> **Upgrading from 2.x?** 3.0 is a breaking release: the `agent fix`,
-> `agent trivial-fix`, `agent fix-all`, `agent resolve-stale`, and
-> `agent submit-batch` commands are replaced by a single `agent resolve`.
-
 Project architecture governance lives in `.specify/memory/constitution.md`.
 The installed skill contract remains `skill/SKILL.md`.
 
@@ -120,6 +116,19 @@ Use the same value for `review`, `address`, `agent next`, `agent submit`,
 view. If the configured directory is unavailable, the runtime returns
 `STATE_DIR_NOT_WRITABLE` with this override as the recovery action.
 
+Each PR workspace uses `runtime.sqlite3` as its authoritative, versioned runtime
+store. JSON and JSONL files in the live workspace are read-only projections;
+`session.json` carries its source revision and `evidence.jsonl.meta.json` carries
+the JSONL projection revision without changing the JSONL row format.
+`session.json` is written as compact, key-sorted JSON. Runtime schema v3 marks
+it dirty after bounded commands and rewrites it at explicit full-load, reporting,
+export, and recovery boundaries; consumers that require current data must verify
+its embedded revision or request materialization. Incremental evidence remains
+current after command commits. Read JSON with a parser rather than by line. Editing
+or deleting these projections does not change runtime truth. Unsupported schemas,
+recovery-bundle divergence, stale revisions, and bounded writer contention fail
+explicitly instead of falling back to uncoordinated file writes.
+
 Completion means the latest final gate reports:
 
 - zero unresolved review threads
@@ -128,6 +137,9 @@ Completion means the latest final gate reports:
 - terminal GitHub threads have durable reply evidence
 - a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
 - a telemetry coverage label and structured efficiency report path
+- an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
+  aggregates exclude inferred observation times, and report failures never
+  change the gate verdict or exit code
 - an audit summary path with a sha256 hash
 
 A zero unresolved-thread count alone is not sufficient.
@@ -151,6 +163,18 @@ Gateway by default:
 ```text
 https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces
 ```
+
+Development and PR-preview builds (a `.devN` development-release version) default to
+the development Gateway instead, so pre-merge traffic never reaches the
+production dataset:
+
+```text
+https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+```
+
+Published releases, including `beta` and `rc` pre-releases, report to the
+production Gateway, and a local version segment (`+...`) does not change that: only a
+`.devN` release is routed away. An unrecognized version string also falls back to production.
 
 For controlled environment canaries, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` may
 target the exact HTTPS development or staging Gateway origin. The client adds
@@ -240,8 +264,8 @@ bodies, local paths, standard streams, or hashes of those values.
 
 Endpoint precedence follows the standard OTLP variables:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then
-`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the documented
-application default. Requests to the approved gateway carry
+`OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces`, then the release-channel
+default described above. Requests to the approved gateway carry
 `otel-gateway-profile: anonymous-client-v1`; custom Collector endpoints do not
 inherit that header.
 
@@ -270,7 +294,7 @@ Advanced integration commands:
 - `agent next`
 - `agent next --batch`
 - `agent submit`
-- `agent resolve` — (`<item_id>` | `--files`/`--file` | `--input`) x (`--disposition fix|trivial|reject|clarify`) x (`--stale`)
+- `agent resolve` — supported GitHub-thread item, files, batch, and stale command shapes with `--disposition fix|trivial|reject|clarify|defer`
 - `agent evidence`
 - `agent publish`
 - `agent leases`
@@ -279,19 +303,21 @@ Advanced integration commands:
 - `doctor`
 
 High-level commands emit machine-readable JSON summaries by default. Use
-`--human` when a person needs narrative output and `--lean` where supported for
-low-token agent context.
+`--machine` to explicitly request structured output, `--human` when a person
+needs narrative output, and `--lean` where supported for low-token agent
+context.
 
 Every final efficiency summary reports one coverage label: `complete`,
 `partial`, `runtime-only`, or `unavailable`. The runtime records process and
 workflow telemetry for the surviving core path and keeps telemetry fail-open:
 reduced coverage is reported in the summary, but it does not change the review
 verdict by itself.
-For GitHub review-thread replies, the single mutating entrypoint is
-`agent resolve`; it records classification internally, so no separate
-`agent classify` round-trip is needed. It resolves along three independent
-axes: disposition (`--disposition fix|trivial|reject|clarify`), selection
-(an `<item_id>`, `--files`/`--file`, or `--input`), and condition (`--stale`).
+For GitHub review-thread replies, the current shortcut is `agent resolve`; it
+records classification internally, so no separate `agent classify` round-trip
+is needed. Use only the item, files, batch, and stale shapes documented by
+`agent manifest`; their flags are validated together rather than forming an
+unrestricted product. Local findings use `agent classify` → `agent next` →
+response skeleton → `agent submit` and must not publish GitHub side effects.
 Shared files/validation evidence is not the same as a shared reviewer answer.
 Use `agent resolve --input <batch-response.json>` with per-thread summary/why
 entries for ordinary multi-thread handling. Commit evidence is hydrated by the
@@ -314,10 +340,8 @@ runtime rejects security-sensitive, API-sensitive, performance, or ambiguous
 comments with `TRIVIAL_THREAD_NOT_ELIGIBLE`; normal reply, resolve, validation,
 and final-gate evidence still applies.
 
-Agents that need a schema-defined triage handoff may emit
-`workflow_decision.v1` JSON with `schema_version`, `request_id`, `item_id`,
-`decision`, and `reason`. Existing Markdown decision blocks remain a documented
-compatibility path, but JSON avoids whitespace-sensitive parsing.
+Agents that need a schema-defined triage handoff emit `workflow_decision.v1`
+JSON with `schema_version`, `request_id`, `item_id`, `decision`, and `reason`.
 
 `command-session --input <json>|-` executes multiple one-shot runtime commands
 inside one process and returns one result per operation. Failed operations do
@@ -326,7 +350,13 @@ not suppress later operations.
 `agent orchestrate` remains an optional advanced surface. The default supported
 path is still single-agent `review` / `address` / `agent resolve` /
 `agent publish` / `final-gate`; no orchestration session is required for normal
-PR handling.
+PR handling. Its versioned `worker-packet.v2` contains a
+`dispatch-receipt.v2` projection that references the canonical runtime
+`lease_id`, request binding, and committed revision. The orchestration session
+owns delivery only: lease conflict, expiry, status, and release decisions remain
+in the runtime store, and lost dispatches are rebuilt from canonical leases. The
+`--token` accepted by `agent orchestrate submit` is the opaque delivery token
+from that receipt (the canonical lease's resume token), not a second lease.
 
 ## Architecture and Packaging
 
@@ -396,9 +426,10 @@ next --batch
 submit
 resolve <item_id>
 resolve <item_id> --disposition trivial
+resolve <item_id> --disposition defer --why <why>
 resolve --input <batch-response.json>
 resolve --why <why>
-resolve --disposition reject|clarify --why <why>
+resolve --disposition reject|clarify|defer --why <why>
 resolve --stale
 evidence add
 evidence list
@@ -511,7 +542,9 @@ severity or reviewer priority evidence exists.
 
 1. Run `gh-address-cr review <owner/repo> <pr_number>`.
 2. Ingest existing findings or wait for external review handoff.
-3. Resolve items through `agent resolve` and publish through `agent publish`.
+3. Route GitHub threads through `agent resolve` and `agent publish`. Route local
+   findings through `agent classify` → `agent next` → response skeleton →
+   `agent submit`; do not publish GitHub side effects for local findings.
 4. Finish with `final-gate`.
 
 for GitHub thread `fix`: `fix_reply`
@@ -579,35 +612,19 @@ Packaged skill install:
 
 The packaged skill does not install the runtime CLI package.
 
-Upgrade from skill-shim usage:
+## Current Public Contract
 
-- Install the runtime CLI with `pipx` or `uv tool`
-- Keep `--skill skill` for the packaged adapter
-- Homebrew tap distribution remains available
-
-## Compatibility Inventory
-
-Preserved Public Contracts:
+Use runtime `3.16.0`, protocol `1.1`, skill contract `1.1`, and
+`dispatch-receipt.v2`. The current public commands are:
 
 - `review`
 - `address`
 - `threads`
 - `findings`
-- `submit-action`
 - `final-gate`
 
-Unsupported historical root commands:
-
-- `legacy_scripts`
-
-Removed Or Unsupported Surfaces:
-
-- removed migration/evaluation command surfaces
-- legacy script entrypoints
-
-Internal Naming Rule:
-
-- the shipped runtime and packaged skill remain `gh-address-cr`
+The shipped runtime, packaged skill, Python package, console entrypoint, and
+plugin remain named `gh-address-cr`.
 
 ## Troubleshooting
 

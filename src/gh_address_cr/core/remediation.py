@@ -78,6 +78,61 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.publish(repo, pr_number),
         }
 
+    if code == protocol_codes.LEASE_LOCKED_ITEM:
+        # Generated, not hand-written: a command spelled out in prose drifts from the real
+        # one and loses its `gh-address-cr` prefix, which is not copy-pasteable.
+        item_mode_next = command_templates.next_fixer_for_item(repo, pr_number, "<item_id>", agent_id="<agent_id>")
+        return {
+            "summary": (
+                "An active lease holds this item. Read `lease_recovery` on this payload before "
+                "retrying: `reason_code` `LEASE_RECOVERY_STOP` means another agent or role owns it. "
+                "`LEASE_ACTIVE` means you own it but cannot be handed the request back, so this is a "
+                "non-fixer role, a lease you already submitted against, or a lease with no request on "
+                "record; submit against the ActionRequest you hold. A fixer re-enters its own active "
+                f"lease with the item-mode form `{item_mode_next}`; without `--item-id` that item is "
+                "skipped as already leased and the command answers `NO_ELIGIBLE_ITEM` instead. "
+                f"`{command_templates.reclaim(repo, pr_number)}` only expires leases past their TTL, "
+                "so it will not free a still-valid one."
+            ),
+            "command": command_templates.leases(repo, pr_number),
+        }
+
+    if code in {protocol_codes.STALE_REVISION, protocol_codes.PERSISTENCE_BUSY}:
+        return {
+            "summary": (
+                "A concurrent gh-address-cr command held or changed the runtime store. The failed command made "
+                "no change; rerun the same command, which reloads the current state."
+            ),
+            "command": command_templates.address(repo, pr_number),
+        }
+
+    if code == protocol_codes.PERSISTENCE_INVALID:
+        return {
+            "summary": (
+                "The runtime store failed an integrity check. Stop and do not edit session.json, evidence.jsonl, "
+                "or runtime.sqlite3, or delete legacy-v1-recovery. Report it with submit-feedback."
+            ),
+            "command": "gh-address-cr submit-feedback",
+        }
+
+    if code == protocol_codes.DISPATCH_PROJECTION_FAILED:
+        return {
+            "summary": (
+                "The orchestrator could not build a worker dispatch after the runtime claimed the item, and "
+                "released that claim. Rerun the step; inspect leases first if the release also failed."
+            ),
+            "command": command_templates.leases(repo, pr_number),
+        }
+
+    if code == protocol_codes.SIDE_EFFECT_IN_PROGRESS:
+        return {
+            "summary": (
+                "Another live process is executing this GitHub side effect. Wait for it to finish, then rerun "
+                "publish; the canonical outbox reuses its recorded result instead of repeating the effect."
+            ),
+            "command": command_templates.publish(repo, pr_number),
+        }
+
     if code.startswith("MISSING_"):
         return {
             "summary": (

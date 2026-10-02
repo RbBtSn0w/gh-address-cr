@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from importlib import metadata, resources, util
 from pathlib import Path
 from typing import Any
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from gh_address_cr import (
     PROTOCOL_VERSION,
@@ -46,16 +50,17 @@ from gh_address_cr.core.utils import (
     get_session_items as _items,
 )
 from gh_address_cr.core.utils import (
-    get_session_ledger as _ledger,
-)
-from gh_address_cr.core.utils import (
     json_ready as _json_ready,
 )
 from gh_address_cr.core.utils import (
     normalize_string_list as _normalize_string_list,
 )
+from gh_address_cr.core.utils import (
+    publish_outcome_status as _publish_outcome_status,
+)
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 from gh_address_cr.core.workflow_matching import FIX_ALL_STALE_ROUTE_REASON
+from gh_address_cr.evidence.ledger import EvidenceRecord
 
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
@@ -85,6 +90,31 @@ TRIVIAL_SENSITIVE_MARKERS = (
     "performance",
     "memory",
 )
+
+
+def _replace_session_with_evidence(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    record: EvidenceRecord,
+    *,
+    operation: str,
+) -> None:
+    persistence = session.get("persistence")
+    expected_revision = persistence.get("revision") if isinstance(persistence, dict) else None
+
+    def replace(current: dict[str, Any]) -> None:
+        current.clear()
+        current.update(session)
+
+    session_store.transact_session(
+        repo,
+        pr_number,
+        replace,
+        operation=operation,
+        expected_revision=expected_revision if isinstance(expected_revision, int) else None,
+        evidence=[record.to_json()],
+    )
 TRIVIAL_POSITIVE_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])("
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_POSITIVE_MARKERS)
@@ -98,18 +128,159 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
 TERMINAL_LOCAL_VALIDATION_STATES = frozenset(
     {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 )
+RUNTIME_PACKAGE = "gh-address-cr"
+RUNTIME_ENTRYPOINTS = ("gh-address-cr", "python3 -m gh_address_cr")
+RUNTIME_COMPATIBILITY_EXIT = 5
 
 
-def runtime_compatibility() -> dict[str, Any]:
+def _runtime_compatibility_payload() -> dict[str, Any]:
     return {
-        "status": "compatible",
-        "runtime_package": "gh-address-cr",
+        "runtime_package": RUNTIME_PACKAGE,
         "runtime_version": __version__,
         "required_protocol_version": PROTOCOL_VERSION,
         "supported_protocol_versions": list(SUPPORTED_PROTOCOL_VERSIONS),
         "supported_skill_contract_versions": list(SUPPORTED_SKILL_CONTRACT_VERSIONS),
-        "entrypoints": ["gh-address-cr", "python3 -m gh_address_cr"],
+        "entrypoints": list(RUNTIME_ENTRYPOINTS),
+    }
+
+
+def _incompatible_runtime(reason_code: str, message: str, **details: Any) -> dict[str, Any]:
+    return {
+        **_runtime_compatibility_payload(),
+        **details,
+        "status": "incompatible",
+        "reason_code": reason_code,
+        "waiting_on": "runtime_compatibility",
+        "next_action": message,
+        "remediation": {
+            "summary": (
+                "Upgrade gh-address-cr through the installation channel that installed this skill, "
+                "then rerun the compatibility check."
+            ),
+            "command": "gh-address-cr adapter check-runtime",
+        },
+        "exit_code": RUNTIME_COMPATIBILITY_EXIT,
+    }
+
+
+def _load_runtime_requirements() -> dict[str, Any]:
+    raw = resources.files("gh_address_cr").joinpath("runtime-requirements.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("runtime requirements must be a JSON object")
+    return payload
+
+
+def _require_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be a non-empty string")
+    return value.strip()
+
+
+def _require_string_list(payload: dict[str, Any], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError(f"{key} must be a non-empty string array")
+    return [item.strip() for item in value]
+
+
+def _available_runtime_entrypoints() -> set[str]:
+    available: set[str] = set()
+    try:
+        distribution = metadata.distribution(RUNTIME_PACKAGE)
+    except metadata.PackageNotFoundError:
+        distribution = None
+    if distribution is not None and any(
+        entrypoint.group == "console_scripts"
+        and entrypoint.name == "gh-address-cr"
+        and entrypoint.value == "gh_address_cr.__main__:main"
+        for entrypoint in distribution.entry_points
+    ):
+        available.add("gh-address-cr")
+    if util.find_spec("gh_address_cr.__main__") is not None:
+        available.add("python3 -m gh_address_cr")
+    return available
+
+
+def runtime_compatibility() -> dict[str, Any]:
+    try:
+        requirements = _load_runtime_requirements()
+        runtime_package = _require_string(requirements, "runtime_package")
+        minimum_runtime_version = _require_string(requirements, "minimum_runtime_version")
+        protocol_specifiers = _require_string_list(requirements, "supported_protocol_versions")
+        skill_contract_version = _require_string(requirements, "skill_contract_version")
+        required_entrypoints = _require_string_list(requirements, "required_entrypoints")
+        minimum_version = Version(minimum_runtime_version)
+        protocol_ranges = [SpecifierSet(specifier) for specifier in protocol_specifiers]
+    except (OSError, json.JSONDecodeError, ValueError, InvalidSpecifier, InvalidVersion) as exc:
+        return _incompatible_runtime(
+            "RUNTIME_REQUIREMENTS_INVALID",
+            "The packaged runtime requirements are missing or invalid.",
+            diagnostics={"error_type": type(exc).__name__},
+        )
+
+    requirement_details = {
+        "minimum_runtime_version": str(minimum_version),
+        "required_protocol_ranges": protocol_specifiers,
+        "required_skill_contract_version": skill_contract_version,
+        "required_entrypoints": required_entrypoints,
+    }
+    if runtime_package != RUNTIME_PACKAGE:
+        return _incompatible_runtime(
+            "RUNTIME_REQUIREMENTS_INVALID",
+            "The packaged runtime requirements identify a different runtime package.",
+            **requirement_details,
+        )
+
+    try:
+        runtime_version = Version(__version__)
+    except InvalidVersion:
+        return _incompatible_runtime(
+            "RUNTIME_VERSION_INCOMPATIBLE",
+            "The installed runtime version is not a valid release version.",
+            **requirement_details,
+        )
+    # The release segment decides: a dev or pre-release build of the minimum
+    # release (e.g. a PR preview stamped 3.16.0.devN+sha) carries its contract.
+    if Version(runtime_version.base_version) < minimum_version:
+        return _incompatible_runtime(
+            "RUNTIME_VERSION_INCOMPATIBLE",
+            f"Runtime {runtime_version} is older than the required {minimum_version} baseline.",
+            **requirement_details,
+        )
+
+    if not any(Version(PROTOCOL_VERSION) in protocol_range for protocol_range in protocol_ranges):
+        return _incompatible_runtime(
+            "PROTOCOL_VERSION_INCOMPATIBLE",
+            f"Protocol {PROTOCOL_VERSION} is outside the skill's required protocol range.",
+            **requirement_details,
+        )
+
+    if skill_contract_version not in SUPPORTED_SKILL_CONTRACT_VERSIONS:
+        return _incompatible_runtime(
+            "SKILL_CONTRACT_INCOMPATIBLE",
+            f"Skill contract {skill_contract_version} is not supported by this runtime.",
+            **requirement_details,
+        )
+
+    missing_entrypoints = sorted(set(required_entrypoints).difference(_available_runtime_entrypoints()))
+    if missing_entrypoints:
+        return _incompatible_runtime(
+            "RUNTIME_ENTRYPOINTS_INCOMPATIBLE",
+            "The runtime does not provide every entrypoint required by the skill.",
+            missing_entrypoints=missing_entrypoints,
+            **requirement_details,
+        )
+
+    return {
+        **_runtime_compatibility_payload(),
+        **requirement_details,
+        "status": "compatible",
+        "reason_code": "RUNTIME_COMPATIBLE",
+        "waiting_on": None,
         "remediation": None,
+        "exit_code": 0,
     }
 
 
@@ -154,9 +325,12 @@ def fast_fix_from_batch_input(
             agent_id="gh-address-cr-publisher",
             now=now,
         )
-        payload["status"] = "FAST_FIX_ALL_COMPLETE"
         payload["publish"] = published
-        payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+        payload["status"] = _publish_outcome_status(
+            "FAST_FIX_ALL", publish=True, published=published, item_ids=payload["item_ids"]
+        )
+        if payload["status"].endswith("_COMPLETE"):
+            payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
 
 
@@ -320,7 +494,7 @@ def record_evidence_profile(
             message="Session evidence_profiles must be a JSON object.",
         )
     profiles[profile_name] = profile
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id="",
         lease_id=None,
@@ -330,7 +504,7 @@ def record_evidence_profile(
         payload={"name": profile_name, "commit_hash": normalized_commit, "files": normalized_files},
         timestamp=timestamp,
     )
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="evidence_profile")
     return {
         "status": "EVIDENCE_PROFILE_RECORDED",
         "repo": repo,
@@ -419,7 +593,7 @@ def record_reply_evidence(
     timestamp = _format_timestamp(_coerce_now(now))
     payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
     idempotency_key = f"reply_evidence:{resolved_item_id}:{normalized_reply}"
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id=resolved_item_id,
         lease_id=None,
@@ -438,7 +612,7 @@ def record_reply_evidence(
     item["reply_posted"] = True
     item["reply_url"] = normalized_reply
     item["reply_evidence"] = {"reply_url": normalized_reply, "author_login": normalized_login}
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="reply_evidence")
     return {
         "status": "REPLY_EVIDENCE_RECORDED",
         "repo": repo,
@@ -576,7 +750,7 @@ def record_validation_evidence(
     timestamp = _format_timestamp(_coerce_now(now))
     payload_thread_id = str(item.get("thread_id") or thread_ref or resolved_item_id.removeprefix("github-thread:"))
     idempotency_key = f"validation_evidence:{resolved_item_id}:{normalized_commit}"
-    record = _ledger(session).append_event(
+    record = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id=resolved_item_id,
         lease_id=None,
@@ -603,7 +777,7 @@ def record_validation_evidence(
     if why and why.strip():
         fix_reply["why"] = why.strip()
     item["validation_reconcile"] = fix_reply
-    session_store.save_session(repo, pr_number, session)
+    _replace_session_with_evidence(repo, pr_number, session, record, operation="validation_evidence")
     return {
         "status": "VALIDATION_EVIDENCE_RECORDED",
         "repo": repo,
@@ -708,41 +882,53 @@ def fast_fix_item(
         severity_note=severity_note,
         review_priority=review_priority,
     )
-    classification, requested = _prepare_fast_fix_request(
+    _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
+    classification = agent_protocol.record_classification(
+        repo,
+        pr_number,
+        item_id=item_id,
+        classification="fix",
+        agent_id=agent_id,
+        note=why,
+    )
+    with agent_protocol.claimed_fixer_lease(
         repo,
         pr_number,
         item_id=item_id,
         agent_id=agent_id,
-        why=why,
-        review_priority_evidence=requested_priority_evidence,
         now=now,
         github_client=github_client,
-    )
-    response_path, response = _build_fast_fix_response(
-        repo,
-        pr_number,
-        requested=requested,
-        item_id=item_id,
-        agent_id=agent_id,
-        summary=summary,
-        why=why,
-        commit_hash=commit_hash,
-        files=files,
-        validation_commands=validation_commands,
-        normalized_severity=normalized_severity,
-        severity_note=severity_note,
-    )
-    submitted = agent_protocol.submit_action_response(
-        repo,
-        pr_number,
-        response_path=response_path,
-        now=now,
-        publish=publish,
-        github_client=github_client,
-    )
+    ) as requested:
+        _attach_review_priority_evidence(
+            repo, pr_number, item_id=item_id, review_priority_evidence=requested_priority_evidence
+        )
+        response_path, response = _build_fast_fix_response(
+            repo,
+            pr_number,
+            requested=requested,
+            item_id=item_id,
+            agent_id=agent_id,
+            summary=summary,
+            why=why,
+            commit_hash=commit_hash,
+            files=files,
+            validation_commands=validation_commands,
+            normalized_severity=normalized_severity,
+            severity_note=severity_note,
+        )
+        submitted = agent_protocol.submit_action_response(
+            repo,
+            pr_number,
+            response_path=response_path,
+            now=now,
+            publish=publish,
+            github_client=github_client,
+        )
 
     return {
-        "status": "FAST_FIX_COMPLETE" if publish else "FAST_FIX_ACCEPTED",
+        "status": _publish_outcome_status(
+            "FAST_FIX", publish=publish, published=submitted.get("publish"), item_ids=[item_id]
+        ),
         "repo": repo,
         "pr_number": str(pr_number),
         "item_id": item_id,
@@ -841,41 +1027,20 @@ def _validate_fast_fix_inputs(
     return normalized_severity, requested_priority_evidence
 
 
-def _prepare_fast_fix_request(
+def _attach_review_priority_evidence(
     repo: str,
     pr_number: str,
     *,
     item_id: str,
-    agent_id: str,
-    why: str,
     review_priority_evidence: dict[str, Any] | None,
-    now: datetime | None,
-    github_client: Any | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    classification = agent_protocol.record_classification(
-        repo,
-        pr_number,
-        item_id=item_id,
-        classification="fix",
-        agent_id=agent_id,
-        note=why,
-    )
-    requested = agent_protocol.issue_action_request(
-        repo,
-        pr_number,
-        role="fixer",
-        agent_id=agent_id,
-        item_id=item_id,
-        now=now,
-        github_client=github_client,
-    )
-    if review_priority_evidence:
-        session = session_store.load_session(repo, pr_number)
-        item = _items(session).get(item_id)
-        if isinstance(item, dict):
-            item["review_priority_evidence"] = review_priority_evidence
-            session_store.save_session(repo, pr_number, session)
-    return classification, requested
+) -> None:
+    if not review_priority_evidence:
+        return
+    session = session_store.load_session(repo, pr_number)
+    item = _items(session).get(item_id)
+    if isinstance(item, dict):
+        item["review_priority_evidence"] = review_priority_evidence
+        session_store.save_session(repo, pr_number, session)
 
 
 def _build_fast_fix_response(
@@ -923,6 +1088,29 @@ def _build_fast_fix_response(
     return response_path, response
 
 
+def _assert_item_publishable(repo: str, pr_number: str, *, item_id: str, publish: bool) -> None:
+    """Reject an unpublishable `--publish` target before any state is mutated.
+
+    Publishing only covers GitHub review threads. `submit_action_response` checks
+    the same thing, but only once the fixer lease exists, so the rejection arrives
+    after `issue_action_request` has already claimed and marked the item (#273).
+    Checking here keeps a doomed `--publish` free of any lease churn instead of
+    relying on a rollback to undo it.
+    """
+    if not publish:
+        return
+    item = _items(session_store.load_session(repo, pr_number)).get(item_id)
+    if isinstance(item, dict) and item.get("item_kind") != "github_thread":
+        raise WorkflowError(
+            status=protocol_codes.ACTION_REJECTED,
+            reason_code="PUBLISH_UNSUPPORTED_RESPONSE",
+            waiting_on="action_response",
+            exit_code=5,
+            message="--publish is only supported for GitHub review-thread responses.",
+            payload={"item_id": item_id},
+        )
+
+
 def decline_item(
     repo: str,
     pr_number: str,
@@ -935,20 +1123,20 @@ def decline_item(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Decline (reject/clarify) a single review-thread item with a reason.
+    """Handle a non-fix resolution for one review-thread item with a reason.
 
     Composes the same primitives as `fast_fix_item` — `record_classification`
     -> `issue_action_request` -> `submit_action_response` — so single-item
     decline inherits identical lease-ownership and final-gate guarantees
     (spec 029 FR-002/FR-009). No new algorithm.
     """
-    if resolution not in {"reject", "clarify"}:
+    if resolution not in {"reject", "clarify", "defer"}:
         raise WorkflowError(
             status=protocol_codes.FAST_FIX_REJECTED,
             reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
             waiting_on="decline_input",
             exit_code=2,
-            message=f"agent resolve {item_id}: decline_item supports only reject or clarify, got {resolution!r}.",
+            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
             payload={"item_id": item_id},
         )
     if not why or not why.strip():
@@ -960,6 +1148,7 @@ def decline_item(
             message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
             payload={"item_id": item_id},
         )
+    _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
     classification = agent_protocol.record_classification(
         repo,
         pr_number,
@@ -968,38 +1157,36 @@ def decline_item(
         agent_id=agent_id,
         note=why,
     )
-    requested = agent_protocol.issue_action_request(
+    with agent_protocol.claimed_fixer_lease(
         repo,
         pr_number,
-        role="fixer",
-        agent_id=agent_id,
         item_id=item_id,
+        agent_id=agent_id,
         now=now,
         github_client=github_client,
-    )
-    request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
-    response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
-    response = {
-        "schema_version": PROTOCOL_VERSION,
-        "request_id": request["request_id"],
-        "lease_id": request["lease_id"],
-        "agent_id": agent_id,
-        "item_id": item_id,
-        "resolution": resolution,
-        "note": why,
-        "reply_markdown": why,
-    }
-    write_json_atomic(response_path, response)
-    submitted = agent_protocol.submit_action_response(
-        repo,
-        pr_number,
-        response_path=response_path,
-        now=now,
-        publish=publish,
-        github_client=github_client,
-    )
-    return {
-        "status": "DECLINE_COMPLETE" if publish else "DECLINE_ACCEPTED",
+    ) as requested:
+        request = json.loads(Path(requested["request_path"]).read_text(encoding="utf-8"))
+        response_path = session_store.workspace_dir(repo, pr_number) / f"decline-response-{request['request_id']}.json"
+        response = {
+            "schema_version": PROTOCOL_VERSION,
+            "request_id": request["request_id"],
+            "lease_id": request["lease_id"],
+            "agent_id": agent_id,
+            "item_id": item_id,
+            "resolution": resolution,
+            "note": why,
+            "reply_markdown": why,
+        }
+        write_json_atomic(response_path, response)
+        submitted = agent_protocol.submit_action_response(
+            repo,
+            pr_number,
+            response_path=response_path,
+            now=now,
+            github_client=github_client,
+        )
+    result = {
+        "status": "DECLINE_ACCEPTED",
         "repo": repo,
         "pr_number": str(pr_number),
         "item_id": item_id,
@@ -1009,6 +1196,30 @@ def decline_item(
         "submit": submitted,
         "next_action": submitted["next_action"],
     }
+    if publish:
+        # submit_action_response's --publish shortcut is fix-only; publish the
+        # accepted decline through the publisher directly, as the files path does.
+        from gh_address_cr.core import publisher
+
+        published = publisher.publish_github_thread_responses(
+            repo,
+            pr_number,
+            github_client=github_client,
+            agent_id="gh-address-cr-publisher",
+            now=now,
+        )
+        submitted["publish"] = published
+        if _publish_outcome_status("DECLINE", publish=True, published=published, item_ids=[item_id]).endswith(
+            "_COMPLETE"
+        ):
+            # Mirror what submit_action_response writes on its own --publish path:
+            # a caller reading the nested `submit` object must not still be told to
+            # run `agent publish` after the reply was already posted.
+            published_next_action = "Accepted evidence was published. Rerun final-gate when all items are handled."
+            submitted["next_action"] = published_next_action
+            result["status"] = "DECLINE_COMPLETE"
+            result["next_action"] = published_next_action
+    return result
 
 
 def trivial_fix_item(
@@ -1052,7 +1263,9 @@ def trivial_fix_item(
         github_client=github_client,
         now=now,
     )
-    result["status"] = "TRIVIAL_FIX_COMPLETE" if publish else "TRIVIAL_FIX_ACCEPTED"
+    result["status"] = _publish_outcome_status(
+        "TRIVIAL_FIX", publish=publish, published=result["submit"].get("publish"), item_ids=[item_id]
+    )
     result["trivial_eligibility"] = "docs_or_typo"
     return result
 

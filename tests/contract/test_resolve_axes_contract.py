@@ -21,9 +21,9 @@ from unittest.mock import patch
 
 from tests.helpers import PythonScriptTestCase
 from tests.test_control_plane_workflow import github_thread
-from tests.test_native_workflow import UnstackedGitHubClient, stale_github_thread_item
+from tests.test_native_workflow import UnstackedGitHubClient, open_item, stale_github_thread_item
 
-DISPOSITIONS = ("fix", "trivial", "reject", "clarify")
+DISPOSITIONS = ("fix", "trivial", "reject", "clarify", "defer")
 SELECTIONS = ("single", "files", "batch")
 CONDITIONS = ("fresh", "stale")
 
@@ -62,7 +62,9 @@ class SingleItemDeclineAxesCLITest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def test_single_disposition_reject_on_fresh_thread(self):
         # (single x reject x fresh): the flagship #204 cell.
@@ -104,6 +106,22 @@ class SingleItemDeclineAxesCLITest(PythonScriptTestCase):
         item = session["items"]["github-thread:stale1"]
         self.assertEqual(item["state"], "publish_ready")
         self.assertEqual(item["publish_resolution"], "clarify")
+
+    def test_single_disposition_defer_on_stale_thread(self):
+        self.write_session(items=[stale_github_thread_item("github-thread:stale-defer")])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "github-thread:stale-defer",
+            "--disposition", "defer",
+            "--stale",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        item = self.load_session()["items"]["github-thread:stale-defer"]
+        self.assertEqual(item["state"], "publish_ready")
+        self.assertEqual(item["publish_resolution"], "defer")
 
 
 class DeclineFinalGateAndLeaseTest(unittest.TestCase):
@@ -164,6 +182,148 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
                 self.assertEqual(result.counts["unresolved_github_threads_count"], 0)
                 self.assertEqual(result.counts["blocking_items_count"], 0)
                 self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
+
+    def _assert_single_decline_with_publish(self, resolution):
+        # #273: single-item decline accepts --publish like the files path does.
+        # Its submit shortcut is fix-only, so decline_item publishes through the
+        # publisher after submit instead of tripping PUBLISH_UNSUPPORTED_RESPONSE
+        # after claiming a lease.
+        from gh_address_cr.core import workflow
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply/single-decline"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "512"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(
+                    repo, pr_number, github_thread("github-thread:THREAD_SINGLE_PUB")
+                )
+                client = FakeGitHubClient()
+
+                result = workflow.decline_item(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_SINGLE_PUB",
+                    agent_id="fixer-1",
+                    resolution=resolution,
+                    why="Style preference only; not a defect.",
+                    publish=True,
+                    github_client=client,
+                )
+
+                self.assertEqual(result["status"], "DECLINE_COMPLETE")
+                self.assertEqual(result["submit"]["publish"]["status"], "PUBLISH_COMPLETE")
+                # The nested submit payload must agree with the outer result: it
+                # previously kept submit_action_response's "run agent publish" text
+                # after the reply had already been posted (PR #274 review).
+                self.assertEqual(result["submit"]["next_action"], result["next_action"])
+                self.assertNotIn("agent publish", result["submit"]["next_action"])
+                self.assertEqual(len(client.replies), 1)
+                active = [
+                    lease
+                    for lease in manager.load().get("leases", {}).values()
+                    if lease.get("status") in {"active", "submitted"}
+                ]
+                self.assertEqual(active, [])
+
+    def test_single_reject_with_publish_posts_reply(self):
+        self._assert_single_decline_with_publish("reject")
+
+    def test_single_clarify_with_publish_posts_reply(self):
+        self._assert_single_decline_with_publish("clarify")
+
+    def test_single_decline_publish_on_local_finding_rejected_without_lease(self):
+        # --publish only covers GitHub review threads; a local finding must be
+        # refused before a fixer lease is claimed, not reported as published.
+        from gh_address_cr.core import workflow
+        from gh_address_cr.core.errors import WorkflowError
+
+        repo = "owner/repo"
+        pr_number = "513"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(repo, pr_number, open_item("local:1"))
+
+                with self.assertRaises(WorkflowError) as ctx:
+                    workflow.decline_item(
+                        repo,
+                        pr_number,
+                        item_id="local:1",
+                        agent_id="fixer-1",
+                        resolution="reject",
+                        why="Not applicable to this change.",
+                        publish=True,
+                        github_client=UnstackedGitHubClient(),
+                    )
+
+                self.assertEqual(ctx.exception.reason_code, "PUBLISH_UNSUPPORTED_RESPONSE")
+                self.assertEqual(manager.load().get("leases", {}), {})
+
+    def _assert_files_decline_with_publish(self, resolution):
+        # #273 follow-up: the files-selection path takes --publish for reject and
+        # clarify (it publishes via publisher, not the fix-only submit shortcut).
+        from gh_address_cr.core import workflow_matching
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((repo, pr_number, thread_id, body))
+                return "https://github.test/reply/files-decline"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append((repo, pr_number, thread_id))
+                return True
+
+        repo = "owner/repo"
+        pr_number = "511"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self._write_session(
+                    repo, pr_number, github_thread("github-thread:THREAD_FILES_PUB")
+                )
+                client = FakeGitHubClient()
+
+                result = workflow_matching.decline_matching_threads(
+                    repo,
+                    pr_number,
+                    agent_id="fixer-1",
+                    files=["src/shared.py"],
+                    resolution=resolution,
+                    homogeneous_reason="Shared style nit; declining with rationale.",
+                    publish=True,
+                    github_client=client,
+                )
+
+                self.assertEqual(result["accepted_count"], 1)
+                self.assertEqual(result["publish"]["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(len(client.replies), 1)
+                active = [
+                    lease
+                    for lease in manager.load().get("leases", {}).values()
+                    if lease.get("status") in {"active", "submitted"}
+                ]
+                self.assertEqual(active, [])
+
+    def test_files_reject_with_publish_posts_reply(self):
+        self._assert_files_decline_with_publish("reject")
+
+    def test_files_clarify_with_publish_posts_reply(self):
+        self._assert_files_decline_with_publish("clarify")
 
     def test_decline_second_agent_hits_lease_locked(self):
         # An item already leased by another agent blocks a second agent's
@@ -280,9 +440,24 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "DECLINE_ALL_ACCEPTED")
 
+    def test_files_defer_stale_succeeds(self):
+        self.write_session(items=[stale_github_thread_item("github-thread:fdefer")])
+
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--disposition", "defer",
+            "--files", "src/example.py",
+            "--stale",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "STALE_RESOLUTION_ACCEPTED")
+        self.assertEqual(payload["resolution"], "defer")
+
     def test_single_trivial_stale_succeeds(self):
-        # (single x trivial x stale): FR-003 is exhaustive over all four
-        # dispositions, including trivial — do not skip this cell.
+        # The single-thread trivial fast path also supports a stale thread.
         self.write_session(
             items=[
                 stale_github_thread_item("github-thread:trivialstale")
@@ -301,21 +476,6 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
             "--why", "Docs-only correction.",
             "--validation", "spellcheck=passed@50ms",
         )
-
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_item_id_reject_with_deprecated_homogeneous_reason_alias_succeeds(self):
-        # (U2-dissolved): the deprecated alias still supplies the reason for
-        # a single decline; no special item_id+alias conflict rule exists.
-        self.write_session(items=[github_thread("github-thread:aliasreason")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:aliasreason",
-                "--disposition", "reject",
-                "--homogeneous-reason", self.REASON,
-            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -353,21 +513,6 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_AXIS_CONFLICT")
 
-    def test_legacy_boolean_disagreeing_with_disposition_conflicts(self):
-        self.write_session(items=[github_thread("github-thread:legacyconflict")])
-
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent", "resolve", self.repo, self.pr,
-                "github-thread:legacyconflict",
-                "--disposition", "fix",
-                "--reject",
-                "--why", self.REASON,
-            )
-
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_AXIS_CONFLICT")
-
     def test_fix_evidence_with_decline_disposition_is_incoherent(self):
         self.write_session(items=[github_thread("github-thread:incoherent")])
 
@@ -377,6 +522,27 @@ class CrossAxisCompositionCLITest(PythonScriptTestCase):
             "--disposition", "clarify",
             "--commit", "abc123",
             "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+
+    def test_batch_defer_is_incoherent(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--input", "batch-response.json",
+            "--disposition", "defer",
+            "--why", self.REASON,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["reason_code"], "RESOLVE_EVIDENCE_INCOHERENT")
+
+    def test_batch_explicit_fix_disposition_is_incoherent(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--input", "batch-response.json",
+            "--disposition", "fix",
         )
 
         self.assertEqual(result.returncode, 2)
@@ -452,6 +618,8 @@ class ResolveHelpDiscoverabilityTest(unittest.TestCase):
 
         for token in ("--disposition", "--stale", "--files", "--input", "item_id"):
             self.assertIn(token, help_text)
+
+        self.assertIn("defer", help_text)
 
         # PR #206 CR: --why's help text must not read as reject/clarify-only —
         # it is also the shared rationale for a homogeneous fix (files selection).

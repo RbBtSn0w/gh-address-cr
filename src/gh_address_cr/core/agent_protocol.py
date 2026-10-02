@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +13,8 @@ from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.agent_protocol_evidence import required_evidence_for
+from gh_address_cr.core.agent_protocol_leases import active_fixer_lease_for_item
+from gh_address_cr.core.agent_protocol_leases import payload_for_lease as _payload_for_lease
 from gh_address_cr.core.agent_protocol_submission import (
     accept_action_response_submission,
     handling_boundary_summary_or_none,
@@ -34,10 +39,12 @@ from gh_address_cr.core.leases import (
     calculate_lease_recovery_state,
     claim_lease,
     expire_leases,
+    release_claimed_lease,
     release_lease,
 )
 from gh_address_cr.core.models import ActionRequest
 from gh_address_cr.core.runtime_kernel.stack import STACK_MANAGEMENT_ACTIONS, repository_context_for_stack
+from gh_address_cr.core.runtime_store import WorkingSetRequest
 from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.core.utils import (
     coerce_now as _coerce_now,
@@ -52,13 +59,49 @@ from gh_address_cr.core.utils import (
     get_session_ledger as _ledger,
 )
 from gh_address_cr.core.utils import (
+    publish_outcome_status,
+)
+from gh_address_cr.core.utils import (
     return_expired_items_to_open as _return_expired_items_to_open,
 )
 from gh_address_cr.core.utils import (
     return_item_to_claimable_state as _return_item_to_claimable_state,
 )
+from gh_address_cr.evidence.ledger import EvidenceRecord
 
 MUTATING_ROLES = {"fixer"}
+
+
+def _persist_loaded_scope(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    request: WorkingSetRequest | None,
+) -> None:
+    """Persist mutations using the same full or bounded scope that was loaded."""
+    if request is None:
+        session_store.save_session(repo, pr_number, session)
+        return
+    persistence = session.get("persistence")
+    expected_revision = (
+        int(persistence["revision"])
+        if isinstance(persistence, dict) and isinstance(persistence.get("revision"), int)
+        else None
+    )
+
+    def replace_loaded_scope(current: dict[str, Any]) -> None:
+        current.clear()
+        current.update(session)
+
+    session_store.transact_working_set(
+        repo,
+        pr_number,
+        request,
+        replace_loaded_scope,
+        operation="session_update",
+        expected_revision=expected_revision,
+    )
 
 
 def record_classification(
@@ -90,46 +133,56 @@ def record_classification(
             payload={"item_id": item_id},
         )
 
-    session = session_store.load_session(repo, pr_number)
-    item = _items(session).get(item_id)
-    if not isinstance(item, dict):
-        raise WorkflowError(
-            status="CLASSIFICATION_REJECTED",
-            reason_code="ITEM_NOT_FOUND",
-            waiting_on="work_item",
-            exit_code=5,
-            message=f"Work item not found: {item_id}",
-            payload={"item_id": item_id},
-        )
+    def classify(session: dict[str, Any]) -> Any:
+        item = _items(session).get(item_id)
+        if not isinstance(item, dict):
+            raise WorkflowError(
+                status="CLASSIFICATION_REJECTED",
+                reason_code="ITEM_NOT_FOUND",
+                waiting_on="work_item",
+                exit_code=5,
+                message=f"Work item not found: {item_id}",
+                payload={"item_id": item_id},
+            )
 
-    ledger = _ledger(session)
-    record = ledger.append_event(
-        session_id=str(session["session_id"]),
-        item_id=item_id,
-        lease_id=None,
-        agent_id=agent_id,
-        role="triage",
-        event_type="classification_recorded",
-        payload={"classification": normalized, "note": note},
-    )
-    item["classification_evidence"] = {
-        "event_type": "classification_recorded",
-        "classification": normalized,
-        "note": note,
-        "record_id": record.record_id,
-    }
-    item["decision"] = normalized
-    item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
-    if released_lease_id:
-        _return_item_to_claimable_state(item)
-        if not is_stale_github_thread_item(item):
-            item["blocking"] = True
-        item["claimed_by"] = None
-        item["claimed_at"] = None
-        item["lease_expires_at"] = None
-        item.pop("active_lease_id", None)
-    session_store.save_session(repo, pr_number, session)
+        ledger = _ledger(session)
+        record = ledger.append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=None,
+            agent_id=agent_id,
+            role="triage",
+            event_type="classification_recorded",
+            payload={"classification": normalized, "note": note},
+        )
+        item["classification_evidence"] = {
+            "event_type": "classification_recorded",
+            "classification": normalized,
+            "note": note,
+            "record_id": record.record_id,
+        }
+        item["decision"] = normalized
+        item["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        released_lease_id = _release_active_triage_lease(session, item_id, agent_id=agent_id)
+        if released_lease_id:
+            _return_item_to_claimable_state(item)
+            if not is_stale_github_thread_item(item):
+                item["blocking"] = True
+            item["claimed_by"] = None
+            item["claimed_at"] = None
+            item["lease_expires_at"] = None
+            item.pop("active_lease_id", None)
+        return record, released_lease_id
+
+    # Classification is pure session logic, so it is decided under the write lock
+    # against committed state instead of racing other writers with a stale copy.
+    record, released_lease_id = session_store.transact_working_set(
+        repo,
+        pr_number,
+        WorkingSetRequest(item_ids=(item_id,)),
+        classify,
+        operation="session_update",
+    ).value
     return {
         "status": "CLASSIFICATION_RECORDED",
         "repo": repo,
@@ -139,6 +192,145 @@ def record_classification(
         "evidence_record_id": record.record_id,
         "released_lease_id": released_lease_id,
     }
+
+
+def _reenter_own_fixer_lease(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    role: str,
+    agent_id: str,
+    item_id: str | None,
+    github_client: Any | None,
+    working_set_request: WorkingSetRequest | None,
+) -> dict[str, Any] | None:
+    """Hand an agent back the request for the fixer lease it already holds.
+
+    `agent next --batch` already does this (`_reconcile_existing_lease`); the
+    single-item path instead raised LEASE_LOCKED_ITEM at the lease's own owner. When
+    an agent loses its request files the lease stays active, so it could neither submit
+    nor claim again and had to wait out the TTL.
+
+    Only the owner is re-entered: `active_fixer_lease_for_item` matches on agent *and*
+    role and only `active` status, so another agent, another role, and a `submitted`
+    lease (evidence already sent) all fall through to LEASE_LOCKED_ITEM unchanged.
+    Runs after `expire_leases`, so an expired lease is never resurrected.
+
+    The request keeps its original request_id and lease_id. Submit re-reads the request
+    file and requires response.request_id to match, so a fresh id would strand any
+    response the agent already wrote.
+    """
+    if role != "fixer" or not item_id:
+        return None
+    lease = active_fixer_lease_for_item(session, item_id, agent_id=agent_id)
+    if lease is None:
+        return None
+    item = _items(session).get(item_id)
+    if not isinstance(item, dict):
+        return None
+    request_id = str(lease.get("request_id") or "")
+    request_path = lease.get("request_path")
+    if not request_id or not request_path:
+        # No request identity to hand back; leave it to the lock path rather than
+        # invent one that no response could match.
+        return None
+
+    request_path = Path(str(request_path))
+    skeleton_path = request_path.with_name(f"action-response-skeleton-{request_id}.json")
+    identity = {"request_id": request_id, "lease_id": str(lease["lease_id"])}
+    request = _payload_for_lease(request_path, **identity, validate=ActionRequest.from_dict)
+    if request is None:
+        # The request itself is gone (or unreadable), so it has to be rebuilt.
+        request = _rebuild_fixer_request(repo, pr_number, session, item=item, lease=lease, github_client=github_client)
+        request["response_skeleton_path"] = str(skeleton_path)
+        write_json_atomic(request_path, request)
+        # The stack revision binding is part of the hash, so a rebuilt request can hash
+        # differently from the original. Submit recomputes the hash from the file, but
+        # keep the lease's copy in step with what is now on disk.
+        lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
+        # `evidence-ledger.md` promises agents a `request_issued` event whenever an
+        # ActionRequest is written. Only the rebuild writes one; handing back an intact
+        # request records nothing, or every re-entry would claim a side effect that did
+        # not happen. `rebuilt` keeps the trail honest about which of the two occurred.
+        _ledger(session).append_event(
+            session_id=str(session["session_id"]),
+            item_id=item_id,
+            lease_id=str(lease["lease_id"]),
+            agent_id=agent_id,
+            role=role,
+            event_type="request_issued",
+            payload={
+                "request_id": request_id,
+                "request_path": str(request_path),
+                "response_skeleton_path": str(skeleton_path),
+                "rebuilt": True,
+            },
+        )
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
+    if _payload_for_lease(skeleton_path, **identity) is None:
+        # Derived from the request now on disk. Regenerating the skeleton does not touch
+        # the request or the hash the lease stores for it: when only the skeleton was
+        # lost, rebuilding the request here moved that hash without rewriting the file,
+        # and the two then disagreed on submit.
+        write_json_atomic(skeleton_path, response_skeleton_for_request(request, agent_id=agent_id, item=item))
+
+    # Same shape as a fresh claim: callers read the top-level handling_boundary without
+    # opening the request file.
+    handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
+    return {
+        "status": "ACTION_REQUESTED",
+        "acquisition": "reentered",
+        "repo": repo,
+        "pr_number": str(pr_number),
+        "request_path": str(request_path),
+        "response_skeleton_path": str(skeleton_path),
+        "lease_id": str(lease["lease_id"]),
+        "resume_token": _get(lease, "resume_token"),
+        "item_id": item_id,
+        **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
+        "next_action": (
+            f"You already hold this {role} lease. Pass request_path to an agent with the {role} role, "
+            "then fill response_skeleton_path."
+        ),
+    }
+
+
+def _rebuild_fixer_request(
+    repo: str,
+    pr_number: str,
+    session: dict[str, Any],
+    *,
+    item: dict[str, Any],
+    lease: dict[str, Any],
+    github_client: Any | None,
+) -> dict[str, Any]:
+    """Rebuild a lost fixer ActionRequest under the lease's existing request/lease ids."""
+    request_item = request_item_projection(item)
+    request_item["state"] = "claimed"
+    stack_context = refresh_stack_context_for_request(repo, str(pr_number), session, github_client=github_client)
+    request = {
+        "schema_version": PROTOCOL_VERSION,
+        "request_id": str(lease["request_id"]),
+        "session_id": session["session_id"],
+        "lease_id": str(lease["lease_id"]),
+        "agent_role": "fixer",
+        "item": request_item,
+        "allowed_actions": sorted(item.get("allowed_actions") or TERMINAL_RESOLUTIONS),
+        "required_evidence": required_evidence_for(item, "fixer"),
+        "repository_context": repository_context_for_stack(repo, pr_number, stack_context.to_dict()),
+        "forbidden_actions": ["post_github_reply", "resolve_github_thread", *STACK_MANAGEMENT_ACTIONS],
+        "resume_command": f"gh-address-cr agent submit {repo} {pr_number} --input response.json",
+    }
+    handling_boundary = handling_boundary_summary_or_none(item, role="fixer")
+    if handling_boundary is not None:
+        request["handling_boundary"] = handling_boundary
+    return request
 
 
 def issue_action_request(
@@ -152,13 +344,39 @@ def issue_action_request(
     github_client: Any | None = None,
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
-    session = session_store.load_session(repo, pr_number)
+    working_set_request = (
+        WorkingSetRequest(item_ids=(item_id,), include_active_leases=True)
+        if item_id
+        else None
+    )
+    session = (
+        session_store.load_working_set(
+            repo,
+            pr_number,
+            working_set_request,
+        )
+        if working_set_request is not None
+        else session_store.load_session(repo, pr_number)
+    )
     ledger = _ledger(session)
+    metadata_base = copy.deepcopy(session.get("metadata"))
     expired = expire_leases(session, now=current_time)
     _return_expired_items_to_open(session, expired)
 
     item_id, item = _next_item(session, role, item_id=item_id)
     if item is None:
+        reentered = _reenter_own_fixer_lease(
+            repo,
+            pr_number,
+            session,
+            role=role,
+            agent_id=agent_id,
+            item_id=item_id,
+            github_client=github_client,
+            working_set_request=working_set_request,
+        )
+        if reentered is not None:
+            return reentered
         locked_lease = _active_lease_for_item(session, item_id) if item_id else None
         if item_id and locked_lease is not None:
             lease_id = str(locked_lease.get("lease_id") or "")
@@ -171,7 +389,12 @@ def issue_action_request(
                 request_hash=str(locked_lease.get("request_hash") or ""),
                 now=current_time,
             ).to_dict()
-            session_store.save_session(repo, pr_number, session)
+            _persist_loaded_scope(
+                repo,
+                pr_number,
+                session,
+                request=working_set_request,
+            )
             raise WorkflowError(
                 status=protocol_codes.LEASE_LOCKED_ITEM,
                 reason_code=protocol_codes.LEASE_LOCKED_ITEM,
@@ -184,7 +407,12 @@ def issue_action_request(
                 ),
                 payload={"item_id": item_id, "lease_recovery": recovery},
             )
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise WorkflowError(
             status=protocol_codes.NO_ELIGIBLE_ITEM,
             reason_code=protocol_codes.NO_ELIGIBLE_ITEM,
@@ -211,7 +439,12 @@ def issue_action_request(
             event_type="request_rejected",
             payload={"reason_code": protocol_codes.MISSING_CLASSIFICATION},
         )
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise WorkflowError(
             status="REQUEST_REJECTED",
             reason_code=protocol_codes.MISSING_CLASSIFICATION,
@@ -266,10 +499,23 @@ def issue_action_request(
         session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
     )
     request["response_skeleton_path"] = str(response_skeleton_path)
-    try:
-        lease = claim_lease(
-            session,
-            item,
+    local_classification = item.get("classification_evidence")
+    local_decision = item.get("decision")
+    local_metadata = session_store.metadata_delta(metadata_base, session.get("metadata"))
+
+    def commit_claim(current: dict[str, Any]) -> Any:
+        current_expired = expire_leases(current, now=current_time)
+        _return_expired_items_to_open(current, current_expired)
+        current_item = current.get("items", {}).get(item_id)
+        if not isinstance(current_item, dict):
+            raise LeaseConflictError("ITEM_NOT_CLAIMABLE", item_id)
+        session_store.apply_metadata_delta(current, local_metadata)
+        if isinstance(local_classification, dict) and not has_classification_evidence(current_item):
+            current_item["classification_evidence"] = dict(local_classification)
+            current_item["decision"] = local_decision
+        committed_lease = claim_lease(
+            current,
+            current_item,
             agent_id=agent_id,
             role=role,
             request_hash=request_hash,
@@ -279,27 +525,16 @@ def issue_action_request(
             request_path=str(request_path),
             resume_token=f"resume:{request_id}",
             allow_same_agent_github_thread_file_overlap=bool(
-                role == "fixer" and item.get("item_kind") == "github_thread"
+                role == "fixer" and current_item.get("item_kind") == "github_thread"
             ),
         )
-    except LeaseConflictError as exc:
-        session_store.save_session(repo, pr_number, session)
-        raise WorkflowError(
-            status="LEASE_REJECTED",
-            reason_code=exc.reason_code,
-            waiting_on="lease",
-            exit_code=5,
-            message=str(exc),
-            payload={"item_id": item_id},
-        ) from exc
+        current_item["state"] = "claimed"
+        current_item["active_lease_id"] = lease_id
+        return committed_lease
 
-    item["state"] = "claimed"
-    item["active_lease_id"] = lease_id
-    write_json_atomic(request_path, request)
-    response_skeleton = response_skeleton_for_request(request, agent_id=agent_id, item=item)
-    write_json_atomic(response_skeleton_path, response_skeleton)
-
-    ledger.append_event(
+    # `request_issued` commits with the lease: issuance is the committed claim, and
+    # the request files written below are artifacts re-entry can rebuild.
+    request_issued = EvidenceRecord.new(
         session_id=str(session["session_id"]),
         item_id=item_id,
         lease_id=lease_id,
@@ -312,9 +547,34 @@ def issue_action_request(
             "response_skeleton_path": str(response_skeleton_path),
         },
     )
-    session_store.save_session(repo, pr_number, session)
+    try:
+        committed = session_store.transact_working_set(
+            repo,
+            pr_number,
+            WorkingSetRequest(item_ids=(item_id,), include_active_leases=True),
+            commit_claim,
+            operation="lease_claim",
+            evidence=[request_issued.to_json()],
+        )
+    except LeaseConflictError as exc:
+        raise WorkflowError(
+            status="LEASE_REJECTED",
+            reason_code=exc.reason_code,
+            waiting_on="lease",
+            exit_code=5,
+            message=str(exc),
+            payload={"item_id": item_id},
+        ) from exc
+
+    session = committed.payload
+    item = session["items"][item_id]
+    lease = committed.value
+    write_json_atomic(request_path, request)
+    response_skeleton = response_skeleton_for_request(request, agent_id=agent_id, item=item)
+    write_json_atomic(response_skeleton_path, response_skeleton)
     return {
         "status": "ACTION_REQUESTED",
+        "acquisition": "created",
         "repo": repo,
         "pr_number": str(pr_number),
         "request_path": str(request_path),
@@ -325,6 +585,69 @@ def issue_action_request(
         **({"handling_boundary": handling_boundary} if handling_boundary is not None else {}),
         "next_action": f"Pass request_path to an agent with the {role} role, then fill response_skeleton_path.",
     }
+
+
+@contextmanager
+def claimed_fixer_lease(
+    repo: str,
+    pr_number: str,
+    *,
+    item_id: str,
+    agent_id: str,
+    now: datetime | None = None,
+    github_client: Any | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Claim a fixer lease for a one-shot composition, releasing it if the body raises a WorkflowError.
+
+    The rollback belongs here, around the claim, and deliberately **not** inside
+    `submit_action_response`. The two-step `agent next` -> `agent submit` flow keeps
+    its lease across a rejected submit on purpose: the agent still holds the
+    `response_skeleton_path` and resubmits against the same `lease_id` once the
+    evidence is corrected. Releasing there would break that retry.
+
+    A one-shot `agent resolve` is the opposite case. It claims internally, so a
+    rejection hands the agent nothing to retry with while the lease keeps the item
+    locked until its TTL -- the #273 dead end, where `agent resolve` then answers
+    `LEASE_LOCKED_ITEM`, `agent next` answers `NO_ELIGIBLE_ITEM`, and
+    `agent reclaim` reports `expired_count=0`.
+
+    Only `WorkflowError` triggers the rollback. An unexpected exception leaves the
+    lease in place for `agent leases` to show, because an unmodelled failure is not
+    evidence that the claim is safe to undo.
+
+    And only a lease *this* call created is rolled back. `issue_action_request` re-enters
+    an active fixer lease the agent already holds rather than minting a second one, so a
+    one-shot composition run on an item the agent claimed earlier through `agent next`
+    would otherwise release that lease on failure -- destroying exactly the retry handle
+    the two-step flow is documented above to preserve.
+    """
+    preexisting = active_fixer_lease_for_item(session_store.load_session(repo, pr_number), item_id, agent_id=agent_id)
+    preexisting_lease_id = str(preexisting["lease_id"]) if isinstance(preexisting, dict) else None
+    requested = issue_action_request(
+        repo,
+        pr_number,
+        role="fixer",
+        agent_id=agent_id,
+        item_id=item_id,
+        now=now,
+        github_client=github_client,
+    )
+    try:
+        yield requested
+    except WorkflowError as exc:
+        if str(requested["lease_id"]) == preexisting_lease_id:
+            # Re-entered, not claimed: the agent held this lease before the call and keeps it.
+            raise
+        # Any WorkflowError rolls back, not only ACTION_REJECTED, so record which one:
+        # a fixed "action_rejected" would mislabel the lease events `agent leases` shows.
+        release_claimed_lease(
+            repo,
+            pr_number,
+            lease_id=str(requested["lease_id"]),
+            now=now,
+            reason=f"action_rejected:{exc.reason_code}",
+        )
+        raise
 
 
 def submit_action_response(
@@ -338,8 +661,29 @@ def submit_action_response(
     publisher_agent_id: str = "gh-address-cr-publisher",
 ) -> dict[str, Any]:
     now = _coerce_now(now)
-    session = session_store.load_session(repo, pr_number)
-    ledger = _ledger(session)
+    # The accept phase reads GitHub for revision binding, so it cannot run inside a
+    # write transaction; it is pure until its save, so a stale save reruns it.
+    payload, prepared = session_store.retry_on_stale_revision(
+        lambda: _accept_action_response(
+            repo, pr_number, response_path=response_path, now=now, publish=publish, github_client=github_client
+        )
+    )
+    if not publish:
+        return payload
+    return _publish_accepted_response(
+        repo, pr_number, payload, prepared, github_client=github_client, publisher_agent_id=publisher_agent_id, now=now
+    )
+
+
+def _accept_action_response(
+    repo: str,
+    pr_number: str,
+    *,
+    response_path: str | Path,
+    now: datetime,
+    publish: bool,
+    github_client: Any | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     response = load_response_json_object(
         response_path,
         status=protocol_codes.ACTION_REJECTED,
@@ -349,16 +693,32 @@ def submit_action_response(
         shape_message="ActionResponse must be a JSON object.",
         payload_name="ActionResponse",
     )
+    requested_lease_id = str(response.get("lease_id") or "")
+    bounded_request = WorkingSetRequest(
+        lease_ids=(requested_lease_id,) if requested_lease_id else (),
+    )
+    working_set_request: WorkingSetRequest | None = bounded_request
+    session = session_store.load_working_set(
+        repo,
+        pr_number,
+        bounded_request,
+    )
+    if requested_lease_id and requested_lease_id not in session.get("leases", {}):
+        # Rebound GitHub-thread responses are a compatibility path that needs
+        # the complete lease history to locate the replacement lease.
+        session = session_store.load_session(repo, pr_number)
+        working_set_request = None
+    ledger = _ledger(session)
 
     try:
         if publish:
             _validate_publish_shortcut_target(session, response)
-        prepared = prepare_action_response_submission(session, ledger, response, now=now)
+        preflight = prepare_action_response_submission(session, ledger, response, now=now)
         binding = verify_request_revision_binding(
             repo,
             pr_number,
             session,
-            prepared,
+            preflight,
             response,
             github_client=github_client,
             ledger=ledger,
@@ -367,23 +727,81 @@ def submit_action_response(
         )
         if binding is not None:
             response["_runtime_revision_binding"] = binding
-        record = accept_action_response_submission(session, ledger, response, prepared, now=now)
     except WorkflowError:
-        session_store.save_session(repo, pr_number, session)
+        _persist_loaded_scope(
+            repo,
+            pr_number,
+            session,
+            request=working_set_request,
+        )
         raise
-    session_store.save_session(repo, pr_number, session)
+
+    def accept(current: dict[str, Any]) -> dict[str, Any]:
+        metadata = session.get("metadata")
+        if isinstance(metadata, dict):
+            current["metadata"] = dict(metadata)
+        current_ledger = _ledger(current)
+        prepared = prepare_action_response_submission(current, current_ledger, response, now=now)
+        try:
+            record = accept_action_response_submission(
+                current,
+                current_ledger,
+                response,
+                prepared,
+                now=now,
+            )
+        except WorkflowError as exc:
+            return {"error": exc, "prepared": prepared}
+        return {
+            "prepared": prepared,
+            "evidence_record_id": record.record_id,
+        }
+
+    persistence = session.get("persistence")
+    expected_revision = (
+        int(persistence["revision"])
+        if isinstance(persistence, dict) and isinstance(persistence.get("revision"), int)
+        else None
+    )
+    committed = session_store.transact_working_set(
+        repo,
+        pr_number,
+        WorkingSetRequest(
+            item_ids=(str(preflight["item_id"]),),
+            lease_ids=(str(preflight["lease_id"]),),
+        ),
+        accept,
+        operation="lease_release",
+        expected_revision=expected_revision,
+    )
+    outcome = committed.value
+    if isinstance(outcome, dict) and isinstance(outcome.get("error"), WorkflowError):
+        raise outcome["error"]
+    if not isinstance(outcome, dict) or not isinstance(outcome.get("prepared"), dict):
+        raise RuntimeError("Accepted ActionResponse transaction returned an invalid outcome.")
+    prepared = outcome["prepared"]
     payload = {
         "status": "ACTION_ACCEPTED",
         "repo": repo,
         "pr_number": str(pr_number),
         "lease_id": prepared["lease_id"],
         "item_id": prepared["item_id"],
-        "evidence_record_id": record.record_id,
+        "evidence_record_id": outcome["evidence_record_id"],
         "next_action": f"Run `gh-address-cr agent publish {repo} {pr_number}` to publish accepted evidence.",
     }
-    if not publish:
-        return payload
+    return payload, prepared
 
+
+def _publish_accepted_response(
+    repo: str,
+    pr_number: str,
+    payload: dict[str, Any],
+    prepared: dict[str, Any],
+    *,
+    github_client: Any | None,
+    publisher_agent_id: str,
+    now: datetime,
+) -> dict[str, Any]:
     from gh_address_cr.core import publisher
 
     published = publisher.publish_github_thread_responses(
@@ -394,7 +812,15 @@ def submit_action_response(
         now=now,
     )
     payload["publish"] = published
-    payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
+    # Only claim "published" when the publisher actually covered this item. A no-op
+    # publish (NO_PUBLISH_READY_ITEMS) or one that skipped it keeps the default
+    # "run agent publish" next_action, so callers that read this payload -- and the
+    # `fast_fix_item` result built on it -- agree with the outcome-derived status.
+    published_status = publish_outcome_status(
+        "SUBMIT", publish=True, published=published, item_ids=[str(prepared["item_id"])]
+    )
+    if published_status.endswith("_COMPLETE"):
+        payload["next_action"] = "Accepted evidence was published. Rerun final-gate when all items are handled."
     return payload
 
 

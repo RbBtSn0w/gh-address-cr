@@ -6,7 +6,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+_PENDING_EVIDENCE_KEY = "_pending_evidence_records"
 
 
 def _canonical_json(value: Any) -> str:
@@ -300,36 +302,100 @@ class EvidenceLedger:
             timestamp=timestamp,
         )
 
-    def successful_side_effect_url(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
-        latest_successful_url: str | None = None
-        for line_number, line in self._iter_records():
-            record = self._record_from_line(line_number, line)
-            if record.event_type != "side_effect_attempt":
-                continue
-            attempt = SideEffectAttempt.from_json(record.payload)
-            if attempt.idempotency_key != idempotency_key:
-                continue
-            if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
-                continue
-            if attempt.status == "succeeded" and attempt.external_url:
-                latest_successful_url = attempt.external_url
-        return latest_successful_url
 
-    def latest_side_effect_status(self, idempotency_key: str, side_effect_type: str | None = None) -> str | None:
-        """Status of the most recent attempt for a key, or None.
+class SessionEvidenceLedger(EvidenceLedger):
+    """Buffer evidence on a loaded session until its canonical transaction commits."""
 
-        Callers detect a dangling `in_flight` crash window by comparing the
-        returned value to `"in_flight"`; this method only reports the status.
+    def __init__(
+        self,
+        path: str | Path,
+        session: dict[str, Any],
+        *,
+        flush: Callable[[list[dict[str, Any]]], None] | None = None,
+        canonical: Callable[[], list[dict[str, Any]]] | None = None,
+    ):
+        super().__init__(path)
+        self.session = session
+        self.flush = flush
+        self.canonical = canonical
+
+    def load(self, *, event_type: str | None = None) -> list[EvidenceRecord]:
+        """Committed canonical evidence plus this session's uncommitted buffer.
+
+        ``evidence.jsonl`` is a rebuildable projection and is never read back as
+        input, so a stale or edited projection cannot change runtime decisions.
         """
-        latest_status: str | None = None
-        for line_number, line in self._iter_records():
-            record = self._record_from_line(line_number, line)
-            if record.event_type != "side_effect_attempt":
-                continue
-            attempt = SideEffectAttempt.from_json(record.payload)
-            if attempt.idempotency_key != idempotency_key:
-                continue
-            if side_effect_type is not None and attempt.side_effect_type != side_effect_type:
-                continue
-            latest_status = attempt.status
-        return latest_status
+        if self.canonical is None:
+            raise ValueError("A session ledger requires its canonical evidence source to load records.")
+        rows = [*self.canonical(), *(self.session.get(_PENDING_EVIDENCE_KEY) or [])]
+        records = [self._record_from_line(index, json.dumps(row)) for index, row in enumerate(rows, start=1)]
+        return [record for record in records if event_type is None or record.event_type == event_type]
+
+    def append(self, record: EvidenceRecord) -> EvidenceRecord:
+        pending = self.session.setdefault(_PENDING_EVIDENCE_KEY, [])
+        if not isinstance(pending, list):
+            raise ValueError("Session pending evidence must be a list.")
+        pending.append(record.to_json())
+        return record
+
+    def record_side_effect_attempt(
+        self,
+        *,
+        attempt: SideEffectAttempt,
+        lease_id: str | None,
+        agent_id: str,
+        role: str = "publisher",
+        timestamp: str | None = None,
+    ) -> EvidenceRecord:
+        record = super().record_side_effect_attempt(
+            attempt=attempt,
+            lease_id=lease_id,
+            agent_id=agent_id,
+            role=role,
+            timestamp=timestamp,
+        )
+        if self.flush is not None:
+            pending = self.session.get(_PENDING_EVIDENCE_KEY)
+            if not isinstance(pending, list) or not pending:
+                raise ValueError("Side-effect evidence was not buffered.")
+            self.flush([dict(pending.pop())])
+            if not pending:
+                self.session.pop(_PENDING_EVIDENCE_KEY, None)
+        return record
+
+
+def take_pending_evidence(session: dict[str, Any]) -> list[dict[str, Any]]:
+    pending = session.pop(_PENDING_EVIDENCE_KEY, [])
+    if not isinstance(pending, list):
+        raise ValueError("Session pending evidence must be a list.")
+    return [dict(record) for record in pending if isinstance(record, dict)]
+
+
+def record_new_item_observations(
+    session: dict[str, Any],
+    previous_item_ids: set[str],
+    *,
+    timestamp: str | None = None,
+) -> None:
+    """Buffer one exact runtime-observation event for each newly discovered item."""
+    items = session.get("items")
+    if not isinstance(items, dict):
+        return
+    ledger = SessionEvidenceLedger(session.get("ledger_path") or ".", session)
+    for item_id in sorted(set(map(str, items)) - previous_item_ids):
+        item = items.get(item_id)
+        if not isinstance(item, dict):
+            continue
+        item_kind = str(item.get("item_kind") or "")
+        if item_kind not in {"github_thread", "local_finding"}:
+            continue
+        ledger.append_event(
+            session_id=str(session.get("session_id") or ""),
+            item_id=item_id,
+            lease_id=None,
+            agent_id="gh-address-cr-runtime",
+            role="intake",
+            event_type="finding_observed",
+            payload={"item_kind": item_kind, "source": str(item.get("source") or "unknown")},
+            timestamp=timestamp,
+        )

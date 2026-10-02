@@ -10,7 +10,6 @@ from gh_address_cr.core.leases import (
     claim_lease,
     expire_leases,
     reclaim_lease,
-    reject_lease,
     release_lease,
     submit_lease,
 )
@@ -97,24 +96,11 @@ class ClaimLeaseLifecycleTest(unittest.TestCase):
         expire_leases(session, now=NOW + timedelta(seconds=2))
         self.assertEqual(expired.status, "expired")
 
-        rejected = claim_lease(
-            session,
-            make_item("item-reject", path="src/reject.py"),
-            agent_id="agent-d",
-            role="fixer",
-            request_hash="req-reject",
-            lease_id="lease-reject",
-            now=NOW,
-        )
-        reject_lease(session, "lease-reject", now=NOW + timedelta(seconds=4), reason="invalid evidence")
-        self.assertEqual(rejected.status, "rejected")
-
         event_types = [event["event_type"] for event in session["lease_events"]]
         self.assertIn("lease_released", event_types)
         self.assertIn("lease_submitted", event_types)
         self.assertIn("lease_accepted", event_types)
         self.assertIn("lease_expired", event_types)
-        self.assertIn("lease_rejected", event_types)
 
     def test_reclaim_expired_lease_preserves_accepted_evidence(self):
         session = make_session()
@@ -194,7 +180,12 @@ class LeaseRecoveryOutcomeTest(unittest.TestCase):
 
         self.assertEqual(recovery.recovery_outcome, "stop")
         self.assertEqual(recovery.reason_code, "LEASE_ACTIVE")
-        self.assertIsNone(recovery.resume_command)
+        # Still "stop" -- nothing is stale and no re-claim is warranted -- but the
+        # owner of a valid lease now gets the submit step rather than no command
+        # at all. An orphaned lease and a healthy in-flight one are indistinguishable
+        # in session state, so the same advice has to serve both (#273).
+        self.assertIn("agent submit", recovery.resume_command)
+        self.assertNotIn("agent next", recovery.resume_command)
 
     def test_falsy_lease_fields_fail_closed_without_collapsing_numeric_values(self):
         session = make_session()

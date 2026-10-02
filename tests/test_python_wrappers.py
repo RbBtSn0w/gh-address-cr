@@ -640,6 +640,7 @@ else:
         self.assertEqual(request["mode"], "simple-address")
         self.assertEqual(request["threads"][0]["thread_id"], "THREAD_SIMPLE")
         self.assertEqual(request["claimable_item_ids"], ["github-thread:THREAD_SIMPLE"])
+        self.assertEqual(request["batch_response_skeleton"]["schema_version"], "1.1")
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["item_id"], "github-thread:THREAD_SIMPLE")
         self.assertEqual(request["batch_response_skeleton"]["items"][0]["request_id"], "<request_id from agent next>")
         self.assertEqual(
@@ -1448,7 +1449,10 @@ else:
         first_summary = json.loads(first.stdout)
         self.assertEqual(first_summary["status"], "BLOCKED")
 
-        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import SessionManager
+
+        manager = SessionManager(self.repo, self.pr)
+        session = manager.load()
         item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         item = session["items"][item_id]
         item["status"] = "CLOSED"
@@ -1456,7 +1460,7 @@ else:
         item["blocking"] = False
         item["handled"] = True
         item["validation_evidence"] = [{"command": "manual fixture", "result": "passed"}]
-        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+        manager.save(session)
 
         second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -2880,20 +2884,25 @@ else:
         archived_workspace = archived_runs[0]
         archived_summary = archived_workspace / "audit_summary.md"
         archived_report = archived_workspace / "efficiency-report.json"
+        archived_cr_metrics = archived_workspace / "cr-metrics.json"
         self.assertTrue((archived_workspace / "audit.jsonl").exists())
         self.assertTrue((archived_workspace / "trace.jsonl").exists())
         self.assertTrue(archived_summary.exists())
         self.assertTrue(archived_report.exists())
+        self.assertTrue(archived_cr_metrics.exists())
         self.assertTrue((archived_workspace / "session.json").exists())
         self.assertIn(f"Audit summary path: {archived_summary}", result.stdout)
         self.assertIn("Audit summary sha256:", result.stdout)
         summary_text = archived_summary.read_text(encoding="utf-8")
         self.assertIn(f"- efficiency_report_path: {archived_report}", summary_text)
+        self.assertIn(f"- cr_metrics_path: {archived_cr_metrics}", summary_text)
         self.assertIn("## PR Completion Summary Guidance", summary_text)
         self.assertIn(f"- Efficiency Report: {archived_report}", summary_text)
         self.assertIn(f"- Audit Summary: {archived_summary}", summary_text)
         report = json.loads(archived_report.read_text(encoding="utf-8"))
         self.assertEqual(report["report_artifact"], str(archived_report))
+        cr_metrics = json.loads(archived_cr_metrics.read_text(encoding="utf-8"))
+        self.assertEqual(cr_metrics["report_artifact"], str(archived_cr_metrics))
 
         trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertTrue(trace_lines)

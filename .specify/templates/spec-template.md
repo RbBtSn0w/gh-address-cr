@@ -99,7 +99,10 @@
 
 - **Control Plane Impact**: [Does this feature affect session state,
   GitHub IO, findings intake, loop safety, audit artifacts, telemetry, or
-  final-gate behavior? If yes, describe the deterministic owner.]
+  final-gate behavior? If yes, describe the deterministic owner and the single
+  versioned authoritative persistence boundary. Are compatibility artifacts
+  projections only? If authority changes, how does an atomic migration prevent
+  divergence and dual-primary operation?]
 - **Runtime Kernel Model**: [If this feature affects runtime behavior, what are
   the external facts/event inputs, projections, policy/status-to-action
   decisions, side-effect plan/outbox boundary, artifact truth boundary, and

@@ -25,7 +25,9 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def ledger_rows(self):
         ledger = self.workspace_dir() / "evidence.jsonl"
@@ -577,12 +579,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "open")
 
-    def test_agent_fix_all_include_stale_routes_to_resolve_stale(self):
-        """Legacy compat window regression test: when RESOLVE_DEPRECATION_WINDOW_OPEN is True,
-
-        passing the legacy --include-stale flag routes to STALE_THREADS_REQUIRE_RESOLVE_STALE.
-        (Closed-window fast failure is tested in test_agent_resolve_guards.py).
-        """
+    def test_agent_fix_all_rejects_removed_include_stale_flag(self):
         self.write_session(
             items=[
                 github_thread(
@@ -595,26 +592,22 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        with self.deprecation_window(True):
-            result = self.run_runtime_module(
-                "agent",
-                "resolve",
-                self.repo,
-                self.pr,
-                "--commit",
-                "abc123",
-                "--files",
-                "src/stale.py",
-                "--validation",
-                "python3 -m unittest tests.test_stale=passed",
-                "--include-stale",
-            )
+        result = self.run_runtime_module(
+            "agent",
+            "resolve",
+            self.repo,
+            self.pr,
+            "--commit",
+            "abc123",
+            "--files",
+            "src/stale.py",
+            "--validation",
+            "python3 -m unittest tests.test_stale=passed",
+            "--include-stale",
+        )
 
-        self.assertEqual(result.returncode, 4)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_REJECTED")
-        self.assertEqual(payload["reason_code"], "STALE_THREADS_REQUIRE_RESOLVE_STALE")
-        self.assertIn("agent resolve", payload["next_action"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --include-stale", result.stderr)
 
     def test_agent_fix_all_excludes_stale_without_opt_in(self):
         self.write_session(
@@ -863,7 +856,7 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "STALE_RESOLUTION_REJECTED")
         self.assertEqual(payload["reason_code"], "COMMIT_FILES_UNAVAILABLE")
 
-    def test_agent_fix_all_reports_partial_when_one_matched_thread_is_leased(self):
+    def test_agent_fix_all_excludes_a_thread_leased_by_another_agent(self):
         self.write_session(
             items=[
                 open_item(
@@ -917,18 +910,20 @@ class ControlPlaneFixAllWorkflowCLITest(PythonScriptTestCase):
             NOW.isoformat(),
         )
 
-        self.assertEqual(result.returncode, 5)
+        self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "FAST_FIX_ALL_PARTIAL")
+        self.assertEqual(payload["status"], "FAST_FIX_ALL_ACCEPTED")
         self.assertEqual(payload["accepted_count"], 1)
-        self.assertEqual(payload["failed_count"], 1)
+        self.assertEqual(payload["failed_count"], 0)
         self.assertEqual(payload["item_ids"], ["github-thread:abc"])
-        self.assertEqual(payload["failed"][0]["item_id"], "github-thread:def")
-        self.assertEqual(payload["failed"][0]["reason_code"], "LEASE_LOCKED_ITEM")
-        self.assertIn("agent leases", payload["failed"][0]["next_action"])
+        self.assertEqual(payload["failed"], [])
         session = self.load_session()
         self.assertEqual(session["items"]["github-thread:abc"]["state"], "publish_ready")
-        self.assertEqual(session["items"]["github-thread:def"]["state"], "open")
+        self.assertEqual(session["items"]["github-thread:def"]["state"], "claimed")
+        self.assertEqual(
+            session["items"]["github-thread:def"]["active_lease_id"],
+            "lease-existing",
+        )
 
     def test_agent_resolve_item_reports_active_batch_lease_owner(self):
         self.write_session(

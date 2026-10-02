@@ -16,6 +16,7 @@ from urllib.parse import quote_plus
 from gh_address_cr.core import audit_log as core_audit_log
 from gh_address_cr.core import io as core_io
 from gh_address_cr.core import paths as core_paths
+from gh_address_cr.core import session as core_session
 from gh_address_cr.core.command_runner import run_cmd as run_cmd_native
 
 
@@ -308,6 +309,23 @@ def load_json_file(path: Path, errors: list[str], *, label: str) -> dict[str, An
     return payload
 
 
+def load_current_session(
+    repo: str,
+    pr_number: str,
+    errors: list[str],
+) -> dict[str, Any]:
+    """Load canonical session truth and materialize its read-only projection."""
+    path = session_file(repo, pr_number)
+    database_path = path.parent / "runtime.sqlite3"
+    if not path.exists() and not database_path.is_file():
+        return {}
+    try:
+        return core_session.SessionManager(repo, pr_number).load()
+    except (OSError, core_session.SessionError) as exc:
+        errors.append(f"session.json could not be materialized from canonical state: {exc}")
+        return load_json_file(path, errors, label="session.json")
+
+
 def extract_artifact_path(last_error: str) -> str | None:
     prefix = "Internal fixer action required:"
     if prefix in last_error:
@@ -356,8 +374,7 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict[str, 
     if summary_payload.get("item_id"):
         context["current_item_id"] = str(summary_payload["item_id"])
 
-    session_path = session_file(repo, pr_number)
-    session_payload = load_json_file(session_path, context["errors"], label="session.json")
+    session_payload = load_current_session(repo, pr_number, context["errors"])
     context["session"] = session_payload
     if session_payload:
         context["session_status"] = session_payload.get("status")

@@ -97,6 +97,36 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(evidence_rows[0]["event_type"], "classification_recorded")
                 self.assertEqual(evidence_rows[0]["agent_id"], "triage-1")
 
+    def test_explicit_action_request_does_not_load_full_session(self):
+        from gh_address_cr.core import agent_protocol
+
+        repo = "owner/repo"
+        pr_number = "124"
+        item = open_item()
+        item["classification_evidence"] = {
+            "classification": "fix",
+            "event_type": "classification_recorded",
+            "note": "Real defect.",
+            "record_id": "classification-1",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                with patch.object(
+                    agent_protocol.session_store,
+                    "load_session",
+                    side_effect=AssertionError("full session load"),
+                ):
+                    requested = agent_protocol.issue_action_request(
+                        repo,
+                        pr_number,
+                        role="fixer",
+                        agent_id="fixer-1",
+                        item_id="local:1",
+                    )
+
+        self.assertEqual(requested["status"], "ACTION_REQUESTED")
+
     def test_action_request_refreshes_missing_stack_context_before_claim(self):
         from gh_address_cr.core.runtime_kernel.stack import project_stack_context
         from tests.helpers import stack_observation
@@ -392,6 +422,16 @@ class NativeWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, open_item())
+                seeded = manager.load()
+                seeded["items"]["local:2"] = open_item("local:2")
+                seeded["leases"]["lease-terminal"] = {
+                    "lease_id": "lease-terminal",
+                    "item_id": "local:2",
+                    "agent_id": "previous-fixer",
+                    "role": "fixer",
+                    "status": "released",
+                }
+                manager.save(seeded)
                 agent_protocol.record_classification(
                     repo,
                     pr_number,
@@ -439,6 +479,8 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(session["leases"][request["lease_id"]]["status"], "released")
                 self.assertEqual(session["items"]["local:1"]["state"], "open")
                 self.assertNotIn("active_lease_id", session["items"]["local:1"])
+                self.assertIn("local:2", session["items"])
+                self.assertIn("lease-terminal", session["leases"])
 
                 refreshed = agent_protocol.issue_action_request(
                     repo,
@@ -491,9 +533,16 @@ class NativeWorkflowTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                with patch(
-                    "gh_address_cr.github.client.GitHubClient",
-                    side_effect=AssertionError("ordinary unbound submit must not construct a GitHub client"),
+                with (
+                    patch(
+                        "gh_address_cr.github.client.GitHubClient",
+                        side_effect=AssertionError("ordinary unbound submit must not construct a GitHub client"),
+                    ),
+                    patch.object(
+                        agent_protocol.session_store,
+                        "load_session",
+                        side_effect=AssertionError("submit must not load the full session"),
+                    ),
                 ):
                     accepted = agent_protocol.submit_action_response(
                         repo,
@@ -782,6 +831,127 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertEqual(updated["reply_url"], "https://github.test/reply-recovered")
                 self.assertEqual(updated["status"], "CLOSED")
 
+    def test_publish_drives_reply_and_resolve_through_canonical_outbox(self):
+        from gh_address_cr.core.runtime_store import RuntimeStore
+
+        manager = None
+        test_case = self
+
+        class InspectingClient(UnstackedGitHubClient):
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                commands = RuntimeStore(manager.workspace_path).load_outbox()
+                self_reply = next(row for row in commands if row["effect_type"] == "github_reply")
+                test_case.assertEqual(self_reply["status"], "in_flight")
+                return "https://github.test/reply-1"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                commands = RuntimeStore(manager.workspace_path).load_outbox()
+                reply = next(row for row in commands if row["effect_type"] == "github_reply")
+                resolve = next(row for row in commands if row["effect_type"] == "github_resolve")
+                test_case.assertEqual(reply["status"], "succeeded")
+                test_case.assertEqual(resolve["status"], "in_flight")
+                return True
+
+            def list_threads(self, repo, pr_number):
+                return [{"id": "THREAD_1", "isResolved": True}]
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "clarify",
+                "note": "Need maintainer input.",
+                "reply_markdown": "Can you confirm the intended behavior?",
+                "validation_commands": [{"command": "python3 -m unittest", "result": "passed"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+
+                result = publisher.publish_github_thread_responses(
+                    repo,
+                    pr_number,
+                    github_client=InspectingClient(),
+                )
+
+                commands = RuntimeStore(manager.workspace_path).load_outbox()
+
+        self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+        self.assertEqual([row["status"] for row in commands], ["succeeded", "succeeded"])
+
+    def test_publish_retries_unknown_idempotent_resolve_after_crash(self):
+        from gh_address_cr.core.runtime_store import RuntimeStore
+
+        class CrashResolveOnceClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.post_reply_calls = 0
+                self.resolve_calls = 0
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.post_reply_calls += 1
+                return "https://github.test/reply-1"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolve_calls += 1
+                if self.resolve_calls == 1:
+                    raise KeyboardInterrupt("simulated crash after idempotent resolve")
+                return True
+
+            def list_threads(self, repo, pr_number):
+                return [{"id": "THREAD_1", "isResolved": True}]
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "clarify",
+                "note": "Need maintainer input.",
+                "reply_markdown": "Can you confirm the intended behavior?",
+                "validation_commands": [{"command": "python3 -m unittest", "result": "passed"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                manager = self.write_session(repo, pr_number, item)
+                client = CrashResolveOnceClient()
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                resolve = next(
+                    row
+                    for row in RuntimeStore(manager.workspace_path).load_outbox()
+                    if row["effect_type"] == "github_resolve"
+                )
+
+        self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+        self.assertEqual(client.post_reply_calls, 1)
+        self.assertEqual(client.resolve_calls, 2)
+        self.assertEqual(resolve["status"], "succeeded")
+        self.assertEqual(resolve["attempt_count"], 2)
+
     def test_publish_blocks_for_manual_reconciliation_when_in_flight_reply_is_unmatched(self):
         from gh_address_cr.core import protocol_codes, publisher
         from gh_address_cr.core.errors import WorkflowError
@@ -825,23 +995,30 @@ class NativeWorkflowTests(unittest.TestCase):
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, item)
                 session = manager.load()
+                from gh_address_cr.core import side_effect_outbox
                 from gh_address_cr.core.utils import get_session_ledger
                 from gh_address_cr.evidence.ledger import SideEffectAttempt
 
                 ledger = get_session_ledger(session)
-                ledger.record_side_effect_attempt(
-                    attempt=SideEffectAttempt.new(
-                        session_id=str(session["session_id"]),
-                        item_id="github-thread:THREAD_1",
-                        side_effect_type="github_reply",
-                        idempotency_key=f"{session['session_id']}:github-thread:THREAD_1:github_reply",
-                        status="in_flight",
+                reply_key = f"{session['session_id']}:github-thread:THREAD_1:github_reply"
+                # The executor records in_flight under its execution lock and then dies before
+                # recording a result; leaving the guard releases the lock exactly as process exit does.
+                with side_effect_outbox.execution_guard(
+                    session, effect_type="github_reply", idempotency_key=reply_key
+                ):
+                    ledger.record_side_effect_attempt(
+                        attempt=SideEffectAttempt.new(
+                            session_id=str(session["session_id"]),
+                            item_id="github-thread:THREAD_1",
+                            side_effect_type="github_reply",
+                            idempotency_key=reply_key,
+                            status="in_flight",
+                            timestamp="2026-08-01T00:00:00Z",
+                        ),
+                        lease_id=None,
+                        agent_id="gh-address-cr-publisher",
                         timestamp="2026-08-01T00:00:00Z",
-                    ),
-                    lease_id=None,
-                    agent_id="gh-address-cr-publisher",
-                    timestamp="2026-08-01T00:00:00Z",
-                )
+                    )
                 client = NeverReconcilableClient()
 
                 with self.assertRaises(WorkflowError) as context:
@@ -927,23 +1104,30 @@ class NativeWorkflowTests(unittest.TestCase):
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = self.write_session(repo, pr_number, item)
                 session = manager.load()
+                from gh_address_cr.core import side_effect_outbox
                 from gh_address_cr.core.utils import get_session_ledger
                 from gh_address_cr.evidence.ledger import SideEffectAttempt
 
                 ledger = get_session_ledger(session)
-                ledger.record_side_effect_attempt(
-                    attempt=SideEffectAttempt.new(
-                        session_id=str(session["session_id"]),
-                        item_id="github-thread:THREAD_1",
-                        side_effect_type="github_reply",
-                        idempotency_key=f"{session['session_id']}:github-thread:THREAD_1:github_reply",
-                        status="in_flight",
+                reply_key = f"{session['session_id']}:github-thread:THREAD_1:github_reply"
+                # The executor records in_flight under its execution lock and then dies before
+                # recording a result; leaving the guard releases the lock exactly as process exit does.
+                with side_effect_outbox.execution_guard(
+                    session, effect_type="github_reply", idempotency_key=reply_key
+                ):
+                    ledger.record_side_effect_attempt(
+                        attempt=SideEffectAttempt.new(
+                            session_id=str(session["session_id"]),
+                            item_id="github-thread:THREAD_1",
+                            side_effect_type="github_reply",
+                            idempotency_key=reply_key,
+                            status="in_flight",
+                            timestamp="2026-08-01T00:00:00Z",
+                        ),
+                        lease_id=None,
+                        agent_id="gh-address-cr-publisher",
                         timestamp="2026-08-01T00:00:00Z",
-                    ),
-                    lease_id=None,
-                    agent_id="gh-address-cr-publisher",
-                    timestamp="2026-08-01T00:00:00Z",
-                )
+                    )
                 client = NeverPostedClient()
 
                 result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)

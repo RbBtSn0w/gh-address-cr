@@ -6,10 +6,13 @@ APIs.
 
 Agents should expect the runtime to record:
 
-- `request_issued` when an `ActionRequest` is written
+- `request_issued` when an `ActionRequest` is issued: the event commits in the
+  same runtime transaction as the lease it describes, and a later reissue of a
+  missing or outdated request file records another `request_issued` with
+  `rebuilt: true`
 - `request_rejected` when classification or manifest rules block a request
-- `lease_created`, `lease_submitted`, `lease_accepted`, `lease_rejected`,
-  `lease_expired`, and `lease_released` for lease lifecycle changes
+- `lease_created`, `lease_submitted`, `lease_accepted`, `lease_expired`, and
+  `lease_released` for lease lifecycle changes
 - `response_accepted` and `response_rejected` for `ActionResponse` handling
 - batch evidence submissions expand into per-item `response_accepted` or `response_rejected` records
 - `verification_rejected` when verifier evidence reopens a work item

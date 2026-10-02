@@ -59,6 +59,7 @@ Public behavior changes MUST update code, docs, and executable tests together. T
 Before claiming work is complete, run these local checks:
 - **Install**: `pip install -e .` (required before running tests).
 - **Linting**: `ruff check src tests scripts/build_plugin_payload.py` (configured in `pyproject.toml`).
+- **Type Checking**: `python3 scripts/check_mypy_ratchet.py` (CI blocking gate; baseline 0 errors, config in `pyproject.toml`). Run it with the same interpreter that has the package installed so third-party stubs resolve.
 - **Unit Tests**: `python3 -m unittest discover -s tests`.
 - **CLI Smoke Test**: `python3 -m gh_address_cr --help`.
 - **Agent Contract Smoke Test**: `python3 -m gh_address_cr agent manifest`.

@@ -14,15 +14,25 @@ class TestOrchestratorSession(unittest.TestCase):
         }
         packet = build_worker_packet(
             run_id="run-xyz",
-            lease_token="lease-abc",
+            delivery_token="dispatch-abc",
             role="fixer",
             session_id="owner__repo/pr-123",
             item=item,
             response_path="/tmp/workspace/response-finding-1.json",
+            dispatch_receipt={
+                "schema_version": "dispatch-receipt.v1",
+                "item_id": "finding-1",
+                "lease_id": "lease-abc",
+                "request_id": "req-abc",
+                "runtime_revision": 7,
+                "delivery_token": "dispatch-abc",
+            },
         )
 
+        self.assertEqual(packet["schema_version"], "worker-packet.v2")
         self.assertEqual(packet["orchestration_run_id"], "run-xyz")
-        self.assertEqual(packet["lease_token"], "lease-abc")
+        self.assertEqual(packet["delivery_token"], "dispatch-abc")
+        self.assertEqual(packet["dispatch_receipt"]["lease_id"], "lease-abc")
         self.assertEqual(packet["role_requested"], "fixer")
         self.assertEqual(packet["response_path"], "/tmp/workspace/response-finding-1.json")
 

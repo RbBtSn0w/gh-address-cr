@@ -74,7 +74,9 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def load_session(self):
-        return json.loads(self.session_file().read_text(encoding="utf-8"))
+        from gh_address_cr.core.session import load_session
+
+        return load_session(self.repo, self.pr)
 
     def ledger_rows(self):
         ledger = self.workspace_dir() / "evidence.jsonl"

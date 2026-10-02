@@ -20,6 +20,10 @@ authority, or `final-gate` semantics.
   so request fresh work instead of waiting for lease expiry.
   If an authorized cascading rebase or push caused the change, complete that
   external handoff first, then request fresh PR-scoped work.
+- `REQUEST_PROTOCOL_SUPERSEDED`: the request file predates the
+  runtime's protocol. Rerun `agent next` for the same item; it reissues the
+  request at the current protocol for the lease you already hold, then fill the
+  response skeleton again and resubmit.
 - `STACK_ACTION_CONTEXT_MISMATCH`: stop the worker action. Do not move the fix
   or evidence to the currently checked-out upper member; refresh and request
   work from the PR and owning branch named by the current runtime context.
@@ -48,6 +52,26 @@ If `reason_code` is `STATE_DIR_NOT_WRITABLE`:
   `agent submit`, `agent publish`, and `final-gate`. Rerun the blocked command;
   do not change `HOME` or create a second state directory mid-session.
 
+## Runtime Persistence
+
+Commands that fail on the runtime store return `waiting_on=runtime_store`, keep
+the store's own `reason_code`, and add `retryable`. The failed command committed
+nothing.
+
+- `STALE_REVISION` (`retryable=true`): another command changed the session after
+  this one loaded it. Rerun the same command; it reloads the current state.
+  Classification, lease release, and reclaim decide inside the write lock and
+  never report it; submit reruns itself up to three times before reporting it.
+- `PERSISTENCE_BUSY` (`retryable=true`): the store stayed locked past its bounded
+  wait. Let the other gh-address-cr command finish, then rerun the same command.
+- `PERSISTENCE_INVALID` (`retryable=false`): the store failed an integrity check
+  (for example an invariant violation). Stop. Do not edit `session.json`,
+  `evidence.jsonl`, or `runtime.sqlite3`; follow the returned artifact and
+  remediation, then prepare sanitized feedback if the skill itself is at fault.
+
+If `reason_code` is `DISPATCH_PROJECTION_FAILED`:
+- **Action**: `agent orchestrate step` failed after the runtime claimed the item and has released that claim. When `next_action` is `RETRY`, rerun the step; when it is `HALT`, the release itself failed, so inspect `gh-address-cr agent leases <owner/repo> <pr_number>` before stepping again.
+
 ## Active Work
 
 If `status` is `ACTION_REQUESTED`:
@@ -57,7 +81,7 @@ If `status` is `ACTION_ACCEPTED`:
 - **Action**: Run the returned `next_action` exactly. For accepted GitHub-thread fixes, this publishes through `gh-address-cr agent publish`.
 
 If `status` is `ACTION_REJECTED` or `BATCH_ACTION_REJECTED` and the payload includes `lease_recovery`:
-- **Action**: Follow `lease_recovery.recovery_outcome`, not a blind retry. `renew` means request a fresh action request for the same item. `reclaim` means run `gh-address-cr agent reclaim <owner/repo> <pr_number>` and then request work again. `refresh_state` means discard the stale response/request file and rerun `agent next` or `address --lean` to get current runtime truth. `stop` means another actor or newer state owns the item; do not resubmit. `already_completed` means the work was accepted or completed; move to publish/final-gate as appropriate.
+- **Action**: Follow `lease_recovery.recovery_outcome`, not a blind retry. `renew` means request a fresh action request for the same item. `reclaim` means run `gh-address-cr agent reclaim <owner/repo> <pr_number>` and then request work again. `refresh_state` means discard the stale response/request file and rerun `agent next` or `address --lean` to get current runtime truth. `stop` means the item cannot be claimed as requested; check `reason_code` before concluding it is unrecoverable, because `LEASE_ACTIVE` (the requesting agent's own valid lease) also reports `stop` and does carry a `resume_command`, while `LEASE_RECOVERY_STOP` (a different owner) does not. `already_completed` means the work was accepted or completed; move to publish/final-gate as appropriate.
 - **Command discipline**: Prefer `lease_recovery.resume_command` when present. It is a machine-generated safe next command, not a guarantee that the previous response can be reused.
 
 If `status` is `LEASES_READY` and a lease row includes `lease_recovery`:
@@ -81,8 +105,14 @@ If `reason_code` is `FINAL_GATE_UNRESOLVED_REMOTE_THREADS` or `FINAL_GATE_BLOCKI
 If `reason_code` is `FINAL_GATE_MISSING_REPLY_EVIDENCE`:
 - **Action**: Follow the returned `next_action`. If accepted publish-ready evidence exists, this may still route to `gh-address-cr agent publish <owner/repo> <pr_number>`. If the blocking thread is already terminal and not claimable, the recovery path must instead use `gh-address-cr agent evidence add <owner/repo> <pr_number> --item-id <item_id> --reply-url <reply_url> --author-login <login>`, then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
 
+If `reason_code` is `PUBLISH_RECONCILE_REQUIRED`:
+- **Action**: Inspect the named GitHub thread and do not retry `agent publish` blindly. The canonical outbox says an interrupted reply may already have been posted, but the runtime could not match it automatically. If the reply exists, record its exact URL and author with the returned item-scoped `gh-address-cr agent evidence add ... --reply-url ... --author-login ...` command, then rerun publish and final-gate. If no matching reply can be identified, stop for manual reconciliation rather than posting a duplicate.
+
+If `reason_code` is `SIDE_EFFECT_IN_PROGRESS`:
+- **Action**: Another live process holds the execution lock for this GitHub reply or resolve. Do not reconcile or post it yourself. Wait for that process to finish, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`; publish reads the canonical outbox and reuses the recorded result. If the owning process dies, the next run sees the command as `unknown` and follows the `PUBLISH_RECONCILE_REQUIRED` rules.
+
 If `reason_code` is `LEASE_LOCKED_ITEM`:
-- **Action**: Do not retry blindly. Inspect `lease_recovery` and run `gh-address-cr agent leases <owner/repo> <pr_number>` to see the authoritative owner, lease status, and safe recovery command before trying item-mode `agent resolve` again.
+- **Action**: Do not retry blindly. A fixer that already holds an active lease on the item does not see this error: `gh-address-cr agent next <owner/repo> <pr_number> --role fixer --agent-id <id> --item-id <item_id>` re-enters that lease and returns the same request, recreating the request files under the original `request_id` if they were lost. The `--item-id` is required: without it the item is skipped as already leased and the command answers `NO_ELIGIBLE_ITEM` rather than re-entering. When this error does appear, read `lease_recovery.reason_code`: `LEASE_ACTIVE` means the requesting agent owns the lease but is not a fixer, or has already submitted against it, or the lease carries no request on record, and `lease_recovery.resume_command` names the submit step against the ActionRequest it already holds; `LEASE_RECOVERY_STOP` means another agent or role owns the item and no command is offered. `gh-address-cr agent reclaim <owner/repo> <pr_number>` only expires leases past their TTL and will not free a still-valid one, so it is not a recovery step here. Run `gh-address-cr agent leases <owner/repo> <pr_number>` to see the authoritative owner before trying item-mode `agent resolve` again.
 
 If a GitHub thread has `state=stale` or `status=STALE`:
 - **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale`, then publish and rerun final-gate.
@@ -128,7 +158,4 @@ If `reason_code` is `RESOLVE_AXIS_CONFLICT`:
 - **Action**: `agent resolve` accepts exactly one selection source (`item_id`, `--files`/`--file`, or `--input`) and exactly one disposition. Drop the extra flag and rerun.
 
 If `reason_code` is `RESOLVE_EVIDENCE_INCOHERENT`:
-- **Action**: A `reject`/`clarify` disposition declines with a reason (`--why`) and does not accept `--commit`/`--validation`. Use `--disposition fix` for code changes, or drop the fix-only evidence.
-
-If `reason_code` is `RESOLVE_FLAG_DEPRECATED`:
-- **Action**: The deprecation window for this legacy `agent resolve` flag has closed. Replace it with its axis-based equivalent (`--disposition fix|trivial|reject|clarify`, `--stale`, `--why`, or plain `--input`) and rerun.
+- **Action**: A `reject`/`clarify`/`defer` disposition declines with a reason (`--why`) and does not accept `--commit`/`--validation`. Use `--disposition fix` for code changes, or drop the fix-only evidence.

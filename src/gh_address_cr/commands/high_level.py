@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
+from gh_address_cr import PROTOCOL_VERSION
 from gh_address_cr.core import command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
@@ -219,6 +220,8 @@ def _ingest_native_findings(
     scan_id: str | None = None,
     handoff_sha256: str | None = None,
 ) -> list[dict[str, Any]]:
+    from gh_address_cr.evidence.ledger import record_new_item_observations
+
     if not raw.strip():
         raise FindingsFormatError(EMPTY_FINDINGS_INPUT_MESSAGE)
     format_source = "adapter" if source == "adapter" else "json"
@@ -229,6 +232,7 @@ def _ingest_native_findings(
             finding = with_local_item_fields(source, base)
         findings.append(finding)
     items = session.setdefault("items", {})
+    previous_item_ids = set(map(str, items))
     incoming_ids: set[str] = set()
     now = _utc_now()
     if scan_id:
@@ -285,6 +289,7 @@ def _ingest_native_findings(
     )
     if handoff_sha256:
         handoff["last_consumed_sha256"] = handoff_sha256
+    record_new_item_observations(session, previous_item_ids, timestamp=now)
     return findings
 
 
@@ -576,7 +581,7 @@ def _claimable_github_thread_item_ids(threads: list[dict[str, Any]]) -> list[str
 
 def _batch_response_skeleton(item_ids: list[str]) -> dict[str, Any]:
     return {
-        "schema_version": "1.0",
+        "schema_version": PROTOCOL_VERSION,
         "agent_id": "<agent_id>",
         "resolution": "fix",
         "common": {
@@ -819,6 +824,27 @@ def _high_level_phase(command: str, phase: str) -> Iterator[dict[str, str | int 
         add_current_span_event("gh_address_cr.high_level.phase.end", payload)
 
 
+def _emit_session_error_summary(
+    command: str, repo: str, pr_number: str, exc: session_store.SessionError, *, human: bool, lean: bool
+) -> int:
+    guidance = session_store.session_error_guidance(exc)
+    summary = _native_summary(
+        command=command,
+        repo=repo,
+        pr_number=pr_number,
+        status="BLOCKED",
+        reason_code=guidance["reason_code"],
+        waiting_on=guidance["waiting_on"],
+        next_action=guidance["next_action"],
+        exit_code=5,
+        session={},
+        lean=lean,
+    )
+    summary["retryable"] = guidance["retryable"]
+    _emit_native_summary(summary, human=human)
+    return 5
+
+
 class HighLevelReviewRuntime:
     def _run_preflight_checks(
         self, command: str, parsed: Any, repo: str, pr_number: str
@@ -889,6 +915,8 @@ class HighLevelReviewRuntime:
 
         remote_threads: list[dict[str, Any]] = []
         if command in {"address", "review", "threads", "adapter"}:
+            from gh_address_cr.evidence.ledger import record_new_item_observations
+
             client = GitHubClient()
             try:
                 stack_context = client.get_stack_context(repo, pr_number)
@@ -906,7 +934,9 @@ class HighLevelReviewRuntime:
             except Exception:
                 pass
             remote_threads = client.list_threads(repo, pr_number)
+            previous_item_ids = set(map(str, session.get("items") or {}))
             session = core_gate.session_with_remote_threads(session, remote_threads)
+            record_new_item_observations(session, previous_item_ids, timestamp=_utc_now())
             metadata = session.setdefault("metadata", {})
             if isinstance(metadata, dict):
                 try:
@@ -1011,12 +1041,19 @@ class HighLevelReviewRuntime:
         return 5
 
     def handle(self, command: str, passthrough_args: list[str], *, human: bool, lean: bool = False) -> int:
+        parsed = _parse_native_high_level_args(command, passthrough_args)
+        lean = bool(lean or parsed.lean or parsed.summary)
+        try:
+            return self._handle_parsed(command, parsed, human=human, lean=lean)
+        except session_store.SessionError as exc:
+            # Loading and every later save can fail on persistence; each keeps its own reason code.
+            return _emit_session_error_summary(command, parsed.repo, str(parsed.pr_number), exc, human=human, lean=lean)
+
+    def _handle_parsed(self, command: str, parsed: argparse.Namespace, *, human: bool, lean: bool) -> int:
         from gh_address_cr.otel_tracing import add_current_span_event
 
-        parsed = _parse_native_high_level_args(command, passthrough_args)
         repo = parsed.repo
         pr_number = str(parsed.pr_number)
-        lean = bool(lean or parsed.lean or parsed.summary)
         run_id = parsed.audit_id or f"native-{_utc_now().replace(':', '-')}"
         auto_simple = command == "address" or (command == "review" and bool(parsed.auto_simple))
 
@@ -1026,25 +1063,8 @@ class HighLevelReviewRuntime:
         if exit_code is not None:
             return exit_code
 
-        try:
-            with _high_level_phase(command, "session"):
-                session = _load_or_create_session(repo, pr_number)
-        except session_store.SessionError as exc:
-            waiting_on = "state_directory" if exc.reason_code == "STATE_DIR_NOT_WRITABLE" else "session"
-            summary = _native_summary(
-                command=command,
-                repo=repo,
-                pr_number=pr_number,
-                status="BLOCKED",
-                reason_code=exc.reason_code,
-                waiting_on=waiting_on,
-                next_action=str(exc),
-                exit_code=5,
-                session={},
-                lean=lean,
-            )
-            _emit_native_summary(summary, human=human)
-            return 5
+        with _high_level_phase(command, "session"):
+            session = _load_or_create_session(repo, pr_number)
         _set_loop_state(session, run_id=run_id, status="ACTIVE", iteration=1, max_iterations=parsed.max_iterations)
 
         try:

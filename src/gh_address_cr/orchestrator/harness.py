@@ -13,9 +13,9 @@ from gh_address_cr.core import agent_protocol, protocol_codes
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as core_session
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.leases import release_claimed_lease
 from gh_address_cr.orchestrator.session import (
-    ExpiredLeaseError,
-    LeaseConflictError,
+    DispatchValidationError,
     OrchestrationSession,
     OrchestrationSessionError,
     load_orchestration_session,
@@ -146,7 +146,10 @@ def handle_submit(args: List[str]) -> int:
 
     try:
         session = load_orchestration_session(repo, pr)
-        session.validate_lease_for_submission(parsed.item_id, parsed.token)
+        runtime_state = _load_runtime_state(repo, pr)
+        _reconcile_dispatches_from_runtime(session, runtime_state)
+        save_orchestration_session(session)
+        session.validate_dispatch(parsed.item_id, parsed.token, runtime_state)
 
         retry_count = int(session.retry_counts.get(parsed.item_id, 0))
 
@@ -158,10 +161,10 @@ def handle_submit(args: List[str]) -> int:
             session.retry_counts[parsed.item_id] = retry_count
             cb_threshold = session.config.get("circuit_breaker_threshold", MAX_RETRIES)
             if retry_count >= cb_threshold:
-                if parsed.item_id in session.active_leases:
-                    session.active_leases[parsed.item_id].waiting_for_human = True
-                    session.active_leases[parsed.item_id].handoff_reason = str(e)
-                    session.active_leases[parsed.item_id].artifact_path = parsed.input
+                if parsed.item_id in session.active_dispatches:
+                    session.active_dispatches[parsed.item_id].waiting_for_human = True
+                    session.active_dispatches[parsed.item_id].handoff_reason = str(e)
+                    session.active_dispatches[parsed.item_id].artifact_path = parsed.input
                 save_orchestration_session(session)
                 _output_signal(
                     "FAILED",
@@ -176,10 +179,10 @@ def handle_submit(args: List[str]) -> int:
         except HumanHandoffRequired as e:
             cb_threshold = session.config.get("circuit_breaker_threshold", MAX_RETRIES)
             session.retry_counts[parsed.item_id] = max(retry_count, cb_threshold)
-            if parsed.item_id in session.active_leases:
-                session.active_leases[parsed.item_id].waiting_for_human = True
-                session.active_leases[parsed.item_id].handoff_reason = str(e)
-                session.active_leases[parsed.item_id].artifact_path = parsed.input
+            if parsed.item_id in session.active_dispatches:
+                session.active_dispatches[parsed.item_id].waiting_for_human = True
+                session.active_dispatches[parsed.item_id].handoff_reason = str(e)
+                session.active_dispatches[parsed.item_id].artifact_path = parsed.input
             save_orchestration_session(session)
             _output_signal("FAILED", "HUMAN_INTERVENTION_REQUIRED", "HANDOFF", f"CRITICAL: Human Handoff Required: {e}")
             return 2
@@ -191,14 +194,14 @@ def handle_submit(args: List[str]) -> int:
             _output_signal("FAILED", e.reason_code, "RETRY", f"Submission failed: {e.reason_code}: {e}")
             return 2
 
-        session.release_lease(parsed.item_id, parsed.token)
+        session.remove_dispatch(parsed.item_id, parsed.token)
         session.retry_counts.pop(parsed.item_id, None)
         warnings = session.pop_audit_warnings()
 
         save_orchestration_session(session)
         _output_signal("SUCCESS", "SUBMITTED", "PROCEED", f"Verified and submitted {parsed.item_id}", warnings)
         return 0
-    except (WorkerPacketValidationError, ExpiredLeaseError, LeaseConflictError) as e:
+    except (WorkerPacketValidationError, DispatchValidationError) as e:
         _output_signal("FAILED", protocol_codes.STALE_REQUEST_CONTEXT, "RETRY", f"Submission failed: {e}")
         return 2
     except OrchestrationSessionError as e:
@@ -382,13 +385,13 @@ def _prepare_session_for_step(
         _sync_queue_from_runtime(session, enforce_budget=False)
 
         if session.completed:
-            if not session.queued_items and not session.active_leases:
+            if not session.queued_items and not session.active_dispatches:
                 _output_signal("LOCKED", "SESSION_LOCKED", "HALT", "Session is locked and fully handled.")
                 return None, 0
             else:
                 session.completed = False
 
-        if len(session.active_leases) >= session.config.get("max_concurrency", 3):
+        if len(session.active_dispatches) >= session.config.get("max_concurrency", 3):
             warnings = session.pop_audit_warnings()
             _output_signal(
                 "WAITING",
@@ -414,14 +417,14 @@ def _handle_workflow_error(e: WorkflowError, session: OrchestrationSession, repo
         _sync_queue_from_runtime(session, enforce_budget=False)
         save_orchestration_session(session)
         warnings = session.pop_audit_warnings()
-        if not session.active_leases:
+        if not session.active_dispatches:
             _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
         else:
             _output_signal(
                 "WAITING",
                 "WAITING_FOR_LEASES",
                 "RETRY",
-                f"Waiting for {len(session.active_leases)} active leases.",
+                f"Waiting for {len(session.active_dispatches)} active dispatches.",
                 warnings,
             )
         return 0
@@ -462,7 +465,7 @@ def handle_step(args: List[str]) -> int:
 
     # Simple dequeue logic
     if not session.queued_items:
-        if not session.active_leases:
+        if not session.active_dispatches:
             warnings = session.pop_audit_warnings()
             _output_signal("SUCCESS", "QUEUE_EMPTY", "HALT", "Zero pending items.", warnings)
             return 0
@@ -472,7 +475,7 @@ def handle_step(args: List[str]) -> int:
                 "WAITING",
                 "WAITING_FOR_LEASES",
                 "RETRY",
-                f"Waiting for {len(session.active_leases)} active leases.",
+                f"Waiting for {len(session.active_dispatches)} active dispatches.",
                 warnings,
             )
             return 0
@@ -496,8 +499,20 @@ def handle_step(args: List[str]) -> int:
 
         item_data = action_request.get("item", {})
 
-        context_key = str(item_data.get("path") or item_id)
-        lease = session.grant_lease(item_id, role, agent_id=f"orchestrator:{session.run_id}", context_key=context_key)
+        runtime_state = _load_runtime_state(repo, pr)
+        persistence = runtime_state.get("persistence") if isinstance(runtime_state, dict) else {}
+        runtime_revision = int(persistence.get("revision") or 0) if isinstance(persistence, dict) else 0
+        lease_id = str(action_result["lease_id"])
+        canonical_lease = runtime_state.get("leases", {}).get(lease_id) or {}
+        dispatch = session.project_dispatch(
+            item_id=item_id,
+            role=role,
+            agent_id=f"orchestrator:{session.run_id}",
+            lease_id=lease_id,
+            request_id=str(action_request["request_id"]),
+            runtime_revision=runtime_revision,
+            delivery_token=str(canonical_lease["resume_token"]),
+        )
         warnings = session.pop_audit_warnings()
 
         session.queued_items = [queued_id for queued_id in session.queued_items if queued_id != item_id]
@@ -507,12 +522,13 @@ def handle_step(args: List[str]) -> int:
 
         packet = build_worker_packet(
             run_id=session.run_id,
-            lease_token=lease.lease_token,
+            delivery_token=dispatch.delivery_token,
             role=role,
             session_id=str(action_request.get("session_id") or f"{repo.replace('/', '__')}/pr-{pr}"),
             item=item_data,
             response_path=response_path,
             action_request=action_request,
+            dispatch_receipt=dispatch.to_dict(),
         )
 
         save_orchestration_session(session)
@@ -522,9 +538,27 @@ def handle_step(args: List[str]) -> int:
             payload["warnings"] = warnings
         sys.stdout.write(json.dumps(payload) + "\n")
         return 0
-    except LeaseConflictError as e:
-        _output_signal("FAILED", "LEASE_CONFLICT", "RETRY", f"Lease conflict: {e}")
-        return 2
+    except Exception as e:
+        # The core claim already committed; without a dispatch no worker will ever submit
+        # against it, so release it now instead of leaving the item locked until TTL.
+        released = _release_undispatched_claim(repo, pr, action_result)
+        _output_signal(
+            "FAILED",
+            protocol_codes.DISPATCH_PROJECTION_FAILED,
+            "RETRY" if released else "HALT",
+            f"Failed to project worker dispatch ({type(e).__name__}): {e}",
+        )
+        return 5
+
+
+def _release_undispatched_claim(repo: str, pr: str, action_result: dict) -> bool:
+    lease_id = action_result.get("lease_id") if isinstance(action_result, dict) else None
+    if not lease_id:
+        return False
+    try:
+        return release_claimed_lease(repo, pr, lease_id=str(lease_id), reason="dispatch_projection_failed")
+    except Exception:
+        return False
 
 
 def handle_resume(args: List[str]) -> int:
@@ -563,7 +597,7 @@ def handle_status(args: List[str]) -> int:
             "reason_code": "STATUS_OK",
             "next_action": "PROCEED",
             "run_id": session.run_id,
-            "active_leases": len(session.active_leases),
+            "active_dispatches": len(session.active_dispatches),
             "queued_items": len(session.queued_items),
             "reconciliation_seconds": round(elapsed, 6),
         }
@@ -588,12 +622,13 @@ def handle_stop(args: List[str]) -> int:
     repo, pr = parsed.repo, parsed.pr_number
     try:
         session = load_orchestration_session(repo, pr)
-        if session.active_leases:
+        _sync_queue_from_runtime(session, enforce_budget=False)
+        if session.active_dispatches:
             _output_signal(
                 "FAILED",
                 "ACTIVE_LEASES_EXIST",
                 "HALT",
-                f"Cannot stop: {len(session.active_leases)} active leases exist.",
+                f"Cannot stop: {len(session.active_dispatches)} active dispatches exist.",
             )
             return 2
         gate_rc = _run_authoritative_gate(repo, pr)
@@ -610,6 +645,9 @@ def handle_stop(args: List[str]) -> int:
 
         _output_signal("SUCCESS", "COMPLETED", "HALT", "agent orchestrate stop completed")
         return 0
+    except core_session.SessionError:
+        _output_signal("FAILED", "GATE_FAILED", "HALT", "Cannot stop: authoritative runtime state is unavailable.")
+        return 2
     except OrchestrationSessionError:
         _output_signal("SUCCESS", "COMPLETED", "HALT", "agent orchestrate stop: no active session found")
         return 0
@@ -618,12 +656,37 @@ def handle_stop(args: List[str]) -> int:
 def _sync_queue_from_runtime(session: OrchestrationSession, *, enforce_budget: bool) -> float:
     started = time.perf_counter()
     runtime_state = _load_runtime_state(session.repo, session.pr_number)
+    _reconcile_dispatches_from_runtime(session, runtime_state)
     queued = _eligible_runtime_items(runtime_state)
-    session.queued_items = [item_id for item_id in queued if item_id not in session.active_leases]
+    session.queued_items = [item_id for item_id in queued if item_id not in session.active_dispatches]
     elapsed = time.perf_counter() - started
     if enforce_budget and elapsed > MAX_QUEUE_RECONCILIATION_SECONDS:
         raise RuntimeError(f"reconciliation exceeded {MAX_QUEUE_RECONCILIATION_SECONDS:.3f}s budget ({elapsed:.3f}s)")
     return elapsed
+
+
+def _reconcile_dispatches_from_runtime(session: OrchestrationSession, runtime_state: dict) -> None:
+    persistence = runtime_state.get("persistence") if isinstance(runtime_state, dict) else {}
+    runtime_revision = int(persistence.get("revision") or 0) if isinstance(persistence, dict) else 0
+    reconciliation = session.reconcile_dispatches(runtime_state, runtime_revision=runtime_revision)
+    _record_reconciliation_event(reconciliation)
+
+
+def _record_reconciliation_event(result: dict[str, int]) -> None:
+    from gh_address_cr.otel_tracing import add_current_span_event
+
+    removed = int(result.get("removed") or 0)
+    retained = int(result.get("retained") or 0)
+    rebuilt = int(result.get("rebuilt") or 0)
+    count = removed + retained + rebuilt
+    count_bucket = "0" if count == 0 else "1" if count == 1 else "2-5" if count <= 5 else "6+"
+    add_current_span_event(
+        "orchestrator.reconcile",
+        {
+            "gh_address_cr.orchestrator.reconcile.outcome": "rebuilt" if rebuilt else "repaired" if removed else "current",
+            "gh_address_cr.orchestrator.reconcile.count_bucket": count_bucket,
+        },
+    )
 
 
 def _eligible_runtime_items(runtime_state: dict) -> List[str]:

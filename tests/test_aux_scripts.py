@@ -435,6 +435,30 @@ else:
         self.assertIn("loop-request.json", payload["body"])
         self.assertNotIn("/Users/snow", payload["body"])
 
+    def test_submit_feedback_materializes_current_canonical_session(self):
+        from gh_address_cr.commands.submit_feedback import load_feedback_context
+        from gh_address_cr.core import session as session_store
+        from gh_address_cr.core.runtime_store import WorkingSetRequest
+
+        manager = session_store.SessionManager(self.repo, self.pr)
+        session = manager.create(status="BEFORE_BOUNDED_UPDATE")
+        manager.save(session)
+        session_store.transact_working_set(
+            self.repo,
+            self.pr,
+            WorkingSetRequest(),
+            lambda current: current.update(status="AFTER_BOUNDED_UPDATE"),
+            operation="session_update",
+        )
+
+        context = load_feedback_context(self.repo, self.pr)
+
+        self.assertEqual(context["session_status"], "AFTER_BOUNDED_UPDATE")
+        self.assertEqual(
+            json.loads(manager.session_path.read_text(encoding="utf-8"))["status"],
+            "AFTER_BOUNDED_UPDATE",
+        )
+
     def test_submit_feedback_reuses_existing_open_issue_for_same_fingerprint(self):
         gh = self.bin_dir / "gh"
         calls_path = Path(self.temp_dir.name) / "gh_calls.json"

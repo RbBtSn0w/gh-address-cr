@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from gh_address_cr import PROTOCOL_VERSION
 from gh_address_cr.agent.manifests import ManifestValidationError, ensure_manifest_eligible
 from gh_address_cr.agent.roles import GITHUB_SIDE_EFFECT_FORBIDDEN_ACTIONS, AgentRole, is_ai_agent_role, parse_role
 from gh_address_cr.core.models import ActionRequest, CapabilityManifest, EvidenceRecord, WorkItem
@@ -138,7 +139,7 @@ def build_action_request(
                 role,
                 action,
                 "action_request.v1",
-                "1.0",
+                PROTOCOL_VERSION,
                 active_claims_for_agent,
             )
         except ManifestValidationError as exc:
@@ -158,7 +159,7 @@ def build_action_request(
     if is_ai_agent_role(role) and _has_present_stack_context(repository_context):
         forbidden_actions.extend(STACK_MANAGEMENT_ACTIONS)
     request = ActionRequest(
-        schema_version="1.0",
+        schema_version=PROTOCOL_VERSION,
         request_id=request_id,
         session_id=session_id,
         lease_id=lease_id,

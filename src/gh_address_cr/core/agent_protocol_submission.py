@@ -35,7 +35,7 @@ from gh_address_cr.core.agent_protocol_validation import (
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_claimable_github_thread, is_stale_github_thread_item
 from gh_address_cr.core.leases import LeaseSubmissionError, accept_lease, submit_lease
-from gh_address_cr.core.models import ActionRequest
+from gh_address_cr.core.models import ActionRequest, UnsupportedProtocolVersionError
 from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding, unavailable_stack_context
 from gh_address_cr.core.utils import (
     fix_reply_severity_rejection_reason as _fix_reply_severity_rejection_reason,
@@ -673,6 +673,8 @@ def expected_request_hash_for_response(
         try:
             request = json.loads(path.read_text(encoding="utf-8"))
             expected_hash = ActionRequest.from_dict(request).stable_hash()
+        except UnsupportedProtocolVersionError:
+            return None, protocol_codes.REQUEST_PROTOCOL_SUPERSEDED
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None, "INVALID_REQUEST_CONTEXT"
         if response_request_id != str(request.get("request_id") or ""):

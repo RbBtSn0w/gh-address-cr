@@ -238,6 +238,101 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
                 self.assertEqual(exporter_type.call_args.kwargs["endpoint"], expected)
                 self.assertEqual(exporter_type.call_args.kwargs["headers"], expected_headers)
 
+    def test_release_channel_only_routes_dev_releases_off_production(self) -> None:
+        # The channel is a function of the dev-release flag alone (spec 032). A local
+        # version segment is not consulted: preview builds are `<base>.devN+<sha>`, so
+        # `.devN` already identifies them, and treating `+...` as a signal is what made
+        # `3.16.0-beta.1+abc` match two rules with opposite answers.
+        from gh_address_cr import otel_tracing
+
+        cases = [
+            ("3.15.2", "production"),
+            ("3.16.0-beta.1", "production"),
+            ("3.16.0b1", "production"),
+            ("3.16.0rc1", "production"),
+            ("3.15.2.dev279+5dc8a44", "development"),
+            ("3.13.1.dev266+b3bddc8", "development"),
+            ("3.15.2.dev279", "development"),
+            # A local segment alone never leaves production: routing a real build away
+            # silently loses its telemetry, and a repackaged release may carry one.
+            ("3.15.2+local", "production"),
+            ("3.15.2+internal", "production"),
+            # The reviewed ambiguity: a pre-release that also has a local segment.
+            ("3.16.0-beta.1+abc", "production"),
+            ("3.16.0rc1+local", "production"),
+            ("not-a-version", "production"),
+            ("", "production"),
+        ]
+        for version, expected in cases:
+            with self.subTest(version=version):
+                self.assertEqual(otel_tracing.release_channel(version), expected)
+
+    def test_default_endpoint_follows_release_channel_without_explicit_configuration(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        development = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
+        cases = [
+            ("3.15.2", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.16.0-beta.1", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.15.2.dev279+5dc8a44", development),
+            ("3.16.0-beta.1+abc", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("3.15.2+internal", otel_tracing.OTLP_TRACES_ENDPOINT),
+            ("not-a-version", otel_tracing.OTLP_TRACES_ENDPOINT),
+        ]
+        for version, expected in cases:
+            with self.subTest(version=version):
+                self.assertEqual(otel_tracing._traces_endpoint({}, version=version), expected)
+                self.assertEqual(
+                    otel_tracing._gateway_headers(expected),
+                    otel_tracing._SAFE_EXPORT_HEADERS,
+                )
+
+    def test_explicit_endpoint_overrides_the_release_channel_default(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        dev_version = "3.15.2.dev279+5dc8a44"
+        self.assertEqual(
+            otel_tracing._traces_endpoint(
+                {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://traces.example/custom"}, version=dev_version
+            ),
+            "https://traces.example/custom",
+        )
+        self.assertEqual(
+            otel_tracing._traces_endpoint(
+                {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry-gateway.hamiltonsnow.workers.dev"},
+                version=dev_version,
+            ),
+            otel_tracing.OTLP_TRACES_ENDPOINT,
+        )
+
+    def test_initialization_uses_release_channel_endpoint_for_dev_builds(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        provider = MagicMock()
+        provider.get_tracer.return_value = MagicMock()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(otel_tracing, "__version__", "3.15.2.dev279+5dc8a44"),
+            patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
+            patch.object(otel_tracing, "BatchSpanProcessor"),
+        ):
+            otel_tracing.initialize_telemetry()
+            otel_tracing._reset_telemetry_for_tests()
+
+        self.assertEqual(
+            exporter_type.call_args.kwargs["endpoint"],
+            "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces",
+        )
+        self.assertEqual(exporter_type.call_args.kwargs["headers"], otel_tracing._SAFE_EXPORT_HEADERS)
+
+    def test_checked_in_version_routes_to_production(self) -> None:
+        # A stable-looking checked-in version must never route off production, or
+        # released builds would silently stop reporting to the production dataset.
+        from gh_address_cr import __version__, otel_tracing
+
+        self.assertEqual(otel_tracing.release_channel(__version__), "production")
+
     def test_initialization_does_not_inherit_ambient_otlp_credentials(self) -> None:
         from gh_address_cr import otel_tracing
 
@@ -248,20 +343,27 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
             "OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x-api-key=trace-secret",
             "OTEL_PYTHON_EXPORTER_OTLP_HTTP_TRACES_CREDENTIAL_PROVIDER": "invalid.module:provider",
         }
+        export_session = MagicMock()
+        export_session.trust_env = True
 
         with (
             patch.dict(os.environ, ambient_credentials, clear=True),
             patch.object(otel_tracing, "TracerProvider", return_value=provider),
+            patch.object(otel_tracing.requests, "Session", return_value=export_session),
+            patch.object(otel_tracing, "OTLPSpanExporter") as exporter_type,
             patch.object(otel_tracing, "BatchSpanProcessor") as processor_type,
         ):
             otel_tracing.initialize_telemetry()
 
-        exporter = processor_type.call_args.args[0]
-        request_headers = {key.lower(): value for key, value in exporter._session.headers.items()}
+        exporter_type.assert_called_once()
+        processor_type.assert_called_once()
+        self.assertIs(processor_type.call_args.args[0], exporter_type.return_value)
+        request_headers = {key.lower(): value for key, value in exporter_type.call_args.kwargs["headers"].items()}
         self.assertNotIn("authorization", request_headers)
         self.assertNotIn("x-api-key", request_headers)
         self.assertEqual(request_headers["otel-gateway-profile"], "anonymous-client-v1")
-        self.assertFalse(exporter._session.trust_env)
+        self.assertIs(exporter_type.call_args.kwargs["session"], export_session)
+        self.assertFalse(export_session.trust_env)
 
     def test_shutdown_flushes_provider_once(self) -> None:
         from gh_address_cr import otel_tracing

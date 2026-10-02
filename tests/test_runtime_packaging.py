@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from packaging.version import Version
+
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
@@ -207,6 +209,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "MANIFEST_READY")
+        self.assertEqual(payload["schema_version"], "1.1")
+        self.assertEqual(payload["protocol_versions"], ["1.1"])
+        self.assertEqual(payload["supported_protocol_versions"], ["1.1"])
+        self.assertEqual(payload["supported_skill_contract_versions"], ["1.1"])
         self.assertIn("address", payload["public_commands"])
         self.assertIn("review-to-findings", payload["public_commands"])
         self.assertIn("submit-feedback", payload["public_commands"])
@@ -223,6 +229,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("action_request.v1", payload["input_formats"])
         self.assertIn("batch_action_response.v1", payload["output_formats"])
         self.assertIn("work_item_boundary.v1", payload["output_formats"])
+        self.assertIn("worker_packet.v2", payload["output_formats"])
+        self.assertIn("dispatch_receipt.v2", payload["output_formats"])
+        self.assertNotIn("dispatch_receipt.v1", payload["output_formats"])
 
     def test_agent_resolve_help_documents_batch_contract(self):
         result = self.run_runtime_module("agent", "resolve", "--help")
@@ -230,6 +239,30 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: gh-address-cr agent resolve", result.stdout)
         self.assertIn("BatchActionResponse", result.stdout)
+        for deprecated_flag in (
+            "--batch",
+            "--trivial",
+            "--reject",
+            "--clarify",
+            "--homogeneous-reason",
+            "--concern-label",
+            "--match-files",
+            "--include-stale",
+        ):
+            self.assertNotIn(deprecated_flag, result.stdout)
+
+    def test_agent_resolve_rejects_removed_flag_as_unknown_argument(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "github-thread:abc",
+            "--reject",
+            "--why", "Not applicable.",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --reject", result.stderr)
+        self.assertNotIn("RESOLVE_FLAG_DEPRECATED", result.stdout + result.stderr)
+        self.assertFalse(self.session_file().exists())
 
     def test_missing_gh_preflight_fails_before_session_mutation(self):
         env = self.env.copy()
@@ -326,17 +359,20 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
 
-    def test_changelog_top_entry_is_not_future_release_without_version_bump(self):
+    def test_changelog_is_release_managed_and_not_ahead_of_source_version(self):
         changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         pyproject_text = PYPROJECT.read_text(encoding="utf-8")
 
         version_match = re.search(r'^version = "([^"]+)"$', pyproject_text, re.MULTILINE)
         self.assertIsNotNone(version_match)
         package_version = version_match.group(1)
-        first_heading = next(line for line in changelog_text.splitlines() if line.startswith("## "))
+        headings = [line for line in changelog_text.splitlines() if line.startswith("## ")]
 
-        if first_heading != "## Unreleased":
-            self.assertIn(f"[{package_version}]", first_heading)
+        # semantic-release prepends generated notes, so a hand-written section would be stranded.
+        self.assertNotIn("## [Unreleased]", headings)
+        latest_match = re.match(r"^## \[([^\]]+)\]", headings[0])
+        self.assertIsNotNone(latest_match)
+        self.assertLessEqual(Version(latest_match.group(1)), Version(package_version))
 
     def test_version_sync_script_updates_pyproject_and_runtime_version(self):
         pyproject = Path(self.temp_dir.name) / "pyproject.toml"
@@ -404,6 +440,100 @@ class RuntimePackagingTest(PythonScriptTestCase):
             "gh-address-cr final-gate owner/repo 123",
         ):
             self.assertIn(command, text)
+
+    DEV_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
+
+    @staticmethod
+    def _workflow_env_bindings(text):
+        """Every `env:` mapping in a workflow, as (scope, variable, value) triples.
+
+        `scope` is `env@lineN/indentK`. The indent is what tells levels apart: a
+        workflow-level `env:` sits at column 0, a job-level one at 4, a step-level one
+        deeper. Without it a guard cannot tell "set globally" from "set somewhere", and a
+        single job carrying the right endpoint would satisfy a check meant to prove the
+        whole workflow is routed.
+
+        Text-matching one region of the file only guards that region. A job- or step-level
+        `env:` block overrides the top-level one, so a check that stops at `jobs:` passes
+        while a job quietly re-points the endpoint at production, or turns telemetry off.
+        Reading every block covers the workflow whatever level the override is written at.
+
+        Standard library only: the project installs no YAML parser (`pip install -e .`), so
+        depending on PyYAML here would pass locally and fail in CI. A block is the mapping
+        indented under an `env:` key, ending at the first line indented no deeper than it.
+        """
+        bindings = []
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            match = re.match(r"^(\s*)(?:-\s+)?env:\s*$", line)
+            if not match:
+                continue
+            key_indent = len(match.group(1))
+            for entry in lines[index + 1 :]:
+                if not entry.strip() or entry.lstrip().startswith("#"):
+                    continue
+                if len(entry) - len(entry.lstrip()) <= key_indent:
+                    break
+                pair = re.match(r"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$", entry)
+                if pair:
+                    bindings.append(
+                        (f"env@line{index + 1}/indent{key_indent}", pair.group(1), pair.group(2).strip("\"'"))
+                    )
+        return bindings
+
+    def test_env_binding_extractor_sees_overrides_at_every_level(self):
+        # The extractor is the thing the CI guard below trusts, so pin it first.
+        workflow = (
+            "name: x\n"
+            "env:\n"
+            "  TOP: one\n"
+            "jobs:\n"
+            "  build:\n"
+            "    env:\n"
+            "      JOB_LEVEL: two\n"
+            "    steps:\n"
+            "      - name: s\n"
+            "        env:\n"
+            "          STEP_LEVEL: three\n"
+            "        run: echo\n"
+            "      - name: t\n"
+            "        run: echo\n"
+        )
+
+        found = {(name, value) for _, name, value in self._workflow_env_bindings(workflow)}
+        self.assertEqual(found, {("TOP", "one"), ("JOB_LEVEL", "two"), ("STEP_LEVEL", "three")})
+
+        indent_of = {
+            name: int(re.search(r"indent(\d+)$", scope).group(1))
+            for scope, name, _ in self._workflow_env_bindings(workflow)
+        }
+        self.assertEqual(indent_of["TOP"], 0)
+        self.assertLess(indent_of["TOP"], indent_of["JOB_LEVEL"])
+        self.assertLess(indent_of["JOB_LEVEL"], indent_of["STEP_LEVEL"])
+
+    def test_ci_workflow_routes_synthetic_smoke_telemetry_to_development_gateway(self):
+        # Installed-CLI smoke runs hit placeholder repos without gh auth; sending them to
+        # the production gateway fires the production auth/error alerts.
+        bindings = self._workflow_env_bindings(CI_WORKFLOW.read_text(encoding="utf-8"))
+
+        endpoints = [(scope, value) for scope, name, value in bindings if name == "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
+        self.assertTrue(endpoints, "no env block sets OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        # Routing has to be set for the whole workflow. A job- or step-level binding only
+        # routes that scope, so with the workflow-level one gone every other job's smoke
+        # runs fall back to the production default while this test stayed green.
+        self.assertTrue(
+            any(scope.endswith("/indent0") for scope, _ in endpoints),
+            "the endpoint is not bound at workflow level, so jobs without their own binding are not routed",
+        )
+        # Every binding, at any level, must point at development. One production override
+        # anywhere defeats the routing for that job's smoke runs.
+        for scope, value in endpoints:
+            with self.subTest(scope=scope):
+                self.assertEqual(value, self.DEV_TRACES_ENDPOINT)
+
+        # Turning telemetry off anywhere would hide the very routing this guards.
+        disabled = [(scope, name) for scope, name, _ in bindings if name in {"DISABLE_TELEMETRY", "DO_NOT_TRACK"}]
+        self.assertEqual(disabled, [])
 
     def test_ci_installs_project_dependencies_before_source_tests(self):
         text = CI_WORKFLOW.read_text(encoding="utf-8")
@@ -741,9 +871,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill", text)
         self.assertNotIn("--skill gh-address-cr", text)
         self.assertIn("does not install the runtime CLI package", text)
-        self.assertIn("Upgrade from skill-shim usage", text)
-        self.assertIn("Install the runtime CLI with `pipx` or `uv tool`", text)
-        self.assertIn("Homebrew tap", text)
+        self.assertIn("## Current Public Contract", text)
+        self.assertIn("runtime `3.16.0`", text)
+        self.assertIn("protocol `1.1`", text)
+        self.assertIn("skill contract `1.1`", text)
 
     def test_contributing_documents_homebrew_release_policy(self):
         text = CONTRIBUTING.read_text(encoding="utf-8")
