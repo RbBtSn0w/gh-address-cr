@@ -453,7 +453,8 @@ class ClosedThreadReplyContractTests(AgentJourneyTestCase):
     def test_closed_with_missing_arguments_leaves_the_thread_closed(self):
         self.close_remotely()
 
-        for extra in ((), ("--disposition", "clarify")):
+        fix_without_files_or_validation = ("--commit", "abc1234", "--summary", "s", "--why", "w")
+        for extra in ((), ("--disposition", "clarify"), fix_without_files_or_validation):
             with self.subTest(extra=extra):
                 result = self.runtime(
                     "agent", "resolve", self.repo, self.pr, "github-thread:PRRT_journey1", "--closed", *extra,

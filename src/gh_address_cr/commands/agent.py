@@ -651,6 +651,21 @@ def _dispatch_single_item_resolution(parsed: argparse.Namespace, *, now_dt: date
         workflow.validate_decline_input(item_id=parsed.item_id, resolution=disposition, why=parsed.why)
     else:
         _require_single_fix_args(parsed)
+        if parsed.closed:
+            # The same checks fast_fix_item runs, so new required inputs are covered too.
+            workflow.validate_fast_fix_inputs(
+                parsed.repo,
+                parsed.pr_number,
+                item_id=parsed.item_id,
+                files=_parse_agent_files(parsed.files, parsed.file),
+                validation_commands=_parse_agent_validation(parsed.validation),
+                commit_hash=parsed.commit,
+                summary=parsed.summary,
+                why=parsed.why,
+                severity=parsed.severity,
+                severity_note=parsed.severity_note,
+                review_priority=parsed.review_priority,
+            )
     if parsed.closed:
         workflow.reopen_resolved_thread_for_reply(parsed.repo, parsed.pr_number, item_id=parsed.item_id)
         # A reopened thread must be published now: the next refresh closes it again.

@@ -871,7 +871,7 @@ def fast_fix_item(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    normalized_severity, requested_priority_evidence = _validate_fast_fix_inputs(
+    normalized_severity, requested_priority_evidence = validate_fast_fix_inputs(
         repo,
         pr_number,
         item_id=item_id,
@@ -943,7 +943,7 @@ def fast_fix_item(
     }
 
 
-def _validate_fast_fix_inputs(
+def validate_fast_fix_inputs(
     repo: str,
     pr_number: str,
     *,
