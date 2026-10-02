@@ -401,6 +401,24 @@ def publish_github_thread_responses(
     agent_id: str = "gh-address-cr-publisher",
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    """Publish accepted responses, replaying from fresh state when another writer committed first.
+
+    Every GitHub mutation runs through the canonical outbox, so a replay reuses
+    each recorded result and performs no new mutation for work already done.
+    """
+    return session_store.retry_on_stale_revision(
+        lambda: _publish_once(repo, pr_number, github_client=github_client, agent_id=agent_id, now=now)
+    )
+
+
+def _publish_once(
+    repo: str,
+    pr_number: str,
+    *,
+    github_client: Any | None,
+    agent_id: str,
+    now: datetime | None,
+) -> dict[str, Any]:
     current_time = _coerce_now(now)
     timestamp = _format_timestamp(current_time)
     _configure_publish_telemetry(repo, pr_number)

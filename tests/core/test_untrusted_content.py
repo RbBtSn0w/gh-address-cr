@@ -1,6 +1,6 @@
 import unittest
 
-from gh_address_cr.core.models import ActionRequest, WorkItem
+from gh_address_cr.core.models import ActionRequest, UnsupportedProtocolVersionError
 from gh_address_cr.core.untrusted_content import request_item_projection, untrusted_content_envelope
 from gh_address_cr.core.workflow import _trivial_thread_eligibility
 
@@ -113,21 +113,15 @@ class TestRequestHashCompatibility(unittest.TestCase):
             "required_evidence": ["note"],
         }
 
-    def test_pre_envelope_request_file_hash_is_stable_on_recomputation(self):
-        # An in-flight lease claimed before the upgrade must not fail submission with
-        # STALE_REQUEST_CONTEXT: its on-disk file still has schema_version 1.0, flat
-        # `body`, and no envelope, and `to_dict` emits `untrusted_content` only when
-        # present.
-        legacy_item = _thread_item(state="claimed")
-        legacy_request = self._request(legacy_item, schema_version="1.0")
+    def test_pre_envelope_request_file_is_rejected_as_superseded_protocol(self):
+        # 3.16 supports protocol 1.1 only. A request file written by an older runtime
+        # (schema_version 1.0, flat `body`, no envelope) is never hashed as if it were
+        # current: submit reports REQUEST_PROTOCOL_SUPERSEDED and re-entry reissues
+        # the request at 1.1 (tests/contract/test_runtime_store_consistency_contract.py).
+        legacy_request = self._request(_thread_item(state="claimed"), schema_version="1.0")
 
-        rehashed = ActionRequest.from_dict(legacy_request).stable_hash()
-
-        expected = WorkItem.from_dict(legacy_item).to_dict()
-        self.assertNotIn("untrusted_content", expected)
-        self.assertEqual(expected["body"], DIRECTIVE_BODY)
-        # Recomputing twice from the same on-disk shape is what claim/submit actually do.
-        self.assertEqual(rehashed, ActionRequest.from_dict(legacy_request).stable_hash())
+        with self.assertRaises(UnsupportedProtocolVersionError):
+            ActionRequest.from_dict(legacy_request)
 
     def test_envelope_is_covered_by_the_request_hash(self):
         projected = request_item_projection(_thread_item())

@@ -241,7 +241,9 @@ def runtime_compatibility() -> dict[str, Any]:
             "The installed runtime version is not a valid release version.",
             **requirement_details,
         )
-    if runtime_version < minimum_version:
+    # The release segment decides: a dev or pre-release build of the minimum
+    # release (e.g. a PR preview stamped 3.16.0.devN+sha) carries its contract.
+    if Version(runtime_version.base_version) < minimum_version:
         return _incompatible_runtime(
             "RUNTIME_VERSION_INCOMPATIBLE",
             f"Runtime {runtime_version} is older than the required {minimum_version} baseline.",

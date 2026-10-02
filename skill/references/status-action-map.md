@@ -20,6 +20,10 @@ authority, or `final-gate` semantics.
   so request fresh work instead of waiting for lease expiry.
   If an authorized cascading rebase or push caused the change, complete that
   external handoff first, then request fresh PR-scoped work.
+- `REQUEST_PROTOCOL_SUPERSEDED`: the request file predates the
+  runtime's protocol. Rerun `agent next` for the same item; it reissues the
+  request at the current protocol for the lease you already hold, then fill the
+  response skeleton again and resubmit.
 - `STACK_ACTION_CONTEXT_MISMATCH`: stop the worker action. Do not move the fix
   or evidence to the currently checked-out upper member; refresh and request
   work from the PR and owning branch named by the current runtime context.

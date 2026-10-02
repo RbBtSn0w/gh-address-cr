@@ -9,6 +9,7 @@ agent_protocol.py itself.
 
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from gh_address_cr.core.agent_protocol_leases import (
     active_fixer_lease_for_item,
     lease_recovery_payload_for_response,
     lease_submission_rejection_reason,
+    payload_for_lease,
     release_irrecoverable_request_lease,
 )
 from gh_address_cr.core.agent_protocol_submission import (
@@ -103,22 +105,28 @@ def _select_batch_target_items(
 def _ensure_batch_classification_evidence(
     session: dict[str, Any], item: dict[str, Any], *, item_id: str, agent_id: str
 ) -> bool:
-    """Record a 'fix' classification for a batch-claimed thread if none exists yet."""
+    """Record a 'fix' classification for a batch-claimed thread if none exists yet.
+
+    Runs inside the claim transaction: the ledger buffers the event on ``session``
+    so it commits with the classification it describes, and the item references
+    that committed record.
+    """
     if has_classification_evidence(item):
         return False
+    record = _ledger(session).append_event(
+        session_id=str(session["session_id"]),
+        item_id=item_id,
+        lease_id=None,
+        agent_id=agent_id,
+        role="fixer",
+        event_type="classification_recorded",
+        payload={"classification": "fix", "note": _BATCH_CLASSIFICATION_NOTE},
+    )
     item["classification_evidence"] = {
         "event_type": "classification_recorded",
         "classification": "fix",
         "note": _BATCH_CLASSIFICATION_NOTE,
-        "record_id": _stable_id(
-            "classification",
-            {
-                "session_id": session["session_id"],
-                "item_id": item_id,
-                "agent_id": agent_id,
-                "role": "fixer",
-            },
-        ),
+        "record_id": record.record_id,
     }
     item["decision"] = "fix"
     return True
@@ -192,8 +200,19 @@ def _reconcile_existing_lease(
         session_store.workspace_dir(repo, pr_number) / f"action-response-skeleton-{request_id}.json"
     )
     request["response_skeleton_path"] = str(response_skeleton_path)
+    # Same predicate as single-item re-entry: a missing, unreadable, foreign, or
+    # superseded-protocol request is reissued, and the lease hash follows the file
+    # submit will read. An intact request keeps its file and hash untouched.
+    rebuild = (
+        not existing_lease.get("request_hash")
+        or payload_for_lease(
+            request_path, request_id=request_id, lease_id=str(lease_id), validate=ActionRequest.from_dict
+        )
+        is None
+    )
     existing_lease["request_id"] = request_id
-    existing_lease["request_hash"] = existing_lease.get("request_hash") or ActionRequest.from_dict(request).stable_hash()
+    if rebuild:
+        existing_lease["request_hash"] = ActionRequest.from_dict(request).stable_hash()
     existing_lease["request_path"] = str(request_path)
     entry = {
         "item_id": item_id,
@@ -203,6 +222,7 @@ def _reconcile_existing_lease(
     }
     plan = {
         "acquisition": "reentered",
+        "rebuild": rebuild,
         "item_id": item_id,
         "lease_id": lease_id,
         "request": request,
@@ -391,7 +411,7 @@ def commit_batch(
     refreshed_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Run batch selection and claim policy inside the store's writer reservation."""
-    current["metadata"] = refreshed_metadata
+    session_store.apply_metadata_delta(current, refreshed_metadata)
     expired = expire_leases(current, now=current_time)
     _return_expired_items_to_open(current, expired)
     active_leases_count = sum(
@@ -445,6 +465,25 @@ def commit_batch(
 
     if not leased_items:
         raise _no_eligible_item_error()
+    # Issuance commits with the leases it describes; the request files written
+    # after the commit are rebuildable artifacts.
+    ledger = _ledger(current)
+    for plan in artifact_plans:
+        if plan["acquisition"] != "created":
+            continue
+        ledger.append_event(
+            session_id=str(current["session_id"]),
+            item_id=plan["item_id"],
+            lease_id=plan["lease_id"],
+            agent_id=agent_id,
+            role="fixer",
+            event_type="request_issued",
+            payload={
+                "request_id": plan["request"]["request_id"],
+                "request_path": plan["request_path"],
+                "response_skeleton_path": plan["response_skeleton_path"],
+            },
+        )
     return {
         "leased_items": leased_items,
         "artifact_plans": artifact_plans,
@@ -484,13 +523,12 @@ def _materialize_committed_batch(
     batch_skeleton_path: Path,
     batch_skeleton: dict[str, Any],
 ) -> None:
-    ledger = _ledger(session)
     artifact_plans = transition["artifact_plans"]
     try:
         for plan in artifact_plans:
             request_path = Path(plan["request_path"])
             response_skeleton_path = Path(plan["response_skeleton_path"])
-            if plan["acquisition"] == "created" or not request_path.is_file():
+            if plan["acquisition"] == "created" or plan.get("rebuild"):
                 write_json_atomic(request_path, plan["request"])
             if plan["acquisition"] == "created" or not response_skeleton_path.is_file():
                 item = session["items"][plan["item_id"]]
@@ -499,32 +537,6 @@ def _materialize_committed_batch(
                 )
                 write_json_atomic(response_skeleton_path, response_skeleton)
 
-        for classified_item_id in transition["classification_items"]:
-            ledger.append_event(
-                session_id=str(session["session_id"]),
-                item_id=classified_item_id,
-                lease_id=None,
-                agent_id=agent_id,
-                role="fixer",
-                event_type="classification_recorded",
-                payload={"classification": "fix", "note": _BATCH_CLASSIFICATION_NOTE},
-            )
-        for plan in artifact_plans:
-            if plan["acquisition"] != "created":
-                continue
-            ledger.append_event(
-                session_id=str(session["session_id"]),
-                item_id=plan["item_id"],
-                lease_id=plan["lease_id"],
-                agent_id=agent_id,
-                role="fixer",
-                event_type="request_issued",
-                payload={
-                    "request_id": plan["request"]["request_id"],
-                    "request_path": plan["request_path"],
-                    "response_skeleton_path": plan["response_skeleton_path"],
-                },
-            )
         write_json_atomic(batch_skeleton_path, batch_skeleton)
     except Exception:
         _compensate_batch_materialization(repo, pr_number, artifact_plans)
@@ -541,8 +553,9 @@ def issue_batch_action_request(
 ) -> dict[str, Any]:
     current_time = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
+    metadata_base = copy.deepcopy(session.get("metadata"))
     refresh_stack_context_for_request(repo, str(pr_number), session)
-    refreshed_metadata = dict(session.get("metadata") or {})
+    refreshed_metadata = session_store.metadata_delta(metadata_base, session.get("metadata"))
 
     try:
         committed = session_store.transact_session(

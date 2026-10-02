@@ -147,6 +147,8 @@ def _project_lifecycle_item(
         exclusions.append("addressed_before_observed")
     if verified_at is not None and durations["observed_to_verified"] is None:
         exclusions.append("verified_before_observed")
+    if addressed_at is not None and verified_at is not None and durations["addressed_to_verified"] is None:
+        exclusions.append("verified_before_addressed")
     first_pass = None
     if verified_at is not None:
         first_pass = counts["address_attempts"] == 1 and all(

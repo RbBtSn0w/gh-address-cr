@@ -91,6 +91,7 @@ def get_session_ledger(session: dict[str, Any]) -> EvidenceLedger:
         or session_store.default_ledger_path(repo, pr_number),
         session,
         flush=lambda records: persist_side_effect_attempt(session, records),
+        canonical=lambda: session_store.load_canonical_evidence(repo, pr_number),
     )
 
 

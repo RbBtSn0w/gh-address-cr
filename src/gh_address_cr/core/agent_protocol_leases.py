@@ -9,7 +9,9 @@ use these as peers rather than one reaching into the other's internals.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from gh_address_cr.core import protocol_codes
@@ -141,3 +143,45 @@ def lease_recovery_payload_for_response(
         request_hash=request_hash,
         now=now,
     ).to_dict()
+
+
+def payload_for_lease(
+    path: Path,
+    *,
+    request_id: str,
+    lease_id: str,
+    validate: Any | None = None,
+) -> dict[str, Any] | None:
+    """The JSON object on disk when it belongs to this lease, else None.
+
+    One predicate for the request and for its response skeleton. Applying it to the
+    request only was an asymmetry, not a decision: a corrupt or foreign skeleton was
+    handed back untouched while the request beside it would have been rebuilt.
+
+    Usable means all of:
+
+    - it parses, and is an object;
+    - it passes `validate`, when one is given. For the request that is
+      `ActionRequest.from_dict`, the parser submit itself uses, so what re-entry
+      accepts cannot drift from what submit accepts. "Any JSON object" is not enough:
+      `{}` parses, then skeleton generation indexes required keys and raises KeyError
+      instead of rebuilding. A skeleton has no such parser -- it is deliberately
+      incomplete until the agent fills it in -- so it is checked on identity alone;
+    - it carries this lease's `request_id` and `lease_id`. A file can be perfectly
+      valid and still belong to another lease, and handing that back points the agent
+      at the wrong request.
+
+    A skeleton the agent has already filled in still matches, so re-entry keeps it;
+    only an unusable one is regenerated and the agent's evidence is never discarded.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if validate is not None:
+            validate(payload)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
+        return None
+    if str(payload.get("request_id")) != request_id or str(payload.get("lease_id")) != lease_id:
+        return None
+    return payload
