@@ -8,6 +8,8 @@ so the stdout/stderr shape decides, and the runtime and its telemetry share this
 
 from __future__ import annotations
 
+import re
+
 NO_CHECKS_MESSAGE = "no checks reported"
 
 
@@ -22,4 +24,8 @@ def pr_checks_result(returncode: int, stdout: str | None, stderr: str | None) ->
 
 
 def is_pr_checks_command(cmd: list[str]) -> bool:
-    return len(cmd) >= 3 and cmd[0].rsplit("/", 1)[-1] == "gh" and cmd[1:3] == ["pr", "checks"]
+    if len(cmd) < 3 or cmd[1:3] != ["pr", "checks"]:
+        return False
+    # Accept POSIX and Windows paths, and a case-insensitive `.exe` suffix.
+    executable = re.split(r"[\\/]", cmd[0])[-1].lower()
+    return executable in {"gh", "gh.exe"}

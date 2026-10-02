@@ -39,6 +39,9 @@ class PrChecksResultTests(unittest.TestCase):
     def test_recognizes_only_gh_pr_checks(self):
         self.assertTrue(is_pr_checks_command(CHECKS_CMD))
         self.assertTrue(is_pr_checks_command(["/opt/homebrew/bin/gh", "pr", "checks", "7"]))
+        self.assertTrue(is_pr_checks_command(["gh.exe", "pr", "checks", "7"]))
+        self.assertTrue(is_pr_checks_command(["C:\\Program Files\\GitHub CLI\\GH.EXE", "pr", "checks", "7"]))
+        self.assertFalse(is_pr_checks_command(["ghx", "pr", "checks", "7"]))
         self.assertFalse(is_pr_checks_command(["gh", "pr", "view", "7"]))
         self.assertFalse(is_pr_checks_command(["gh", "api", "graphql"]))
 
@@ -68,7 +71,11 @@ class SubprocessOutcomeTests(unittest.TestCase):
     def test_pr_checks_states_are_successful_probes(self):
         self.assertEqual(_subprocess_outcome(CHECKS_CMD, completed(1, "", NO_CHECKS_STDERR)), "success")
         self.assertEqual(_subprocess_outcome(CHECKS_CMD, completed(8, PENDING_JSON)), "success")
-        self.assertEqual(_subprocess_outcome(CHECKS_CMD, completed(1, "", AUTH_STDERR)), "failure")
+
+    def test_timeout_and_errors_keep_exit_code_meaning(self):
+        # Only PR states are overridden; a timeout must still report as a timeout.
+        self.assertIsNone(_subprocess_outcome(CHECKS_CMD, completed(124)))
+        self.assertIsNone(_subprocess_outcome(CHECKS_CMD, completed(1, "", AUTH_STDERR)))
 
     def test_other_commands_keep_exit_code_meaning(self):
         self.assertIsNone(_subprocess_outcome(["gh", "api", "user"], completed(1, "", AUTH_STDERR)))

@@ -237,8 +237,9 @@ def _subprocess_outcome(cmd: list[str], result: subprocess.CompletedProcess[str]
     """
     from gh_address_cr.github.pr_checks import is_pr_checks_command, pr_checks_result
 
-    if is_pr_checks_command(cmd):
-        return "failure" if pr_checks_result(result.returncode, result.stdout, result.stderr) == "error" else "success"
+    # Only a recognized PR state is overridden; errors and timeouts keep the exit-code meaning.
+    if is_pr_checks_command(cmd) and pr_checks_result(result.returncode, result.stdout, result.stderr) != "error":
+        return "success"
     return None
 
 
