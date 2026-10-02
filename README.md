@@ -136,7 +136,10 @@ Completion means the latest final gate reports:
 - no blocking session items
 - terminal GitHub threads have durable reply evidence
 - a compact metrics line via `completion_summary_line` or `PR Completion Summary Guidance`
-- a telemetry coverage label and structured efficiency report path
+- a telemetry coverage label and structured efficiency report path; a command
+  that exits 5 because the PR still needs work (for example `address` or
+  `final-gate` blocking on an open thread) counts in `needs_action_count`, not as
+  a failure in `success_rate` or the inefficiency flags
 - an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
   aggregates exclude inferred observation times, and report failures never
   change the gate verdict or exit code
