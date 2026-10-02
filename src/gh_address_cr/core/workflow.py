@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib import metadata, resources, util
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,7 @@ from gh_address_cr.core.github_thread_state import (
     is_resolved_github_thread,
     is_stale_or_outdated_github_thread,
     normalized_thread_state,
+    returned_claimable_state,
 )
 from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.severity import (
@@ -870,7 +871,7 @@ def fast_fix_item(
     github_client: Any | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    normalized_severity, requested_priority_evidence = _validate_fast_fix_inputs(
+    normalized_severity, requested_priority_evidence = validate_fast_fix_inputs(
         repo,
         pr_number,
         item_id=item_id,
@@ -942,7 +943,7 @@ def fast_fix_item(
     }
 
 
-def _validate_fast_fix_inputs(
+def validate_fast_fix_inputs(
     repo: str,
     pr_number: str,
     *,
@@ -1123,7 +1124,8 @@ def _assert_thread_not_resolved_remotely(repo: str, pr_number: str, *, item_id: 
     item = _items(session_store.load_session(repo, pr_number)).get(item_id)
     if not isinstance(item, dict) or item.get("item_kind") != "github_thread" or not is_resolved_github_thread(item):
         return
-    reconcile = command_templates.evidence_add_reply_with_validation(repo, pr_number, item_id=item_id)
+    reply = command_templates.resolve_closed_fix(repo, pr_number, item_id)
+    explain = command_templates.resolve_closed_clarify(repo, pr_number, item_id)
     raise WorkflowError(
         status=protocol_codes.FAST_FIX_REJECTED,
         reason_code="THREAD_ALREADY_RESOLVED",
@@ -1131,11 +1133,97 @@ def _assert_thread_not_resolved_remotely(repo: str, pr_number: str, *, item_id: 
         exit_code=4,
         message=(
             f"{item_id} is already resolved on GitHub, so it cannot be claimed; no classification was recorded. "
-            f"Record its evidence instead with `{reconcile}` (omit --commit/--files/--validation when no code "
-            f"change was made), then rerun `gh-address-cr final-gate {repo} {pr_number}`."
+            f"Let the runtime reply on it with `{reply}`, or `{explain}` when no code change was made, then "
+            f"rerun `gh-address-cr final-gate {repo} {pr_number}`."
         ),
         payload={"item_id": item_id},
     )
+
+
+def reopen_resolved_thread_for_reply(repo: str, pr_number: str, *, item_id: str) -> None:
+    """Make a thread resolved on GitHub without our reply claimable again (Spec 039 Q2).
+
+    Only the threads final-gate blocks on qualify: resolved remotely, no reply
+    evidence, and seen by this session before they were resolved. The caller must
+    publish in the same command; otherwise the next refresh closes the item again
+    from the remote state and the accepted reply would never be posted. If that
+    happens anyway, the same refresh restores the closed state, so nothing is lost.
+    """
+
+    def reopen(session: dict[str, Any]) -> None:
+        item = _items(session).get(item_id)
+        if not isinstance(item, dict) or item.get("item_kind") != "github_thread":
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_REJECTED,
+                reason_code="ITEM_NOT_FOUND",
+                waiting_on="work_item",
+                exit_code=5,
+                message=f"--closed needs a GitHub review thread; {item_id} is not one.",
+                payload={"item_id": item_id},
+            )
+        if not is_resolved_github_thread(item):
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_REJECTED,
+                reason_code="THREAD_NOT_RESOLVED",
+                waiting_on="work_item",
+                exit_code=2,
+                message=f"{item_id} is not resolved on GitHub; run `agent resolve` without --closed.",
+                payload={"item_id": item_id},
+            )
+        if isinstance(item.get("reply_evidence"), dict) or item.get("historical_remote_only"):
+            raise WorkflowError(
+                status=protocol_codes.FAST_FIX_REJECTED,
+                reason_code="CLOSED_THREAD_NEEDS_NO_REPLY",
+                waiting_on="work_item",
+                exit_code=2,
+                message=(
+                    f"{item_id} already has reply evidence or was resolved before this session saw it; "
+                    "final-gate does not require a reply."
+                ),
+                payload={"item_id": item_id},
+            )
+        state, status = returned_claimable_state(item)
+        item.pop("isResolved", None)
+        item.pop("is_resolved", None)
+        item.update(
+            {
+                "state": state,
+                "status": status,
+                "blocking": True,
+                "handled": False,
+                "reopened_for_reply_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            }
+        )
+
+    session_store.transact_session(repo, pr_number, reopen, operation="reopen_resolved_thread_for_reply")
+    from gh_address_cr.otel_tracing import add_current_span_event
+
+    add_current_span_event(
+        "gh_address_cr.thread.reopened_for_reply",
+        {"gh_address_cr.item.kind": "github_thread", "gh_address_cr.agent.role": "fixer"},
+    )
+
+
+def validate_decline_input(*, item_id: str, resolution: str, why: str | None) -> None:
+    """Input checks for a decline, run before any state changes (also ahead of --closed reopening)."""
+    if resolution not in {"reject", "clarify", "defer"}:
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
+            payload={"item_id": item_id},
+        )
+    if not why or not why.strip():
+        raise WorkflowError(
+            status=protocol_codes.FAST_FIX_REJECTED,
+            reason_code="MISSING_RESOLVE_ARGS",
+            waiting_on="decline_input",
+            exit_code=2,
+            message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
+            payload={"item_id": item_id},
+        )
 
 
 def decline_item(
@@ -1157,24 +1245,7 @@ def decline_item(
     decline inherits identical lease-ownership and final-gate guarantees
     (spec 029 FR-002/FR-009). No new algorithm.
     """
-    if resolution not in {"reject", "clarify", "defer"}:
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code="UNSUPPORTED_DECLINE_RESOLUTION",
-            waiting_on="decline_input",
-            exit_code=2,
-            message=f"agent resolve {item_id}: expected reject, clarify, or defer; got {resolution!r}.",
-            payload={"item_id": item_id},
-        )
-    if not why or not why.strip():
-        raise WorkflowError(
-            status=protocol_codes.FAST_FIX_REJECTED,
-            reason_code="MISSING_RESOLVE_ARGS",
-            waiting_on="decline_input",
-            exit_code=2,
-            message=f"agent resolve {item_id} requires --why to {resolution} a thread.",
-            payload={"item_id": item_id},
-        )
+    validate_decline_input(item_id=item_id, resolution=resolution, why=why)
     _assert_item_publishable(repo, pr_number, item_id=item_id, publish=publish)
     classification = agent_protocol.record_classification(
         repo,

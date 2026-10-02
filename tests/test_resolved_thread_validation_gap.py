@@ -203,8 +203,9 @@ class ValidationEvidenceIngestTest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 4, result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["reason_code"], "THREAD_ALREADY_RESOLVED")
+        # The runtime posts the missing reply itself (Spec 039 Q2) instead of asking for an out-of-band one.
         self.assertIn(
-            f"gh-address-cr agent evidence add {self.repo} {self.pr} --item-id github-thread:PRRT_recon --reply-url",
+            f"gh-address-cr agent resolve {self.repo} {self.pr} github-thread:PRRT_recon --closed",
             payload["next_action"],
         )
         item = self.load_session()["items"]["github-thread:PRRT_recon"]
