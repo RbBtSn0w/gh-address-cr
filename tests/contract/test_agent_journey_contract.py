@@ -263,6 +263,10 @@ class AgentJourneyContractTests(AgentJourneyTestCase):
         report = self.efficiency_report(result)
         self.assertEqual(report["success_rate"], 100.0, report.get("error_prone_operations"))
         self.assertEqual(report["inefficiency_flags"], [])
+        # The fake PR has no check runs, like a repository without CI: that is a PR
+        # state, not a GitHub failure.
+        summary = self.runtime("address", self.repo, self.pr, "--lean")
+        self.assertEqual(summary["context"]["checks"], {"availability": "present", "counts": {}})
         # The opening `address` blocked on the open thread: counted, not hidden.
         self.assertGreaterEqual(report["needs_action_count"], 1)
 

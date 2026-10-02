@@ -42,7 +42,7 @@ from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 from gh_address_cr.core.untrusted_content import request_item_projection
 from gh_address_cr.github.client import GitHubClient
 from gh_address_cr.github.diagnostics import github_waiting_on
-from gh_address_cr.github.errors import GitHubError
+from gh_address_cr.github.errors import GitHubError, GitHubNoChecksError
 from gh_address_cr.intake.findings import (
     EMPTY_FINDINGS_INPUT_MESSAGE,
     FindingsFormatError,
@@ -953,6 +953,8 @@ class HighLevelReviewRuntime:
                         "availability": "present",
                         "counts": counts,
                     }
+                except GitHubNoChecksError:
+                    metadata["check_summary"] = {"availability": "present", "counts": {}}
                 except GitHubError as exc:
                     metadata["check_summary"] = {
                         "availability": "unavailable",

@@ -753,11 +753,7 @@ def _has_unrecovered_import_diagnostics(paths: core_paths.SessionPaths) -> bool:
 
 
 def _runtime_event_status(metric: ExecutionMetric) -> str:
-    if metric.outcome == "needs_action":
-        return "needs_action"
-    if metric.is_success:
-        return "success"
-    return "timeout" if metric.exit_code == 124 else "failure"
+    return metric.effective_outcome
 
 
 def _runtime_events(paths: core_paths.SessionPaths) -> list[ExternalTelemetryEvent]:
