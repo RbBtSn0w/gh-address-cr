@@ -72,3 +72,11 @@ class AgentInputHintTests(PythonScriptTestCase):
         self.assertEqual(payload["reason_code"], "UNSUPPORTED_FLAG")
         self.assertIn("--why", payload["next_action"])
         self.assertNotIn("decision", self.item())
+
+
+class HandlerDocstringTest(PythonScriptTestCase):
+    def test_resolve_handler_keeps_its_docstring(self):
+        # The near-miss check must not displace the docstring into a no-op expression.
+        from gh_address_cr.commands.agent import handle_agent_resolve
+
+        self.assertTrue((handle_agent_resolve.__doc__ or "").startswith("Unified GitHub review-thread resolution surface"))

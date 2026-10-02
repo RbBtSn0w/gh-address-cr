@@ -366,15 +366,15 @@ def _changed_files_for_commit(
 
 
 def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
-    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent resolve", repo, passthrough)
-    if near_miss_rc is not None:
-        return near_miss_rc
     """Unified GitHub review-thread resolution surface.
 
     One command routes single, trivial, batch, homogeneous, and stale fixes
     through the same lease/evidence/publish contract. Classification is recorded
     internally, so no separate `agent classify` round-trip is required on this path.
     """
+    near_miss_rc = _reject_flag_near_misses("gh-address-cr agent resolve", repo, passthrough)
+    if near_miss_rc is not None:
+        return near_miss_rc
     parser = argparse.ArgumentParser(
         prog="gh-address-cr agent resolve",
         description=(
