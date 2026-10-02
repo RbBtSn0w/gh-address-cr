@@ -512,12 +512,10 @@ def build_preflight_summary(
     diagnostics: dict | None = None,
 ) -> dict:
     if artifact_path is None:
-        try:
-            artifact_path = str(session_store.workspace_dir(repo, pr_number))
-        except session_store.SessionError:
-            # The state directory itself may be the failed prerequisite. Keep
-            # the diagnostic machine-readable without attempting another write.
-            artifact_path = None
+        # A preflight failure must not create state: the state directory or the
+        # target itself may be the failed prerequisite.
+        workspace = session_store.workspace_path_if_valid(repo, pr_number)
+        artifact_path = str(workspace) if workspace is not None else None
     summary = {
         "status": status,
         "repo": repo,

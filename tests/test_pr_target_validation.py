@@ -135,6 +135,26 @@ class PrTargetCliTests(unittest.TestCase):
         self.assertIsNone(payload["artifact_path"])
         self.assert_no_workspace()
 
+    def test_address_rejects_a_non_numeric_pr_number_without_a_workspace(self):
+        result, payload = self.run_cli("address", "o/r", "abc", "--lean")
+
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(payload["reason_code"], protocol_codes.INVALID_PR_NUMBER)
+        self.assertIsNone(payload["artifact_path"])
+        self.assert_no_workspace()
+
+    def test_summary_artifact_path_does_not_create_the_workspace(self):
+        from unittest.mock import patch
+
+        from gh_address_cr.commands.high_level import _default_artifact_path
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state)}):
+            artifact_path = _default_artifact_path("o/r", "12")
+            self.assertIsNone(_default_artifact_path("o/r", "abc"))
+
+        self.assertEqual(artifact_path, str(self.state / "o__r" / "pr-12"))
+        self.assertFalse(self.state.exists())
+
     def test_final_gate_rejects_a_non_numeric_pr_number(self):
         result, payload = self.run_cli("final-gate", "o/r", "abc")
 

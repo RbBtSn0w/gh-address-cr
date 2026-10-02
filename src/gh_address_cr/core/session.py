@@ -116,6 +116,18 @@ def validate_pr_target(repo: str, pr_number: str) -> None:
         raise SessionError(exc.reason_code, str(exc)) from exc
 
 
+def workspace_path_if_valid(repo: str, pr_number: str) -> Path | None:
+    """The workspace path for a summary's `artifact_path`, without creating it.
+
+    None when the target is malformed or the state directory cannot be resolved.
+    """
+    try:
+        paths.validate_pr_target(repo, pr_number)
+        return paths.workspace_dir(repo, pr_number)
+    except paths.PathResolutionError:
+        return None
+
+
 def normalize_repo(repo: str) -> str:
     try:
         return paths.normalize_repo(repo)

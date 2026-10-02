@@ -62,13 +62,9 @@ def _workspace_root(repo: str, pr_number: str) -> Path:
 
 
 def _default_artifact_path(repo: str, pr_number: str) -> str | None:
-    """The workspace path, or None when the target is too malformed to name one."""
-    try:
-        return str(_workspace_root(repo, pr_number))
-    except session_store.SessionError as exc:
-        if exc.reason_code in session_store.PR_TARGET_REASONS:
-            return None
-        raise
+    """The workspace path for a summary, or None when the target is too malformed to name one."""
+    workspace = session_store.workspace_path_if_valid(repo, pr_number)
+    return str(workspace) if workspace is not None else None
 
 
 def _persist_machine_summary(repo: str, pr_number: str, payload: dict[str, Any]) -> None:
