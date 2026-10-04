@@ -10,7 +10,7 @@ It is not a code-review producer and not a generic GitHub bot. The runtime owns
 state and side effects; agents return structured evidence and the runtime
 publishes GitHub replies/resolves.
 
-Project architecture governance lives in `.specify/memory/constitution.md`.
+Project architecture governance lives in `AGENTS.md`.
 The installed skill contract remains `skill/SKILL.md`.
 
 ## 60-second quickstart
@@ -280,7 +280,7 @@ inherit that header.
 
 A malformed or missing `TRACEPARENT` never blocks or changes the CLI's exit
 code; a well-formed one makes the span a child of that remote context. See
-[`specs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md`](specs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md)
+[`docs/rfcs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md`](docs/rfcs/026-cli-otel-agent-integration/contracts/cli-otel-span-attributes.md)
 for the full enforced contract.
 
 ## Public surface

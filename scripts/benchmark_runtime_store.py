@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure runtime persistence cost and within-session slowdown.
 
-This is an advisory local benchmark (specs/035-runtime-store-hardening). It
+This is an advisory local benchmark (docs/rfcs/035-runtime-store-hardening). It
 drives the public Python runtime API with local findings only, so it needs no
 network and runs unchanged against any checkout that exposes
 ``agent_protocol.record_classification``, ``issue_action_request``, and
