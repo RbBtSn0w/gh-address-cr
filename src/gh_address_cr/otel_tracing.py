@@ -45,7 +45,7 @@ SERVICE_NAMESPACE_VALUE = "com.hamiltonsnow"
 TELEMETRY_ENVIRONMENT_VARIABLE = "GH_ADDRESS_CR_TELEMETRY_ENVIRONMENT"
 OTLP_TRACES_ENDPOINT = "https://telemetry-gateway.hamiltonsnow.workers.dev/v1/traces"
 # Dev and PR-preview builds report here by default so synthetic and pre-merge traffic
-# never reaches the production dataset (specs/032-otel-release-channel-endpoint).
+# never reaches the production dataset (docs/rfcs/032-otel-release-channel-endpoint).
 DEVELOPMENT_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
 GATEWAY_ORIGINS = {
     "https://telemetry-gateway-development.hamiltonsnow.workers.dev",

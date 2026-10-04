@@ -80,7 +80,7 @@ class SingleItemDeclineCLIRegressionTest(PythonScriptTestCase):
         self.session_file().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def test_missing_reason_is_rejected(self):
-        # spec 029 / /speckit-analyze U1: item_id + --disposition reject with
+        # Resolve-axis contract: item_id + --disposition reject with
         # no --why must fail fast with a decline-specific message, not submit silently.
         self.write_session(items=[github_thread("github-thread:noreason")])
 
