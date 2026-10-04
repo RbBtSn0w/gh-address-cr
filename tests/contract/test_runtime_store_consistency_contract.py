@@ -1,7 +1,7 @@
 """Spec 038: runtime store consistency fixes found by the 3.16.0 release review.
 
 Each test reproduces one verified finding against the pre-fix runtime; see
-``specs/038-runtime-store-consistency/adr-001-revision-token-and-commit-boundaries.md``.
+``docs/rfcs/038-runtime-store-consistency/adr-001-revision-token-and-commit-boundaries.md``.
 """
 
 from __future__ import annotations
