@@ -71,8 +71,9 @@ gh-address-cr agent publish owner/repo 123
 gh-address-cr final-gate owner/repo 123
 ```
 
-GitHub stacked pull requests are supported as an additive public-preview
-workflow. Normal commands remain scoped to the selected PR layer and report
+GitHub stacked pull requests (generally available since 2026-10-06) are
+supported as an additive workflow. On hosts without the feature (for example an
+older GitHub Enterprise Server) stack context is reported as unavailable. Normal commands remain scoped to the selected PR layer and report
 `stack_context`; use `final-gate owner/repo 123 --stack` only for a fresh
 bottom-up gate through that PR. `gh-address-cr` does not create, checkout,
 rebase, push, modify, queue, merge, or unstack a stack; use GitHub's `gh stack`
@@ -83,9 +84,13 @@ happens to be checked out. A separately authorized stack-management workflow
 may then cascade the change upward; after it pushes rewritten members, discard
 old ActionRequests and obtain fresh revision-bound evidence before publishing.
 
-Stacked-member requests and validation evidence are bound to the current head
-revision and stack topology. A head update or reorder invalidates that evidence
-before reply/resolve side effects, so refresh and revalidate the owning layer.
+Stacked-member requests and validation evidence are bound to the validated
+content of the member (`revision_binding.v2`, keyed by the head commit's tree,
+which already contains the trunk and every lower layer). A change to the
+member's own or a lower layer's content invalidates that evidence before
+reply/resolve side effects, so refresh and revalidate the owning layer. A
+rebase that leaves the content unchanged, a push to a higher layer, or the
+position renumbering after a lower member merges does not.
 For an already-terminal GitHub thread or local finding, record that fresh proof
 with `agent evidence add --item-id <item_id> --commit <sha> --files <paths>
 --validation <cmd=passed>`; the runtime attaches the current stack binding.
@@ -96,8 +101,9 @@ the session for the owning PR reported by `stack_context.selected_pr`. A
 finding seen on the top PR but introduced by a lower PR must be handed back to
 that lower PR. Run each member's layer `final-gate` separately, and use
 `final-gate ... --stack` only for explicitly requested bottom-up aggregate proof.
-After `gh stack sync` or `gh stack rebase`, refresh every affected member and
-revalidate its changed revision before publishing again. Stack merge remains an
+After `gh stack sync` or `gh stack rebase`, or after GitHub rebases the
+remaining members when a lower one merges, refresh every affected member;
+revalidate only the members whose content changed before publishing again. Stack merge remains an
 atomic, contiguous, bottom-up GitHub operation.
 
 ### Sandbox-safe session state
@@ -683,6 +689,28 @@ python3 scripts/e2e_stacked_pr_sandbox.py provision --manifest /var/tmp/gh-addre
 python3 scripts/e2e_stacked_pr_sandbox.py exercise --manifest /var/tmp/gh-address-cr-stack-e2e.json
 python3 scripts/e2e_stacked_pr_sandbox.py cleanup --manifest /var/tmp/gh-address-cr-stack-e2e.json
 ```
+
+Scenario actions reproduce what GitHub GA does to a live stack, and `refresh`
+records the resulting head/base drift in the manifest after proving the pull
+requests are still the recorded fixture, so `verify` and `cleanup` keep working
+without hand-editing it. `rebase` commits a change to the bottom layer and
+cascades it with `gh stack rebase` and `gh stack push`; `merge-bottom` squash-merges the bottom layer
+with `gh stack merge`, which makes GitHub rebase and retarget the remaining
+members. Both need the `gh stack` extension and leave the sandbox `main` with
+the merged fixture files (merging cannot be undone by `cleanup`).
+
+```bash
+python3 scripts/e2e_stacked_pr_sandbox.py rebase --manifest /var/tmp/gh-address-cr-stack-e2e.json
+python3 scripts/e2e_stacked_pr_sandbox.py merge-bottom --manifest /var/tmp/gh-address-cr-stack-e2e.json
+python3 scripts/e2e_stacked_pr_sandbox.py refresh --manifest /var/tmp/gh-address-cr-stack-e2e.json
+```
+
+`fix-evidence` resolves the middle layer's thread as a `fix` with validation
+evidence, which is the only scenario that exercises revision-bound evidence;
+`gate` then reports each layer's own `final-gate` verdict. Running `rebase` (the
+bottom layer's content changes) after `fix-evidence` yields
+`FINAL_GATE_STALE_REVISION_EVIDENCE` for the middle layer, while `merge-bottom`
+(GitHub rebases the rest, content unchanged) leaves it `PASSED`.
 
 The default target is the repository's designated demo sandbox. Other targets
 must contain a sandbox marker or be explicitly authorized with

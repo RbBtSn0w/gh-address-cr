@@ -7,7 +7,7 @@
         "isDraft": false,
         "baseRefName": "feature/base",
         "headRefName": "feature/middle",
-        "headRefOid": "2222222222222222222222222222222222222222",
+        "headRefOid": "2222222222222222222222222222222222222222", "headRef": {"target": {"oid": "2222222222222222222222222222222222222222", "tree": {"oid": "e222222222222222222222222222222222222222"}}},
         "mergeQueueEntry": null,
         "stackEntry": {"position": 2},
         "stack": {
@@ -18,8 +18,8 @@
           "entries": {
             "pageInfo": {"hasNextPage": true, "endCursor": "cursor-1"},
             "nodes": [
-              {"position": 1, "pullRequest": {"number": 101, "state": "OPEN", "isDraft": false, "baseRefName": "main", "headRefName": "feature/base", "headRefOid": "1111111111111111111111111111111111111111", "mergeQueueEntry": null}},
-              {"position": 2, "pullRequest": {"number": 102, "state": "OPEN", "isDraft": false, "baseRefName": "feature/base", "headRefName": "feature/middle", "headRefOid": "2222222222222222222222222222222222222222", "mergeQueueEntry": null}}
+              {"position": 1, "pullRequest": {"number": 101, "state": "OPEN", "isDraft": false, "baseRefName": "main", "headRefName": "feature/base", "headRefOid": "1111111111111111111111111111111111111111", "headRef": {"target": {"oid": "1111111111111111111111111111111111111111", "tree": {"oid": "e111111111111111111111111111111111111111"}}}, "mergeQueueEntry": null}},
+              {"position": 2, "pullRequest": {"number": 102, "state": "OPEN", "isDraft": false, "baseRefName": "feature/base", "headRefName": "feature/middle", "headRefOid": "2222222222222222222222222222222222222222", "headRef": {"target": {"oid": "2222222222222222222222222222222222222222", "tree": {"oid": "e222222222222222222222222222222222222222"}}}, "mergeQueueEntry": null}}
             ]
           }
         }

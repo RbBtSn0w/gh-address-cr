@@ -7,7 +7,9 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,6 +114,7 @@ def validate_fixture_layer(
     run_id: str,
     seen_prs: set[int],
     seen_branches: set[str],
+    default_branch: str | None = None,
 ) -> str:
     if not isinstance(layer, dict):
         raise SandboxError(f"Manifest layer {position} must be an object.")
@@ -125,7 +128,8 @@ def validate_fixture_layer(
         raise SandboxError(f"Manifest layer {position} identity is invalid.")
     if layer.get("branch") != expected_branch or expected_branch in seen_branches:
         raise SandboxError(f"Manifest layer {position} branch is outside the fixture namespace.")
-    if layer.get("base_branch") != expected_base:
+    # GitHub retargets the remaining members to the trunk when a lower member merges, so the trunk is a valid base.
+    if layer.get("base_branch") not in {expected_base, default_branch}:
         raise SandboxError(f"Manifest layer {position} base branch does not match the fixture chain.")
     if layer.get("path") != expected_path:
         raise SandboxError(f"Manifest layer {position} path is outside the fixture namespace.")
@@ -178,6 +182,7 @@ def validate_fixture_manifest(manifest: dict[str, Any]) -> None:
             run_id=run_id,
             seen_prs=seen_prs,
             seen_branches=seen_branches,
+            default_branch=default_branch,
         )
 
 
@@ -350,6 +355,16 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     return manifest
 
 
+def assert_fixture_pull_identity(manifest: dict[str, Any], layer: dict[str, Any], pull: dict[str, Any]) -> None:
+    """Prove a live pull request is the recorded fixture, independent of its head revision and base."""
+    expected_title = fixture_pull_title(str(manifest["run_id"]), str(layer["name"]))
+    expected_body = fixture_pull_body(str(manifest["run_id"]), str(layer["name"]), int(layer["position"]))
+    if pull.get("title") != expected_title or pull.get("body") != expected_body:
+        raise SandboxError(f"PR #{layer['pr_number']} is not the recorded fixture pull request.")
+    if str((pull.get("head") or {}).get("ref") or "") != str(layer["branch"]):
+        raise SandboxError(f"PR #{layer['pr_number']} head branch does not match the fixture manifest.")
+
+
 def verify(manifest: dict[str, Any]) -> dict[str, Any]:
     validate_fixture_manifest(manifest)
     repo = str(manifest["repo"])
@@ -368,14 +383,7 @@ def verify(manifest: dict[str, Any]) -> dict[str, Any]:
     positions: list[dict[str, Any]] = []
     for layer in manifest["layers"]:
         pull = gh_api(f"repos/{repo}/pulls/{layer['pr_number']}")
-        expected_title = fixture_pull_title(str(manifest["run_id"]), str(layer["name"]))
-        expected_body = fixture_pull_body(
-            str(manifest["run_id"]), str(layer["name"]), int(layer["position"])
-        )
-        if pull.get("title") != expected_title or pull.get("body") != expected_body:
-            raise SandboxError(f"PR #{layer['pr_number']} is not the recorded fixture pull request.")
-        if str((pull.get("head") or {}).get("ref") or "") != str(layer["branch"]):
-            raise SandboxError(f"PR #{layer['pr_number']} head branch does not match the fixture manifest.")
+        assert_fixture_pull_identity(manifest, layer, pull)
         if str((pull.get("head") or {}).get("sha") or "") != str(layer["head_sha"]):
             raise SandboxError(f"PR #{layer['pr_number']} head revision does not match the fixture manifest.")
         if str((pull.get("base") or {}).get("ref") or "") != str(layer["base_branch"]):
@@ -527,15 +535,158 @@ def exercise(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def refresh(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Record head/base drift that GitHub or a stack scenario legitimately produced.
+
+    Ownership is proven by title, body and head branch (not by head revision), so a fixture that was rebased or
+    retargeted can be verified and cleaned without hand-editing the manifest. Anything else still fails fast.
+    """
+    validate_fixture_manifest(manifest)
+    repo = str(manifest["repo"])
+    changes: list[dict[str, Any]] = []
+    for layer in manifest["layers"]:
+        pull = gh_api(f"repos/{repo}/pulls/{layer['pr_number']}")
+        assert_fixture_pull_identity(manifest, layer, pull)
+        head_sha = str((pull.get("head") or {}).get("sha") or "")
+        base_ref = str((pull.get("base") or {}).get("ref") or "")
+        if FULL_SHA_RE.fullmatch(head_sha) is None:
+            raise SandboxError(f"PR #{layer['pr_number']} reported an invalid head revision.")
+        if base_ref not in {str(layer["base_branch"]), str(manifest["default_branch"])}:
+            raise SandboxError(f"PR #{layer['pr_number']} base branch is outside the fixture chain.")
+        if head_sha != layer["head_sha"] or base_ref != layer["base_branch"]:
+            changes.append(
+                {
+                    "pr_number": int(layer["pr_number"]),
+                    "head_sha": [layer["head_sha"], head_sha],
+                    "base_branch": [layer["base_branch"], base_ref],
+                    "merged": bool(pull.get("merged_at")),
+                }
+            )
+            layer["head_sha"] = head_sha
+            layer["base_branch"] = base_ref
+    validate_fixture_manifest(manifest)
+    return {"status": "REFRESHED", "repo": repo, "changes": changes}
+
+
+def run_local(command: list[str], *, cwd: Path) -> str:
+    completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False, timeout=300)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise SandboxError(f"{' '.join(command[:3])} failed: {detail}")
+    return completed.stdout
+
+
+def stack_scenario(manifest: dict[str, Any], action: str) -> dict[str, Any]:
+    """Drive `gh stack` against the fixture in a throwaway clone, then record the resulting drift."""
+    validate_fixture_manifest(manifest)
+    verify(manifest)
+    repo = str(manifest["repo"])
+    run_id = str(manifest["run_id"])
+    bottom = manifest["layers"][0]
+    gh = gh_path()
+    with tempfile.TemporaryDirectory(prefix="gh-address-cr-stack-e2e-") as workdir:
+        clone = Path(workdir) / "clone"
+        run_local([gh, "repo", "clone", repo, str(clone)], cwd=Path(workdir))
+        run_local([gh, "stack", "checkout", str(manifest["stack_number"])], cwd=clone)
+        if action == "rebase":
+            # Shift the reviewed line, then cascade through the upper members like a lower-layer fix would.
+            run_local(["git", "checkout", "-q", str(bottom["branch"])], cwd=clone)
+            target = clone / str(bottom["path"])
+            target.write_text("rebase scenario line\n" + target.read_text(encoding="utf-8"), encoding="utf-8")
+            run_local(["git", "add", str(bottom["path"])], cwd=clone)
+            run_local(["git", "commit", "-q", "-m", f"test: stacked PR E2E {run_id} rebase scenario"], cwd=clone)
+            run_local([gh, "stack", "rebase"], cwd=clone)
+            run_local([gh, "stack", "push"], cwd=clone)
+        elif action == "merge-bottom":
+            run_local([gh, "stack", "merge", str(bottom["pr_number"]), "--yes", "--squash"], cwd=clone)
+        else:  # pragma: no cover - guarded by argparse choices
+            raise SandboxError(f"Unknown stack scenario: {action}")
+    time.sleep(10)  # GitHub rewrites the remaining members asynchronously after a merge or push
+    outcome = refresh(manifest)
+    outcome["scenario"] = action
+    return outcome
+
+
+def layer_gate(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Report each layer's own final-gate verdict without changing any state."""
+    validate_fixture_manifest(manifest)
+    repo = str(manifest["repo"])
+    results = []
+    for layer in manifest["layers"]:
+        gate = run_runtime_json(
+            ["final-gate", repo, str(layer["pr_number"]), "--machine", "--no-auto-clean"],
+            accepted_exit_codes=(0, 5),
+        )
+        results.append(
+            {
+                "pr_number": int(layer["pr_number"]),
+                "status": gate.get("status"),
+                "reason_code": gate.get("reason_code"),
+                "failure_codes": gate.get("failure_codes"),
+            }
+        )
+    return {"status": "OBSERVED", "repo": repo, "layers": results}
+
+
+def fix_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the middle layer's fixture thread as a `fix`, which records revision-bound validation evidence.
+
+    Unlike `exercise` (which rejects every thread and so needs no validation evidence), this puts evidence
+    on a stacked member so a later `rebase` or `merge-bottom` followed by `gate` shows whether it survives.
+    """
+    validate_fixture_manifest(manifest)
+    verify(manifest)
+    repo = str(manifest["repo"])
+    layer = manifest["layers"][1]
+    pr_number = str(layer["pr_number"])
+    address = run_runtime_json(["address", repo, pr_number], accepted_exit_codes=(0, 5))
+    item_id = address.get("item_id")
+    if not isinstance(item_id, str) or not item_id.startswith("github-thread:"):
+        raise SandboxError(f"PR #{pr_number} did not expose a claimable GitHub review thread.")
+    selected = next((row for row in address.get("threads", []) if isinstance(row, dict) and row.get("item_id") == item_id), None)
+    if selected is None or selected.get("body") != fixture_review_body(str(layer["name"])) or selected.get("path") != layer["path"]:
+        raise SandboxError(f"PR #{pr_number} selected an unrelated review thread; refusing to resolve it.")
+    run_runtime_json(
+        [
+            "agent", "resolve", repo, pr_number, item_id,
+            "--disposition", "fix",
+            "--commit", str(layer["head_sha"]),
+            "--file", str(layer["path"]),
+            "--why", "Synthetic E2E fixture fix; no product change is required.",
+            "--summary", "Synthetic E2E fixture fix; no product change is required.",
+            "--validation", "true=passed",
+            "--agent-id", "stacked-pr-e2e",
+        ]
+    )  # fmt: skip
+    run_runtime_json(["agent", "publish", repo, pr_number, "--agent-id", "stacked-pr-e2e"])
+    outcome = layer_gate(manifest)
+    outcome["scenario"] = "fix-evidence"
+    outcome["fixed_pr_number"] = int(pr_number)
+    return outcome
+
+
 def cleanup(manifest: dict[str, Any]) -> dict[str, Any]:
     validate_fixture_manifest(manifest)
     verify(manifest)
     repo = str(manifest["repo"])
     stack_number = int(manifest["stack_number"])
-    gh_api(f"repos/{repo}/stacks/{stack_number}/unstack", method="POST")
+    pulls = {int(layer["pr_number"]): gh_api(f"repos/{repo}/pulls/{layer['pr_number']}") for layer in manifest["layers"]}
+    any_merged = any(pull.get("merged_at") for pull in pulls.values())
+    try:
+        gh_api(f"repos/{repo}/stacks/{stack_number}/unstack", method="POST")
+    except SandboxError:
+        # A stack whose members are all closed or merged has nothing left to unstack.
+        if not any_merged:
+            raise
     for layer in reversed(manifest["layers"]):
-        gh_api(f"repos/{repo}/pulls/{layer['pr_number']}", method="PATCH", payload={"state": "closed"})
-        gh_api(f"repos/{repo}/git/refs/heads/{layer['branch']}", method="DELETE")
+        pull = pulls[int(layer["pr_number"])]
+        if pull.get("state") != "closed":
+            gh_api(f"repos/{repo}/pulls/{layer['pr_number']}", method="PATCH", payload={"state": "closed"})
+        try:
+            gh_api(f"repos/{repo}/git/refs/heads/{layer['branch']}", method="DELETE")
+        except SandboxError as exc:
+            if "does not exist" not in str(exc).lower() and "not found" not in str(exc).lower():
+                raise
     return {"status": "CLEANED", "repo": repo, "stack_number": stack_number}
 
 
@@ -555,7 +706,10 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("action", choices=("provision", "verify", "exercise", "cleanup"))
+    result.add_argument(
+        "action",
+        choices=("provision", "verify", "exercise", "fix-evidence", "gate", "refresh", "rebase", "merge-bottom", "cleanup"),
+    )
     result.add_argument("--repo", default=DEFAULT_REPO)
     result.add_argument("--run-id", default="")
     result.add_argument("--manifest", type=Path, required=True)
@@ -571,8 +725,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             manifest = read_manifest(args.manifest)
             assert_sandbox_repo(str(manifest["repo"]), allow_non_sandbox=args.allow_non_sandbox)
-            actions = {"verify": verify, "exercise": exercise, "cleanup": cleanup}
-            result = actions[args.action](manifest)
+            if args.action in {"rebase", "merge-bottom"}:
+                result = stack_scenario(manifest, args.action)
+                write_manifest(args.manifest, manifest)
+            elif args.action == "refresh":
+                result = refresh(manifest)
+                write_manifest(args.manifest, manifest)
+            else:
+                actions = {
+                    "verify": verify,
+                    "exercise": exercise,
+                    "fix-evidence": fix_evidence,
+                    "gate": layer_gate,
+                    "cleanup": cleanup,
+                }
+                result = actions[args.action](manifest)
     except (SandboxError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         print(json.dumps({"status": "FAILED", "reason": str(exc)}, sort_keys=True), file=sys.stderr)
         return 5

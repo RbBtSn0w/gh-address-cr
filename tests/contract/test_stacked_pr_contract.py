@@ -183,7 +183,7 @@ class RevisionBindingContractTests(unittest.TestCase):
         original = project_stack_context(stack_observation(selected_pr_number="102"))
         binding = revision_binding_for_context(original)
         changed = stack_observation(selected_pr_number="102")
-        changed["members"][1]["head_oid"] = "f" * 40
+        changed["members"][1]["head_tree_oid"] = "f" * 40
 
         class Client:
             side_effect_count = 0
@@ -222,7 +222,7 @@ class RevisionBindingContractTests(unittest.TestCase):
         original = project_stack_context(stack_observation(selected_pr_number="102"))
         binding = revision_binding_for_context(original)
         changed = stack_observation(selected_pr_number="102")
-        changed["members"][1]["head_oid"] = "f" * 40
+        changed["members"][1]["head_tree_oid"] = "f" * 40
         refreshed = project_stack_context(changed)
 
         self.assertEqual(compare_revision_binding(binding, refreshed), "STALE_REQUEST_CONTEXT")

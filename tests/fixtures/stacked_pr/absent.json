@@ -7,7 +7,7 @@
         "isDraft": false,
         "baseRefName": "main",
         "headRefName": "feature/standalone",
-        "headRefOid": "1111111111111111111111111111111111111111",
+        "headRefOid": "1111111111111111111111111111111111111111", "headRef": {"target": {"oid": "1111111111111111111111111111111111111111", "tree": {"oid": "e111111111111111111111111111111111111111"}}},
         "mergeQueueEntry": null,
         "stackEntry": null,
         "stack": null

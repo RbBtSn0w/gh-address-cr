@@ -81,6 +81,7 @@ def pull_request_summary(state):
         "baseRefName": "main",
         "headRefName": state["head_ref"],
         "headRefOid": state["head_sha"],
+        "headRef": {"target": {"oid": state["head_sha"], "tree": {"oid": "t" + state["head_sha"][1:]}}},
         "mergeQueueEntry": None,
         "stackEntry": None,
         "stack": None,
