@@ -340,11 +340,28 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "compatible")
         self.assertEqual(payload["runtime_package"], "gh-address-cr")
 
+    def test_supported_python_versions_agree_across_metadata_lint_typing_and_ci(self):
+        supported = ("3.12", "3.13", "3.14")
+        text = PYPROJECT.read_text(encoding="utf-8")
+        ci = CI_WORKFLOW.read_text(encoding="utf-8")
+
+        for version in supported:
+            self.assertIn(f'"Programming Language :: Python :: {version}"', text)
+        for retired in ("3.10", "3.11"):
+            self.assertNotIn(f'"Programming Language :: Python :: {retired}"', text)
+        self.assertIn('target-version = "py312"', text)
+        self.assertIn('python_version = "3.12"', text)
+        # Read the versions out of the matrix list so harmless formatting changes (spacing, quote style,
+        # line wrapping) do not fail the test while a changed version set still does.
+        matrix = re.search(r"python-version:\s*\[([^\]]*)\]", ci)
+        self.assertIsNotNone(matrix, "CI test matrix must declare python-version as a list")
+        self.assertEqual(re.findall(r"\d+\.\d+", matrix.group(1)), list(supported))
+
     def test_pyproject_declares_distribution_metadata_and_runtime_dependencies(self):
         text = PYPROJECT.read_text(encoding="utf-8")
 
         self.assertIn('name = "gh-address-cr"', text)
-        self.assertIn('requires-python = ">=3.10"', text)
+        self.assertIn('requires-python = ">=3.12"', text)
         self.assertIn('readme = "README.md"', text)
         self.assertIn('license = "MIT"', text)
         self.assertIn('license-files = ["LICENSE"]', text)
@@ -353,7 +370,6 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('"opentelemetry-sdk>=1.30"', text)
         self.assertIn('"opentelemetry-exporter-otlp-proto-http>=1.30"', text)
         self.assertIn('"requests>=2.31.0"', text)
-        self.assertIn("Programming Language :: Python :: 3.10", text)
         self.assertIn("Operating System :: OS Independent", text)
         self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
