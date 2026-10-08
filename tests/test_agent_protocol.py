@@ -143,9 +143,10 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
         )
 
         self.assertEqual(context["stack_context"]["schema_version"], "stack_context.v1")
-        self.assertEqual(context["revision_binding"]["schema_version"], "revision_binding.v1")
+        self.assertEqual(context["revision_binding"]["schema_version"], "revision_binding.v2")
         self.assertEqual(context["revision_binding"]["pr_number"], "102")
         self.assertTrue(context["revision_binding"]["head_oid"])
+        self.assertTrue(context["revision_binding"]["head_tree_oid"])
         self.assertTrue(context["revision_binding"]["topology_fingerprint"].startswith("sha256:"))
 
     def test_stack_management_actions_are_explicitly_forbidden(self):
@@ -191,9 +192,10 @@ class ActionRequestSchemaTests(ActionProtocolTestCase):
                 "repo": "octo/example",
                 "pr_number": "102",
                 "revision_binding": {
-                    "schema_version": "revision_binding.v1",
+                    "schema_version": "revision_binding.v2",
                     "pr_number": "102",
                     "head_oid": "2" * 40,
+                    "head_tree_oid": "e" * 40,
                     "stack_number": 7,
                     "stack_position": 2,
                     "topology_fingerprint": "sha256:fixture",

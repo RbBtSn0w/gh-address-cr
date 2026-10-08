@@ -103,6 +103,7 @@ class _CountingClient:
                     "base_ref_name": "main",
                     "head_ref_name": "feature",
                     "head_oid": "a" * 40,
+                    "head_tree_oid": "e" * 40,
                     "merge_queue_state": None,
                 },
                 "members": [],

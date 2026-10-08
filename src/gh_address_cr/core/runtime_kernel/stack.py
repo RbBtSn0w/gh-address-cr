@@ -14,7 +14,7 @@ STACK_OBSERVATION_SCHEMA_VERSION = "stack_observation.v1"
 STACK_CONTEXT_SCHEMA_VERSION = "stack_context.v1"
 STACK_AVAILABILITIES = frozenset({"absent", "present", "unavailable", "invalid"})
 PULL_REQUEST_STATES = frozenset({"OPEN", "CLOSED", "MERGED"})
-REVISION_BINDING_SCHEMA_VERSION = "revision_binding.v1"
+REVISION_BINDING_SCHEMA_VERSION = "revision_binding.v2"
 STACK_MANAGEMENT_ACTIONS = (
     "create_stack",
     "checkout_stack",
@@ -38,6 +38,7 @@ class PullRequestMemberFact:
     base_ref_name: str
     head_ref_name: str
     head_oid: str
+    head_tree_oid: str
     merge_queue_state: str | None = None
 
     @classmethod
@@ -48,6 +49,7 @@ class PullRequestMemberFact:
         base_ref_name = str(payload.get("base_ref_name") or "").strip()
         head_ref_name = str(payload.get("head_ref_name") or "").strip()
         head_oid = str(payload.get("head_oid") or "").strip()
+        head_tree_oid = str(payload.get("head_tree_oid") or "").strip()
         if position < 1:
             raise ValueError("invalid_position")
         if not pr_number.isdigit() or int(pr_number) < 1:
@@ -60,6 +62,9 @@ class PullRequestMemberFact:
             raise ValueError("missing_head_ref")
         if not head_oid:
             raise ValueError("missing_head_oid")
+        # A merged member's head branch is usually deleted, so its tree is unreadable and never gates evidence.
+        if not head_tree_oid and state != "MERGED":
+            raise ValueError("missing_head_tree_oid")
         queue_state = payload.get("merge_queue_state")
         return cls(
             position=position,
@@ -69,6 +74,7 @@ class PullRequestMemberFact:
             base_ref_name=base_ref_name,
             head_ref_name=head_ref_name,
             head_oid=head_oid,
+            head_tree_oid=head_tree_oid,
             merge_queue_state=str(queue_state).lower() if queue_state else None,
         )
 
@@ -81,6 +87,7 @@ class PullRequestMemberFact:
             "base_ref_name": self.base_ref_name,
             "head_ref_name": self.head_ref_name,
             "head_oid": self.head_oid,
+            "head_tree_oid": self.head_tree_oid,
             "merge_queue_state": self.merge_queue_state,
         }
 
@@ -230,7 +237,7 @@ def project_stack_context(payload: Mapping[str, Any]) -> StackContext:
 
 
 def unavailable_stack_context(repo: str, pr_number: str, *, observed_at: str | None = None) -> StackContext:
-    """Return the bounded fail-open projection for a failed preview-only read."""
+    """Return the bounded fail-open projection for a stack read the host cannot serve."""
     timestamp = observed_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return project_stack_context(
         {
@@ -304,6 +311,7 @@ def revision_binding_for_context(context: StackContext) -> JsonDict | None:
         "schema_version": REVISION_BINDING_SCHEMA_VERSION,
         "pr_number": selected.pr_number,
         "head_oid": selected.head_oid,
+        "head_tree_oid": selected.head_tree_oid,
         "stack_number": context.stack_number,
         "stack_position": selected.position,
         "topology_fingerprint": context.topology_fingerprint,
@@ -348,7 +356,11 @@ def compare_revision_binding(binding: Mapping[str, Any] | None, current: StackCo
     expected = revision_binding_for_context(current)
     if expected is None:
         return protocol_codes.STACK_CONTEXT_UNAVAILABLE
-    fields = ("schema_version", "pr_number", "head_oid", "stack_number", "stack_position", "topology_fingerprint")
+    # Evidence is valid while the validated content is unchanged. The head tree already contains the trunk and
+    # every lower layer, so a rebase that keeps content, a push to a higher layer, or a position renumbering after
+    # a lower merge must not stale it. head_oid, stack_number, stack_position and topology_fingerprint stay in the
+    # binding for audit only.
+    fields = ("schema_version", "pr_number", "head_tree_oid")
     if any(binding.get(field) != expected.get(field) for field in fields):
         return protocol_codes.STALE_REQUEST_CONTEXT
     return None

@@ -40,6 +40,7 @@ def stack_member(
     base: str,
     head: str,
     head_oid: str | None = None,
+    head_tree_oid: str | None = None,
     state: str = "OPEN",
     is_draft: bool = False,
     merge_queue_state: str | None = None,
@@ -52,6 +53,7 @@ def stack_member(
         "base_ref_name": base,
         "head_ref_name": head,
         "head_oid": head_oid or f"{position}" * 40,
+        "head_tree_oid": head_tree_oid or chr(ord("a") + position) * 40,
         "merge_queue_state": merge_queue_state,
     }
 

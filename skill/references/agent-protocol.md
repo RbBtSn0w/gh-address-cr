@@ -6,7 +6,10 @@ For a stacked PR, `ActionRequest.repository_context` may add versioned
 `stack_context` and `revision_binding` objects. They are runtime-owned and part
 of the immutable request hash. Workers act only on the selected PR and never
 manage the stack. Submit and publish refresh GitHub context and reject stale
-head or topology evidence before side effects.
+evidence before side effects. `revision_binding.v2` gates on `pr_number` and
+`head_tree_oid` (the member's cumulative content); `head_oid`, `stack_number`,
+`stack_position` and `topology_fingerprint` are recorded for audit only. A
+`revision_binding.v1` record is stale and requires fresh evidence.
 
 If a request was issued while stack context was unavailable, submit refreshes
 again. Discovery of current stack membership rejects that unbound request as

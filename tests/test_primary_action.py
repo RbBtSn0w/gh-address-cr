@@ -267,6 +267,7 @@ class PrimaryActionProjectionTests(unittest.TestCase):
                                 "base_ref_name": "main",
                                 "head_ref_name": "feature/ux",
                                 "head_oid": "a" * 40,
+                                "head_tree_oid": "e" * 40,
                             }
                         ],
                     }

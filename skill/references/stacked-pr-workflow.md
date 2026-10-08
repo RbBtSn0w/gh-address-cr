@@ -86,13 +86,14 @@ separate authorization.
 
 ## Refresh After Propagation
 
-A cascading rebase or push changes member revisions and may change the topology
-fingerprint. After propagation:
+A cascading rebase or push changes member commit ids and may change the topology
+fingerprint, but evidence is bound to member content (`head_tree_oid`), so only
+members whose content changed lose their evidence. After propagation:
 
 1. Discard the old ActionRequest and response skeleton.
 2. Rerun `address` or the runtime-provided refresh command for the owning PR.
 3. Request fresh work and record validation against the current owning revision.
-4. Revalidate every affected upper member whose revision changed.
+4. Revalidate every affected upper member whose content changed.
 5. Run the owning layer's `final-gate`, then run `final-gate --stack` through
    the selected upper member when aggregate readiness is required.
 
