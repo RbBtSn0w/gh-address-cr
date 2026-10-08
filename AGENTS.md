@@ -50,7 +50,7 @@ Follow this order of precedence:
 - When CLI or skill behavior is modernized, update obsolete flags, pathways, references, and compatibility glue in the same documented contract change.
 
 ### Python Environment
-- **Version**: Python 3.10+ (enforced by `pyproject.toml`).
+- **Version**: Python 3.12+ (enforced by `pyproject.toml`). Support covers the latest three stable CPython releases (3.12, 3.13, 3.14); drop the oldest when a new stable release ships or it reaches end of life.
 - **Install for dev**: `pip install -e .` (required; test discovery depends on the installed package).
 
 ### Testable Contracts And Fail-Fast Changes
