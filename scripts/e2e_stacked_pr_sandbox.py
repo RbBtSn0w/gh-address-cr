@@ -671,12 +671,13 @@ def cleanup(manifest: dict[str, Any]) -> dict[str, Any]:
     repo = str(manifest["repo"])
     stack_number = int(manifest["stack_number"])
     pulls = {int(layer["pr_number"]): gh_api(f"repos/{repo}/pulls/{layer['pr_number']}") for layer in manifest["layers"]}
-    any_merged = any(pull.get("merged_at") for pull in pulls.values())
+    all_closed = all(pull.get("state") == "closed" for pull in pulls.values())
     try:
         gh_api(f"repos/{repo}/stacks/{stack_number}/unstack", method="POST")
     except SandboxError:
-        # A stack whose members are all closed or merged has nothing left to unstack.
-        if not any_merged:
+        # Only a stack whose members are all closed or merged has nothing left to unstack. Any other failure
+        # (auth, an API outage, a member that is still open) must surface instead of being swallowed.
+        if not all_closed:
             raise
     for layer in reversed(manifest["layers"]):
         pull = pulls[int(layer["pr_number"])]

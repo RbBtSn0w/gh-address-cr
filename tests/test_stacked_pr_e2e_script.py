@@ -259,7 +259,10 @@ class StackedPRE2EScriptTests(unittest.TestCase):
 
         self.assertFalse(any(method != "GET" for method, _, _ in calls))
 
-    def _live_api(self, manifest, *, head_overrides=None, base_overrides=None, merged=(), existing_refs=True):
+    def _live_api(
+        self, manifest, *, head_overrides=None, base_overrides=None, merged=(), closed=(), existing_refs=True,
+        unstack_error=None,
+    ):
         """Fake GitHub for a fixture whose members drifted the way GA rewrites them."""
         head_overrides = head_overrides or {}
         base_overrides = base_overrides or {}
@@ -270,6 +273,8 @@ class StackedPRE2EScriptTests(unittest.TestCase):
             if endpoint.endswith("/stacks/7"):
                 return {"number": 7, "node_id": "STACK_7", "pull_requests": [{"number": n} for n in (101, 102, 103)]}
             if endpoint.endswith("/unstack"):
+                if unstack_error:
+                    raise self.script.SandboxError(f"GitHub API POST {endpoint} failed: {unstack_error}")
                 return None
             if "/comments" in endpoint:
                 number = int(endpoint.split("/pulls/")[1].split("/")[0])
@@ -286,7 +291,7 @@ class StackedPRE2EScriptTests(unittest.TestCase):
                     "number": number,
                     "title": f"test: stacked PR E2E {manifest['run_id']} {layer['name']}",
                     "body": self.script.fixture_pull_body(manifest["run_id"], layer["name"], layer["position"]),
-                    "state": "closed" if number in merged else "open",
+                    "state": "closed" if number in merged or number in closed else "open",
                     "merged_at": "2026-10-08T00:00:00Z" if number in merged else None,
                     "head": {"ref": layer["branch"], "sha": head_overrides.get(number, layer["head_sha"])},
                     "base": {"ref": base_overrides.get(number, layer["base_branch"])},
@@ -348,6 +353,40 @@ class StackedPRE2EScriptTests(unittest.TestCase):
         self.assertEqual(result["status"], "CLEANED")
         closed = [endpoint for method, endpoint, _ in calls if method == "PATCH"]
         self.assertEqual(closed, ["repos/owner/demo-repo/pulls/103"])
+
+    def test_cleanup_ignores_an_unstack_failure_only_when_every_member_is_already_closed(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, calls = self._live_api(
+            manifest, merged={101, 102}, closed={103}, unstack_error="nothing left to unstack", existing_refs=False
+        )
+        self.script.gh_api = api
+
+        result = self.script.cleanup(manifest)
+
+        self.assertEqual(result["status"], "CLEANED")
+        self.assertFalse([endpoint for method, endpoint, _ in calls if method == "PATCH"])
+
+    def test_cleanup_surfaces_an_unstack_failure_while_a_member_is_still_open(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, calls = self._live_api(manifest, merged={101}, unstack_error="HTTP 503 service unavailable")
+        self.script.gh_api = api
+
+        with self.assertRaises(self.script.SandboxError) as caught:
+            self.script.cleanup(manifest)
+
+        self.assertIn("503", str(caught.exception))
+        self.assertFalse([call for call in calls if call[0] in {"PATCH", "DELETE"}])
+
+    def test_cleanup_surfaces_an_unstack_failure_when_nothing_was_merged(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest, unstack_error="HTTP 401 bad credentials")
+        self.script.gh_api = api
+
+        with self.assertRaises(self.script.SandboxError):
+            self.script.cleanup(manifest)
 
     def test_stack_scenario_runs_gh_stack_in_a_clone_then_refreshes(self):
         self.script = load_script()
