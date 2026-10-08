@@ -343,7 +343,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
     def test_supported_python_versions_agree_across_metadata_lint_typing_and_ci(self):
         supported = ("3.12", "3.13", "3.14")
         text = PYPROJECT.read_text(encoding="utf-8")
-        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        ci = CI_WORKFLOW.read_text(encoding="utf-8")
 
         for version in supported:
             self.assertIn(f'"Programming Language :: Python :: {version}"', text)
@@ -351,7 +351,11 @@ class RuntimePackagingTest(PythonScriptTestCase):
             self.assertNotIn(f'"Programming Language :: Python :: {retired}"', text)
         self.assertIn('target-version = "py312"', text)
         self.assertIn('python_version = "3.12"', text)
-        self.assertIn('python-version: ["3.12", "3.13", "3.14"]', ci)
+        # Read the versions out of the matrix list so harmless formatting changes (spacing, quote style,
+        # line wrapping) do not fail the test while a changed version set still does.
+        matrix = re.search(r"python-version:\s*\[([^\]]*)\]", ci)
+        self.assertIsNotNone(matrix, "CI test matrix must declare python-version as a list")
+        self.assertEqual(re.findall(r"\d+\.\d+", matrix.group(1)), list(supported))
 
     def test_pyproject_declares_distribution_metadata_and_runtime_dependencies(self):
         text = PYPROJECT.read_text(encoding="utf-8")
