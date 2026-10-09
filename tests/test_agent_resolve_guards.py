@@ -218,5 +218,26 @@ class DeclineItemResolutionValidationTest(unittest.TestCase):
         self.assertEqual(ctx.exception.reason_code, "UNSUPPORTED_DECLINE_RESOLUTION")
 
 
+class ResolveMultiFileFlagsTest(PythonScriptTestCase):
+    """Documented multi-file forms: repeated --file == quoted comma --files."""
+
+    def test_repeated_file_and_quoted_files_parse_identically(self):
+        from gh_address_cr.commands.agent import _parse_agent_files
+
+        repeated = _parse_agent_files(None, ["src/a.py", "src/b.py"])
+        quoted = _parse_agent_files("src/a.py, src/b.py")
+        self.assertEqual(repeated, ["src/a.py", "src/b.py"])
+        self.assertEqual(repeated, quoted)
+
+    def test_unquoted_space_separated_files_fail_argument_parsing(self):
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "github-thread:multi",
+            "--files", "src/a.py", "src/b.py",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: src/b.py", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

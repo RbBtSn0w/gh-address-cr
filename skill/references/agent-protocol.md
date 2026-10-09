@@ -80,6 +80,7 @@ Local findings instead use `agent classify` → `agent next` → response skelet
 
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed@<ms>ms> [--severity P0|P1|P2|P3|P4 --severity-note <why>] [--publish]`
   - Single unified resolution surface (disposition=fix, selection=item_id). Classifies, claims, submits, and optionally publishes one straightforward GitHub-thread fix. Classification is recorded internally, so no separate `agent classify` round-trip is required.
+  - For multiple touched files, pass repeated `--file <path1> --file <path2>` or a quoted string (`--files "<path1>, <path2>"`). Unquoted space-delimited paths after `--files` cause CLI argument parse errors.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition trivial ... [--publish]`
   - Narrow fast path for documentation or typo-only GitHub threads. Non-trivial or sensitive threads fail with `TRIVIAL_THREAD_NOT_ELIGIBLE`.
 - `gh-address-cr agent resolve <owner/repo> <pr_number> <item_id> --disposition reject|clarify|defer --why <text> [--stale] [--publish]`
