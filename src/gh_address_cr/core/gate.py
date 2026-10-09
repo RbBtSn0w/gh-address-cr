@@ -13,6 +13,7 @@ from gh_address_cr.core.github_thread_state import (
     is_stale_or_outdated_github_thread,
 )
 from gh_address_cr.core.logic_validation import generate_logic_validation_signals
+from gh_address_cr.core.parallel_reads import gather_reads
 from gh_address_cr.core.runtime_kernel.final_gate import (
     COUNT_KEYS,
     FAILURE_ORDER,
@@ -151,16 +152,27 @@ class Gatekeeper:
             if require_existing_session or exc.reason_code != "SESSION_NOT_FOUND":
                 raise
             session = manager.create(status="WAITING_FOR_GATE")
-        if observed_stack_context is not None:
-            observed_stack = observed_stack_context
-        else:
-            observed_stack = None
+        # Independent reads are issued together; outcomes are consumed in the original
+        # sequential order so the first failing read still decides which error surfaces.
+        # Wave 1: the viewer login and stack facts do not depend on each other.
+        # Wave 2: threads, pending reviews, and checks only need the login from wave 1.
+        def read_stack() -> Any:
             get_stack_context = getattr(self.github_client, "get_stack_context", None)
-            if callable(get_stack_context):
-                try:
-                    observed_stack = get_stack_context(repo, str(pr_number))
-                except Exception:
-                    observed_stack = unavailable_stack_context(repo, str(pr_number))
+            if not callable(get_stack_context):
+                return None
+            try:
+                return get_stack_context(repo, str(pr_number))
+            except Exception:
+                return unavailable_stack_context(repo, str(pr_number))
+
+        if observed_stack_context is not None:
+            # The stack facts are already in hand, so there is nothing to overlap with.
+            observed_stack = observed_stack_context
+            current_login = self.github_client.viewer_login()
+        else:
+            stack_outcome, login_outcome = gather_reads(read_stack, self.github_client.viewer_login)
+            observed_stack = stack_outcome.unwrap()
+            current_login = login_outcome.unwrap()
         if observed_stack is not None:
             try:
                 serialized_stack = observed_stack.to_dict()
@@ -170,20 +182,24 @@ class Gatekeeper:
                 from gh_address_cr.core.session import cache_pull_request_context
 
                 cache_pull_request_context(session, serialized_stack)
-        current_login = self.github_client.viewer_login()
-        remote_threads = (
-            _load_thread_snapshot(snapshot_path)
-            if snapshot_path
-            else self.github_client.list_threads(repo, str(pr_number))
-        )
-        pending_reviews = self.github_client.list_pending_reviews(repo, str(pr_number), current_login)
-        check_runs: list[dict[str, Any]] = []
-        if require_checks or require_required_checks:
+
+        def read_checks() -> list[dict[str, Any]]:
             try:
-                check_runs = self.github_client.list_pr_checks(repo, str(pr_number), required=require_required_checks)
+                return self.github_client.list_pr_checks(repo, str(pr_number), required=require_required_checks)
             except GitHubNoChecksError:
                 # No (required) check runs: evaluated as FINAL_GATE_REQUIRED_CHECKS_MISSING.
-                check_runs = []
+                return []
+
+        threads_outcome, pending_outcome, checks_outcome = gather_reads(
+            (lambda: _load_thread_snapshot(snapshot_path))
+            if snapshot_path
+            else (lambda: self.github_client.list_threads(repo, str(pr_number))),
+            lambda: self.github_client.list_pending_reviews(repo, str(pr_number), current_login),
+            read_checks if (require_checks or require_required_checks) else (lambda: []),
+        )
+        remote_threads = threads_outcome.unwrap()
+        pending_reviews = pending_outcome.unwrap()
+        check_runs: list[dict[str, Any]] = checks_outcome.unwrap()
         previous_item_ids = set(map(str, session.get("items") or {}))
         merged_session = _session_with_remote_threads(session, remote_threads, current_login=current_login)
         from gh_address_cr.evidence.ledger import record_new_item_observations
