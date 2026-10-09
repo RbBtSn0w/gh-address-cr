@@ -165,11 +165,14 @@ class Gatekeeper:
             except Exception:
                 return unavailable_stack_context(repo, str(pr_number))
 
-        stack_outcome, login_outcome = gather_reads(
-            (lambda: observed_stack_context) if observed_stack_context is not None else read_stack,
-            self.github_client.viewer_login,
-        )
-        observed_stack = stack_outcome.unwrap()
+        if observed_stack_context is not None:
+            # The stack facts are already in hand, so there is nothing to overlap with.
+            observed_stack = observed_stack_context
+            current_login = self.github_client.viewer_login()
+        else:
+            stack_outcome, login_outcome = gather_reads(read_stack, self.github_client.viewer_login)
+            observed_stack = stack_outcome.unwrap()
+            current_login = login_outcome.unwrap()
         if observed_stack is not None:
             try:
                 serialized_stack = observed_stack.to_dict()
@@ -179,7 +182,6 @@ class Gatekeeper:
                 from gh_address_cr.core.session import cache_pull_request_context
 
                 cache_pull_request_context(session, serialized_stack)
-        current_login = login_outcome.unwrap()
 
         def read_checks() -> list[dict[str, Any]]:
             try:
