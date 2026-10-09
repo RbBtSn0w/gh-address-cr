@@ -160,6 +160,7 @@ class EfficiencyReportPayload(TypedDict):
     duration_observed: bool
     telemetry_overhead_budget_ms: int
     telemetry_overhead_ms: float | None
+    telemetry_shutdown_wait_ms: float | None
     host_metrics: dict[str, int]
     slowest_operations: list[SlowestOperation]
     error_prone_operations: list[dict[str, Any]]

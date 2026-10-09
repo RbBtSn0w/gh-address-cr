@@ -211,9 +211,12 @@ Tests use the same stable service identity. As a distributable CLI,
 gateway-owned admission and destination configuration provide isolation.
 
 The CLI entrypoint initializes tracing before dispatch and calls
-`shutdown_telemetry()` in a `finally` block. It attempts to flush spans for up
-to 2.2 seconds, including a 2-second exporter timeout, then returns fail-open
-if the gateway remains unavailable.
+`shutdown_telemetry()` in a `finally` block. It waits at most 0.3 seconds
+(`SHUTDOWN_JOIN_TIMEOUT_SECONDS`) for the flush, then returns fail-open and
+abandons any export still in flight, so a slow or unreachable gateway cannot
+delay the command. The measured wait is recorded locally and counted in the
+next efficiency report's `telemetry_overhead_ms` (see
+`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`).
 For a custom operation:
 
 ```python

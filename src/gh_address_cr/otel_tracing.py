@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -37,6 +38,7 @@ from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
     PROCESS_EXIT_CODE,
 )
+from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
 
 SERVICE_NAME_VALUE = "gh-address-cr"
 SERVICE_NAMESPACE_VALUE = "com.hamiltonsnow"
@@ -55,7 +57,10 @@ GATEWAY_ORIGINS = {
 _INSTRUMENTATION_NAME = "gh_address_cr"
 EXPORT_TIMEOUT_SECONDS = 2.0
 EXPORT_TIMEOUT_MILLIS = EXPORT_TIMEOUT_SECONDS * 1000
-SHUTDOWN_JOIN_TIMEOUT_SECONDS = 2.2
+# Documented bound on how long a CLI invocation may wait on the network at exit
+# (docs/rfcs/041-telemetry-shutdown-wait). An export still in flight after this is
+# abandoned with the daemon thread: dropping a span beats delaying every command.
+SHUTDOWN_JOIN_TIMEOUT_SECONDS = 0.3
 _SAFE_EXPORT_HEADERS = {"otel-gateway-profile": "anonymous-client-v1"}
 MAX_QUEUE_SIZE = 128
 MAX_EXPORT_BATCH_SIZE = 32
@@ -189,7 +194,11 @@ def _silence_exporter_diagnostics() -> None:
 
 
 def shutdown_telemetry() -> None:
-    """Attempt a bounded flush without delaying CLI completion."""
+    """Attempt a flush bounded by SHUTDOWN_JOIN_TIMEOUT_SECONDS.
+
+    The measured wait is recorded for the next efficiency report; it cannot be
+    part of this invocation's own report because it happens after output.
+    """
     global _trace_provider, _tracer
 
     provider = _trace_provider
@@ -204,8 +213,10 @@ def shutdown_telemetry() -> None:
         name="gh-address-cr-telemetry-shutdown",
         daemon=True,
     )
+    started_at = time.perf_counter()
     shutdown_thread.start()
     shutdown_thread.join(timeout=SHUTDOWN_JOIN_TIMEOUT_SECONDS)
+    record_shutdown_wait((time.perf_counter() - started_at) * 1000, timed_out=shutdown_thread.is_alive())
 
 
 def _shutdown_provider(provider: TracerProvider) -> None:
