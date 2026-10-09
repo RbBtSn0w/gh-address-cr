@@ -50,4 +50,4 @@ fi
 "${venv_dir}/bin/python" -m pip install --quiet --upgrade pip
 "${venv_dir}/bin/python" -m pip install --quiet -e "${repo_root}[dev]"
 
-echo "dev_setup: ready. Activate with: source ${venv_dir}/bin/activate" >&2
+printf 'dev_setup: ready. Activate with: source %q\n' "${venv_dir}/bin/activate" >&2
