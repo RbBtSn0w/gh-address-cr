@@ -1,3 +1,13 @@
+## [3.19.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.18.0...v3.19.0) (2026-10-09)
+
+### Features
+
+* **packaging:** support the latest three stable Python releases (3.12-3.14) ([#336](https://github.com/RbBtSn0w/gh-address-cr/issues/336)) ([119195d](https://github.com/RbBtSn0w/gh-address-cr/commit/119195d4b8b27226a4ef64e76b4ae3a4328b6fd6))
+
+### Bug Fixes
+
+* **stack:** bind revision evidence to head tree content for GA stacked PRs ([#335](https://github.com/RbBtSn0w/gh-address-cr/issues/335)) ([7dc8f82](https://github.com/RbBtSn0w/gh-address-cr/commit/7dc8f8294624c7ce4639977b4b588a4ba59e37b2))
+
 ## [3.18.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.17.0...v3.18.0) (2026-10-02)
 
 ### Features
