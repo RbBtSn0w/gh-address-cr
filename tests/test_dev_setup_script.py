@@ -36,6 +36,8 @@ class DevSetupScriptTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--venv", result.stderr)
+        self.assertIn("Why a venv", result.stderr)
+        self.assertIn("brew link", result.stderr)
 
 
 class DevSetupDocsTests(unittest.TestCase):

@@ -17,7 +17,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 
 usage() {
-    sed -n '2,5p' "${script_dir}/$(basename "${BASH_SOURCE[0]}")" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,13p' "${script_dir}/$(basename "${BASH_SOURCE[0]}")" | sed 's/^# \{0,1\}//' >&2
     echo "Options: --python <interpreter> (default python3)  --venv <dir> (default ${repo_root}/.venv)" >&2
 }
 
