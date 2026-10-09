@@ -122,8 +122,8 @@
   https://opentelemetry.io/docs/concepts/signals/traces/
 - OpenTelemetry trace API says child spans or events may represent
   sub-operations, with child spans measuring the timing of those operations:
-  https://opentelemetry.io/docs/docs/rfcs/otel/trace/api/
+  https://opentelemetry.io/docs/specs/otel/trace/api/
 - OpenTelemetry event semantic guidance emphasizes that events represent
   structured point-in-time details and should not duplicate all span-level
   context:
-  https://opentelemetry.io/docs/docs/rfcs/semconv/general/events/
+  https://opentelemetry.io/docs/specs/semconv/general/events/

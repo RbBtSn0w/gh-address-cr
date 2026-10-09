@@ -4,7 +4,6 @@
 # Implementation Plan: Workflow Gap Recovery
 
 **Branch**: `028-workflow-gap-recovery` | **Date**: 2026-07-07 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `/docs/rfcs/028-workflow-gap-recovery/spec.md`
 
 **Note**: This plan covers issues `#195` through `#200` as one runtime recovery and diagnostics hardening feature.
 

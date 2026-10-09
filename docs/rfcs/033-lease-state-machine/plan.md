@@ -4,7 +4,6 @@
 # Implementation Plan: Lease State Machine Contract
 
 **Branch**: `033-lease-state-machine` | **Date**: 2026-09-23 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `docs/rfcs/033-lease-state-machine/spec.md`
 
 ## Summary
 
