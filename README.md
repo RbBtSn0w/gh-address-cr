@@ -623,9 +623,12 @@ GitHub-direct runtime validation install:
 
 - `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git`
 
-Local editable development install:
+Local editable development install (use a virtual environment, never the system or Homebrew Python):
 
-- `python3 -m pip install -e .`
+- `scripts/dev_setup.sh` creates `.venv` and installs the package editable with the dev extras
+- `python3 -m pip install -e .` is the equivalent manual step, only inside an activated virtual environment
+
+Installing editable into the system or Homebrew Python writes a `gh-address-cr` script into its bin directory, which shadows the released CLI and makes `brew link` fail with "Target already exists".
 
 Packaged skill install:
 

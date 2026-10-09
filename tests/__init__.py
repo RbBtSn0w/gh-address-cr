@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError as exc:
     raise RuntimeError(
         "gh_address_cr is not installed. "
-        "Run 'pip install -e .' before running tests. "
+        "Run scripts/dev_setup.sh and activate .venv (or 'pip install -e .' inside a virtual environment) before running tests. "
         "See AGENTS.md § Verification Commands."
     ) from exc
 
