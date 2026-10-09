@@ -38,6 +38,9 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -266,6 +269,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           owner: RbBtSn0w
           repositories: homebrew-tap
+          permission-contents: write
 
       - name: Checkout Homebrew tap
         uses: actions/checkout@v4
