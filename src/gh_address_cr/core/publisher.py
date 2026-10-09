@@ -22,6 +22,9 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
+from gh_address_cr.core.reply_templates import (
+    reject_reply as render_reject_reply,
+)
 from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
@@ -684,6 +687,8 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
             return render_clarify_reply([reply_markdown.strip()]), None
         if resolution == "defer":
             return render_defer_reply([reply_markdown.strip()]), None
+        if resolution == "reject":
+            return render_reject_reply([reply_markdown.strip()]), None
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):

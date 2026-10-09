@@ -1306,6 +1306,61 @@ class NativeWorkflowTests(unittest.TestCase):
                 self.assertIn("The nil-validation branch now rejects missing values before use.", first_body)
                 self.assertIn("The logging path now omits the sensitive token mentioned in this thread.", second_body)
 
+    def test_publish_github_thread_response_renders_structured_reject_reply(self):
+        from gh_address_cr.core import publisher
+        from gh_address_cr.core.reply_templates import REPLY_ATTRIBUTION
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def __init__(self):
+                self.replies = []
+                self.resolved = []
+
+            def viewer_login(self):
+                return "agent-login"
+
+            def post_reply(self, repo, pr_number, thread_id, body):
+                self.replies.append((thread_id, body))
+                return "https://github.test/reply"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                self.resolved.append(thread_id)
+                return True
+
+        repo = "owner/repo"
+        pr_number = "123"
+        item = {
+            "item_id": "github-thread:THREAD_1",
+            "item_kind": "github_thread",
+            "source": "github",
+            "thread_id": "THREAD_1",
+            "state": "publish_ready",
+            "status": "OPEN",
+            "blocking": True,
+            "accepted_response": {
+                "resolution": "reject",
+                "note": "Architectural direction differs from suggestion.",
+                "reply_markdown": "Architectural direction differs from suggestion.",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self.write_session(repo, pr_number, item)
+                client = FakeGitHubClient()
+
+                result = publisher.publish_github_thread_responses(repo, pr_number, github_client=client)
+
+                self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+                self.assertEqual(len(client.replies), 1)
+                thread_id, body = client.replies[0]
+                self.assertEqual(thread_id, "THREAD_1")
+                self.assertIn("Thanks for the review.", body)
+                self.assertIn("Analysis & Rationale:", body)
+                self.assertIn("- Architectural direction differs from suggestion.", body)
+                self.assertIn("Decision:\n- Declined for the current PR.", body)
+                self.assertTrue(body.endswith(f"{REPLY_ATTRIBUTION}\n"))
+                self.assertEqual(client.resolved, ["THREAD_1"])
+
     def test_submit_action_response_with_publish_posts_and_resolves_thread(self):
         from gh_address_cr.core import agent_protocol
 
