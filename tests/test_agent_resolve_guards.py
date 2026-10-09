@@ -229,6 +229,35 @@ class ResolveMultiFileFlagsTest(PythonScriptTestCase):
         self.assertEqual(repeated, ["src/a.py", "src/b.py"])
         self.assertEqual(repeated, quoted)
 
+    def _clarify_matching(self, *selection_args):
+        SingleItemDeclineCLIRegressionTest.write_session(
+            self,
+            items=[
+                github_thread("github-thread:multi-a", path="src/a.py"),
+                github_thread("github-thread:multi-b", path="src/b.py"),
+            ],
+        )
+        result = self.run_runtime_module(
+            "agent", "resolve", self.repo, self.pr,
+            "--disposition", "clarify",
+            *selection_args,
+            "--why", "Needs the author's intent before this can be actioned.",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def _assert_selects_both_threads(self, payload):
+        # A successful resolve consumes the threads in the runtime store, so each
+        # CLI form is asserted in its own test against the same expected outcome.
+        self.assertEqual(payload["status"], "DECLINE_ALL_ACCEPTED")
+        self.assertEqual(payload["files"], ["src/a.py", "src/b.py"])
+
+    def test_cli_repeated_file_selects_every_listed_path(self):
+        self._assert_selects_both_threads(self._clarify_matching("--file", "src/a.py", "--file", "src/b.py"))
+
+    def test_cli_quoted_comma_separated_files_selects_every_listed_path(self):
+        self._assert_selects_both_threads(self._clarify_matching("--files", "src/a.py, src/b.py"))
+
     def test_unquoted_space_separated_files_fail_argument_parsing(self):
         result = self.run_runtime_module(
             "agent", "resolve", self.repo, self.pr,
