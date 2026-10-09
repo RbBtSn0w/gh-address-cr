@@ -335,10 +335,9 @@ def render_formula(
     url: str,
     sha256: str,
     python_dependency: str,
-    resources: tuple[dict[str, str], ...],
+    resources: tuple[dict[str, str], ...] = (),
     conflicts_with: tuple[str, ...] = (),
 ) -> str:
-    resource_blocks = render_resources(resources)
     python_for_venv = python_dependency.replace("@", "")
     conflict_lines = ""
     if conflicts_with:
@@ -352,8 +351,6 @@ def render_formula(
             )
         conflict_lines = "\n" + "\n".join(rendered_conflicts)
     return f'''class {class_name} < Formula
-  include Language::Python::Virtualenv
-
   desc "Deterministic PR review-resolution control plane runtime"
   homepage "https://github.com/RbBtSn0w/gh-address-cr"
   url "{url}"
@@ -361,11 +358,13 @@ def render_formula(
   license "MIT"
 
   depends_on "{python_dependency}"{conflict_lines}
-
-{resource_blocks}
+  depends_on "uv"
 
   def install
-    virtualenv_install_with_resources using: "{python_for_venv}"
+    python = formula_opt_bin("{python_dependency}")/"{python_for_venv}"
+    system "uv", "venv", "--python", python, libexec
+    system "uv", "pip", "install", "--python", libexec/"bin/python", "."
+    bin.install_symlink libexec/"bin/gh-address-cr"
   end
 
   test do
@@ -407,20 +406,7 @@ def main() -> int:
     args = parse_args()
     args.version = validate_version(args.version)
 
-    if args.pypi_json is not None:
-        root_payload = read_json(args.pypi_json)
-    elif args.sdist_path is None and args.sdist_url is None:
-        root_payload = fetch_pypi_json(
-            args.package_name,
-            args.version,
-            args.pypi_base_url,
-            args.retries,
-            args.retry_delay,
-        )
-    else:
-        root_payload = None
     url, sha256 = resolve_source(args)
-    resources = resolve_dependency_resources(args, root_payload)
     target_name = args.formula_name or args.package_name
     if target_name.endswith(".rb"):
         target_name = target_name[:-3]
@@ -429,7 +415,6 @@ def main() -> int:
         url=url,
         sha256=sha256,
         python_dependency=args.python_dependency,
-        resources=resources,
         conflicts_with=tuple(args.conflicts_with),
     )
 
@@ -438,12 +423,12 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "status": "RENDERED",
-                "version": args.version,
-                "url": url,
-                "sha256": sha256,
-                "resources": [resource["name"] for resource in resources],
                 "output": str(args.output),
+                "resources": [],
+                "sha256": sha256,
+                "status": "RENDERED",
+                "url": url,
+                "version": args.version,
             },
             sort_keys=True,
         )
