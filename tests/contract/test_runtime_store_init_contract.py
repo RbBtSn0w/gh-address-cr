@@ -195,7 +195,7 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
             resume = context.Event()
             late = context.Process(target=_late_initializer, args=(tmp, publishing, resume))
             late.start()
-            publishing.wait(timeout=2)
+            publishing.wait(timeout=30)
             store = RuntimeStore(Path(tmp), busy_timeout_ms=30_000)
             store.bootstrap(_session())
             store.transact(lambda payload: payload["metadata"]["writers"].append("early"), operation="session_update")

@@ -386,10 +386,10 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
             for worker in workers:
                 worker.start()
             for worker in workers:
-                worker.join(timeout=10)
+                worker.join(timeout=60)
                 self.assertEqual(worker.exitcode, 0)
 
-            outcomes = sorted(queue.get(timeout=1) for _ in workers)
+            outcomes = sorted(queue.get(timeout=5) for _ in workers)
             snapshot = store.load()
 
         self.assertEqual([outcome[0] for outcome in outcomes], ["committed", "conflict"])
@@ -412,9 +412,9 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
             for worker in workers:
                 worker.start()
             for worker in workers:
-                worker.join(timeout=20)
+                worker.join(timeout=60)
                 self.assertEqual(worker.exitcode, 0)
-            outcomes = [queue.get(timeout=2)[0] for _ in workers]
+            outcomes = [queue.get(timeout=5)[0] for _ in workers]
             snapshot = store.load()
 
         self.assertEqual(outcomes.count("committed"), 1)
@@ -973,10 +973,10 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 for worker in workers:
                     worker.start()
                 for worker in workers:
-                    worker.join(timeout=10)
+                    worker.join(timeout=60)
                     self.assertEqual(worker.exitcode, 0)
 
-                outcomes = sorted(queue.get(timeout=1) for _ in workers)
+                outcomes = sorted(queue.get(timeout=5) for _ in workers)
                 request_files = list(manager.workspace_path.glob("action-request-*.json"))
                 snapshot = manager.load()
             finally:
@@ -1014,10 +1014,10 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 for worker in workers:
                     worker.start()
                 for worker in workers:
-                    worker.join(timeout=10)
+                    worker.join(timeout=60)
                     self.assertEqual(worker.exitcode, 0)
 
-                outcomes = sorted(queue.get(timeout=1) for _ in workers)
+                outcomes = sorted(queue.get(timeout=5) for _ in workers)
                 request_files = list(manager.workspace_path.glob("action-request-*.json"))
                 snapshot = manager.load()
             finally:

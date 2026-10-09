@@ -15,7 +15,7 @@ We welcome contributions! Please follow these guidelines:
 -   **Shell Scripts**: Use `set -euo pipefail` for robustness. Follow `shellcheck` recommendations.
 -   **Documentation**: Keep `SKILL.md` and `README.md` up to date with any changes to the core protocol or script usage.
 -   **Templates**: If you add new reply templates, ensure they follow the evidence-first principles.
--   **Multi-process tests**: Runtime-store contract tests that need real cross-process contention use `multiprocessing.get_context("spawn")`, never `fork`. Forking a process that already used SQLite can crash the child with SIGSEGV (exit code -11) when Python links the macOS system SQLite, which is what pyenv builds on macOS do (Homebrew Python links Homebrew SQLite). Keep worker targets module-level and their arguments picklable.
+-   **Multi-process tests**: Runtime-store contract tests that need real cross-process contention use `multiprocessing.get_context("spawn")`, never `fork`. Forking a process that already used SQLite can crash the child with SIGSEGV (exit code -11) when Python links the macOS system SQLite, which pyenv builds on macOS often do by default (Homebrew Python links Homebrew SQLite); linkage varies by build options, so the safe rule is to avoid fork-after-SQLite. Keep worker targets module-level and their arguments picklable.
 -   **Commits (required for automated release)**: Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
 
 ## Release Process
