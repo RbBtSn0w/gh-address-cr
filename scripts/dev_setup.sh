@@ -22,10 +22,11 @@ usage() {
 }
 
 python_bin="python3"
+python_explicit=0
 venv_dir="${repo_root}/.venv"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --python) [ $# -ge 2 ] || { usage; exit 2; }; python_bin="$2"; shift 2 ;;
+        --python) [ $# -ge 2 ] || { usage; exit 2; }; python_bin="$2"; python_explicit=1; shift 2 ;;
         --venv) [ $# -ge 2 ] || { usage; exit 2; }; venv_dir="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "dev_setup: unknown argument: $1" >&2; usage; exit 2 ;;
@@ -39,6 +40,8 @@ command -v "${python_bin}" >/dev/null 2>&1 || { echo "dev_setup: interpreter not
 if [ ! -x "${venv_dir}/bin/python" ]; then
     echo "dev_setup: creating ${venv_dir}" >&2
     "${python_bin}" -m venv "${venv_dir}"
+elif [ "${python_explicit}" -eq 1 ]; then
+    echo "dev_setup: reusing existing ${venv_dir}; --python ${python_bin} only applies to a new venv (remove ${venv_dir} to switch interpreters)" >&2
 fi
 
 "${venv_dir}/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' \

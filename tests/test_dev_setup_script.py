@@ -46,6 +46,19 @@ class DevSetupScriptTests(unittest.TestCase):
             self.assertIn("failed to run", result.stderr)
             self.assertIn("remove", result.stderr)
 
+    def test_explicit_python_is_reported_as_ignored_for_an_existing_venv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = Path(tmp) / "venv"
+            (venv / "bin").mkdir(parents=True)
+            fake_python = venv / "bin" / "python"
+            fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            result = run("--python", "python3", "--venv", str(venv))
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("only applies to a new venv", result.stderr)
+
     def test_help_documents_why_a_venv_is_used(self):
         result = run("--help")
 

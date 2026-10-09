@@ -70,7 +70,11 @@ _REASON_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 
 def note_command_reason_code(reason_code: str | None) -> None:
-    """Record the reason code the current command emitted, for its outcome metric and root span."""
+    """Record the reason code the current command emitted, for its outcome metric and the current span.
+
+    Failure output helpers call this from the command handler, where the current span is the
+    CLI root span.
+    """
     _COMMAND_REASON_CODE.set(reason_code)
     if reason_code and _REASON_CODE_PATTERN.fullmatch(reason_code):
         try:
