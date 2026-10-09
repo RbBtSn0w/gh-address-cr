@@ -5,12 +5,18 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
+from unittest.mock import patch
 
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from gh_address_cr.commands.common import output_workflow_error
+from gh_address_cr.commands.common import (
+    emit_scope_resolution_error,
+    output_generic_agent_error,
+    output_session_error,
+    output_workflow_error,
+)
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.telemetry_runtime import (
     command_reason_code,
@@ -73,6 +79,48 @@ class CommandReasonCodeTelemetryTests(unittest.TestCase):
         self.assertEqual(exit_code, 5)
         self.assertEqual(command_reason_code(), "COMMIT_NOT_IN_PR")
         self.assertEqual(self._exported_attributes()[ATTRIBUTE], "COMMIT_NOT_IN_PR")
+
+    def test_generic_agent_error_output_records_its_reason_code(self):
+        with (
+            self.tracer.start_as_current_span("gh-address-cr.cli"),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            exit_code = output_generic_agent_error("o/r", "1", "SESSION_NOT_FOUND", "no session")
+
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(command_reason_code(), "SESSION_NOT_FOUND")
+        self.assertEqual(self._exported_attributes()[ATTRIBUTE], "SESSION_NOT_FOUND")
+
+    def test_session_error_output_records_the_guidance_reason_code(self):
+        guidance = {"reason_code": "PERSISTENCE_BUSY", "next_action": "retry", "waiting_on": "runtime_store"}
+
+        with (
+            patch("gh_address_cr.core.session.session_error_guidance", return_value=guidance),
+            patch("gh_address_cr.commands.common.remediation_for", return_value=None),
+            self.tracer.start_as_current_span("gh-address-cr.cli"),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            exit_code = output_session_error(RuntimeError("busy"), repo="o/r", pr_number="1")
+
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(command_reason_code(), "PERSISTENCE_BUSY")
+        self.assertEqual(self._exported_attributes()[ATTRIBUTE], "PERSISTENCE_BUSY")
+
+    def test_scope_resolution_error_records_its_reason_code(self):
+        payload = {"status": "PR_SCOPE_UNRESOLVED", "reason_code": "PARTIAL_PR_SCOPE", "next_action": "pass both", "exit_code": 2}
+
+        with (
+            self.tracer.start_as_current_span("gh-address-cr.cli"),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            exit_code = emit_scope_resolution_error(payload)
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(command_reason_code(), "PARTIAL_PR_SCOPE")
+        self.assertEqual(self._exported_attributes()[ATTRIBUTE], "PARTIAL_PR_SCOPE")
 
 
 if __name__ == "__main__":

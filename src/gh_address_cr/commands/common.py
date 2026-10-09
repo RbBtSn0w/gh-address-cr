@@ -48,17 +48,22 @@ def prepend_optional(value: str | None, args: list[str]) -> list[str]:
     return [*([value] if value else []), *args]
 
 
-def output_workflow_error(exc: Any, *, repo: str, pr_number: str) -> int:
-    # Telemetry only: a failed command's reason code is what makes its outcome diagnosable.
+def _note_reason_code(reason_code: object) -> None:
+    """Telemetry only: a failed command's reason code is what makes its outcome diagnosable."""
     from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 
-    note_command_reason_code(getattr(exc, "reason_code", None))
+    note_command_reason_code(reason_code if isinstance(reason_code, str) else None)
+
+
+def output_workflow_error(exc: Any, *, repo: str, pr_number: str) -> int:
+    _note_reason_code(getattr(exc, "reason_code", None))
     sys.stdout.write(json.dumps(exc.to_summary(repo=repo, pr_number=pr_number), indent=2, sort_keys=True) + "\n")
     print(str(exc), file=sys.stderr)
     return int(exc.exit_code)
 
 
 def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, message: str) -> int:
+    _note_reason_code(reason_code)
     payload = {
         "status": "FAILED",
         "repo": repo,
@@ -78,6 +83,7 @@ def output_session_error(exc: Any, *, repo: str | None, pr_number: str | None) -
     from gh_address_cr.core.session import session_error_guidance
 
     guidance = session_error_guidance(exc)
+    _note_reason_code(guidance.get("reason_code"))
     payload = {
         "status": "FAILED",
         "repo": repo,
@@ -172,6 +178,7 @@ def emit_scope_resolution_error(payload: dict) -> int:
     # remediation command is built from literal placeholders, not real values.
     # command_templates.quote_arg keeps a "<...>"-shaped argument literal, so the
     # rendered command reads as an instructive template rather than a broken one.
+    _note_reason_code(payload.get("reason_code"))
     payload = {
         **payload,
         "remediation": remediation_for(payload.get("reason_code"), repo="<owner/repo>", pr_number="<pr_number>"),
