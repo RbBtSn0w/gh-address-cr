@@ -38,6 +38,7 @@ class UnstackedGitHubClient:
                     "base_ref_name": "main",
                     "head_ref_name": "feature/test",
                     "head_oid": "a" * 40,
+                    "head_tree_oid": "e" * 40,
                     "merge_queue_state": None,
                 },
                 "members": [],
@@ -233,7 +234,7 @@ class NativeWorkflowTests(unittest.TestCase):
         class CurrentStackClient:
             def get_stack_context(self, repo, pr_number):
                 changed = stack_observation(selected_pr_number=pr_number)
-                changed["members"][1]["head_oid"] = "f" * 40
+                changed["members"][1]["head_tree_oid"] = "f" * 40
                 return project_stack_context(changed)
 
         repo = "octo/example"
@@ -332,7 +333,7 @@ class NativeWorkflowTests(unittest.TestCase):
                 if self.calls == 1:
                     return original
                 changed = stack_observation(selected_pr_number=pr_number)
-                changed["members"][1]["head_oid"] = "f" * 40
+                changed["members"][1]["head_tree_oid"] = "f" * 40
                 return project_stack_context(changed)
 
         items = {}

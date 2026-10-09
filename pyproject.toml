@@ -7,7 +7,7 @@ name = "gh-address-cr"
 version = "3.18.0"
 description = "Deterministic PR review-resolution control plane runtime."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "rbbtsn0w" }]
@@ -18,10 +18,9 @@ classifiers = [
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Software Development :: Version Control :: Git",
 ]
@@ -57,7 +56,7 @@ gh_address_cr = ["runtime-requirements.json"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 # E/F: pyflakes + pycodestyle. B: bugbear (likely-bug patterns).
@@ -84,7 +83,7 @@ skip_covered = false
 # are now on and CI runs this as a blocking gate via scripts/check_mypy_ratchet.py
 # (baseline 0). This config is the single source of truth for the gate. Do not
 # relax further — only tighten.
-python_version = "3.10"
+python_version = "3.12"
 files = ["src/gh_address_cr"]
 ignore_missing_imports = true
 warn_unused_ignores = true

@@ -259,6 +259,206 @@ class StackedPRE2EScriptTests(unittest.TestCase):
 
         self.assertFalse(any(method != "GET" for method, _, _ in calls))
 
+    def _live_api(
+        self, manifest, *, head_overrides=None, base_overrides=None, merged=(), closed=(), existing_refs=True,
+        unstack_error=None,
+    ):
+        """Fake GitHub for a fixture whose members drifted the way GA rewrites them."""
+        head_overrides = head_overrides or {}
+        base_overrides = base_overrides or {}
+        calls = []
+
+        def api(endpoint, *, method="GET", payload=None):
+            calls.append((method, endpoint, payload))
+            if endpoint.endswith("/stacks/7"):
+                return {"number": 7, "node_id": "STACK_7", "pull_requests": [{"number": n} for n in (101, 102, 103)]}
+            if endpoint.endswith("/unstack"):
+                if unstack_error:
+                    raise self.script.SandboxError(f"GitHub API POST {endpoint} failed: {unstack_error}")
+                return None
+            if "/comments" in endpoint:
+                number = int(endpoint.split("/pulls/")[1].split("/")[0])
+                layer = manifest["layers"][number - 101]
+                return [{"id": layer["review_comment_id"], "body": f"E2E review fixture for the {layer['name']} stack layer. Resolve through gh-address-cr.", "path": layer["path"]}]
+            if "/git/refs/" in endpoint:
+                if not existing_refs:
+                    raise self.script.SandboxError("GitHub API DELETE failed: Reference does not exist")
+                return None
+            if "/pulls/" in endpoint:
+                number = int(endpoint.rsplit("/", 1)[1])
+                layer = manifest["layers"][number - 101]
+                return {
+                    "number": number,
+                    "title": f"test: stacked PR E2E {manifest['run_id']} {layer['name']}",
+                    "body": self.script.fixture_pull_body(manifest["run_id"], layer["name"], layer["position"]),
+                    "state": "closed" if number in merged or number in closed else "open",
+                    "merged_at": "2026-10-08T00:00:00Z" if number in merged else None,
+                    "head": {"ref": layer["branch"], "sha": head_overrides.get(number, layer["head_sha"])},
+                    "base": {"ref": base_overrides.get(number, layer["base_branch"])},
+                    "stack": {"number": 7, "position": layer["position"], "size": 3},
+                }
+            raise AssertionError(endpoint)
+
+        return api, calls
+
+    def test_refresh_records_rebase_and_retarget_drift_after_proving_ownership(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(
+            manifest, head_overrides={102: "a" * 40, 103: "b" * 40}, base_overrides={102: "main"}, merged={101}
+        )
+        self.script.gh_api = api
+
+        result = self.script.refresh(manifest)
+
+        self.assertEqual(result["status"], "REFRESHED")
+        self.assertEqual([change["pr_number"] for change in result["changes"]], [102, 103])
+        self.assertEqual(manifest["layers"][1]["head_sha"], "a" * 40)
+        self.assertEqual(manifest["layers"][1]["base_branch"], "main")
+        self.script.validate_fixture_manifest(manifest)
+
+    def test_refresh_rejects_a_base_outside_the_fixture_chain(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest, base_overrides={103: "release/other"})
+        self.script.gh_api = api
+
+        with self.assertRaises(self.script.SandboxError):
+            self.script.refresh(manifest)
+        self.assertEqual(manifest["layers"][2]["base_branch"], "e2e/gh-address-cr-stack-20260801-120000-middle")
+
+    def test_refresh_rejects_a_pull_request_that_is_not_the_fixture(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest)
+
+        def tampered(endpoint, **kwargs):
+            payload = api(endpoint, **kwargs)
+            if endpoint.endswith("/pulls/102"):
+                payload["body"] = "someone else's pull request"
+            return payload
+
+        self.script.gh_api = tampered
+        with self.assertRaises(self.script.SandboxError):
+            self.script.refresh(manifest)
+
+    def test_cleanup_handles_merged_members_and_deleted_branches_without_closing_merged_prs(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, calls = self._live_api(manifest, merged={101, 102}, existing_refs=False)
+        self.script.gh_api = api
+
+        result = self.script.cleanup(manifest)
+
+        self.assertEqual(result["status"], "CLEANED")
+        closed = [endpoint for method, endpoint, _ in calls if method == "PATCH"]
+        self.assertEqual(closed, ["repos/owner/demo-repo/pulls/103"])
+
+    def test_cleanup_ignores_an_unstack_failure_only_when_every_member_is_already_closed(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, calls = self._live_api(
+            manifest, merged={101, 102}, closed={103}, unstack_error="nothing left to unstack", existing_refs=False
+        )
+        self.script.gh_api = api
+
+        result = self.script.cleanup(manifest)
+
+        self.assertEqual(result["status"], "CLEANED")
+        self.assertFalse([endpoint for method, endpoint, _ in calls if method == "PATCH"])
+
+    def test_cleanup_surfaces_an_unstack_failure_while_a_member_is_still_open(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, calls = self._live_api(manifest, merged={101}, unstack_error="HTTP 503 service unavailable")
+        self.script.gh_api = api
+
+        with self.assertRaises(self.script.SandboxError) as caught:
+            self.script.cleanup(manifest)
+
+        self.assertIn("503", str(caught.exception))
+        self.assertFalse([call for call in calls if call[0] in {"PATCH", "DELETE"}])
+
+    def test_cleanup_surfaces_an_unstack_failure_when_nothing_was_merged(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest, unstack_error="HTTP 401 bad credentials")
+        self.script.gh_api = api
+
+        with self.assertRaises(self.script.SandboxError):
+            self.script.cleanup(manifest)
+
+    def test_stack_scenario_runs_gh_stack_in_a_clone_then_refreshes(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest)
+        self.script.gh_api = api
+        commands = []
+        self.script.run_local = lambda command, *, cwd: commands.append(command[:3]) or ""
+
+        with patch.object(self.script.time, "sleep"):
+            result = self.script.stack_scenario(manifest, "merge-bottom")
+
+        self.assertEqual(result["scenario"], "merge-bottom")
+        self.assertTrue(any(command[1:3] == ["stack", "merge"] for command in commands))
+        self.assertTrue(any(command[1:3] == ["stack", "checkout"] for command in commands))
+
+    def _runtime_double(self, manifest, *, thread_body=None):
+        layer = manifest["layers"][1]
+        calls = []
+
+        def runtime(arguments, *, accepted_exit_codes=(0,)):
+            calls.append(list(arguments))
+            if arguments[0] == "address":
+                return {
+                    "status": "NEEDS_ACTION",
+                    "item_id": "github-thread:T1",
+                    "threads": [
+                        {
+                            "item_id": "github-thread:T1",
+                            "body": thread_body
+                            or f"E2E review fixture for the {layer['name']} stack layer. Resolve through gh-address-cr.",
+                            "path": layer["path"],
+                        }
+                    ],
+                }
+            if arguments[0] == "final-gate":
+                return {"status": "PASSED", "reason_code": None}
+            return {"status": "OK"}
+
+        return runtime, calls
+
+    def test_fix_evidence_resolves_the_middle_thread_as_a_fix_with_validation(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest)
+        runtime, calls = self._runtime_double(manifest)
+        self.script.gh_api = api
+        self.script.run_runtime_json = runtime
+
+        result = self.script.fix_evidence(manifest)
+
+        resolve = next(call for call in calls if call[:2] == ["agent", "resolve"])
+        self.assertEqual(resolve[2:5], ["owner/demo-repo", "102", "github-thread:T1"])
+        self.assertEqual(resolve[resolve.index("--disposition") + 1], "fix")
+        self.assertEqual(resolve[resolve.index("--file") + 1], manifest["layers"][1]["path"])
+        self.assertIn("--validation", resolve)
+        self.assertTrue(any(call[:2] == ["agent", "publish"] for call in calls))
+        self.assertEqual(result["scenario"], "fix-evidence")
+        self.assertEqual([row["pr_number"] for row in result["layers"]], [101, 102, 103])
+
+    def test_fix_evidence_refuses_an_unrelated_thread(self):
+        self.script = load_script()
+        manifest = self.manifest()
+        api, _ = self._live_api(manifest)
+        runtime, calls = self._runtime_double(manifest, thread_body="someone else's review")
+        self.script.gh_api = api
+        self.script.run_runtime_json = runtime
+
+        with self.assertRaises(self.script.SandboxError):
+            self.script.fix_evidence(manifest)
+        self.assertFalse(any(call[:2] == ["agent", "resolve"] for call in calls))
+
     def test_verify_rejects_member_stack_identity_mismatch(self):
         script = load_script()
         manifest = self.manifest()

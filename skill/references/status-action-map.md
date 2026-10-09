@@ -19,8 +19,8 @@ authority, or `final-gate` semantics.
 
 ## Stacked PR Context and Evidence
 
-- `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub preview
-  capability or inspect the bounded diagnostic, then refresh the selected PR.
+- `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub stacked-PR
+  capability (older GitHub Enterprise Server hosts do not have it) or inspect the bounded diagnostic, then refresh the selected PR.
 - `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
   refresh the affected layer, and rerun validation; never publish old evidence.
   Runtime-rejected stale or cross-layer requests release their unusable lease,

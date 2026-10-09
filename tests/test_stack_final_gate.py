@@ -280,7 +280,7 @@ class StackFinalGateTests(unittest.TestCase):
 
         context = project_stack_context(stack_observation(selected_pr_number="102"))
         changed = stack_observation(selected_pr_number="102")
-        changed["members"][1]["head_oid"] = "f" * 40
+        changed["members"][1]["head_tree_oid"] = "f" * 40
         result = evaluate_stack_gate(
             "octo/example",
             "102",

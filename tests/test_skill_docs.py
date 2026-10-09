@@ -18,7 +18,6 @@ INSTALLATION_MD = README_MD
 TROUBLESHOOTING_MD = README_MD
 WORKFLOWS_MD = README_MD
 AGENTS_MD = ROOT / "AGENTS.md"
-CONSTITUTION_MD = ROOT / ".specify" / "memory" / "constitution.md"
 HANDOFF_PY = ROOT / "src" / "gh_address_cr" / "core" / "handoff.py"
 MODE_PRODUCER_MATRIX_MD = ROOT / "skill" / "references" / "mode-producer-matrix.md"
 OTEL_TRACING_CONTRACT_MD = README_MD
@@ -198,7 +197,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("does not claim a hosted `deployment.environment.name`", contract)
 
     def test_gateway_profile_contract_is_reviewable_without_secrets(self):
-        profile = (ROOT / "specs" / "030-otel-gateway-hardening" / "contracts" / "ingest-profile.md")
+        profile = (ROOT / "docs" / "rfcs" / "030-otel-gateway-hardening" / "contracts" / "ingest-profile.md")
         text = profile.read_text(encoding="utf-8")
 
         for phrase in (
@@ -735,7 +734,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("with `--skill skill`", text)
 
     def test_project_governance_documents_architecture_preflight_kernel(self):
-        text = read_repo_docs(CONSTITUTION_MD, AGENTS_MD, ARCHITECTURE_MD)
+        text = read_repo_docs(AGENTS_MD, ARCHITECTURE_MD)
         for phrase in (
             "First-Principles Runtime Kernel",
             "Architecture Preflight",

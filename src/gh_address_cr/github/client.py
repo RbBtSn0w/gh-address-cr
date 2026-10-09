@@ -32,15 +32,17 @@ class GitHubClient:
     def get_stack_context(self, repo: str, pr_number: str) -> StackContext:
         """Read and validate GitHub's current stack facts for one pull request.
 
-        The preview query is deliberately separate from review-thread reads so
-        an older GitHub schema can report stack context as unavailable without
-        disabling the established PR-scoped resolution flow.
+        The stack query is deliberately separate from review-thread reads so a
+        host without stacked PRs (for example an older GitHub Enterprise Server)
+        can report stack context as unavailable without disabling the
+        established PR-scoped resolution flow.
         """
         owner, name = _split_repo(repo)
         query = """query($owner:String!,$name:String!,$number:Int!,$after:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
       number state isDraft baseRefName headRefName headRefOid
+      headRef{ target{ ... on Commit{ oid tree{ oid } } } }
       mergeQueueEntry{ state }
       stackEntry{ position }
       stack{
@@ -51,6 +53,7 @@ class GitHubClient:
             position
             pullRequest{
               number state isDraft baseRefName headRefName headRefOid
+              headRef{ target{ ... on Commit{ oid tree{ oid } } } }
               mergeQueueEntry{ state }
             }
           }
@@ -558,8 +561,20 @@ def _stack_member_from_pull_request(payload: dict[str, Any], *, position: Any) -
         "base_ref_name": payload.get("baseRefName"),
         "head_ref_name": payload.get("headRefName"),
         "head_oid": payload.get("headRefOid"),
+        "head_tree_oid": _head_tree_oid(payload),
         "merge_queue_state": queue_state,
     }
+
+
+def _head_tree_oid(payload: dict[str, Any]) -> str | None:
+    """Return the head tree only when it was read from the same commit as ``headRefOid``."""
+    head_ref = payload.get("headRef")
+    target = head_ref.get("target") if isinstance(head_ref, dict) else None
+    if not isinstance(target, dict) or target.get("oid") != payload.get("headRefOid"):
+        return None
+    tree = target.get("tree")
+    tree_oid = tree.get("oid") if isinstance(tree, dict) else None
+    return str(tree_oid) if tree_oid else None
 
 
 def _stack_page_identity(payload: dict[str, Any]) -> tuple[Any, ...]:
@@ -664,10 +679,10 @@ def _invalid_stack_context(repo: str, pr_number: str, observed_at: str, invarian
 
 def _is_stack_capability_error(detail: str) -> bool:
     normalized = detail.lower()
-    preview_fields = ("stack", "stackentry", "entries")
+    stack_fields = ("stack", "stackentry", "entries")
     return any(
         marker in normalized
-        for field in preview_fields
+        for field in stack_fields
         for marker in (
             f"field '{field}' doesn't exist",
             f'field "{field}" doesn\'t exist',

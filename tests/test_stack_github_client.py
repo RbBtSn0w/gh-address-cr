@@ -43,6 +43,31 @@ class StackGitHubClientTests(unittest.TestCase):
         self.assertIn("stackEntry", query_arg)
         self.assertIn("headRefOid", query_arg)
 
+    def test_stack_query_reads_head_tree_for_the_same_commit(self):
+        runner = fixture_runner("three_layer.json")
+
+        context = GitHubClient(runner=runner).get_stack_context("octo/example", "102")
+
+        query_arg = next(part for part in runner.calls[0] if part.startswith("query="))
+        self.assertIn("tree{ oid }", query_arg)
+        self.assertEqual(
+            [member.head_tree_oid for member in context.members],
+            ["e" + "1" * 39, "e" + "2" * 39, "e" + "3" * 39],
+        )
+
+    def test_head_tree_read_from_a_different_commit_is_invalid(self):
+        payload = load_stacked_pr_fixture("three_layer.json")
+        member = payload["data"]["repository"]["pullRequest"]["stack"]["entries"]["nodes"][1]["pullRequest"]
+        member["headRef"]["target"]["oid"] = "f" * 40
+
+        def run(cmd):
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        context = GitHubClient(runner=run).get_stack_context("octo/example", "102")
+
+        self.assertEqual(context.availability, "invalid")
+        self.assertEqual(context.invalid_invariant, "missing_head_tree_oid")
+
     def test_stack_entries_are_paginated_to_completion(self):
         runner = fixture_runner("multi_page_first.json", "multi_page_second.json")
 

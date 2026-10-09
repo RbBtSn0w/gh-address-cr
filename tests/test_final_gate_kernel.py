@@ -55,7 +55,7 @@ class FinalGateKernelTests(unittest.TestCase):
         }
         item = session["items"]["github-thread:THREAD_DONE"]
         stale_binding = dict(revision_binding_for_context(context))
-        stale_binding["head_oid"] = "f" * 40
+        stale_binding["head_tree_oid"] = "f" * 40
         item["accepted_response"] = {
             "validation_commands": [{"command": "old-unit", "result": "passed"}],
             "revision_binding": stale_binding,
@@ -85,7 +85,7 @@ class FinalGateKernelTests(unittest.TestCase):
         }
         item = session["items"]["github-thread:THREAD_DONE"]
         stale_binding = dict(revision_binding_for_context(context))
-        stale_binding["head_oid"] = "f" * 40
+        stale_binding["head_tree_oid"] = "f" * 40
         item["validation_evidence"] = [{"command": "old-unit", "result": "passed"}]
         item["revision_binding"] = stale_binding
         item["accepted_response"] = {
@@ -119,7 +119,7 @@ class FinalGateKernelTests(unittest.TestCase):
             }
         }
         binding = revision_binding_for_context(context)
-        binding["head_oid"] = "f" * 40
+        binding["head_tree_oid"] = "f" * 40
         for item in session["items"].values():
             item["revision_binding"] = binding
         signals = [signal.to_dict() for signal in generate_logic_validation_signals(session)]

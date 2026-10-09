@@ -19,7 +19,7 @@ class LogicValidationSignalTest(unittest.TestCase):
         self.assertEqual(revision_evidence_status(binding, context), "current")
         self.assertEqual(revision_evidence_status(None, context), "unbound")
         stale = dict(binding)
-        stale["head_oid"] = "f" * 40
+        stale["head_tree_oid"] = "f" * 40
         self.assertEqual(revision_evidence_status(stale, context), "stale")
 
     def test_missing_required_evidence_generates_blocking_signal(self):

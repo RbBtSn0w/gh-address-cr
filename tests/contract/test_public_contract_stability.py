@@ -43,12 +43,12 @@ class PublicContractStabilityTests(unittest.TestCase):
         self.assertIn("Optional", help_text)
 
     def test_layered_workflow_contract_documents_first_slice_child_span_names(self) -> None:
-        text = Path("specs/027-otel-layered-model/contracts/workflow-layering-contract.md").read_text(encoding="utf-8")
+        text = Path("docs/rfcs/027-otel-layered-model/contracts/workflow-layering-contract.md").read_text(encoding="utf-8")
         self.assertIn("gh_address_cr.adapter", text)
         self.assertIn("gh_address_cr.command_session.operation", text)
 
     def test_layered_workflow_contract_keeps_high_level_phases_event_first(self) -> None:
-        text = Path("specs/027-otel-layered-model/contracts/workflow-layering-contract.md").read_text(encoding="utf-8")
+        text = Path("docs/rfcs/027-otel-layered-model/contracts/workflow-layering-contract.md").read_text(encoding="utf-8")
         self.assertIn("preflight", text)
         self.assertIn("session", text)
         self.assertIn("ingest", text)

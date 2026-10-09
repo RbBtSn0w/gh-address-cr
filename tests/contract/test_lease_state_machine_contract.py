@@ -1,4 +1,4 @@
-"""Executable form of specs/033-lease-state-machine/contracts/.
+"""Executable form of docs/rfcs/033-lease-state-machine/contracts/.
 
 The expected values are read from the markdown tables, not copied into this file, so the
 document and the test cannot drift apart: changing either without the other fails here.
@@ -26,7 +26,7 @@ from pathlib import Path
 from gh_address_cr.core import leases as L
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTRACTS = ROOT / "specs" / "033-lease-state-machine" / "contracts"
+CONTRACTS = ROOT / "docs" / "rfcs" / "033-lease-state-machine" / "contracts"
 SRC = ROOT / "src" / "gh_address_cr"
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
 STATUSES = ("active", "submitted", "accepted", "rejected", "expired", "released")
