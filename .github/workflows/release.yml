@@ -31,10 +31,20 @@ jobs:
       released: ${{ steps.package-version.outputs.released }}
 
     steps:
+      - name: Mint release-bot token
+        id: release-bot
+        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.release-bot.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Resolve publish target
         id: publish-target
@@ -67,7 +77,7 @@ jobs:
       - name: Run semantic-release
         if: steps.publish-target.outputs.target == 'pypi'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-bot.outputs.token || secrets.GITHUB_TOKEN }}
         run: npx --yes semantic-release
 
       - name: Prepare staging package version
