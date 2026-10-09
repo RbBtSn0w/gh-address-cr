@@ -681,14 +681,15 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
     reply_markdown = response.get("reply_markdown")
 
     if resolution != "fix":
+        if resolution == "reject":
+            payload = [reply_markdown.strip()] if isinstance(reply_markdown, str) and reply_markdown.strip() else []
+            return render_reject_reply(payload), None
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
             return None, protocol_codes.MISSING_PUBLISH_REPLY
         if resolution == "clarify":
             return render_clarify_reply([reply_markdown.strip()]), None
         if resolution == "defer":
             return render_defer_reply([reply_markdown.strip()]), None
-        if resolution == "reject":
-            return render_reject_reply([reply_markdown.strip()]), None
         return reply_markdown, None
     fix_reply = response.get("fix_reply")
     if not isinstance(fix_reply, dict):
