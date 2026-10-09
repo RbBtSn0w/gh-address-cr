@@ -635,44 +635,23 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(payload["status"], "RENDERED")
         self.assertEqual(payload["version"], "1.2.3")
         self.assertEqual(payload["sha256"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        self.assertEqual(
-            payload["resources"],
-            [
-                "certifi",
-                "charset-normalizer",
-                "googleapis-common-protos",
-                "idna",
-                "opentelemetry-api",
-                "opentelemetry-exporter-otlp-proto-common",
-                "opentelemetry-exporter-otlp-proto-http",
-                "opentelemetry-proto",
-                "opentelemetry-sdk",
-                "opentelemetry-semantic-conventions",
-                "packaging",
-                "protobuf",
-                "requests",
-                "typing-extensions",
-                "urllib3",
-            ],
-        )
+        self.assertEqual(payload["resources"], [])
 
         formula = output.read_text(encoding="utf-8")
         self.assertIn("class GhAddressCr < Formula", formula)
-        self.assertIn("include Language::Python::Virtualenv", formula)
+        self.assertNotIn("include Language::Python::Virtualenv", formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
-        self.assertIn('resource "requests" do', formula)
-        self.assertIn('resource "certifi" do', formula)
-        self.assertIn('resource "opentelemetry-exporter-otlp-proto-http" do', formula)
-        self.assertIn('resource "packaging" do', formula)
-        self.assertIn('url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"', formula)
-        self.assertIn('sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661"', formula)
-        self.assertIn("virtualenv_install_with_resources", formula)
-        self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)
+        self.assertIn('depends_on "uv"', formula)
+        self.assertIn('python = formula_opt_bin("python@3.14")/"python3.14"', formula)
+        self.assertIn('system "uv", "venv", "--python", python, libexec', formula)
+        self.assertIn('system "uv", "pip", "install", "--python", libexec/"bin/python", "."', formula)
+        self.assertIn('bin.install_symlink libexec/"bin/gh-address-cr"', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
-        self.assertNotIn('resource "coverage" do', formula)
+        self.assertNotIn("virtualenv_install_with_resources", formula)
+        self.assertNotIn('resource "', formula)
         self.assertNotIn("whl", formula)
 
     def test_homebrew_formula_renderer_prefers_tar_gz_when_pypi_lists_multiple_sdists(self):
@@ -768,52 +747,26 @@ class RuntimePackagingTest(PythonScriptTestCase):
                 }
             ],
         }
-        requests_index = {
-            "info": {"name": "requests", "version": "2.34.2"},
-            "releases": {
-                "2.34.2": [
-                    {
-                        "packagetype": "sdist",
-                        "url": "https://example.test/requests-2.34.2.tar.gz",
-                    }
-                ]
-            },
-        }
-        requests_payload = {
-            "info": {"name": "requests", "version": "2.34.2"},
-            "urls": [
-                {
-                    "filename": "requests-2.34.2.tar.gz",
-                    "packagetype": "sdist",
-                    "url": "https://example.test/requests-2.34.2.tar.gz",
-                    "digests": {
-                        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
-                    },
-                }
-            ],
-        }
-
         stdout = io.StringIO()
-        with mock.patch.object(renderer, "fetch_pypi_json", side_effect=[root_payload, root_payload, requests_payload]):
-            with mock.patch.object(renderer, "fetch_package_index", return_value=requests_index):
-                with mock.patch.object(
-                    sys,
-                    "argv",
-                    [
-                        str(HOMEBREW_FORMULA_RENDERER),
-                        "--version",
-                        "1.2.3",
-                        "--output",
-                        str(output),
-                    ],
-                ):
-                    with mock.patch("sys.stdout", stdout):
-                        result = renderer.main()
+        with mock.patch.object(renderer, "fetch_pypi_json", return_value=root_payload):
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    str(HOMEBREW_FORMULA_RENDERER),
+                    "--version",
+                    "1.2.3",
+                    "--output",
+                    str(output),
+                ],
+            ):
+                with mock.patch("sys.stdout", stdout):
+                    result = renderer.main()
 
         self.assertEqual(result, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["status"], "RENDERED")
-        self.assertIn('resource "requests" do', output.read_text(encoding="utf-8"))
+        self.assertIn('depends_on "uv"', output.read_text(encoding="utf-8"))
 
     def test_homebrew_formula_renderer_supports_custom_formula_name_and_conflicts(self):
         output = Path(self.temp_dir.name) / "gh-address-cr-pr42.rb"
