@@ -22,6 +22,9 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.reply_templates import (
     fix_reply as render_fix_reply,
 )
+from gh_address_cr.core.reply_templates import (
+    reject_reply as render_reject_reply,
+)
 from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
@@ -678,6 +681,9 @@ def publish_reply_body(item: dict[str, Any], response: dict[str, Any]) -> tuple[
     reply_markdown = response.get("reply_markdown")
 
     if resolution != "fix":
+        if resolution == "reject":
+            payload = [reply_markdown.strip()] if isinstance(reply_markdown, str) and reply_markdown.strip() else []
+            return render_reject_reply(payload), None
         if not isinstance(reply_markdown, str) or not reply_markdown.strip():
             return None, protocol_codes.MISSING_PUBLISH_REPLY
         if resolution == "clarify":
