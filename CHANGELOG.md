@@ -1,3 +1,17 @@
+## [3.20.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.19.0...v3.20.0) (2026-10-09)
+
+### Features
+
+* **publisher:** render structured reply template for rejected review items ([#340](https://github.com/RbBtSn0w/gh-address-cr/issues/340)) ([4477a57](https://github.com/RbBtSn0w/gh-address-cr/commit/4477a574bba0517a8834cdd94e27889d8791768f))
+
+### Bug Fixes
+
+* update workflow tokens and document multi-file resolve syntax ([#344](https://github.com/RbBtSn0w/gh-address-cr/issues/344)) ([bad029a](https://github.com/RbBtSn0w/gh-address-cr/commit/bad029a96273a637447d6c97980ad28507d34b7b)), closes [#342](https://github.com/RbBtSn0w/gh-address-cr/issues/342) [#343](https://github.com/RbBtSn0w/gh-address-cr/issues/343)
+
+### Performance Improvements
+
+* **release:** modernize Homebrew formula to install via uv ([#339](https://github.com/RbBtSn0w/gh-address-cr/issues/339)) ([75b43b6](https://github.com/RbBtSn0w/gh-address-cr/commit/75b43b624242d100c9b798b50ee1c6911321d27b))
+
 ## [3.19.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.18.0...v3.19.0) (2026-10-09)
 
 ### Features
