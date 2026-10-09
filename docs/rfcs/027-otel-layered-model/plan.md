@@ -4,7 +4,6 @@
 # Implementation Plan: Layered OTel Workflow Modeling
 
 **Branch**: `027-otel-layered-model` | **Date**: 2026-07-03 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `/docs/rfcs/027-otel-layered-model/spec.md`
 
 ## Summary
 

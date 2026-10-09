@@ -7,6 +7,7 @@ from gh_address_cr.core.reply_templates import (
     clarify_reply,
     defer_reply,
     fix_reply,
+    reject_reply,
 )
 
 
@@ -45,8 +46,26 @@ class TestReplyTemplates(unittest.TestCase):
         self.assertNotIn("Risk note:", result)
 
     def test_reply_templates_do_not_accept_efficiency_summary_parameter(self):
-        for renderer in (fix_reply, clarify_reply, defer_reply):
+        for renderer in (fix_reply, clarify_reply, defer_reply, reject_reply):
             self.assertNotIn("efficiency_summary", inspect.signature(renderer).parameters)
+
+    def test_reject_reply_rendering(self):
+        result = reject_reply(["This change conflicts with intentional architectural direction."])
+        self.assertIn("Thanks for the review.", result)
+        self.assertIn("Analysis & Rationale:", result)
+        self.assertIn("- This change conflicts with intentional architectural direction.", result)
+        self.assertIn("Decision:\n- Declined for the current PR.", result)
+        self.assertIn("If you have additional context or feel this requires further discussion, please let me know!", result)
+        self.assertTrue(result.endswith(f"{REPLY_ATTRIBUTION}\n"))
+
+    def test_reject_reply_empty_and_whitespace_payload_fallback(self):
+        empty_result = reject_reply([])
+        self.assertIn("- Declined with rationale.", empty_result)
+        self.assertTrue(empty_result.endswith(f"{REPLY_ATTRIBUTION}\n"))
+
+        whitespace_result = reject_reply(["   "])
+        self.assertIn("- Declined with rationale.", whitespace_result)
+        self.assertTrue(whitespace_result.endswith(f"{REPLY_ATTRIBUTION}\n"))
 
     def test_fix_reply_surfaces_reviewer_priority_without_p_scale_severity(self):
         result = fix_reply(
@@ -90,8 +109,9 @@ class TestReplyTemplates(unittest.TestCase):
         fix = fix_reply(None, ["sha123", "src/a.py", "pytest", "Passed", "Rationale."])
         clarify = clarify_reply(["Rationale."])
         defer = defer_reply(["Out of scope for this PR."])
+        reject = reject_reply(["Out of scope for this PR."])
 
-        for rendered in (fix, clarify, defer):
+        for rendered in (fix, clarify, defer, reject):
             self.assertTrue(rendered.endswith(f"{REPLY_ATTRIBUTION}\n"))
 
 

@@ -181,3 +181,25 @@ def defer_reply(payload: list[str]) -> str:
     )
 
     return _finalize(lines)
+
+
+def reject_reply(payload: list[str]) -> str:
+    raw_rationale = payload[0].strip() if payload and payload[0] else ""
+    rationale = raw_rationale or "Declined with rationale."
+    lines = [
+        "Thanks for the review.",
+        "",
+        "Analysis & Rationale:",
+    ]
+    lines.extend(_format_rationale(rationale))
+    lines.extend(
+        [
+            "",
+            "Decision:",
+            "- Declined for the current PR.",
+            "",
+            "If you have additional context or feel this requires further discussion, please let me know!",
+        ]
+    )
+
+    return _finalize(lines)
