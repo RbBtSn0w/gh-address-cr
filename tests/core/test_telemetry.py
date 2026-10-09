@@ -382,6 +382,10 @@ class TestTelemetry(unittest.TestCase):
             report = build_efficiency_report("octo/example", "77")
             self.assertIsNone(report["telemetry_shutdown_wait_ms"])
             self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            for raw in ("NaN", "Infinity", "-Infinity"):
+                shutdown_wait_file().write_text('{"wait_ms": %s}' % raw, encoding="utf-8")
+                report = build_efficiency_report("octo/example", "77")
+                self.assertIsNone(report["telemetry_shutdown_wait_ms"], raw)
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):

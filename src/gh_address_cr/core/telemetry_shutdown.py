@@ -9,6 +9,7 @@ stays observed evidence: this file never feeds review state or final-gate.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,8 @@ def read_last_shutdown_wait_ms() -> float | None:
         value = payload.get("wait_ms")
     except Exception:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
         return None
     return float(value)
