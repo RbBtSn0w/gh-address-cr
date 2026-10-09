@@ -358,6 +358,31 @@ class TestTelemetry(unittest.TestCase):
             self.assertIsNone(artifact["telemetry_overhead_ms"])
             self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", artifact["diagnostics"])
 
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.05])
+    def test_efficiency_report_overhead_includes_previous_shutdown_wait(self, _perf_counter):
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(300.0, timed_out=True)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
+            self.assertEqual(report["telemetry_shutdown_wait_ms"], 300.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 350.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            self.assertEqual(artifact["telemetry_shutdown_wait_ms"], 300.0)
+
+    def test_efficiency_report_ignores_missing_or_malformed_shutdown_wait(self):
+        from gh_address_cr.core.telemetry_shutdown import shutdown_wait_file
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            self.assertIsNone(build_efficiency_report("octo/example", "77")["telemetry_shutdown_wait_ms"])
+            shutdown_wait_file().write_text('{"wait_ms": "slow"}', encoding="utf-8")
+            report = build_efficiency_report("octo/example", "77")
+            self.assertIsNone(report["telemetry_shutdown_wait_ms"])
+            self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
