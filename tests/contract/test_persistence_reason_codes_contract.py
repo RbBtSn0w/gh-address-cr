@@ -272,10 +272,10 @@ class TransactionTelemetryBindingContractTest(unittest.TestCase):
         self.assertEqual(Path(telemetry_file).parent, workspace)
 
 
-@unittest.skipIf(os.name == "nt", "concurrency contracts use fork")
+@unittest.skipIf(os.name == "nt", "concurrency contracts use spawn")
 class TransactionalHotPathContractTest(unittest.TestCase):
     def test_concurrent_classification_never_surfaces_stale_revision(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         worker_count = 8
         with tempfile.TemporaryDirectory() as tmp:
             _seed_session(tmp, items=worker_count)
@@ -296,7 +296,7 @@ class TransactionalHotPathContractTest(unittest.TestCase):
         self.assertEqual({item["decision"] for item in final["items"].values()}, {"fix"})
 
     def test_concurrent_reclaim_expires_each_lease_exactly_once(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         worker_count = 6
         with tempfile.TemporaryDirectory() as tmp:
             _seed_session(tmp, items=4, expired_leases=4)
