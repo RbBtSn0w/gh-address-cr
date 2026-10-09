@@ -15,8 +15,7 @@ jobs:
       - name: Mint bot token
         id: bot
         if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
-        continue-on-error: true
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -25,7 +24,7 @@ jobs:
         with:
           ref: develop
           fetch-depth: 0
-          token: ${{ steps.bot.outputs.token || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.bot.outputs.token || github.token }}
 
       - name: Merge main into develop
         run: |
