@@ -163,10 +163,10 @@ def _crash_during_bundle(workspace: str, checkpoint: str) -> None:
     )
 
 
-@unittest.skipIf(os.name == "nt", "initialization contracts use fork and os._exit")
+@unittest.skipIf(os.name == "nt", "initialization contracts use spawn and os._exit")
 class RuntimeStoreInitializationContractTest(unittest.TestCase):
     def test_concurrent_bootstrap_never_clobbers_committed_revision(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         worker_count = 32
         for _round in range(3):
             with self.subTest(round=_round), tempfile.TemporaryDirectory() as tmp:
@@ -189,7 +189,7 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
                 self.assertEqual(snapshot.revision, worker_count + 1)
 
     def test_late_initializer_cannot_replace_committed_store(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             publishing = context.Event()
             resume = context.Event()
@@ -209,7 +209,7 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
         self.assertEqual(snapshot.payload["metadata"]["writers"], ["early"])
 
     def test_concurrent_legacy_migration_is_exactly_once(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         worker_count = 8
         for _round in range(20):
             with self.subTest(round=_round), tempfile.TemporaryDirectory() as tmp:
@@ -230,7 +230,7 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
                 self.assertEqual(len(store.load_evidence()), 1)
 
     def test_crash_inside_initialize_leaves_uninitialized_store_that_retries_cleanly(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             worker = context.Process(target=_crash_during_initialize, args=(tmp,))
             worker.start()
@@ -263,7 +263,7 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
                 self.assertFalse(store.is_initialized())
 
     def test_crash_at_every_bundle_checkpoint_recovers(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         for checkpoint, expected_exit in (
             ("before_session_copy", 41),
             ("after_session_copy", 42),

@@ -267,7 +267,7 @@ EXPECTED_BACKFILL = {
 }
 
 
-@unittest.skipIf(os.name == "nt", "ownership contracts use fork")
+@unittest.skipIf(os.name == "nt", "ownership contracts use spawn")
 class OutboxOwnershipContractTest(unittest.TestCase):
     def _store_with_planned_command(self, tmp: str) -> RuntimeStore:
         store = RuntimeStore(Path(tmp))
@@ -276,7 +276,7 @@ class OutboxOwnershipContractTest(unittest.TestCase):
         return store
 
     def test_load_does_not_demote_live_in_flight_command(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             store = self._store_with_planned_command(tmp)
             started, resume = context.Event(), context.Event()
@@ -293,7 +293,7 @@ class OutboxOwnershipContractTest(unittest.TestCase):
         self.assertEqual(status_while_alive, "in_flight")
 
     def test_owner_death_demotes_to_unknown(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             store = self._store_with_planned_command(tmp)
             owner = context.Process(target=_die_in_flight, args=(tmp,))
@@ -338,7 +338,7 @@ class OutboxOwnershipContractTest(unittest.TestCase):
     def test_concurrent_publish_same_item_posts_once(self):
         from gh_address_cr.core import publisher
 
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
                 manager = _write_publish_session()
@@ -408,7 +408,7 @@ class OutboxOwnershipContractTest(unittest.TestCase):
         self.assertLess(elapsed, 2.0)
 
 
-@unittest.skipIf(os.name == "nt", "schema contracts use fork")
+@unittest.skipIf(os.name == "nt", "schema contracts use spawn")
 class SchemaV2ContractTest(unittest.TestCase):
     def test_v2_upgrade_normalizes_lease_events_without_changing_snapshot(self):
         events = [
@@ -525,7 +525,7 @@ class SchemaV2ContractTest(unittest.TestCase):
 
     @unittest.skipIf(sqlite3.sqlite_version_info < (3, 35, 0), "fixture needs ALTER TABLE DROP COLUMN")
     def test_v1_store_upgrades_to_v2_exactly_once_under_concurrency(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         worker_count = 8
         for _round in range(5):
             with self.subTest(round=_round), tempfile.TemporaryDirectory() as tmp:
@@ -660,7 +660,7 @@ class SchemaV2ContractTest(unittest.TestCase):
         self.assertEqual(observed, {"finding-1": 3, "finding-2": 1})
 
 
-@unittest.skipIf(os.name == "nt", "projection contracts use fork")
+@unittest.skipIf(os.name == "nt", "projection contracts use spawn")
 class ProjectionContractTest(unittest.TestCase):
     def _evidence(self, index: int) -> dict:
         return EvidenceRecord.new(
@@ -727,7 +727,7 @@ class ProjectionContractTest(unittest.TestCase):
         self.assertEqual(clean, 0)
 
     def test_materialized_meta_revision_matches_content_under_concurrent_writes(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             store = RuntimeStore(workspace, busy_timeout_ms=30_000)

@@ -371,12 +371,12 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
             self.assertTrue(context.exception.retryable)
             self.assertEqual(store.load().payload["status"], "WAITING_FOR_FIX")
 
-    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses fork semantics")
+    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses spawn semantics")
     def test_two_processes_claiming_one_item_have_exactly_one_winner(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = RuntimeStore(Path(tmp))
             store.bootstrap(_session())
-            context = multiprocessing.get_context("fork")
+            context = multiprocessing.get_context("spawn")
             barrier = context.Barrier(2)
             queue = context.Queue()
             workers = [
@@ -396,12 +396,12 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(len(snapshot.payload["leases"]), 1)
         self.assertEqual(snapshot.revision, 2)
 
-    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses fork semantics")
+    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses spawn semantics")
     def test_one_hundred_process_claim_race_has_one_winner(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = RuntimeStore(Path(tmp), busy_timeout_ms=10_000)
             store.bootstrap(_session())
-            context = multiprocessing.get_context("fork")
+            context = multiprocessing.get_context("spawn")
             worker_count = 100
             barrier = context.Barrier(worker_count)
             queue = context.Queue()
@@ -421,9 +421,9 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(outcomes.count("conflict"), worker_count - 1)
         self.assertEqual(snapshot.revision, 2)
 
-    @unittest.skipIf(os.name == "nt", "crash contract uses fork and os._exit")
+    @unittest.skipIf(os.name == "nt", "crash contract uses spawn and os._exit")
     def test_process_exit_reopens_to_old_or_complete_committed_revision(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         for stage, expected_exit, expected_revision, expected_status in (
             ("before_commit", 17, 1, "WAITING_FOR_FIX"),
             ("after_commit", 23, 2, "COMMITTED_AFTER_CRASH"),
@@ -443,9 +443,9 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 self.assertEqual(len(store.load_evidence()), 0 if stage == "before_commit" else 1)
                 self.assertEqual(len(store.load_outbox()), 0 if stage == "before_commit" else 1)
 
-    @unittest.skipIf(os.name == "nt", "crash contract uses fork and os._exit")
+    @unittest.skipIf(os.name == "nt", "crash contract uses spawn and os._exit")
     def test_process_exit_at_each_outbox_checkpoint_recovers_honestly(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         for stage, expected_exit, expected_status, expected_revision in (
             ("planned", 41, "planned", 2),
             ("in_flight", 42, "unknown", 4),
@@ -466,9 +466,9 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 self.assertEqual(command["status"], expected_status)
                 self.assertEqual(snapshot.revision, expected_revision)
 
-    @unittest.skipIf(os.name == "nt", "crash contract uses fork and os._exit")
+    @unittest.skipIf(os.name == "nt", "crash contract uses spawn and os._exit")
     def test_process_exit_during_materialization_rebuilds_from_canonical_state(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             store = RuntimeStore(workspace)
@@ -941,7 +941,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(committed.revision, 2)
         self.assertEqual(committed.payload["status"], "ACTIVE")
 
-    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses fork semantics")
+    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses spawn semantics")
     def test_action_request_race_commits_one_lease_without_orphan_request_files(self):
         from gh_address_cr.core.session import SessionManager
 
@@ -963,7 +963,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 session["items"] = {"finding-1": item}
                 manager.save(session)
 
-                context = multiprocessing.get_context("fork")
+                context = multiprocessing.get_context("spawn")
                 barrier = context.Barrier(2)
                 queue = context.Queue()
                 workers = [
@@ -990,7 +990,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
         self.assertEqual(len(request_files), 1)
         self.assertEqual(len(snapshot["leases"]), 1)
 
-    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses fork semantics")
+    @unittest.skipIf(os.name == "nt", "multiprocessing barrier contract uses spawn semantics")
     def test_batch_action_request_race_commits_one_lease_without_orphan_request_files(self):
         from gh_address_cr.core.session import SessionManager
         from tests.test_control_plane_workflow import github_thread
@@ -1004,7 +1004,7 @@ class TransactionalRuntimeStoreContractTests(unittest.TestCase):
                 session["items"] = {"github-thread:T1": github_thread("github-thread:T1")}
                 manager.save(session)
 
-                context = multiprocessing.get_context("fork")
+                context = multiprocessing.get_context("spawn")
                 barrier = context.Barrier(2)
                 queue = context.Queue()
                 workers = [
