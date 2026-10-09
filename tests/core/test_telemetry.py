@@ -2,7 +2,7 @@ import json
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -387,25 +387,33 @@ class TestTelemetry(unittest.TestCase):
                 report = build_efficiency_report("octo/example", "77")
                 self.assertIsNone(report["telemetry_shutdown_wait_ms"], raw)
 
-    def test_stale_or_undated_shutdown_wait_is_not_added_to_reports(self):
-        import json
-        from datetime import datetime, timedelta, timezone
-
+    def test_read_last_shutdown_wait_ignores_stale_or_undated_records(self):
         from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms, shutdown_wait_file
 
-        def stamp(delta):
-            return (datetime.now(timezone.utc) + delta).replace(microsecond=0).isoformat()
+        now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
 
-        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now if tz is None else now.astimezone(tz)
+
+        def stamp(seconds):
+            return (now + timedelta(seconds=seconds)).isoformat()
+
+        cases = {
+            "fresh": ({"wait_ms": 300.0, "recorded_at": stamp(-5)}, 300.0),
+            "stale": ({"wait_ms": 300.0, "recorded_at": stamp(-3600)}, None),
+            "far_future": ({"wait_ms": 300.0, "recorded_at": stamp(3600)}, None),
+            "undated": ({"wait_ms": 300.0}, None),
+            "unparseable": ({"wait_ms": 300.0, "recorded_at": "yesterday"}, None),
+            "naive": ({"wait_ms": 300.0, "recorded_at": "2026-10-09T11:59:55"}, None),
+        }
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+            patch("gh_address_cr.core.telemetry_shutdown.datetime", FixedDatetime),
+        ):
             path = shutdown_wait_file()
-            cases = {
-                "fresh": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(seconds=-5))}, 300.0),
-                "stale": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(hours=-1))}, None),
-                "far_future": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(hours=1))}, None),
-                "undated": ({"wait_ms": 300.0}, None),
-                "unparseable": ({"wait_ms": 300.0, "recorded_at": "yesterday"}, None),
-                "naive": ({"wait_ms": 300.0, "recorded_at": "2026-10-09T00:00:00"}, None),
-            }
             for name, (payload, expected) in cases.items():
                 path.write_text(json.dumps(payload), encoding="utf-8")
                 self.assertEqual(read_last_shutdown_wait_ms(), expected, name)
