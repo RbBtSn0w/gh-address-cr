@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import threading
 import uuid
 from contextvars import ContextVar, Token
@@ -64,9 +65,25 @@ def classify_command_outcome(exit_code: int, reason_code: str | None) -> str:
     return "failure"
 
 
+_REASON_CODE_SPAN_ATTRIBUTE = "gh_address_cr.command.reason_code"
+# Reason codes are a fixed public enum; anything else is not safe to export as a span attribute.
+_REASON_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+
 def note_command_reason_code(reason_code: str | None) -> None:
-    """Record the reason code the current command emitted, for its outcome metric."""
+    """Record the reason code the current command emitted, for its outcome metric and the current span.
+
+    Failure output helpers call this from the command handler, where the current span is the
+    CLI root span.
+    """
     _COMMAND_REASON_CODE.set(reason_code)
+    if reason_code and _REASON_CODE_PATTERN.fullmatch(reason_code):
+        try:
+            from gh_address_cr.otel_tracing import set_current_span_attributes
+
+            set_current_span_attributes({_REASON_CODE_SPAN_ATTRIBUTE: reason_code})
+        except Exception as exc:
+            _log_telemetry_failure("reason code span attribute", exc)
 
 
 def reset_command_reason_code() -> None:
