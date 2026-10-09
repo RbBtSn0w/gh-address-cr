@@ -41,6 +41,9 @@ if [ ! -x "${venv_dir}/bin/python" ]; then
     "${python_bin}" -m venv "${venv_dir}"
 fi
 
+"${venv_dir}/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' \
+    || { echo "dev_setup: ${venv_dir}/bin/python is older than Python 3.12 (required by pyproject.toml); remove ${venv_dir} and rerun" >&2; exit 1; }
+
 "${venv_dir}/bin/python" -m pip install --quiet --upgrade pip
 "${venv_dir}/bin/python" -m pip install --quiet -e "${repo_root}[dev]"
 

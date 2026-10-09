@@ -31,6 +31,20 @@ class DevSetupScriptTests(unittest.TestCase):
             self.assertIn("interpreter not found", result.stderr)
             self.assertFalse(venv.exists())
 
+    def test_existing_venv_with_an_old_python_is_rejected_before_pip_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = Path(tmp) / "venv"
+            (venv / "bin").mkdir(parents=True)
+            fake_python = venv / "bin" / "python"
+            fake_python.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            result = run("--venv", str(venv))
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("older than Python 3.12", result.stderr)
+            self.assertIn("remove", result.stderr)
+
     def test_help_documents_why_a_venv_is_used(self):
         result = run("--help")
 
