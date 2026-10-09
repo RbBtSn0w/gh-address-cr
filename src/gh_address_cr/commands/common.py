@@ -49,6 +49,10 @@ def prepend_optional(value: str | None, args: list[str]) -> list[str]:
 
 
 def output_workflow_error(exc: Any, *, repo: str, pr_number: str) -> int:
+    # Telemetry only: a failed command's reason code is what makes its outcome diagnosable.
+    from gh_address_cr.core.telemetry_runtime import note_command_reason_code
+
+    note_command_reason_code(getattr(exc, "reason_code", None))
     sys.stdout.write(json.dumps(exc.to_summary(repo=repo, pr_number=pr_number), indent=2, sort_keys=True) + "\n")
     print(str(exc), file=sys.stderr)
     return int(exc.exit_code)
