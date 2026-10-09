@@ -4,7 +4,6 @@
 # Implementation Plan: Resolve Command Orthogonalization
 
 **Branch**: `029-resolve-orthogonalization` | **Date**: 2026-07-08 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `docs/rfcs/029-resolve-orthogonalization/spec.md`
 
 ## Summary
 

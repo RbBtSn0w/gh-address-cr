@@ -4,7 +4,6 @@
 # Implementation Plan: CLI OpenTelemetry Instrumentation for AI Agent Scenarios
 
 **Branch**: `026-cli-otel-agent-integration` | **Date**: 2026-07-01 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `/docs/rfcs/026-cli-otel-agent-integration/spec.md`
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

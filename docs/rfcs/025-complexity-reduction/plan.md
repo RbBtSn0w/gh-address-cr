@@ -4,7 +4,6 @@
 # Implementation Plan: Core-Path-Anchored Complexity Reduction
 
 **Branch**: `025-complexity-reduction` | **Date**: 2026-07-01 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `docs/rfcs/025-complexity-reduction/spec.md`
 
 ## Summary
 

@@ -4,7 +4,6 @@
 # Implementation Plan: Stacked Pull Request Support
 
 **Branch**: `031-stacked-pr-support` | **Date**: 2026-08-01 | **Spec**: spec.md (removed delivery artifact; see Git history)
-**Input**: Feature specification from `docs/rfcs/031-stacked-pr-support/spec.md`
 
 ## Summary
 
