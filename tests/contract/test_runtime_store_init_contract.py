@@ -16,6 +16,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -88,23 +89,22 @@ def _bootstrap_then_write(workspace: str, barrier, queue, name: str) -> None:
         queue.put("ok")
 
 
-def _late_initializer(workspace: str, publishing, resume) -> None:
-    """Hold an initializer at the moment it would publish a database file.
+def _late_initializer(workspace: str, holding, resume) -> None:
+    """Hold an initializer inside its exclusive transaction, before it commits.
 
-    Pre-035 initialization built a temporary database and then ``os.replace``d
-    it over ``runtime.sqlite3``; pausing here lets another writer commit first,
-    which is the R2 clobber window. An in-place initializer never publishes a
-    file this way, so the hook never fires.
+    Initialization runs in place under ``BEGIN EXCLUSIVE``; pausing at the
+    metadata insert keeps that lock held, so a second initializer must queue
+    behind it instead of building and publishing a competing database file.
     """
-    original_replace = os.replace
+    original_insert = RuntimeStore._insert_metadata
 
-    def paused_replace(source, destination, *args, **kwargs):
-        if str(destination).endswith("runtime.sqlite3"):
-            publishing.set()
-            resume.wait(timeout=30)
-        return original_replace(source, destination, *args, **kwargs)
+    def paused_insert(*args, **kwargs):
+        holding.set()
+        if not resume.wait(timeout=30):
+            raise TimeoutError("late initializer was never resumed")
+        return original_insert(*args, **kwargs)
 
-    with patch("os.replace", side_effect=paused_replace):
+    with patch.object(RuntimeStore, "_insert_metadata", side_effect=paused_insert):
         RuntimeStore(Path(workspace), busy_timeout_ms=30_000).bootstrap(_session())
 
 
@@ -191,19 +191,31 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
     def test_late_initializer_cannot_replace_committed_store(self):
         context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
-            publishing = context.Event()
+            holding = context.Event()
             resume = context.Event()
-            late = context.Process(target=_late_initializer, args=(tmp, publishing, resume))
+            late = context.Process(target=_late_initializer, args=(tmp, holding, resume))
             late.start()
-            publishing.wait(timeout=30)
-            store = RuntimeStore(Path(tmp), busy_timeout_ms=30_000)
-            store.bootstrap(_session())
-            store.transact(lambda payload: payload["metadata"]["writers"].append("early"), operation="session_update")
-            resume.set()
+            try:
+                self.assertTrue(holding.wait(timeout=30), "late initializer never reached the pause point")
+                results: list[object] = []
+                early = threading.Thread(
+                    target=lambda: results.append(
+                        RuntimeStore(Path(tmp), busy_timeout_ms=30_000).bootstrap(_session())
+                    )
+                )
+                early.start()
+                early.join(timeout=0.5)
+                self.assertTrue(early.is_alive(), "second initializer must queue behind the held lock")
+            finally:
+                resume.set()
+            early.join(timeout=30)
             late.join(timeout=30)
             self.assertEqual(late.exitcode, 0)
+            self.assertEqual(len(results), 1)
 
-            snapshot = RuntimeStore(Path(tmp)).load()
+            store = RuntimeStore(Path(tmp))
+            store.transact(lambda payload: payload["metadata"]["writers"].append("early"), operation="session_update")
+            snapshot = store.load()
 
         self.assertEqual(snapshot.revision, 2)
         self.assertEqual(snapshot.payload["metadata"]["writers"], ["early"])
