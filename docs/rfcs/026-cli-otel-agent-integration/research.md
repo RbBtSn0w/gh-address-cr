@@ -11,7 +11,7 @@
 
 Evidence sources:
 - OpenTelemetry CLI semantic conventions (status: **Development**) — `opentelemetry.io/docs/specs/semconv/cli/cli-spans/`
-- OpenTelemetry Environment-Variable context carriers (status: **Beta**) — `opentelemetry.io/docs/specs/otel/context/env-carriers/`
+- OpenTelemetry Environment-Variable context carriers (status: **Release Candidate**) — `opentelemetry.io/docs/specs/otel/context/env-carriers/`
 - OpenTelemetry GenAI semantic conventions (status: **Development**, **moved** to `semantic-conventions-genai`) — `opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/`
 - Local code inspection: `src/gh_address_cr/__main__.py`, `telemetry.py`, `core/telemetry_safety.py`, `cli.py`
 - Installed SDK verification: `opentelemetry.semconv._incubating.attributes.{process,gen_ai}_attributes`, `TraceContextTextMapPropagator` — all import successfully in the pinned venv.
