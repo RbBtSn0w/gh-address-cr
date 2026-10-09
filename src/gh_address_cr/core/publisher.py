@@ -9,6 +9,7 @@ from gh_address_cr.core import command_templates, protocol_codes, side_effect_ou
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.commit_membership import commit_in_pr
 from gh_address_cr.core.errors import WorkflowError
+from gh_address_cr.core.parallel_reads import gather_reads
 from gh_address_cr.core.primary_action import project_context_summary
 from gh_address_cr.core.reply_templates import (
     KNOWN_REPLY_ATTRIBUTIONS,
@@ -440,8 +441,14 @@ def _publish_once(
             "pr_number": str(pr_number),
             "published_count": 0,
         }
-    _verify_publish_revision_bindings(repo, str(pr_number), session, publish_items, client)
-    publisher_login = _publisher_login(client, fallback=agent_id)
+    # The login lookup is a read independent of the stack refresh; run it alongside so the
+    # blocking stack check still raises first and no GitHub write has happened either way.
+    stack_outcome, login_outcome = gather_reads(
+        lambda: _verify_publish_revision_bindings(repo, str(pr_number), session, publish_items, client),
+        lambda: _publisher_login(client, fallback=agent_id),
+    )
+    stack_outcome.unwrap()
+    publisher_login = login_outcome.unwrap()
 
     plans = _build_publish_plans(session, ledger, publish_items, repo, pr_number, agent_id, client)
 

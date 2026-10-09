@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
 import uuid
 from contextvars import ContextVar, Token
 from pathlib import Path
@@ -103,6 +104,8 @@ class SessionTelemetry:
         self._loaded_files: set[Path] = set()
         self._pending_files: list[Path] = []
         self.paths: core_paths.SessionPaths | None = None
+        # Concurrent read workers record their `gh` subprocess metrics on this shared instance.
+        self._record_lock = threading.RLock()
 
     @property
     def metrics(self) -> list[ExecutionMetric]:
@@ -204,6 +207,32 @@ class SessionTelemetry:
         persistence_ms: float | None = None,
         lock_wait_ms: float | None = None,
         outcome: str | None = None,
+    ) -> None:
+        with self._record_lock:
+            self._record_locked(
+                command=command,
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+                pid=pid,
+                execution_id=execution_id,
+                persistence_ms=persistence_ms,
+                lock_wait_ms=lock_wait_ms,
+                outcome=outcome,
+            )
+
+    def _record_locked(
+        self,
+        *,
+        command: str,
+        start_time: float,
+        end_time: float,
+        exit_code: int,
+        pid: int | None,
+        execution_id: str | None,
+        persistence_ms: float | None,
+        lock_wait_ms: float | None,
+        outcome: str | None,
     ) -> None:
         is_retry = False
         last_metric = self._last_metric()

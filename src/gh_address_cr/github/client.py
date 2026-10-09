@@ -28,6 +28,8 @@ Runner = Callable[[list[str]], subprocess.CompletedProcess]
 class GitHubClient:
     def __init__(self, *, runner: Runner | None = None):
         self._runner = runner or self._default_runner
+        # Authenticated login is stable within one invocation; only successful reads are cached.
+        self._viewer_login: str | None = None
 
     def get_stack_context(self, repo: str, pr_number: str) -> StackContext:
         """Read and validate GitHub's current stack facts for one pull request.
@@ -449,10 +451,13 @@ class GitHubClient:
             page += 1
 
     def viewer_login(self) -> str:
+        if self._viewer_login is not None:
+            return self._viewer_login
         payload = self._read_json(["api", "user"])
         login = payload.get("login")
         if not isinstance(login, str) or not login.strip():
             raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub user response did not include login.")
+        self._viewer_login = login
         return login
 
     def _load_thread_comments(self, thread_id: str, initial_connection: dict[str, Any] | None) -> list[dict[str, Any]]:
