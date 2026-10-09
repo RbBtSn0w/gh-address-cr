@@ -44,8 +44,8 @@ elif [ "${python_explicit}" -eq 1 ]; then
     echo "dev_setup: reusing existing ${venv_dir}; --python ${python_bin} only applies to a new venv (remove ${venv_dir} to switch interpreters)" >&2
 fi
 
-"${venv_dir}/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' \
-    || { echo "dev_setup: ${venv_dir}/bin/python is not a working Python 3.12+ (older than 3.12, or it failed to run; pyproject.toml requires 3.12+); remove ${venv_dir} and rerun" >&2; exit 1; }
+"${venv_dir}/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) and sys.prefix != sys.base_prefix else 1)' \
+    || { echo "dev_setup: ${venv_dir}/bin/python is not a working virtual-environment Python 3.12+ (older than 3.12, not a venv, or it failed to run; pyproject.toml requires 3.12+ and a system Python must never be installed into); remove ${venv_dir} and rerun" >&2; exit 1; }
 
 "${venv_dir}/bin/python" -m pip install --quiet --upgrade pip
 "${venv_dir}/bin/python" -m pip install --quiet -e "${repo_root}[dev]"

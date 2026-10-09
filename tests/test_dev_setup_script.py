@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,9 +43,21 @@ class DevSetupScriptTests(unittest.TestCase):
             result = run("--venv", str(venv))
 
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("not a working Python 3.12+", result.stderr)
+            self.assertIn("not a working virtual-environment Python 3.12+", result.stderr)
             self.assertIn("failed to run", result.stderr)
             self.assertIn("remove", result.stderr)
+
+    def test_a_venv_path_holding_a_non_venv_interpreter_is_rejected(self):
+        base_python = Path(getattr(sys, "_base_executable", sys.executable))
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = Path(tmp) / "not-a-venv"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin" / "python").symlink_to(base_python)
+
+            result = run("--venv", str(venv))
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("not a venv", result.stderr)
 
     def test_explicit_python_is_reported_as_ignored_for_an_existing_venv(self):
         with tempfile.TemporaryDirectory() as tmp:
