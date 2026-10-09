@@ -42,7 +42,8 @@ class DevSetupScriptTests(unittest.TestCase):
             result = run("--venv", str(venv))
 
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("older than Python 3.12", result.stderr)
+            self.assertIn("not a working Python 3.12+", result.stderr)
+            self.assertIn("failed to run", result.stderr)
             self.assertIn("remove", result.stderr)
 
     def test_help_documents_why_a_venv_is_used(self):
