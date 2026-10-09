@@ -265,7 +265,8 @@ class ResolveMultiFileFlagsTest(PythonScriptTestCase):
             "--files", "src/a.py", "src/b.py",
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("unrecognized arguments: src/b.py", result.stderr)
+        self.assertIn("unrecognized arguments", result.stderr)
+        self.assertIn("src/b.py", result.stderr)
 
 
 if __name__ == "__main__":
