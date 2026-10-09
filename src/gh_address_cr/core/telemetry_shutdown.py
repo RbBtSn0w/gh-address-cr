@@ -18,6 +18,11 @@ from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.io import read_json_object, write_json_atomic
 
 SHUTDOWN_WAIT_FILENAME = "telemetry-shutdown-wait.json"
+# Every invocation overwrites the record, so a legitimate preceding wait is seconds old.
+# An older record means a later invocation did not write one (telemetry disabled, write
+# failure), and must not keep inflating telemetry_overhead_ms.
+SHUTDOWN_WAIT_MAX_AGE_SECONDS = 300.0
+_FUTURE_SKEW_SECONDS = 60.0
 
 
 def shutdown_wait_file() -> Path:
@@ -50,4 +55,19 @@ def read_last_shutdown_wait_ms() -> float | None:
         return None
     if not math.isfinite(value) or value < 0:
         return None
+    if not _is_recent(payload.get("recorded_at")):
+        return None
     return float(value)
+
+
+def _is_recent(recorded_at: Any) -> bool:
+    if not isinstance(recorded_at, str):
+        return False
+    try:
+        recorded = datetime.fromisoformat(recorded_at)
+    except ValueError:
+        return False
+    if recorded.tzinfo is None:
+        return False
+    age = (datetime.now(timezone.utc) - recorded).total_seconds()
+    return -_FUTURE_SKEW_SECONDS <= age <= SHUTDOWN_WAIT_MAX_AGE_SECONDS

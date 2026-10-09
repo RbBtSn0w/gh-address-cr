@@ -387,6 +387,29 @@ class TestTelemetry(unittest.TestCase):
                 report = build_efficiency_report("octo/example", "77")
                 self.assertIsNone(report["telemetry_shutdown_wait_ms"], raw)
 
+    def test_stale_or_undated_shutdown_wait_is_not_added_to_reports(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+
+        from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms, shutdown_wait_file
+
+        def stamp(delta):
+            return (datetime.now(timezone.utc) + delta).replace(microsecond=0).isoformat()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            path = shutdown_wait_file()
+            cases = {
+                "fresh": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(seconds=-5))}, 300.0),
+                "stale": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(hours=-1))}, None),
+                "far_future": ({"wait_ms": 300.0, "recorded_at": stamp(timedelta(hours=1))}, None),
+                "undated": ({"wait_ms": 300.0}, None),
+                "unparseable": ({"wait_ms": 300.0, "recorded_at": "yesterday"}, None),
+                "naive": ({"wait_ms": 300.0, "recorded_at": "2026-10-09T00:00:00"}, None),
+            }
+            for name, (payload, expected) in cases.items():
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertEqual(read_last_shutdown_wait_ms(), expected, name)
+
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):
         with tempfile.TemporaryDirectory() as tmp:
