@@ -208,8 +208,8 @@ class RuntimeStoreInitializationContractTest(unittest.TestCase):
                 self.assertTrue(early.is_alive(), "second initializer must queue behind the held lock")
             finally:
                 resume.set()
+                late.join(timeout=30)
             early.join(timeout=30)
-            late.join(timeout=30)
             self.assertEqual(late.exitcode, 0)
             self.assertEqual(len(results), 1)
 
