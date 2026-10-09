@@ -22,21 +22,25 @@ jobs:
       - name: Mint release-bot token
         id: bot
         if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
-        continue-on-error: true
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-checks: read
+          permission-contents: write
+          permission-pull-requests: write
+          permission-statuses: read
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
+          token: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
 
       - name: Create or Update Promotion PR
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
           HAS_CUSTOM_TOKEN: ${{ steps.bot.outputs.token != '' || secrets.SYNC_TOKEN != '' }}
         run: |
           set -euo pipefail
