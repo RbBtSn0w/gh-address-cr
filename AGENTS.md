@@ -51,14 +51,14 @@ Follow this order of precedence:
 
 ### Python Environment
 - **Version**: Python 3.12+ (enforced by `pyproject.toml`). Support covers the latest three stable CPython releases (3.12, 3.13, 3.14); drop the oldest when a new stable release ships or it reaches end of life.
-- **Install for dev**: `pip install -e .` (required; test discovery depends on the installed package).
+- **Install for dev**: `scripts/dev_setup.sh`, then `source .venv/bin/activate` (required; test discovery depends on the installed package). Do not run `pip install -e .` against a system or Homebrew Python: it writes `gh-address-cr` into that Python's bin directory, shadows the released CLI, and makes `brew link` fail.
 
 ### Testable Contracts And Fail-Fast Changes
 Public behavior changes MUST update code, docs, and executable tests together. The project MUST fail fast on missing tools, malformed producer output, invalid handoff formats, unsafe resolve-only handling, and unsupported public command usage. Silent fallbacks, hidden compatibility shims, alternate prompt contracts, and narrative-only findings ingestion are forbidden unless they are explicitly documented, tested, and versioned as public behavior.
 
 ### Verification Commands
 Before claiming work is complete, run these local checks:
-- **Install**: `pip install -e .` (required before running tests).
+- **Install**: `scripts/dev_setup.sh` and activate `.venv` (required before running tests).
 - **Linting**: `ruff check src tests scripts/build_plugin_payload.py` (configured in `pyproject.toml`).
 - **Type Checking**: `python3 scripts/check_mypy_ratchet.py` (CI blocking gate; baseline 0 errors, config in `pyproject.toml`). Run it with the same interpreter that has the package installed so third-party stubs resolve.
 - **Unit Tests**: `python3 -m unittest discover -s tests`.

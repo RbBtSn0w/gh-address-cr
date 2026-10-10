@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
+import threading
 import uuid
 from contextvars import ContextVar, Token
 from pathlib import Path
@@ -63,9 +65,25 @@ def classify_command_outcome(exit_code: int, reason_code: str | None) -> str:
     return "failure"
 
 
+_REASON_CODE_SPAN_ATTRIBUTE = "gh_address_cr.command.reason_code"
+# Reason codes are a fixed public enum; anything else is not safe to export as a span attribute.
+_REASON_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+
 def note_command_reason_code(reason_code: str | None) -> None:
-    """Record the reason code the current command emitted, for its outcome metric."""
+    """Record the reason code the current command emitted, for its outcome metric and the current span.
+
+    Failure output helpers call this from the command handler, where the current span is the
+    CLI root span.
+    """
     _COMMAND_REASON_CODE.set(reason_code)
+    if reason_code and _REASON_CODE_PATTERN.fullmatch(reason_code):
+        try:
+            from gh_address_cr.otel_tracing import set_current_span_attributes
+
+            set_current_span_attributes({_REASON_CODE_SPAN_ATTRIBUTE: reason_code})
+        except Exception as exc:
+            _log_telemetry_failure("reason code span attribute", exc)
 
 
 def reset_command_reason_code() -> None:
@@ -103,6 +121,8 @@ class SessionTelemetry:
         self._loaded_files: set[Path] = set()
         self._pending_files: list[Path] = []
         self.paths: core_paths.SessionPaths | None = None
+        # Concurrent read workers record their `gh` subprocess metrics on this shared instance.
+        self._record_lock = threading.RLock()
 
     @property
     def metrics(self) -> list[ExecutionMetric]:
@@ -204,6 +224,32 @@ class SessionTelemetry:
         persistence_ms: float | None = None,
         lock_wait_ms: float | None = None,
         outcome: str | None = None,
+    ) -> None:
+        with self._record_lock:
+            self._record_locked(
+                command=command,
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+                pid=pid,
+                execution_id=execution_id,
+                persistence_ms=persistence_ms,
+                lock_wait_ms=lock_wait_ms,
+                outcome=outcome,
+            )
+
+    def _record_locked(
+        self,
+        *,
+        command: str,
+        start_time: float,
+        end_time: float,
+        exit_code: int,
+        pid: int | None,
+        execution_id: str | None,
+        persistence_ms: float | None,
+        lock_wait_ms: float | None,
+        outcome: str | None,
     ) -> None:
         is_retry = False
         last_metric = self._last_metric()

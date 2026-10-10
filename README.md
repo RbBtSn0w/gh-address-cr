@@ -211,9 +211,12 @@ Tests use the same stable service identity. As a distributable CLI,
 gateway-owned admission and destination configuration provide isolation.
 
 The CLI entrypoint initializes tracing before dispatch and calls
-`shutdown_telemetry()` in a `finally` block. It attempts to flush spans for up
-to 2.2 seconds, including a 2-second exporter timeout, then returns fail-open
-if the gateway remains unavailable.
+`shutdown_telemetry()` in a `finally` block. It waits at most 0.3 seconds
+(`SHUTDOWN_JOIN_TIMEOUT_SECONDS`) for the flush, then returns fail-open and
+abandons any export still in flight, so a slow or unreachable gateway cannot
+delay the command. The measured wait is recorded locally and counted in the
+next efficiency report's `telemetry_overhead_ms` (see
+`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`).
 For a custom operation:
 
 ```python
@@ -623,9 +626,12 @@ GitHub-direct runtime validation install:
 
 - `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git`
 
-Local editable development install:
+Local editable development install (use a virtual environment, never the system or Homebrew Python):
 
-- `python3 -m pip install -e .`
+- `scripts/dev_setup.sh` creates `.venv` and installs the package editable with the dev extras
+- `python3 -m pip install -e '.[dev]'` is the equivalent manual step, only inside an activated virtual environment
+
+Installing editable into the system or Homebrew Python writes a `gh-address-cr` script into its bin directory, which shadows the released CLI and makes `brew link` fail with "Target already exists".
 
 Packaged skill install:
 

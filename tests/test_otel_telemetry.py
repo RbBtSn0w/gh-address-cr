@@ -446,13 +446,41 @@ class OpenTelemetryInitializationTests(unittest.TestCase):
         self.assertLess(elapsed, 0.5)
         release_shutdown.set()
 
-    def test_shutdown_budget_covers_export_timeout(self) -> None:
+    def test_shutdown_wait_bound_is_documented_and_short(self) -> None:
         from gh_address_cr import otel_tracing
 
-        self.assertGreater(
-            otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS,
-            otel_tracing.EXPORT_TIMEOUT_SECONDS,
-        )
+        self.assertLessEqual(otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS, 0.5)
+
+    def test_shutdown_against_unresponsive_endpoint_stays_within_bound_and_records_wait(self) -> None:
+        import socket
+
+        from gh_address_cr import otel_tracing
+        from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms, shutdown_wait_file
+
+        # Accepts connections into the backlog but never answers, so the export hangs.
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        endpoint = f"http://127.0.0.1:{listener.getsockname()[1]}/v1/traces"
+        try:
+            with tempfile.TemporaryDirectory() as state:
+                env = {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": endpoint, "GH_ADDRESS_CR_STATE_DIR": state}
+                with patch.dict(os.environ, env, clear=True):
+                    tracer = otel_tracing.initialize_telemetry()
+                    with tracer.start_as_current_span("hang-test"):
+                        pass
+                    started_at = time.monotonic()
+                    otel_tracing.shutdown_telemetry()
+                    elapsed = time.monotonic() - started_at
+                    recorded = read_last_shutdown_wait_ms()
+                    record = json.loads(shutdown_wait_file().read_text(encoding="utf-8"))
+        finally:
+            listener.close()
+
+        self.assertLess(elapsed, otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS + 0.3)
+        self.assertIsNotNone(recorded)
+        self.assertLess(recorded, (otel_tracing.SHUTDOWN_JOIN_TIMEOUT_SECONDS + 0.3) * 1000)
+        self.assertTrue(record["timed_out"])
 
     def test_initialization_keeps_exporter_failures_off_stderr(self) -> None:
         from gh_address_cr import otel_tracing

@@ -59,6 +59,7 @@ from gh_address_cr.core.telemetry_safety import (
     _safe_diagnostic_text,
     _safe_runtime_operation,
 )
+from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms
 
 __all__ = [
     "CodexHostJsonAdapter",
@@ -446,6 +447,7 @@ TELEMETRY_OVERHEAD_BUDGET_MS = 250
 
 def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayload:
     overhead_started_at = time.perf_counter()
+    shutdown_wait_ms = read_last_shutdown_wait_ms()
     paths = core_paths.SessionPaths(repo, pr_number)
     runtime_events = _runtime_events(paths)
     external_events, diagnostics = _load_external_events_with_diagnostics(paths)
@@ -498,6 +500,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         "duration_observed": duration_observed,
         "telemetry_overhead_budget_ms": TELEMETRY_OVERHEAD_BUDGET_MS,
         "telemetry_overhead_ms": None,
+        "telemetry_shutdown_wait_ms": shutdown_wait_ms,
         "host_metrics": host_metrics,
         "slowest_operations": [
             {
@@ -523,7 +526,7 @@ def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayloa
         write_json_atomic(report_path, report)
     except OSError as exc:
         diagnostics.append(_safe_os_error_diagnostic("efficiency report artifact unavailable", exc))
-    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000, 3)
+    telemetry_overhead_ms = round((time.perf_counter() - overhead_started_at) * 1000 + (shutdown_wait_ms or 0.0), 3)
     report["telemetry_overhead_ms"] = telemetry_overhead_ms
     if telemetry_overhead_ms > TELEMETRY_OVERHEAD_BUDGET_MS and "TELEMETRY_OVERHEAD_EXCEEDED" not in diagnostics:
         diagnostics.append("TELEMETRY_OVERHEAD_EXCEEDED")

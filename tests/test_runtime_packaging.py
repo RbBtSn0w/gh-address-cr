@@ -835,7 +835,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("GitHub-direct runtime validation install", text)
         self.assertIn("pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git", text)
         self.assertIn("Local editable development install", text)
-        self.assertIn("python3 -m pip install -e .", text)
+        self.assertIn("python3 -m pip install -e '.[dev]'", text)
         self.assertIn("Packaged skill install", text)
         self.assertIn("npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill", text)
         self.assertNotIn("--skill gh-address-cr", text)

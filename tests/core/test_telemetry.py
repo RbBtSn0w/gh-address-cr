@@ -2,7 +2,7 @@ import json
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -357,6 +357,66 @@ class TestTelemetry(unittest.TestCase):
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
             self.assertIsNone(artifact["telemetry_overhead_ms"])
             self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", artifact["diagnostics"])
+
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.05])
+    def test_efficiency_report_overhead_includes_previous_shutdown_wait(self, _perf_counter):
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(300.0, timed_out=True)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
+            self.assertEqual(report["telemetry_shutdown_wait_ms"], 300.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 350.0)
+            self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            self.assertEqual(artifact["telemetry_shutdown_wait_ms"], 300.0)
+
+    def test_efficiency_report_ignores_missing_or_malformed_shutdown_wait(self):
+        from gh_address_cr.core.telemetry_shutdown import shutdown_wait_file
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            self.assertIsNone(build_efficiency_report("octo/example", "77")["telemetry_shutdown_wait_ms"])
+            shutdown_wait_file().write_text('{"wait_ms": "slow"}', encoding="utf-8")
+            report = build_efficiency_report("octo/example", "77")
+            self.assertIsNone(report["telemetry_shutdown_wait_ms"])
+            self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
+            for raw in ("NaN", "Infinity", "-Infinity"):
+                shutdown_wait_file().write_text('{"wait_ms": %s}' % raw, encoding="utf-8")
+                report = build_efficiency_report("octo/example", "77")
+                self.assertIsNone(report["telemetry_shutdown_wait_ms"], raw)
+
+    def test_read_last_shutdown_wait_ignores_stale_or_undated_records(self):
+        from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms, shutdown_wait_file
+
+        now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now if tz is None else now.astimezone(tz)
+
+        def stamp(seconds):
+            return (now + timedelta(seconds=seconds)).isoformat()
+
+        cases = {
+            "fresh": ({"wait_ms": 300.0, "recorded_at": stamp(-5)}, 300.0),
+            "stale": ({"wait_ms": 300.0, "recorded_at": stamp(-3600)}, None),
+            "far_future": ({"wait_ms": 300.0, "recorded_at": stamp(3600)}, None),
+            "undated": ({"wait_ms": 300.0}, None),
+            "unparseable": ({"wait_ms": 300.0, "recorded_at": "yesterday"}, None),
+            "naive": ({"wait_ms": 300.0, "recorded_at": "2026-10-09T11:59:55"}, None),
+        }
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+            patch("gh_address_cr.core.telemetry_shutdown.datetime", FixedDatetime),
+        ):
+            path = shutdown_wait_file()
+            for name, (payload, expected) in cases.items():
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertEqual(read_last_shutdown_wait_ms(), expected, name)
 
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_diagnostics_do_not_expose_absolute_paths(self, state_dir):

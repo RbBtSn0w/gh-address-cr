@@ -31,6 +31,7 @@ from gh_address_cr.core.handoff import (
     record_producer_result,
 )
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.parallel_reads import gather_reads
 from gh_address_cr.core.primary_action import (
     build_recommendation_observation,
     project_context_summary,
@@ -926,8 +927,16 @@ class HighLevelReviewRuntime:
             from gh_address_cr.evidence.ledger import record_new_item_observations
 
             client = GitHubClient()
+            # The four lookups are independent reads: issue them together and consume the
+            # outcomes in the original order so error precedence is unchanged.
+            stack_outcome, threads_outcome, checks_outcome, files_outcome = gather_reads(
+                lambda: client.get_stack_context(repo, pr_number),
+                lambda: client.list_threads(repo, pr_number),
+                lambda: client.list_pr_checks(repo, pr_number),
+                lambda: client.list_pr_files(repo, pr_number),
+            )
             try:
-                stack_context = client.get_stack_context(repo, pr_number)
+                stack_context = stack_outcome.unwrap()
             except Exception:
                 stack_context = unavailable_stack_context(repo, pr_number, observed_at=_utc_now())
             session_store.cache_pull_request_context(session, stack_context.to_dict())
@@ -941,14 +950,14 @@ class HighLevelReviewRuntime:
                 )
             except Exception:
                 pass
-            remote_threads = client.list_threads(repo, pr_number)
+            remote_threads = threads_outcome.unwrap()
             previous_item_ids = set(map(str, session.get("items") or {}))
             session = core_gate.session_with_remote_threads(session, remote_threads)
             record_new_item_observations(session, previous_item_ids, timestamp=_utc_now())
             metadata = session.setdefault("metadata", {})
             if isinstance(metadata, dict):
                 try:
-                    checks = client.list_pr_checks(repo, pr_number)
+                    checks = checks_outcome.unwrap()
                     if not isinstance(checks, list):
                         checks = []
                     counts: dict[str, int] = {}
@@ -968,7 +977,7 @@ class HighLevelReviewRuntime:
                         "diagnostic_code": exc.reason_code,
                     }
                 try:
-                    changed_files = client.list_pr_files(repo, pr_number)
+                    changed_files = files_outcome.unwrap()
                     metadata["changed_files"] = changed_files if isinstance(changed_files, list) else []
                 except GitHubError as exc:
                     metadata["changed_files"] = []
