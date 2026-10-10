@@ -1,3 +1,14 @@
+## [3.20.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.20.0...v3.20.1) (2026-10-10)
+
+### Bug Fixes
+
+* escape dev_setup activate path and expire stale shutdown waits ([ef25265](https://github.com/RbBtSn0w/gh-address-cr/commit/ef25265f27602cd32f93392ccf492a0f66f52878))
+
+### Performance Improvements
+
+* **github:** reduce serial gh round trips in final-gate, address and agent publish ([#352](https://github.com/RbBtSn0w/gh-address-cr/issues/352)) ([37c6b2b](https://github.com/RbBtSn0w/gh-address-cr/commit/37c6b2ba4d3ee7be5f8e9b5376186d118446ac68)), closes [#347](https://github.com/RbBtSn0w/gh-address-cr/issues/347)
+* **telemetry:** bound exit-time export wait and count it in overhead ([#351](https://github.com/RbBtSn0w/gh-address-cr/issues/351)) ([c40a89c](https://github.com/RbBtSn0w/gh-address-cr/commit/c40a89c6272542f3f1ad1ba5534a74886e622e75)), closes [#346](https://github.com/RbBtSn0w/gh-address-cr/issues/346)
+
 ## [3.20.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.19.0...v3.20.0) (2026-10-09)
 
 ### Features
