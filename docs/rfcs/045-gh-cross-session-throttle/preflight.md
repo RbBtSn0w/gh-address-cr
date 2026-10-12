@@ -63,3 +63,18 @@ and the auth preflight call `gh` directly and are intentionally outside it.
   unwritable state dir, slot exhaustion times out and proceeds, mutation spacing,
   mutation detection, rate-limit results open the breaker through the default
   runner, and an open breaker avoids spawning `gh`.
+
+## Deferred (decision record)
+
+The following were evaluated and intentionally not built. Revisit only with
+measured evidence from the `gh_address_cr.subprocess` spans (including
+`gh_address_cr.subprocess.mutation`) and the `gh_address_cr.github.*` events, not
+on inference.
+
+| Option | Why deferred | Revisit when |
+| --- | --- | --- |
+| Persistent identity cache (viewer login on disk) | Saves one `gh api user` per process, which is small against the retry and serialization work above; a stale login would break the reply-author evidence of principle III. | Spans show `github.rest` identity calls dominating a session. |
+| ETag / `If-None-Match` for REST lists | `gh api` hides response headers (needs `-i` parsing), GraphQL has no equivalent, and the lists involved (files, commits) are not the hot path. | Rate-limit signals correlate with REST list calls. |
+| Aliased GraphQL batch mutations | Changes the GitHub side-effect shape (partial failures, per-alias idempotency) and pushes against the one-second write spacing GitHub recommends. | Publish latency is shown to be the bottleneck rather than rate limiting. |
+| Folding `gh auth status` into `gh api user` | Would change the public `GH_*` preflight reason codes. | A versioned preflight contract change is planned. |
+| Daemon, direct HTTP client, SQLite token bucket | Rejected under principle X and Spec 041; no evidence the advisory files are insufficient. | Never without a new blast-radius justification. |
