@@ -5,7 +5,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from opentelemetry.sdk.trace import ReadableSpan
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
@@ -341,7 +344,9 @@ def _patched_subprocess_run(original_run, *run_args, **run_kwargs):
     return res
 
 
-def run_cli_under_memory_exporter(argv, *, extra_env=None):
+def run_cli_under_memory_exporter(
+    argv: list[str], *, extra_env: dict[str, str] | None = None
+) -> tuple[int, "ReadableSpan", tuple["ReadableSpan", ...], str]:
     """Run ``gh_address_cr.__main__.main`` in-process under an in-memory tracer.
 
     Returns ``(exit_code, root_span, finished_spans, stdout)``. The PR state directory is a
