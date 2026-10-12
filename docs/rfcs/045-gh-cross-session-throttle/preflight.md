@@ -73,7 +73,8 @@ on inference.
 
 | Option | Why deferred | Revisit when |
 | --- | --- | --- |
-| Persistent identity cache (viewer login on disk) | Saves one `gh api user` per process, which is small against the retry and serialization work above; a stale login would break the reply-author evidence of principle III. | Spans show `github.rest` identity calls dominating a session. |
+| Skipping checks/files reads in `address` | `check_summary` and `changed_files` are part of the machine-readable `address` output, so dropping the reads is a public contract change. They already run in parallel with the other reads. | An output-contract revision makes them optional. |
+| Persistent identity cache (viewer login on disk) | Within a process the login is now shared by all default-runner clients; a disk cache would only save one `gh api user` per process, which is small against the retry and serialization work above; a stale login would break the reply-author evidence of principle III. | Spans show `github.rest` identity calls dominating a session. |
 | ETag / `If-None-Match` for REST lists | `gh api` hides response headers (needs `-i` parsing), GraphQL has no equivalent, and the lists involved (files, commits) are not the hot path. | Rate-limit signals correlate with REST list calls. |
 | Aliased GraphQL batch mutations | Changes the GitHub side-effect shape (partial failures, per-alias idempotency) and pushes against the one-second write spacing GitHub recommends. | Publish latency is shown to be the bottleneck rather than rate limiting. |
 | Folding `gh auth status` into `gh api user` | Would change the public `GH_*` preflight reason codes. | A versioned preflight contract change is planned. |

@@ -111,6 +111,36 @@ class ViewerLoginMemoTests(unittest.TestCase):
         self.assertEqual(gh.calls.count("user"), 2)
 
 
+class ProcessViewerLoginTests(unittest.TestCase):
+    def setUp(self):
+        GitHubClient.reset_process_cache()
+        self.addCleanup(GitHubClient.reset_process_cache)
+
+    def test_default_runner_clients_share_one_login_read(self):
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"login": "me"}), stderr="")
+
+        with (
+            tempfile.TemporaryDirectory() as state,
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state}),
+            patch("gh_address_cr.core.command_runner.run_cmd", side_effect=fake_run_cmd),
+        ):
+            self.assertEqual(GitHubClient().viewer_login(), "me")
+            self.assertEqual(GitHubClient().viewer_login(), "me")
+
+        self.assertEqual(len(calls), 1)
+
+    def test_injected_runner_clients_never_share_the_process_cache(self):
+        first, second = FakeGh(), FakeGh()
+        GitHubClient(runner=first).viewer_login()
+        GitHubClient(runner=second).viewer_login()
+
+        self.assertEqual((first.calls.count("user"), second.calls.count("user")), (1, 1))
+
+
 class FinalGateCallTests(unittest.TestCase):
     def run_gate(self, gh, **kwargs):
         from gh_address_cr.core.gate import Gatekeeper

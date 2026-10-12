@@ -35,7 +35,12 @@ GH_COMMAND_TIMEOUT_SECONDS = 60.0
 _NON_RETRYABLE_CATEGORIES = frozenset({"auth", "not_found", "rate_limit", "environment", "sandbox"})
 
 class GitHubClient:
+    # Clients on the real `gh` runner share the authenticated login within one process, so the several
+    # clients one invocation builds issue a single `gh api user`. Injected runners (tests) never touch it.
+    _process_viewer_login: str | None = None
+
     def __init__(self, *, runner: Runner | None = None):
+        self._uses_default_runner = runner is None
         self._runner = runner or self._default_runner
         # Authenticated login is stable within one invocation; only successful reads are cached.
         self._viewer_login: str | None = None
@@ -471,12 +476,21 @@ class GitHubClient:
     def viewer_login(self) -> str:
         if self._viewer_login is not None:
             return self._viewer_login
+        if self._uses_default_runner and GitHubClient._process_viewer_login is not None:
+            self._viewer_login = GitHubClient._process_viewer_login
+            return self._viewer_login
         payload = self._read_json(["api", "user"])
         login = payload.get("login")
         if not isinstance(login, str) or not login.strip():
             raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub user response did not include login.")
         self._viewer_login = login
+        if self._uses_default_runner:
+            GitHubClient._process_viewer_login = login
         return login
+
+    @classmethod
+    def reset_process_cache(cls) -> None:
+        cls._process_viewer_login = None
 
     def _load_thread_comments(self, thread_id: str, initial_connection: dict[str, Any] | None) -> list[dict[str, Any]]:
         comments = _connection_nodes(initial_connection)
