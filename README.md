@@ -235,6 +235,14 @@ exits before dispatch (`--help`, `-h`, `--version`, no arguments), the placehold
 the same rule. `command.path` and `gh_address_cr.command.exit_code` exist only for
 invocations that reach command dispatch, so count invocations and exit status from
 `process.exit.code`, not from `command.exit_code`.
+
+The root span's `gh_address_cr.invocation.kind` says how the invocation ended:
+`command` (argument parsing succeeded and the command was dispatched or rejected by
+dispatch), `help`, `version`, or `usage_error` (the last three exit during
+argument parsing, before any command runs). Filter on `command` to count invocations
+that reached dispatch; help, version and no-argument calls otherwise make up about
+half of all production root spans (see
+`docs/rfcs/043-telemetry-invocation-kind/preflight.md`).
 For a custom operation:
 
 ```python
