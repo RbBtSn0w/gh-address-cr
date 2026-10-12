@@ -50,6 +50,23 @@ class OtelMinConstraintsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["opentelemetry-sdk==1.40"])
 
+    def test_pins_use_canonical_package_names_whatever_the_spelling(self):
+        # Package names are case-insensitive and treat '-', '_' and '.' alike. A spelling that skips the
+        # opentelemetry- prefix check would leave the sdk unpinned without any error.
+        result = run_script(
+            dependencies=["OpenTelemetry-SDK>=1.40", "OpenTelemetry_API>=1.40", "opentelemetry.exporter.otlp.proto.http>=1.40"]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            [
+                "opentelemetry-api==1.40",
+                "opentelemetry-exporter-otlp-proto-http==1.40",
+                "opentelemetry-sdk==1.40",
+            ],
+        )
+
     def test_refuses_an_opentelemetry_spec_it_cannot_pin(self):
         # Silently skipping these would leave the sdk, and with it semantic-conventions, unpinned
         # while the job still looked green.
@@ -59,11 +76,12 @@ class OtelMinConstraintsTest(unittest.TestCase):
             "opentelemetry-sdk~=1.40",
             "opentelemetry-sdk>=1.40; python_version >= '3.12'",
             "opentelemetry-sdk",
+            "OpenTelemetry_SDK[extra]>=1.40",
         ):
             with self.subTest(spec=spec):
                 result = run_script(dependencies=["opentelemetry-api>=1.40", spec])
                 self.assertNotEqual(result.returncode, 0, result.stdout)
-                self.assertIn("opentelemetry-sdk", result.stderr)
+                self.assertIn("opentelemetry-sdk", result.stderr.lower().replace("_", "-"))
                 self.assertEqual(result.stdout, "", "no partial constraints may be emitted on failure")
 
     def test_refuses_a_pyproject_without_opentelemetry_dependencies(self):

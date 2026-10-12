@@ -381,6 +381,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
     def test_opentelemetry_floors_move_in_lockstep_and_are_not_below_the_known_minimum(self):
         spec = importlib.util.spec_from_file_location("otel_min_constraints", OTEL_MIN_CONSTRAINTS_SCRIPT)
+        self.assertIsNotNone(spec, f"cannot load {OTEL_MIN_CONSTRAINTS_SCRIPT}")
+        self.assertIsNotNone(spec.loader, f"{OTEL_MIN_CONSTRAINTS_SCRIPT} has no loader")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         # Same parser as the CI job, so the test and the job cannot disagree about a floor.

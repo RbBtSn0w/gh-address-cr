@@ -26,7 +26,14 @@ DEFAULT_PYPROJECT = ROOT / "pyproject.toml"
 PREFIX = "opentelemetry-"
 # Resolved for context in --check-installed; pinned transitively by the sdk, not declared.
 SEMCONV_PACKAGE = "opentelemetry-semantic-conventions"
-_PLAIN_FLOOR = re.compile(r"(?P<name>opentelemetry-[A-Za-z0-9._-]+)>=(?P<version>[0-9][A-Za-z0-9._!+-]*)")
+_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_LEADING_NAME = re.compile(_NAME)
+_PLAIN_FLOOR = re.compile(rf"(?P<name>{_NAME})>=(?P<version>[0-9][A-Za-z0-9._!+-]*)")
+
+
+def _canonical(name: str) -> str:
+    """PEP 503 normalisation: case-insensitive, with runs of '-', '_' and '.' equivalent."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def declared_floors(pyproject_text: str) -> dict[str, str]:
@@ -38,12 +45,15 @@ def declared_floors(pyproject_text: str) -> dict[str, str]:
     dependencies = tomllib.loads(pyproject_text)["project"]["dependencies"]
     floors: dict[str, str] = {}
     for spec in dependencies:
-        if not spec.strip().lower().startswith(PREFIX):
+        spec = spec.strip()
+        leading = _LEADING_NAME.match(spec)
+        # Decide by the canonical name, so no spelling of an opentelemetry package is skipped silently.
+        if leading is None or not _canonical(leading.group()).startswith(PREFIX):
             continue
-        match = _PLAIN_FLOOR.fullmatch(spec.strip())
+        match = _PLAIN_FLOOR.fullmatch(spec)
         if match is None:
             raise ValueError(f"cannot pin {spec!r}: expected a plain 'opentelemetry-<name>>=<version>' lower bound")
-        floors[match["name"]] = match["version"]
+        floors[_canonical(match["name"])] = match["version"]
     if not floors:
         raise ValueError("pyproject.toml declares no opentelemetry-* dependency to pin")
     return floors
