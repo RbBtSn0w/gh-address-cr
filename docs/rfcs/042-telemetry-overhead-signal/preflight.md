@@ -8,8 +8,9 @@ pointer.
 ## Problem (verified)
 
 1. **The budget is smaller than the bound it is compared against.**
-   `TELEMETRY_OVERHEAD_BUDGET_MS = 250` (`core/telemetry.py`) while
-   `SHUTDOWN_JOIN_TIMEOUT_SECONDS = 0.3` (`otel_tracing.py`). Spec 041 folds the
+   Before this change, `TELEMETRY_OVERHEAD_BUDGET_MS = 250` (`core/telemetry.py`) while
+   `SHUTDOWN_JOIN_TIMEOUT_SECONDS = 0.3` (then in `otel_tracing.py`, now in
+   `core/telemetry_shutdown.py`). Spec 041 folds the
    previous invocation's exit wait into `telemetry_overhead_ms`, so one timed-out
    export (a 300 ms wait, build time ~0) already exceeds the budget. On a slow
    GitHub link this fires `TELEMETRY_OVERHEAD_EXCEEDED` without any telemetry work
