@@ -80,9 +80,9 @@ Constraints that bound the solution:
 | Projection | `src/gh_address_cr/core/command_names.py`: `PUBLIC_COMMANDS` (frozenset) and `AGENT_SUBCOMMANDS` (an ordered tuple, because its order is the order shown in usage text). The module imports nothing from `src/gh_address_cr/cli.py` or `src/gh_address_cr/commands/`, so `core` can depend on it. |
 | Policy | Membership only. Consumers derive their sets from the vocabulary. The behavior sets stay in `src/gh_address_cr/cli.py` and are tested to be subsets of `PUBLIC_COMMANDS`. `agent` routing becomes a dictionary from the nine non-`manifest` names to handlers; `manifest` stays a special case, and all ten names remain in `AGENT_SUBCOMMANDS`. |
 | Side-effect plan | None. No IO, no GitHub writes. |
-| Artifact truth boundary | `agent manifest` output is unchanged. `--help` output changes in exactly one way: `agent` appears in the command list. |
+| Artifact truth boundary | `agent manifest` output is unchanged. The command list printed by `--help`, `-h` and the no-arguments usage error (one shared list) gains `agent`; nothing else in any checked output changes. |
 | Self-reference risk | None. |
-| Telemetry impact | Decision: the telemetry allowlist becomes the public vocabulary, which adds `version`. For `version` invocations (a few hundred root spans per week) the root `gen_ai.tool.name` changes from `gh-address-cr` to `version`, and `process.command_args` keeps the `version` token instead of redacting it. The command name is not sensitive. If maintainers prefer to keep `version` out, express it as an explicit, commented exclusion rather than an accidental omission. Record the chosen outcome in the change description. |
+| Telemetry impact | Decision (implemented): the telemetry allowlist becomes the public vocabulary, which adds `version`. For `version` invocations (a few hundred root spans per week) the root `gen_ai.tool.name` changes from `gh-address-cr` to `version`, and `process.command_args` keeps the `version` token instead of redacting it. The command name is not sensitive. If maintainers prefer to keep `version` out, express it as an explicit, commented exclusion rather than an accidental omission. Record the chosen outcome in the change description. |
 | Recovery / replay | Revert the change. No data migration. |
 
 ## Options considered
@@ -140,15 +140,33 @@ One refactor PR, now unblocked (the Spec 042 addendum in #357 and Spec 043 in #3
 
 ## Executable contract tests
 
-- `agent manifest` output is byte-identical before and after (golden comparison).
-- `--help` differs only by the added `agent`; `Unknown command. Supported commands:` output,
-  and its exit code, are unchanged.
+- `agent manifest` `public_commands` equals the 14 documented names (pinned in
+  `tests/test_command_vocabulary.py`).
+- The command list in `--help` is the vocabulary in order and equals the previous list plus
+  `agent`; the `Unknown command. Supported commands:` and `Unknown agent command` messages,
+  the `agent` usage line and their exit codes are asserted unchanged.
 - Every behavior set in `src/gh_address_cr/cli.py` is a subset of `PUBLIC_COMMANDS`; `cli`, `agent` and
   telemetry use the same object or an equal set.
 - The dictionary keys plus `manifest` equal `AGENT_SUBCOMMANDS`, and the `usage:` line lists
   exactly all ten names in order.
 - Telemetry: `version` is exported by name; unrecognized text is still exported as `unknown`
   (Spec 042 addendum).
+
+## Implementation notes
+
+- `PUBLIC_COMMANDS` is derived from an ordered tuple, `PUBLIC_COMMAND_NAMES`, because the
+  argparse command list needs a stable order. `agent` sits after `active-pr` in it.
+- The dispatch table is `_AGENT_HANDLERS` in `src/gh_address_cr/commands/agent.py`. A test
+  requires `["manifest", *_AGENT_HANDLERS]` to equal `AGENT_SUBCOMMANDS` in order, and a second
+  test routes each subcommand to its own handler with the same arguments.
+- `src/gh_address_cr/core/telemetry_safety.py` uses `PUBLIC_COMMANDS` directly; the private
+  `_PUBLIC_TELEMETRY_COMMANDS` is gone, so `version` is exported by name. `_PR_SCOPED_COMMANDS`
+  stays, because it answers a different question (which commands carry `vcs.*` attributes).
+- All of these tests are in `tests/test_command_vocabulary.py`; they replace the list
+  consistency test added with the command-name allowlist change.
+- Verified by capturing 20 CLI invocations before and after the change (60 output files:
+  stdout, stderr, exit code): 57 are byte-identical; the other 3 (`--help`, `-h`, and the
+  no-arguments error) differ only by `agent,` in the command list.
 
 ## Limitations
 
