@@ -200,3 +200,31 @@ python3 scripts/build_plugin_payload.py --check
   timed-out wait, true positive when build plus wait exceeds the budget.
 - `tests/test_otel_telemetry.py`: root-span attribute presence/absence and fail-open.
 - (PR C) root-span `reason_code` on needs-action versus preflight-failure paths.
+
+## Addendum: command names are exported from a closed set
+
+Recorded because it reshapes the value domain of `gh_address_cr.command.name` and
+`gh_address_cr.command.path` (AGENTS.md: telemetry reporting contracts).
+
+- **Problem (verified).** `cli.main` overwrote the allowlisted root value with the raw first
+  argv token, and `agent.<sub>` was built from raw `args.repo`. Three production root spans in
+  14 days carried text such as `address RbBtSn0w/gh-address-cr 343 --lean` (a whole command
+  quoted into one argument; `process.command_args` was redacted correctly). A second sink was
+  found in review: `command-session` labelled each operation span with `command_label(argv)`,
+  which treats `argv[0]` as an executable and keeps it verbatim, so an operation such as
+  `["--token=..."]` (rejected by argument parsing before `main` could overwrite the label)
+  exported the flag and its value.
+- **Policy.** One closed set. `cli.PUBLIC_COMMANDS` is the allowlist for `cli.main` and the
+  `cli.init` span; anything else is `unknown`. `agent.<sub>` is exported only for
+  `AGENT_SUBCOMMANDS`, otherwise `agent.unknown`. `command-session` operation spans use
+  `derive_tool_name(argv)` (the telemetry allowlist, else `gh-address-cr`).
+- **Trade-off.** The names of non-existent commands that callers try (production showed
+  `status`, `update`, and a retired `cr-loop` in tests) are no longer visible. The text is
+  unbounded and was the leak, so this is accepted; a bounded counter can be added later if
+  the signal is needed.
+- **Not changed.** Exit codes, output, routing, and `process.command_args` handling.
+- **Executable contract tests** (`tests/test_otel_telemetry.py`): unrecognized first
+  arguments never appear in any span attribute; `agent.unknown`; recognized names unchanged;
+  `command-session` operation spans never export raw argv; `AGENT_SUBCOMMANDS` equals the names
+  routed by `_route_agent_command` and its usage line; `cli.PUBLIC_COMMANDS`,
+  `agent.PUBLIC_COMMANDS` and the telemetry allowlist (plus `version`) stay in step.

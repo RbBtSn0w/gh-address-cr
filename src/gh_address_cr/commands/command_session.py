@@ -26,7 +26,7 @@ def handle_command_session(passthrough: list[str]) -> int:
     from gh_address_cr.core.telemetry_safety import (
         _safe_diagnostic_text,
         classify_workflow_span_layer,
-        command_label,
+        derive_tool_name,
         workflow_step_span_attributes,
     )
     from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
@@ -88,7 +88,9 @@ def handle_command_session(passthrough: list[str]) -> int:
             )
             continue
         op_started_at = time.monotonic()
-        op_command = command_label(argv) or "command"
+        # An operation argv starts with a gh-address-cr command, not an executable, so use the command
+        # allowlist: command_label keeps argv[0] verbatim and would export e.g. `--token=...`.
+        op_command = derive_tool_name(argv)
         safe_operation_id = _safe_diagnostic_text(operation_id)
         stdout = io.StringIO()
         stderr = io.StringIO()
