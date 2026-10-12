@@ -12,7 +12,7 @@ from pathlib import Path
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
-from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS, handle_agent_command
 from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
@@ -1001,8 +1001,8 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
         GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
         attributes={
             **workflow_step_span_attributes(step_name="cli-init", step_kind=layer),
-            "gh_address_cr.command.name": str(args.command),
-            "gh_address_cr.command.path": str(args.command),
+            "gh_address_cr.command.name": _telemetry_command(args),
+            "gh_address_cr.command.path": _telemetry_command(args),
             PROCESS_COMMAND_ARGS: sanitized_args[1:],
         },
     ):
@@ -1033,13 +1033,18 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
+def _telemetry_command(args: argparse.Namespace) -> str:
+    """Return the command name that is safe to export: a dispatched command, never raw argv text."""
+    return str(args.command) if args.command in PUBLIC_COMMANDS else "unknown"
+
+
 def _command_span_name(args: argparse.Namespace) -> str:
-    if args.command != "agent":
-        return str(args.command)
-    subcommand = ""
-    if args.repo and args.repo not in {"-h", "--help"}:
-        subcommand = str(args.repo)
-    return f"agent.{subcommand}" if subcommand else "agent"
+    command = _telemetry_command(args)
+    if command != "agent":
+        return command
+    if not args.repo or args.repo in {"-h", "--help"}:
+        return "agent"
+    return f"agent.{args.repo}" if args.repo in AGENT_SUBCOMMANDS else "agent.unknown"
 
 
 def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
@@ -1051,7 +1056,7 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     command_path = _command_span_name(args)
     attributes: dict[str, str | bool | int | float] = {
         "gh_address_cr.span.kind": "command",
-        "gh_address_cr.command.name": str(args.command),
+        "gh_address_cr.command.name": _telemetry_command(args),
         "gh_address_cr.command.path": command_path,
         GEN_AI_OPERATION_NAME: "execute_tool",
         GEN_AI_TOOL_NAME: command_path,
@@ -1075,7 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
     restore_command_scope = "gh_address_cr.command.path" in prior_command_attributes
     set_current_span_attributes(
         {
-            "gh_address_cr.command.name": str(args.command),
+            "gh_address_cr.command.name": str(span_attributes["gh_address_cr.command.name"]),
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
