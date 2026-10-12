@@ -9,11 +9,13 @@ static design reference, not an active-task pointer.
 Converge the **vocabulary**, not the **behavior**.
 
 1. Add one small module that owns the passive command names: the top-level public
-   commands and the `agent` subcommands. `cli`, `commands/agent`, the telemetry
-   allowlist and the argparse `metavar` all derive from it.
-2. Route `agent` subcommands through a dispatch dictionary. The ten handlers already share
-   one signature, so the routed set becomes the single source of the `agent` subcommand
-   names, and the usage text is derived from it.
+   commands and the `agent` subcommands. `src/gh_address_cr/cli.py`,
+   `src/gh_address_cr/commands/agent.py`, the telemetry allowlist in
+   `src/gh_address_cr/core/telemetry_safety.py` and the argparse `metavar` all derive from it.
+2. Route the nine non-`manifest` `agent` handlers through a dispatch dictionary. Their shared
+   signature makes the dictionary the source of the routed names. `manifest` is the tenth
+   `AGENT_SUBCOMMANDS` entry and remains a separate special case. Derive the usage text from
+   the complete ordered vocabulary.
 3. Do **not** introduce a command registry or framework, and do **not** move command
    validation into argparse (`choices` or subparsers).
 
@@ -22,17 +24,18 @@ This is a separate refactor change. It must not be bundled into a telemetry priv
 
 ## Problem (verified)
 
-In `src/` the command names are encoded in seven places that are edited by hand:
+On `develop` today the command names are encoded in six places that are edited by hand;
+the command-name allowlist change (#357) adds a seventh, listed last:
 
 | Place | Names | State today |
 | --- | --- | --- |
-| `cli.PUBLIC_COMMANDS` | 14 top-level | built from several behavior sets |
-| `commands/agent.PUBLIC_COMMANDS` | 14 top-level | literal copy of the one above |
-| `core/telemetry_safety._PUBLIC_TELEMETRY_COMMANDS` | 13 top-level | **omits `version`** |
-| argparse `metavar` in `cli.parse_args` | 13 top-level | **omits `agent`** |
-| `commands/agent.AGENT_SUBCOMMANDS` | 10 `agent` subcommands | added by the command-name allowlist change (Spec 042 addendum, still in review when this was written) |
-| `usage:` string in `_route_agent_command` | 10 `agent` subcommands | literal |
-| the `if args.repo == ...` chain in `_route_agent_command` | 10 `agent` subcommands | literal |
+| `PUBLIC_COMMANDS` in `src/gh_address_cr/cli.py` | 14 top-level | built from several behavior sets |
+| `PUBLIC_COMMANDS` in `src/gh_address_cr/commands/agent.py` | 14 top-level | literal copy of the one above |
+| `_PUBLIC_TELEMETRY_COMMANDS` in `src/gh_address_cr/core/telemetry_safety.py` | 13 top-level | **omits `version`** |
+| argparse `metavar` in `parse_args` (`src/gh_address_cr/cli.py`) | 13 top-level | **omits `agent`** |
+| `usage:` string in `_route_agent_command` (`src/gh_address_cr/commands/agent.py`) | 10 `agent` subcommands | literal |
+| the `if args.repo == ...` chain in `_route_agent_command` | 10 `agent` subcommands (`manifest` plus nine handlers) | literal |
+| `AGENT_SUBCOMMANDS` in `src/gh_address_cr/commands/agent.py` | 10 `agent` subcommands | **not on `develop` yet**: introduced by #357 |
 
 Drift that has already happened:
 
@@ -59,12 +62,13 @@ Constraints that bound the solution:
   must be a subset of it in `tests/test_skill_docs.py`; membership checks in
   `tests/test_runtime_packaging.py`). It is a machine-readable contract (AGENTS.md Principle II)
   and must stay byte-identical.
-- `cli.py` has six behavior sets (`OUTPUT_MODE_COMMANDS`, `NATIVE_REVIEW_COMMANDS`,
+- `src/gh_address_cr/cli.py` has six behavior sets (`OUTPUT_MODE_COMMANDS`, `NATIVE_REVIEW_COMMANDS`,
   `UTILITY_COMMANDS`, `PR_SCOPED_IMPLICIT_COMMANDS`, `GITHUB_PRECHECK_COMMANDS`,
   `INPUT_REQUIRED_COMMANDS`) used across three dispatch stages. They say what a command
   does, not what it is called.
-- The ten `agent` handlers all have the signature `(repo, passthrough)`; only `manifest` is
-  special-cased.
+- The nine `handle_agent_*` handlers routed by `_route_agent_command` all have the signature
+  `(repo, passthrough)`. `manifest` is the tenth subcommand name; it is answered by
+  `build_agent_manifest()` and is special-cased.
 - The repository has no registry or dispatch-table precedent (Principle X: no new layer
   without a recorded justification).
 
@@ -74,8 +78,8 @@ Constraints that bound the solution:
 | --- | --- |
 | Authoritative state owner | None. A static vocabulary in code, not runtime state. `runtime.sqlite3` is unaffected. |
 | External facts / inputs | The set of command names the CLI accepts. Changes only when a command is added or removed. |
-| Projection | `core/command_names.py`: `PUBLIC_COMMANDS` (frozenset) and `AGENT_SUBCOMMANDS` (an ordered tuple, because its order is the order shown in usage text). The module imports nothing from `cli` or `commands`, so `core` can depend on it. |
-| Policy | Membership only. Consumers derive their sets from the vocabulary. The behavior sets stay in `cli.py` and are tested to be subsets of `PUBLIC_COMMANDS`. `agent` routing becomes a dictionary from subcommand name to handler (`manifest` stays a special case). |
+| Projection | `src/gh_address_cr/core/command_names.py`: `PUBLIC_COMMANDS` (frozenset) and `AGENT_SUBCOMMANDS` (an ordered tuple, because its order is the order shown in usage text). The module imports nothing from `src/gh_address_cr/cli.py` or `src/gh_address_cr/commands/`, so `core` can depend on it. |
+| Policy | Membership only. Consumers derive their sets from the vocabulary. The behavior sets stay in `src/gh_address_cr/cli.py` and are tested to be subsets of `PUBLIC_COMMANDS`. `agent` routing becomes a dictionary from the nine non-`manifest` names to handlers; `manifest` stays a special case, and all ten names remain in `AGENT_SUBCOMMANDS`. |
 | Side-effect plan | None. No IO, no GitHub writes. |
 | Artifact truth boundary | `agent manifest` output is unchanged. `--help` output changes in exactly one way: `agent` appears in the command list. |
 | Self-reference risk | None. |
@@ -101,8 +105,8 @@ Constraints that bound the solution:
 2. **The consequence of drift is mild and silent.** Telemetry mislabels a real command, help
    text omits one. Nothing crashes, so the cost of leaving it is low. That argues against C
    and for a small structural fix (B).
-3. **Why dictionary dispatch for `agent`.** The handlers share one signature, so the table is
-   almost free, derives the set that telemetry needs, and removes the need for a test that
+3. **Why dictionary dispatch for `agent`.** The nine routed handlers share one signature, so
+   the table is almost free, derives the set that telemetry needs, and removes the need for a test that
    scrapes `_route_agent_command` source text with a regular expression. That test, added with
    the command-name allowlist change, is a stopgap and is deleted by this change.
 4. **Why not D.** The unknown-command message and exit behavior are tested public behavior;
@@ -121,10 +125,13 @@ Constraints that bound the solution:
 One refactor PR, after the Spec 042 addendum and Spec 043 changes have landed, branched from
 `origin/develop`. High-risk tier, so about 100 source lines or fewer:
 
-1. `core/command_names.py` with the two constants; `cli`, `commands/agent` and
-   `core/telemetry_safety` import from it; `cli.metavar` is generated from it.
-2. `_route_agent_command` dispatches through a dictionary; `AGENT_SUBCOMMANDS` and the usage
-   line derive from it.
+1. `src/gh_address_cr/core/command_names.py` with the two constants;
+   `src/gh_address_cr/cli.py`, `src/gh_address_cr/commands/agent.py` and
+   `src/gh_address_cr/core/telemetry_safety.py` import from it; the `metavar` is generated
+   from it.
+2. `_route_agent_command` dispatches the nine non-`manifest` names through a dictionary;
+   `AGENT_SUBCOMMANDS` contains those names plus `manifest`, and the usage line derives from
+   the complete ordered vocabulary.
 3. Delete the source-scraping drift test; keep the usage-line and list-consistency tests.
 4. Commits: vocabulary module first, then `agent` dispatch, then tests and docs.
 
@@ -133,10 +140,10 @@ One refactor PR, after the Spec 042 addendum and Spec 043 changes have landed, b
 - `agent manifest` output is byte-identical before and after (golden comparison).
 - `--help` differs only by the added `agent`; `Unknown command. Supported commands:` output,
   and its exit code, are unchanged.
-- Every behavior set in `cli.py` is a subset of `PUBLIC_COMMANDS`; `cli`, `agent` and
+- Every behavior set in `src/gh_address_cr/cli.py` is a subset of `PUBLIC_COMMANDS`; `cli`, `agent` and
   telemetry use the same object or an equal set.
-- The routed `agent` subcommands equal `AGENT_SUBCOMMANDS`, and the `usage:` line lists
-  exactly them in order.
+- The dictionary keys plus `manifest` equal `AGENT_SUBCOMMANDS`, and the `usage:` line lists
+  exactly all ten names in order.
 - Telemetry: `version` is exported by name; unrecognized text is still exported as `unknown`
   (Spec 042 addendum).
 
