@@ -234,6 +234,41 @@ class ThreadResolvedLookupTests(unittest.TestCase):
                 self.assertFalse(GitHubClient(runner=gh).is_thread_resolved("T1"))
 
 
+class PublishWaitCallTests(unittest.TestCase):
+    """Per-thread gh budget of the publish settle-wait: node lookups only, never a PR-wide listing."""
+
+    def run_wait(self, resolved_on):
+        from gh_address_cr.core import publisher
+
+        class Client:
+            def __init__(self):
+                self.lookups = 0
+                self.listings = 0
+
+            def is_thread_resolved(self, thread_id):
+                self.lookups += 1
+                return self.lookups >= resolved_on
+
+            def list_threads(self, repo, pr_number):
+                self.listings += 1
+                return []
+
+        client = Client()
+        with patch("gh_address_cr.core.publisher.time.sleep"):
+            publisher._wait_for_remote_thread_resolution(client, "T1")
+        return client
+
+    def test_settled_thread_costs_one_lookup(self):
+        client = self.run_wait(resolved_on=1)
+
+        self.assertEqual((client.lookups, client.listings), (1, 0))
+
+    def test_unsettled_thread_is_bounded_at_two_lookups(self):
+        client = self.run_wait(resolved_on=99)
+
+        self.assertEqual((client.lookups, client.listings), (2, 0))
+
+
 class GatherReadsTests(unittest.TestCase):
     def test_outcomes_keep_submission_order_and_capture_errors(self):
         from gh_address_cr.core.parallel_reads import gather_reads
