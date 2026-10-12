@@ -224,6 +224,17 @@ invocation's wait as `gh_address_cr.telemetry.previous_shutdown_wait_ms` (plus
 `gh_address_cr.telemetry.previous_shutdown_timed_out`), and a failing command's
 `gh_address_cr.command.reason_code` (see
 `docs/rfcs/042-telemetry-overhead-signal/preflight.md`).
+
+The root span's `gh_address_cr.command.name` and `gh_address_cr.command.path` are
+built only from a fixed set of names, never from raw argv text: a dispatched
+command (`address`, `final-gate`, `agent.manifest`, ...); `unknown` for any other
+first argument, including text a caller mistakenly quoted into one argument
+(`agent.unknown` for an unrecognized `agent` subcommand); or, for an invocation that
+exits before dispatch (`--help`, `-h`, `--version`, no arguments), the placeholder
+`gh-address-cr` with no `command.path`. Operations inside a `command-session` follow
+the same rule. `command.path` and `gh_address_cr.command.exit_code` exist only for
+invocations that reach command dispatch, so count invocations and exit status from
+`process.exit.code`, not from `command.exit_code`.
 For a custom operation:
 
 ```python
