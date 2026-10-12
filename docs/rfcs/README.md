@@ -32,6 +32,7 @@ status does not prove delivery. No runtime or packaged-skill behavior changed.
 | 038-runtime-store-consistency | Architecture/contracts retained; delivery specs, checklists and evidence snapshots removed. |
 | 039-agent-first-run-ux | Architecture/contracts retained; delivery specs, checklists and evidence snapshots removed. |
 | 041-telemetry-shutdown-wait | Architecture preflight for the bounded exit-time telemetry wait (issue #346). |
+| 042-telemetry-overhead-signal | Architecture preflight for the derived telemetry overhead budget, the previous-shutdown-wait span attribute, and root-span `reason_code`. |
 
 ## Migration Verification
 

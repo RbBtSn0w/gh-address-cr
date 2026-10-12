@@ -34,6 +34,10 @@ from opentelemetry.semconv._incubating.attributes.vcs_attributes import (
 )
 
 GH_ADDRESS_CR_SPAN_KIND = "gh_address_cr.span.kind"
+# The previous invocation's exit-time export wait (Spec 041 record). The current
+# invocation's own wait happens after its span ends and cannot be reported on it.
+GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_WAIT_MS = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
+GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_TIMED_OUT = "gh_address_cr.telemetry.previous_shutdown_timed_out"
 GH_ADDRESS_CR_WORKFLOW_STEP_KIND = "gh_address_cr.workflow.step.kind"
 GH_ADDRESS_CR_WORKFLOW_STEP_NAME = "gh_address_cr.workflow.step.name"
 GH_ADDRESS_CR_ADAPTER_SPAN_NAME = "gh_address_cr.adapter"

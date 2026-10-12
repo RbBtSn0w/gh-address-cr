@@ -21,7 +21,7 @@ an endpoint that accepts connections and never answers, `--help`, median of 5:
 | Projection | `telemetry-shutdown-wait.json` in the state dir holds only the latest `{wait_ms, timed_out, recorded_at}`. It is a derived observation, written last-writer-wins by `write_json_atomic`, never read by `final-gate`, never authoritative. |
 | Policy | `SHUTDOWN_JOIN_TIMEOUT_SECONDS = 0.3`. An export still in flight at the bound is abandoned with its daemon thread. Fixed constant, no branching. |
 | Side-effect plan | No new network IO. One small local file write per invocation, best effort. |
-| Artifact truth boundary | `efficiency-report.json` gains `telemetry_shutdown_wait_ms` (the previous invocation's recorded wait, or `null`). `telemetry_overhead_ms` = report build time + that wait, checked against the existing 250 ms budget. |
+| Artifact truth boundary | `efficiency-report.json` gains `telemetry_shutdown_wait_ms` (the previous invocation's recorded wait, or `null`). `telemetry_overhead_ms` = report build time + that wait, checked against the overhead budget (250 ms when this spec was written; derived from the shutdown bound since Spec 042). |
 | Self-reference risk | An invocation cannot include its own exit wait: it happens after the report is sealed. Excluded boundary: the current invocation's own shutdown wait is excluded; the preceding invocation's wait is included. The current wait is separately bounded by the contract test. |
 | Recovery / replay | A missing, malformed, or unwritable record yields `null` and no diagnostic. Core flows stay fail-open. |
 

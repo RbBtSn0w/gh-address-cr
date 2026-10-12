@@ -427,8 +427,6 @@ def _publish_once(
     agent_id: str,
     now: datetime | None,
 ) -> dict[str, Any]:
-    current_time = _coerce_now(now)
-    timestamp = _format_timestamp(current_time)
     _configure_publish_telemetry(repo, pr_number)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
@@ -454,6 +452,10 @@ def _publish_once(
 
     published: list[str] = []
     for plan in plans:
+        # Stamp at execution time, after the session was loaded: a timestamp taken before the
+        # GitHub reads can predate an acceptance that landed meanwhile, which would project as
+        # verified-before-addressed (docs/rfcs/042-telemetry-overhead-signal). An injected `now`
+        # still pins the stamp for deterministic callers.
         item_id = _execute_single_publish_plan(
             plan,
             repo,
@@ -463,7 +465,7 @@ def _publish_once(
             client,
             publisher_login,
             agent_id,
-            timestamp,
+            _format_timestamp(_coerce_now(now)),
         )
         published.append(item_id)
 

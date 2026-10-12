@@ -591,6 +591,9 @@ def output_preflight_error(
     persist: bool = True,
     diagnostics: dict | None = None,
 ) -> int:
+    from gh_address_cr.core.telemetry_runtime import note_command_reason_code
+
+    note_command_reason_code(reason_code)
     if not args.human:
         summary = build_preflight_summary(
             args.command,
@@ -1094,9 +1097,19 @@ def main(argv: list[str] | None = None) -> int:
         set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
     finally:
+        _export_command_reason_code()
         _record_command_metric(args, started_at=started_at, exit_code=rc if isinstance(rc, int) else 1)
         if restore_command_scope:
             set_current_span_attributes(prior_command_attributes)
+
+
+def _export_command_reason_code() -> None:
+    try:
+        from gh_address_cr.core.telemetry_runtime import export_command_reason_code
+
+        export_command_reason_code()
+    except Exception:
+        return
 
 
 def _reset_command_persistence_totals() -> None:

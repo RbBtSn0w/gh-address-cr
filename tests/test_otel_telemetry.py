@@ -681,6 +681,120 @@ class TracedExecutionTests(unittest.TestCase):
         self.assertEqual(spans[0].attributes["gh_address_cr.command.path"], "version")
         self.assertEqual(spans[0].attributes["gh_address_cr.command.exit_code"], 0)
 
+    def _run_version_under_memory_exporter(self, state_dir: str):
+        from gh_address_cr.__main__ import main
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_previous_shutdown_wait")
+
+        with (
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state_dir}),
+            patch("sys.argv", ["gh-address-cr", "version"]),
+            patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+            patch("gh_address_cr.__main__.shutdown_telemetry"),
+        ):
+            result = main(["version"])
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        return result, spans[0]
+
+    def test_preflight_failures_put_reason_code_on_the_root_span(self) -> None:
+        from gh_address_cr.__main__ import main
+
+        for argv, reason in (
+            (["review", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["address", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["threads", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["final-gate", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+        ):
+            with self.subTest(argv=argv), tempfile.TemporaryDirectory() as tmp:
+                exporter = InMemorySpanExporter()
+                provider = TracerProvider()
+                provider.add_span_processor(SimpleSpanProcessor(exporter))
+                tracer = provider.get_tracer("test_reason_code_root_span")
+
+                with (
+                    patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+                    patch("sys.argv", ["gh-address-cr", *argv]),
+                    patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+                    patch("gh_address_cr.__main__.shutdown_telemetry"),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    result = main(argv)
+
+                root = next(span for span in exporter.get_finished_spans() if span.name == "gh-address-cr.cli")
+                self.assertEqual(result, 5)
+                self.assertEqual(root.attributes["process.exit.code"], 5)
+                self.assertEqual(root.attributes["gh_address_cr.command.reason_code"], reason)
+
+    def test_unsafe_reason_code_is_not_exported_on_the_root_span(self) -> None:
+        from gh_address_cr.__main__ import main
+        from gh_address_cr.core.telemetry_runtime import note_command_reason_code
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_reason_code_unsafe")
+
+        def cli_main(_argv):
+            note_command_reason_code("/Users/secret/path token=ghp_x")
+            return 5
+
+        with (
+            patch("sys.argv", ["gh-address-cr", "version"]),
+            patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+            patch("gh_address_cr.__main__.shutdown_telemetry"),
+            patch("gh_address_cr.__main__.cli_main", side_effect=cli_main),
+        ):
+            main(["version"])
+
+        root = next(span for span in exporter.get_finished_spans() if span.name == "gh-address-cr.cli")
+        self.assertNotIn("gh_address_cr.command.reason_code", root.attributes)
+
+    def test_root_span_reports_the_previous_invocation_shutdown_wait(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        attribute = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(300.0, timed_out=True)
+
+            result, span = self._run_version_under_memory_exporter(tmp)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(span.attributes[attribute], 300.0)
+        self.assertIs(span.attributes["gh_address_cr.telemetry.previous_shutdown_timed_out"], True)
+
+    def test_root_span_reports_a_completed_previous_shutdown_as_not_timed_out(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(12.5, timed_out=False)
+
+            _, span = self._run_version_under_memory_exporter(tmp)
+
+        self.assertEqual(span.attributes["gh_address_cr.telemetry.previous_shutdown_wait_ms"], 12.5)
+        self.assertIs(span.attributes["gh_address_cr.telemetry.previous_shutdown_timed_out"], False)
+
+    def test_root_span_omits_previous_shutdown_wait_when_record_is_unusable(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import shutdown_wait_file
+
+        attribute = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            result, span = self._run_version_under_memory_exporter(tmp)
+            self.assertEqual(result, 0)
+            self.assertNotIn(attribute, span.attributes)
+            self.assertNotIn("gh_address_cr.telemetry.previous_shutdown_timed_out", span.attributes)
+
+            shutdown_wait_file().write_text('{"wait_ms": "slow"}', encoding="utf-8")
+            result, span = self._run_version_under_memory_exporter(tmp)
+            self.assertEqual(result, 0)
+            self.assertNotIn(attribute, span.attributes)
+            self.assertNotIn("gh_address_cr.telemetry.previous_shutdown_timed_out", span.attributes)
+
     @patch("gh_address_cr.__main__.shutdown_telemetry")
     @patch("gh_address_cr.__main__.initialize_telemetry")
     @patch("gh_address_cr.__main__.cli_main", side_effect=KeyboardInterrupt)

@@ -216,7 +216,14 @@ The CLI entrypoint initializes tracing before dispatch and calls
 abandons any export still in flight, so a slow or unreachable gateway cannot
 delay the command. The measured wait is recorded locally and counted in the
 next efficiency report's `telemetry_overhead_ms` (see
-`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`).
+`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`). The overhead budget
+(`telemetry_overhead_budget_ms`, currently 500 ms) is derived from that bound plus
+a 200 ms build margin, so a single timed-out export cannot raise
+`TELEMETRY_OVERHEAD_EXCEEDED` on its own. The root span also carries the previous
+invocation's wait as `gh_address_cr.telemetry.previous_shutdown_wait_ms` (plus
+`gh_address_cr.telemetry.previous_shutdown_timed_out`), and a failing command's
+`gh_address_cr.command.reason_code` (see
+`docs/rfcs/042-telemetry-overhead-signal/preflight.md`).
 For a custom operation:
 
 ```python
