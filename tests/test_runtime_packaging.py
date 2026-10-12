@@ -14,6 +14,7 @@ from packaging.version import Version
 
 from gh_address_cr import __version__ as RUNTIME_VERSION
 from gh_address_cr.agent.manifests import validate_capability_manifest
+from gh_address_cr.core import otel_semconv
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
 
 PYPROJECT = ROOT / "pyproject.toml"
@@ -372,9 +373,6 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('license = "MIT"', text)
         self.assertIn('license-files = ["LICENSE"]', text)
         self.assertIn('"packaging>=24"', text)
-        self.assertIn(f'"opentelemetry-api>={OTEL_MINIMUM}"', text)
-        self.assertIn(f'"opentelemetry-sdk>={OTEL_MINIMUM}"', text)
-        self.assertIn(f'"opentelemetry-exporter-otlp-proto-http>={OTEL_MINIMUM}"', text)
         self.assertIn('"requests>=2.31.0"', text)
         self.assertIn("Operating System :: OS Independent", text)
         self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
@@ -395,7 +393,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(len(set(floors.values())), 1, f"OpenTelemetry packages release in lockstep: {floors}")
         # OTEL_MINIMUM is a hand-kept record of the lowest sdk that imports every constant; it cannot
         # be derived offline, so the CI job below is the real proof.
-        self.assertGreaterEqual(next(iter(floors.values())), Version(OTEL_MINIMUM))
+        declared = next(iter(floors.values()))
+        self.assertGreaterEqual(declared, Version(OTEL_MINIMUM))
+        # The module docstring quotes the floor; fail here instead of letting it go stale.
+        self.assertIn(f"opentelemetry-sdk {declared}", otel_semconv.__doc__)
 
     def _ci_job(self, name):
         ci = CI_WORKFLOW.read_text(encoding="utf-8")
