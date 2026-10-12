@@ -319,7 +319,7 @@ class TestTelemetry(unittest.TestCase):
             self.assertIn("efficiency report artifact unavailable: FileNotFoundError: No such file or directory", diagnostic)
             self.assertNotIn("/private/tmp/secret", diagnostic)
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.3, 10.3])
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.6, 10.6])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_records_overhead_budget_diagnostics(self, state_dir, _perf_counter):
         with tempfile.TemporaryDirectory() as tmp:
@@ -327,12 +327,22 @@ class TestTelemetry(unittest.TestCase):
 
             report = build_efficiency_report("octo/example", "77")
 
-            self.assertEqual(report["telemetry_overhead_budget_ms"], 250)
-            self.assertEqual(report["telemetry_overhead_ms"], 300.0)
+            self.assertEqual(report["telemetry_overhead_budget_ms"], 500)
+            self.assertEqual(report["telemetry_overhead_ms"], 600.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
+    def test_overhead_budget_is_derived_from_the_shutdown_bound(self):
+        from gh_address_cr.core import telemetry
+        from gh_address_cr.core.telemetry_shutdown import SHUTDOWN_JOIN_TIMEOUT_SECONDS, TELEMETRY_BUILD_MARGIN_MS
+
+        self.assertEqual(
+            telemetry.TELEMETRY_OVERHEAD_BUDGET_MS,
+            round(SHUTDOWN_JOIN_TIMEOUT_SECONDS * 1000) + TELEMETRY_BUILD_MARGIN_MS,
+        )
+        self.assertGreater(telemetry.TELEMETRY_OVERHEAD_BUDGET_MS, SHUTDOWN_JOIN_TIMEOUT_SECONDS * 1000)
+
     @patch("gh_address_cr.core.telemetry.write_json_atomic")
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.6])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_overhead_includes_artifact_write_latency(self, state_dir, _perf_counter, write_json):
         with tempfile.TemporaryDirectory() as tmp:
@@ -340,11 +350,11 @@ class TestTelemetry(unittest.TestCase):
 
             report = build_efficiency_report("octo/example", "77")
 
-            self.assertEqual(report["telemetry_overhead_ms"], 400.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 600.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
             self.assertEqual(write_json.call_count, 1)
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.4])
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.6])
     @patch("gh_address_cr.core.telemetry.core_paths.state_dir")
     def test_efficiency_report_artifact_marks_final_overhead_unembedded(self, state_dir, _perf_counter):
         with tempfile.TemporaryDirectory() as tmp:
@@ -353,12 +363,12 @@ class TestTelemetry(unittest.TestCase):
             report = build_efficiency_report("octo/example", "77")
 
             artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
-            self.assertEqual(report["telemetry_overhead_ms"], 400.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 600.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
             self.assertIsNone(artifact["telemetry_overhead_ms"])
             self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", artifact["diagnostics"])
 
-    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.05])
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.25])
     def test_efficiency_report_overhead_includes_previous_shutdown_wait(self, _perf_counter):
         from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
 
@@ -369,9 +379,22 @@ class TestTelemetry(unittest.TestCase):
 
             artifact = json.loads(Path(report["report_artifact"]).read_text(encoding="utf-8"))
             self.assertEqual(report["telemetry_shutdown_wait_ms"], 300.0)
-            self.assertEqual(report["telemetry_overhead_ms"], 350.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 550.0)
             self.assertIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
             self.assertEqual(artifact["telemetry_shutdown_wait_ms"], 300.0)
+
+    @patch("gh_address_cr.core.telemetry.time.perf_counter", side_effect=[10.0, 10.05])
+    def test_timed_out_shutdown_wait_alone_does_not_exceed_budget(self, _perf_counter):
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(300.0, timed_out=True)
+
+            report = build_efficiency_report("octo/example", "77")
+
+            self.assertEqual(report["telemetry_shutdown_wait_ms"], 300.0)
+            self.assertEqual(report["telemetry_overhead_ms"], 350.0)
+            self.assertNotIn("TELEMETRY_OVERHEAD_EXCEEDED", report["diagnostics"])
 
     def test_efficiency_report_ignores_missing_or_malformed_shutdown_wait(self):
         from gh_address_cr.core.telemetry_shutdown import shutdown_wait_file

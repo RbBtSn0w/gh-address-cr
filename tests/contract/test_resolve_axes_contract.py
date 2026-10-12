@@ -183,6 +183,66 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
                 self.assertEqual(result.counts["blocking_items_count"], 0)
                 self.assertEqual(result.counts["github_threads_missing_reply_count"], 0)
 
+    def test_publish_events_are_stamped_after_the_acceptance_they_publish(self):
+        # Spec 042: a stamp taken before the publisher's GitHub reads could predate an acceptance
+        # that landed meanwhile, projecting as verified-before-addressed in cr-metrics.
+        import glob
+        from datetime import datetime, timedelta, timezone
+
+        from gh_address_cr.core import publisher, workflow
+
+        class FakeGitHubClient(UnstackedGitHubClient):
+            def post_reply(self, repo, pr_number, thread_id, body):
+                return "https://github.test/reply/stamp-order"
+
+            def resolve_thread(self, repo, pr_number, thread_id):
+                return True
+
+        base = datetime(2026, 10, 9, 14, 53, 18, tzinfo=timezone.utc)
+        clock = {"offset": timedelta(0)}
+
+        def fake_now(value):
+            return value if value is not None else base + clock["offset"]
+
+        original_build = publisher._build_publish_plans
+
+        def slow_build(*args, **kwargs):
+            clock["offset"] += timedelta(seconds=5)
+            return original_build(*args, **kwargs)
+
+        repo, pr_number = "owner/repo", "513"
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}, clear=False):
+                self._write_session(repo, pr_number, github_thread("github-thread:THREAD_STAMP"))
+                client = FakeGitHubClient()
+                workflow.decline_item(
+                    repo,
+                    pr_number,
+                    item_id="github-thread:THREAD_STAMP",
+                    agent_id="fixer-1",
+                    resolution="reject",
+                    why="Style preference only; not a defect.",
+                    github_client=client,
+                )
+                with (
+                    patch.object(publisher, "_coerce_now", fake_now),
+                    patch.object(publisher, "_build_publish_plans", slow_build),
+                ):
+                    publisher.publish_github_thread_responses(
+                        repo, pr_number, agent_id="fixer-1", github_client=client
+                    )
+
+                events = [
+                    json.loads(line)
+                    for path in glob.glob(tmp + "/**/evidence.jsonl", recursive=True)
+                    for line in open(path, encoding="utf-8")
+                    if line.strip()
+                ]
+                published = [e for e in events if e["event_type"] == "response_published"]
+                self.assertEqual(len(published), 1)
+                stamped = datetime.fromisoformat(published[0]["timestamp"].replace("Z", "+00:00"))
+                self.assertGreaterEqual(stamped, base + timedelta(seconds=5))
+
     def _assert_single_decline_with_publish(self, resolution):
         # #273: single-item decline accepts --publish like the files path does.
         # Its submit shortcut is fix-only, so decline_item publishes through the
