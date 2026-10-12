@@ -35,6 +35,8 @@ from opentelemetry.semconv._incubating.attributes.vcs_attributes import (
 )
 
 GH_ADDRESS_CR_SPAN_KIND = "gh_address_cr.span.kind"
+# True only when AI_AGENT was set but its name or version was unusable (never carries the value).
+GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED = "gh_address_cr.agent.identity.rejected"
 # The previous invocation's exit-time export wait (Spec 041 record). The current
 # invocation's own wait happens after its span ends and cannot be reported on it.
 GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_WAIT_MS = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
@@ -76,6 +78,7 @@ __all__ = [
     "VCS_CHANGE_STATE",
     # gh-address-cr custom telemetry keys
     "GH_ADDRESS_CR_SPAN_KIND",
+    "GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED",
     "GH_ADDRESS_CR_WORKFLOW_STEP_KIND",
     "GH_ADDRESS_CR_WORKFLOW_STEP_NAME",
     "GH_ADDRESS_CR_ADAPTER_SPAN_NAME",

@@ -12,6 +12,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
+    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
     GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME,
     PROCESS_PARENT_PID,
 )
@@ -190,6 +191,22 @@ class TestCliOtelContext(unittest.TestCase):
 
         self.assertEqual(span.attributes.get(GEN_AI_AGENT_NAME), "codex")
         self.assertEqual(span.attributes.get(GEN_AI_AGENT_VERSION), "0.5.1")
+
+    def test_rejected_agent_identity_is_flagged_without_the_value(self) -> None:
+        """A set-but-unusable AI_AGENT is distinguishable from an unset one (via __main__)."""
+        with patch.dict(os.environ, {"AI_AGENT": "Kimi K2@1.0"}, clear=True):
+            span = self._run_via_main_and_get_span()
+
+        self.assertIs(span.attributes.get(GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED), True)
+        self.assertNotIn(GEN_AI_AGENT_NAME, span.attributes)
+        self.assertNotIn(GEN_AI_AGENT_VERSION, span.attributes)
+        self.assertNotIn("Kimi", repr(dict(span.attributes)))
+
+    def test_unset_agent_identity_carries_no_rejected_flag(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            span = self._run_via_main_and_get_span()
+
+        self.assertNotIn(GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED, span.attributes)
 
     def test_agent_session_correlation_case_c(self) -> None:
         """T012 Case C: neither session ID set → attributes absent (via __main__)."""

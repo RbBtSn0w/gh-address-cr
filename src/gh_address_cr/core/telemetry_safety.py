@@ -21,6 +21,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
+    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
     GH_ADDRESS_CR_SPAN_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_NAME,
@@ -469,19 +470,23 @@ def sanitize_cli_argv(
     return sanitized, vcs_attrs
 
 
-# Bounds the cardinality of agent identity labels: lowercase-hyphen product names
-# per the AI_AGENT convention, never free text.
-_AGENT_LABEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
-# Claude Code exports AI_AGENT as `claude-code_<major>-<minor>-<patch>_agent`.
-_UNDERSCORE_AGENT_PATTERN = re.compile(r"(?P<name>[A-Za-z0-9][A-Za-z0-9-]*)_(?P<version>\d+(?:-\d+)*)_agent")
+# Bounds the cardinality of agent identity: the AI_AGENT convention names a product in
+# lowercase letters, digits and hyphens. The name is lowercased before matching, so
+# case variants share one value; underscores are rejected so a versioned shape that no
+# parser recognises can never be emitted whole as a name.
+_AGENT_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_AGENT_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Claude Code exports AI_AGENT as `claude-code_<major>-<minor>-<patch>[-suffix]_agent`.
+_UNDERSCORE_AGENT_PATTERN = re.compile(r"(?P<name>[A-Za-z0-9][A-Za-z0-9-]*)_(?P<version>[0-9][A-Za-z0-9-]*)_agent")
+_DASH_BETWEEN_DIGITS = re.compile(r"(?<=[0-9])-(?=[0-9])")
 
 
 def _split_agent_identity(raw: str) -> tuple[str, str | None]:
     """Split an ``AI_AGENT`` value into ``(name, version)``.
 
     Accepts the Vercel ``AI_AGENT`` convention (``name@version``) and the value
-    Claude Code actually exports (``name_<ver-with-dashes>_agent``). Anything
-    else is treated as a bare name.
+    Claude Code actually exports (``name_<ver>_agent``, where dashes between
+    digits become dots). Anything else is treated as a bare name.
     """
     value = raw.strip()
     if "@" in value:
@@ -489,17 +494,44 @@ def _split_agent_identity(raw: str) -> tuple[str, str | None]:
         return name, version
     match = _UNDERSCORE_AGENT_PATTERN.fullmatch(value)
     if match:
-        return match.group("name"), match.group("version").replace("-", ".")
+        return match.group("name"), _DASH_BETWEEN_DIGITS.sub(".", match.group("version"))
     return value, None
 
 
-def _safe_agent_label(value: str, *, field: str) -> str:
-    if not _AGENT_LABEL_PATTERN.fullmatch(value):
+def _safe_agent_label(value: str, *, pattern: re.Pattern[str], field: str) -> str:
+    if not pattern.fullmatch(value):
         raise ValueError(f"UNSAFE:unsupported {field} format")
     return _safe_identity_label(value, field=field)
 
 
-def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
+def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str | bool]:
+    """Return gen_ai.agent.name/version from ``AI_AGENT``, or the rejected flag.
+
+    Fail-open: an unusable name drops the whole identity, an unusable version drops
+    only the version, and either case sets ``GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED``
+    so a rejected value is distinguishable from an unset one without recording it.
+    A blank value counts as unset.
+    """
+    raw = environ.get("AI_AGENT", "")
+    if not raw.strip():
+        return {}
+    raw_name, raw_version = _split_agent_identity(raw)
+    try:
+        name = _safe_agent_label(raw_name.lower(), pattern=_AGENT_NAME_PATTERN, field="AI_AGENT")
+    except ValueError:
+        return {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True}
+    identity: dict[str, str | bool] = {GEN_AI_AGENT_NAME: name}
+    if raw_version is not None:
+        try:
+            identity[GEN_AI_AGENT_VERSION] = _safe_agent_label(
+                raw_version, pattern=_AGENT_VERSION_PATTERN, field="AI_AGENT version"
+            )
+        except ValueError:
+            identity[GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED] = True
+    return identity
+
+
+def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str | bool]:
     """Detect and return agent session correlation attributes from environ.
 
     GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
@@ -514,9 +546,10 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     Agent identity follows the industry ``AI_AGENT`` convention (Vercel
     ``name@version``; Claude Code's ``name_<ver>_agent`` is also parsed) and is
     emitted as the standard ``gen_ai.agent.name`` / ``gen_ai.agent.version``
-    pair so a product is one low-cardinality name regardless of release.
+    pair so a product is one low-cardinality name regardless of release. A set
+    but unusable ``AI_AGENT`` is flagged, not recorded.
     """
-    res: dict[str, str] = {}
+    res: dict[str, str | bool] = {}
 
     # 1. Conversation ID (paired in one tuple so mypy narrows both together)
     conv_id_source: tuple[str, str] | None = None
@@ -535,19 +568,8 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
         except ValueError:
             pass
 
-    # 2. Agent name and version. An invalid name drops the whole identity; an
-    # invalid version drops only the version (fail-open, never raises).
-    if "AI_AGENT" in environ:
-        raw_name, raw_version = _split_agent_identity(environ["AI_AGENT"])
-        try:
-            res[GEN_AI_AGENT_NAME] = _safe_agent_label(raw_name, field="AI_AGENT")
-        except ValueError:
-            return res
-        if raw_version is not None:
-            try:
-                res[GEN_AI_AGENT_VERSION] = _safe_agent_label(raw_version, field="AI_AGENT version")
-            except ValueError:
-                pass
+    # 2. Agent name and version (fail-open; see _detect_agent_identity).
+    res.update(_detect_agent_identity(environ))
 
     return res
 

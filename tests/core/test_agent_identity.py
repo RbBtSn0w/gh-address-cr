@@ -1,12 +1,23 @@
 import unittest
 
-from gh_address_cr.core.otel_semconv import GEN_AI_AGENT_NAME, GEN_AI_AGENT_VERSION
+from gh_address_cr.core.otel_semconv import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_AGENT_VERSION,
+    GEN_AI_CONVERSATION_ID,
+    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
+)
 from gh_address_cr.core.telemetry_safety import detect_agent_session
 
+_IDENTITY_KEYS = (GEN_AI_AGENT_NAME, GEN_AI_AGENT_VERSION)
 
-def _identity(value: str) -> dict[str, str]:
-    result = detect_agent_session({"AI_AGENT": value})
-    return {key: result[key] for key in (GEN_AI_AGENT_NAME, GEN_AI_AGENT_VERSION) if key in result}
+
+def _detect(value: str) -> dict[str, str | bool]:
+    return detect_agent_session({"AI_AGENT": value})
+
+
+def _identity(value: str) -> dict[str, str | bool]:
+    result = _detect(value)
+    return {key: result[key] for key in _IDENTITY_KEYS if key in result}
 
 
 class AgentIdentityParsingTestCase(unittest.TestCase):
@@ -22,6 +33,12 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
             {GEN_AI_AGENT_NAME: "claude-code", GEN_AI_AGENT_VERSION: "2.1.293"},
         )
 
+    def test_claude_code_prerelease_suffix_stays_out_of_the_name(self) -> None:
+        self.assertEqual(
+            _identity("claude-code_2-1-293-beta_agent"),
+            {GEN_AI_AGENT_NAME: "claude-code", GEN_AI_AGENT_VERSION: "2.1.293-beta"},
+        )
+
     def test_bare_name_has_no_version(self) -> None:
         self.assertEqual(_identity("claude-cli"), {GEN_AI_AGENT_NAME: "claude-cli"})
 
@@ -29,14 +46,36 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
         names = {_identity(f"claude-code_2-1-{patch}_agent")[GEN_AI_AGENT_NAME] for patch in (270, 286, 293)}
         self.assertEqual(names, {"claude-code"})
 
+    def test_name_case_is_normalised_so_variants_share_one_name(self) -> None:
+        for value in ("Claude-Code@1.0", "CLAUDE-CODE@1.0", "claude-code@1.0"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    _identity(value),
+                    {GEN_AI_AGENT_NAME: "claude-code", GEN_AI_AGENT_VERSION: "1.0"},
+                )
+
     def test_surrounding_whitespace_is_stripped(self) -> None:
         self.assertEqual(_identity("  codex@0.5.1 "), {GEN_AI_AGENT_NAME: "codex", GEN_AI_AGENT_VERSION: "0.5.1"})
 
+    def test_version_may_carry_dots_underscores_and_prerelease_marks(self) -> None:
+        for version in ("1.2.3.4", "2.0.0-rc.1", "0_5"):
+            with self.subTest(version=version):
+                self.assertEqual(_identity(f"codex@{version}"), {GEN_AI_AGENT_NAME: "codex", GEN_AI_AGENT_VERSION: version})
+
     def test_invalid_version_keeps_name_and_drops_version(self) -> None:
         self.assertEqual(_identity("codex@not a version"), {GEN_AI_AGENT_NAME: "codex"})
+        self.assertEqual(_identity("codex@"), {GEN_AI_AGENT_NAME: "codex"})
+        self.assertEqual(_identity("codex@1.0@x"), {GEN_AI_AGENT_NAME: "codex"})
 
     def test_invalid_name_drops_the_whole_identity(self) -> None:
-        for value in ("@1.0", "", "   ", "two words@1.0", "x" * 65, "a/b", "agent\nname"):
+        for value in ("@1.0", "two words@1.0", "x" * 65, "a/b", "agent\nname", "-agent@1"):
+            with self.subTest(value=value):
+                self.assertEqual(_identity(value), {})
+
+    def test_underscore_names_are_not_accepted_as_bare_names(self) -> None:
+        # A versioned shape the Claude Code parser does not recognise must be rejected,
+        # never emitted whole: that would put the version back into gen_ai.agent.name.
+        for value in ("claude-code_2-1-293_agent_extra", "my_agent_2-1_agent", "codex_cli"):
             with self.subTest(value=value):
                 self.assertEqual(_identity(value), {})
 
@@ -48,10 +87,55 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(_identity(value), {})
 
+    def test_token_marker_in_a_well_formed_version_is_dropped(self) -> None:
+        # Passes the version label pattern, so only the token-marker check can reject it.
+        self.assertEqual(_identity("codex@ghp_abcdefghijklmnopqrstuvwxyz0123456789"), {GEN_AI_AGENT_NAME: "codex"})
+
     def test_absent_ai_agent_emits_nothing(self) -> None:
-        result = detect_agent_session({})
+        self.assertEqual(detect_agent_session({}), {})
+
+    def test_blank_ai_agent_counts_as_absent(self) -> None:
+        for value in ("", "   "):
+            with self.subTest(value=value):
+                self.assertEqual(_detect(value), {})
+
+
+class AgentIdentityRejectionSignalTestCase(unittest.TestCase):
+    def test_rejected_name_sets_the_rejected_flag(self) -> None:
+        for value in ("Kimi K2@1.0", "cursor/1.0", "claude-code_2-1-293_agent_extra", "/Users/someone/agent"):
+            with self.subTest(value=value):
+                self.assertEqual(_detect(value), {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True})
+
+    def test_rejected_version_sets_the_flag_and_keeps_the_name(self) -> None:
+        self.assertEqual(
+            _detect("codex@not a version"),
+            {GEN_AI_AGENT_NAME: "codex", GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True},
+        )
+
+    def test_valid_identity_has_no_rejected_flag(self) -> None:
+        for value in ("claude-code_2-1-293_agent", "codex@0.5.1", "claude-cli"):
+            with self.subTest(value=value):
+                self.assertNotIn(GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED, _detect(value))
+
+    def test_rejected_flag_never_carries_the_rejected_value(self) -> None:
+        result = _detect("token=abc123")
+        self.assertEqual(result, {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True})
+        self.assertNotIn("abc123", repr(result))
+
+
+class AgentIdentityDoesNotDisturbSessionCorrelationTestCase(unittest.TestCase):
+    def test_invalid_ai_agent_keeps_the_conversation_id(self) -> None:
+        result = detect_agent_session({"GH_ADDRESS_CR_CONVERSATION_ID": "session-1", "AI_AGENT": "Kimi K2@1.0"})
+        self.assertEqual(result[GEN_AI_CONVERSATION_ID], "session-1")
+        self.assertEqual(result["gen_ai.conversation.id.source"], "GH_ADDRESS_CR_CONVERSATION_ID")
+        self.assertTrue(result[GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED])
         self.assertNotIn(GEN_AI_AGENT_NAME, result)
-        self.assertNotIn(GEN_AI_AGENT_VERSION, result)
+
+    def test_valid_ai_agent_and_conversation_id_are_both_emitted(self) -> None:
+        result = detect_agent_session({"CLAUDE_CODE_SESSION_ID": "session-2", "AI_AGENT": "claude-code_2-1-293_agent"})
+        self.assertEqual(result[GEN_AI_CONVERSATION_ID], "session-2")
+        self.assertEqual(result[GEN_AI_AGENT_NAME], "claude-code")
+        self.assertEqual(result[GEN_AI_AGENT_VERSION], "2.1.293")
 
 
 if __name__ == "__main__":
