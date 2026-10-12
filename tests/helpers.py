@@ -339,3 +339,41 @@ def _patched_subprocess_run(original_run, *run_args, **run_kwargs):
         sys.stderr.write(_decode_stream(res.stderr))
         object.__setattr__(res, "stderr", None)
     return res
+
+
+def run_cli_under_memory_exporter(argv, *, extra_env=None):
+    """Run ``gh_address_cr.__main__.main`` in-process under an in-memory tracer.
+
+    Returns ``(exit_code, root_span, finished_spans, stdout)``. The PR state directory is a
+    throwaway temporary directory and nothing is exported over the network.
+    """
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from gh_address_cr.__main__ import main
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("tests.run_cli_under_memory_exporter")
+    stdout = io.StringIO()
+
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp, **(extra_env or {})}),
+        patch("sys.argv", ["gh-address-cr", *argv]),
+        patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+        patch("gh_address_cr.__main__.shutdown_telemetry"),
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        result = main(argv)
+
+    spans = exporter.get_finished_spans()
+    root = next(span for span in spans if span.name == "gh-address-cr.cli")
+    return result, root, spans, stdout.getvalue()

@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
@@ -37,6 +39,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_NAME,
     GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+    GH_ADDRESS_CR_INVOCATION_KIND,
     PROCESS_COMMAND_ARGS,
 )
 from gh_address_cr.core.primary_action import project_context_summary, project_primary_action
@@ -815,6 +818,25 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     return HighLevelReviewRuntime().handle(command, passthrough_args, human=human, lean=lean)
 
 
+class _VersionExit(SystemExit):
+    """`--version` exit. `--help` also exits 0, so telemetry tells them apart by type, not by parsing argv."""
+
+
+class _VersionAction(argparse.Action):
+    def __init__(self, option_strings: Sequence[str], dest: str = argparse.SUPPRESS, help: str | None = None) -> None:
+        super().__init__(option_strings=option_strings, dest=dest, default=argparse.SUPPRESS, nargs=0, help=help)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        sys.stdout.write(f"gh-address-cr {__version__}\n")
+        raise _VersionExit(0)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -842,8 +864,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version",
         "-v",
-        action="version",
-        version=f"gh-address-cr {__version__}",
+        action=_VersionAction,
+        help="show program's version number and exit",
     )
     parser.add_argument(
         "command",
@@ -1065,7 +1087,16 @@ def main(argv: list[str] | None = None) -> int:
     from gh_address_cr.otel_tracing import get_current_span_attributes, set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
-    args = parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except SystemExit as exc:
+        # --help, --version and usage errors leave during parsing, so no command was dispatched.
+        if isinstance(exc, _VersionExit):
+            kind = "version"
+        else:
+            kind = "help" if exc.code in (0, None) else "usage_error"
+        set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: kind})
+        raise
     started_at = time.time()
     _reset_command_persistence_totals()
     span_attributes = _command_span_attributes(effective_argv, args)
@@ -1079,6 +1110,7 @@ def main(argv: list[str] | None = None) -> int:
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: "command"})
     rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)
