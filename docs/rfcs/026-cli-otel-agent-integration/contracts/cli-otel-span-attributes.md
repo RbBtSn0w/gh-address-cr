@@ -96,15 +96,18 @@ landable subset; "GATED" = requires human confirmation before build.
 - Given a session id env (`GH_ADDRESS_CR_CONVERSATION_ID`, else the passive
   fallback `CLAUDE_CODE_SESSION_ID`), the span carries `gen_ai.conversation.id`
   equal to that value plus `gen_ai.conversation.id.source` naming the env var.
-- Independently of the session id, a usable `AI_AGENT` adds `gen_ai.agent.name` +
-  `gen_ai.agent.version` (`name@version` or Claude Code's `name_<ver>_agent`; see
-  data-model.md). An unusable `AI_AGENT` is dropped and not recorded.
+- Independently of the session id, a usable `AI_AGENT` adds `gen_ai.agent.name`,
+  and also `gen_ai.agent.version` when it carries a valid version
+  (`name@version` or Claude Code's `name_<ver>_agent`; see data-model.md). A bare
+  name yields only the name. An unusable name drops the whole identity; an
+  unusable version drops only the version. Nothing unusable is recorded.
 - **Enforced**: two invocations under the same session env carry an **identical**
   `gen_ai.conversation.id` (groupable). Each group is omitted on its own
   (fail-open): with neither session env set, `gen_ai.conversation.id` and
   `gen_ai.conversation.id.source` are **absent**; with no usable `AI_AGENT`,
-  `gen_ai.agent.name` and `gen_ai.agent.version` are **absent**. The CLI needs no
-  flag and no skill change.
+  `gen_ai.agent.name` and `gen_ai.agent.version` are **absent**, and
+  `gen_ai.agent.version` is also absent when the name carries no valid version.
+  The CLI needs no flag and no skill change.
 - Recorded values pass the public-safe sanitation path.
 
 ## C-12 VCS GitHub-PR mapping + privacy (MVP — Tier 1)
