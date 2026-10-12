@@ -3,9 +3,15 @@
 This module re-exports pinned incubating semantic conventions constants
 to avoid string literal drift across codebase instrumentation.
 
-Pinned environment versions:
-- OpenTelemetry SDK version: 1.43.0
-- OpenTelemetry Semantic Conventions version: 0.64b0
+Minimum supported versions (declared in pyproject.toml):
+- opentelemetry-sdk 1.40.0, which pins opentelemetry-semantic-conventions 0.61b0. That is
+  the first release defining every constant imported below; GEN_AI_AGENT_VERSION is the
+  newest of them (GEN_AI_TOOL_CALL_ARGUMENTS/RESULT arrived in 0.60b0).
+- The sdk pins semantic-conventions exactly, so the sdk floor is the only lever on these
+  `_incubating` imports. Importing a constant that an older release lacks makes every CLI
+  command fail at import time, so raise the floor in the same change that adds an import.
+  The otel-minimum-versions CI job installs the declared floors, checks that exactly those
+  versions are installed, and runs the tests (scripts/otel_min_constraints.py).
 """
 
 from opentelemetry.semconv._incubating.attributes.error_attributes import (
