@@ -119,24 +119,9 @@ def _route_agent_command(args: argparse.Namespace) -> int:
     if args.repo == "manifest" and not args.pr_number and not args.args:
         sys.stdout.write(json.dumps(build_agent_manifest(), indent=2, sort_keys=True) + "\n")
         return 0
-    if args.repo == "classify":
-        return handle_agent_classify(args.pr_number, args.args)
-    if args.repo == "next":
-        return handle_agent_next(args.pr_number, args.args)
-    if args.repo == "submit":
-        return handle_agent_submit(args.pr_number, args.args)
-    if args.repo == "resolve":
-        return handle_agent_resolve(args.pr_number, args.args)
-    if args.repo == "evidence":
-        return handle_agent_evidence(args.pr_number, args.args)
-    if args.repo == "publish":
-        return handle_agent_publish(args.pr_number, args.args)
-    if args.repo == "leases":
-        return handle_agent_leases(args.pr_number, args.args)
-    if args.repo == "reclaim":
-        return handle_agent_reclaim(args.pr_number, args.args)
-    if args.repo == "orchestrate":
-        return handle_agent_orchestrate(args.pr_number, args.args)
+    handler = _AGENT_HANDLERS.get(args.repo)
+    if handler is not None:
+        return handler(args.pr_number, args.args)
     print(f"Unknown agent command. Supported commands: {', '.join(AGENT_SUBCOMMANDS)}.", file=sys.stderr)
     return 2
 
@@ -943,3 +928,18 @@ def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
     from gh_address_cr.orchestrator import harness
 
     return harness.handle_agent_orchestrate(repo, passthrough)
+
+
+# Every `agent` subcommand except `manifest` (answered by `build_agent_manifest()` above),
+# in the order of AGENT_SUBCOMMANDS. A test keeps this table and the vocabulary in step.
+_AGENT_HANDLERS = {
+    "classify": handle_agent_classify,
+    "next": handle_agent_next,
+    "submit": handle_agent_submit,
+    "resolve": handle_agent_resolve,
+    "evidence": handle_agent_evidence,
+    "publish": handle_agent_publish,
+    "leases": handle_agent_leases,
+    "reclaim": handle_agent_reclaim,
+    "orchestrate": handle_agent_orchestrate,
+}

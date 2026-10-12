@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import inspect
 import io
 import os
 import re
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.helpers import RUNTIME_PACKAGE_DIR, run_cli_under_memory_exporter
 
@@ -154,6 +155,37 @@ class PublicSurfaceTests(unittest.TestCase):
                     stderr,
                     "Unknown agent command. Supported commands: " + ", ".join(EXPECTED_AGENT_SUBCOMMANDS) + ".\n",
                 )
+
+
+class AgentDispatchTableTests(unittest.TestCase):
+    def test_the_dispatch_table_plus_manifest_is_the_agent_vocabulary_in_order(self) -> None:
+        from gh_address_cr.commands import agent
+
+        self.assertNotIn("manifest", agent._AGENT_HANDLERS)
+        self.assertEqual(["manifest", *agent._AGENT_HANDLERS], list(agent.AGENT_SUBCOMMANDS))
+
+    def test_every_handler_takes_the_repo_and_the_passthrough_arguments(self) -> None:
+        from gh_address_cr.commands import agent
+
+        for name, handler in agent._AGENT_HANDLERS.items():
+            with self.subTest(subcommand=name):
+                self.assertEqual(list(inspect.signature(handler).parameters), ["repo", "passthrough"])
+
+    def test_each_subcommand_reaches_its_own_handler_with_the_same_arguments(self) -> None:
+        from gh_address_cr.commands import agent
+
+        for name in agent._AGENT_HANDLERS:
+            with self.subTest(subcommand=name):
+                handlers = {key: MagicMock(return_value=0, name=key) for key in agent._AGENT_HANDLERS}
+                with patch.dict(agent._AGENT_HANDLERS, handlers):
+                    code, _, _ = run_main(["agent", name, "owner/repo", "7", "--flag"])
+
+                self.assertEqual(code, 0)
+                for key, handler in handlers.items():
+                    if key == name:
+                        handler.assert_called_once_with("owner/repo", ["7", "--flag"])
+                    else:
+                        handler.assert_not_called()
 
 
 class TelemetryVocabularyTests(unittest.TestCase):
