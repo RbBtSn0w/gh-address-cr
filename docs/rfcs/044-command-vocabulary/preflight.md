@@ -24,8 +24,7 @@ This is a separate refactor change. It must not be bundled into a telemetry priv
 
 ## Problem (verified)
 
-On `develop` today the command names are encoded in six places that are edited by hand;
-the command-name allowlist change (#357) adds a seventh, listed last:
+On `develop` the command names are encoded in seven places that are edited by hand:
 
 | Place | Names | State today |
 | --- | --- | --- |
@@ -35,7 +34,7 @@ the command-name allowlist change (#357) adds a seventh, listed last:
 | argparse `metavar` in `parse_args` (`src/gh_address_cr/cli.py`) | 13 top-level | **omits `agent`** |
 | `usage:` string in `_route_agent_command` (`src/gh_address_cr/commands/agent.py`) | 10 `agent` subcommands | literal |
 | the `if args.repo == ...` chain in `_route_agent_command` | 10 `agent` subcommands (`manifest` plus nine handlers) | literal |
-| `AGENT_SUBCOMMANDS` in `src/gh_address_cr/commands/agent.py` | 10 `agent` subcommands | **not on `develop` yet**: introduced by #357 |
+| `AGENT_SUBCOMMANDS` in `src/gh_address_cr/commands/agent.py` | 10 `agent` subcommands | added by the command-name allowlist change (#357) |
 
 Drift that has already happened:
 
@@ -124,7 +123,7 @@ Constraints that bound the solution:
 
 ## Work breakdown
 
-One refactor PR, after the Spec 042 addendum and Spec 043 changes have landed, branched from
+One refactor PR, now unblocked (the Spec 042 addendum in #357 and Spec 043 in #358 have landed), branched from
 `origin/develop`. High-risk tier, so about 100 source lines or fewer:
 
 1. `src/gh_address_cr/core/command_names.py` with the two constants;
