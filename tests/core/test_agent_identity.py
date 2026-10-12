@@ -41,6 +41,20 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
     def test_bare_name_has_no_version(self) -> None:
         self.assertEqual(_identity("claude-cli"), {GEN_AI_AGENT_NAME: "claude-cli"})
 
+    def test_shapes_are_parsed_without_knowing_any_vendor(self) -> None:
+        # Pins "parse by shape, never by vendor name": an unseen product is handled
+        # exactly like a known one, so no vendor table can hide in the parser.
+        for product in ("claude-code", "codex", "kimi-cli", "some-future-agent"):
+            with self.subTest(product=product):
+                self.assertEqual(
+                    _identity(f"{product}_1-2-3_agent"),
+                    {GEN_AI_AGENT_NAME: product, GEN_AI_AGENT_VERSION: "1.2.3"},
+                )
+                self.assertEqual(
+                    _identity(f"{product}@1.2.3"),
+                    {GEN_AI_AGENT_NAME: product, GEN_AI_AGENT_VERSION: "1.2.3"},
+                )
+
     def test_same_agent_different_versions_share_one_name(self) -> None:
         names = {_identity(f"claude-code_2-1-{patch}_agent")[GEN_AI_AGENT_NAME] for patch in (270, 286, 293)}
         self.assertEqual(names, {"claude-code"})

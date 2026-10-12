@@ -469,6 +469,11 @@ def sanitize_cli_argv(
     return sanitized, vcs_attrs
 
 
+# AI_AGENT is self-declared, so it is parsed by shape, never by vendor name: there is no
+# vendor table here and none should be added. A new shape needs evidence from observed
+# production values and a pinned case in tests/core/test_agent_identity.py. Grouping or
+# renaming products belongs at query time (Honeycomb calculated fields) or in the gateway.
+#
 # Bounds the cardinality of agent identity: the AI_AGENT convention names a product in
 # lowercase letters, digits and hyphens. The name is lowercased before matching, so
 # case variants share one value; underscores are rejected so a versioned shape that no
@@ -535,16 +540,18 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
     any agent can set (e.g. via skill guidance); CLAUDE_CODE_SESSION_ID is a
     passive, zero-configuration fallback used only because Claude Code exports
-    it for free. This is intentionally bounded to these two sources, not a
-    growing per-vendor detection registry (Principle X): a new agent vendor is
-    onboarded by setting the designed entry point, not by adding a branch here.
+    it for free. Conversation-id detection is intentionally bounded to these two
+    sources, not a growing per-vendor detection registry (Principle X): a new
+    agent vendor is onboarded by setting the designed entry point, not by adding
+    a branch here.
     Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
     CLAUDE_CODE_SESSION_ID (passive fallback).
 
-    Agent identity follows the industry ``AI_AGENT`` convention (Vercel
-    ``name@version``; Claude Code's ``name_<ver>_agent`` is also parsed) and is
-    emitted as the standard ``gen_ai.agent.name`` / ``gen_ai.agent.version``
-    pair so a product is one low-cardinality name regardless of release.
+    Agent identity is separate from the conversation id. It follows the industry
+    ``AI_AGENT`` convention (Vercel ``name@version``; Claude Code's
+    ``name_<ver>_agent`` is also parsed) and is emitted as the standard
+    ``gen_ai.agent.name`` / ``gen_ai.agent.version`` pair so a product is one
+    low-cardinality name regardless of release.
     """
     res: dict[str, str] = {}
 

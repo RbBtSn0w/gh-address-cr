@@ -171,6 +171,13 @@ for process tracing.
 - Side-effect boundary: tracing observes runtime behavior and remains separate from PR-scoped workflow telemetry
 - Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
 - Recovery and replay: tracing is fail-open and must not block command completion
+- Compatibility: this boundary does not freeze the exact values of identity
+  attributes. Following OpenTelemetry's stability rules (attribute values are
+  outside the guarantees and adding attributes is always allowed), a release may
+  normalise such a value and says so in its release notes; `service.version` on
+  the Resource marks the cut. For example, `gen_ai.agent.name` used to carry the
+  whole `AI_AGENT` string, version included; it now carries the lowercased
+  product name and `gen_ai.agent.version` carries the version.
 
 The installed CLI exports one process-level OTLP/HTTP trace to the production
 Gateway by default:
