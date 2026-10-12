@@ -1,6 +1,7 @@
 import json
 import subprocess
 import unittest
+from unittest.mock import patch
 
 
 def completed(cmd, payload, returncode=0, stderr=""):
@@ -42,7 +43,6 @@ class NativeGitHubClientTests(unittest.TestCase):
         self.assertTrue(all("mutation" not in " ".join(call).lower() for call in runner.calls))
 
     def test_default_runner_uses_central_measured_command_boundary(self):
-        from unittest.mock import patch
 
         from gh_address_cr.github.client import GitHubClient
 
@@ -51,7 +51,7 @@ class NativeGitHubClientTests(unittest.TestCase):
             result = GitHubClient._default_runner(["gh", "api", "user"])
 
         self.assertIs(result, expected)
-        run_cmd.assert_called_once_with(["gh", "api", "user"], retries=1)
+        run_cmd.assert_called_once_with(["gh", "api", "user"], retries=1, timeout=60.0)
 
     def test_list_threads_formats_graphql_request_and_enriches_viewer_reply_evidence(self):
         from gh_address_cr.github.client import GitHubClient
@@ -192,14 +192,11 @@ class NativeGitHubClientTests(unittest.TestCase):
                 runner=RecordingRunner([completed(["gh"], {"errors": [{"message": "API rate limit exceeded"}]})])
             ).resolve_thread("owner/repo", "123", "THREAD_1")
 
-        with self.assertRaises(GitHubTransientError):
+        transient = completed(["gh"], {}, returncode=1, stderr="503 Service Unavailable")
+        with patch("gh_address_cr.github.client.time.sleep"), self.assertRaises(GitHubTransientError):
+            # Reads are retried a bounded number of times before the transient error surfaces.
             GitHubClient(
-                runner=RecordingRunner(
-                    [
-                        completed(["gh"], {"login": "octocat"}),
-                        completed(["gh"], {}, returncode=1, stderr="503 Service Unavailable"),
-                    ]
-                )
+                runner=RecordingRunner([completed(["gh"], {"login": "octocat"}), transient, transient, transient])
             ).list_threads("owner/repo", "123")
 
     def test_list_pr_checks_raises_when_lookup_fails_without_json(self):
