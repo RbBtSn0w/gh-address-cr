@@ -34,6 +34,7 @@ status does not prove delivery. No runtime or packaged-skill behavior changed.
 | 041-telemetry-shutdown-wait | Architecture preflight for the bounded exit-time telemetry wait (issue #346). |
 | 042-telemetry-overhead-signal | Architecture preflight for the derived telemetry overhead budget, the previous-shutdown-wait span attribute, and root-span `reason_code`. |
 | 043-telemetry-invocation-kind | Architecture preflight for the bounded root-span `gh_address_cr.invocation.kind` attribute (command, help, version, usage_error). |
+| 044-command-vocabulary | Architecture preflight and decision record for one vocabulary of command names (names module, dictionary dispatch for `agent`); no command registry. |
 
 ## Migration Verification
 
