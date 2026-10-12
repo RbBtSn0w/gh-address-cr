@@ -33,6 +33,7 @@ status does not prove delivery. No runtime or packaged-skill behavior changed.
 | 039-agent-first-run-ux | Architecture/contracts retained; delivery specs, checklists and evidence snapshots removed. |
 | 041-telemetry-shutdown-wait | Architecture preflight for the bounded exit-time telemetry wait (issue #346). |
 | 042-telemetry-overhead-signal | Architecture preflight for the derived telemetry overhead budget, the previous-shutdown-wait span attribute, and root-span `reason_code`. |
+| 044-command-vocabulary | Architecture preflight and decision record for one vocabulary of command names (names module, dictionary dispatch for `agent`); no command registry. |
 
 ## Migration Verification
 
