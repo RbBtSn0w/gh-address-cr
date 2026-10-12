@@ -221,8 +221,8 @@ next efficiency report's `telemetry_overhead_ms` (see
 a 200 ms build margin, so a single timed-out export cannot raise
 `TELEMETRY_OVERHEAD_EXCEEDED` on its own. The root span also carries the previous
 invocation's wait as `gh_address_cr.telemetry.previous_shutdown_wait_ms` (plus
-`previous_shutdown_timed_out`), and a
-failing command's `gh_address_cr.command.reason_code` (see
+`gh_address_cr.telemetry.previous_shutdown_timed_out`), and a failing command's
+`gh_address_cr.command.reason_code` (see
 `docs/rfcs/042-telemetry-overhead-signal/preflight.md`).
 For a custom operation:
 

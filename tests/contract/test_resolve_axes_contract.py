@@ -232,12 +232,10 @@ class DeclineFinalGateAndLeaseTest(unittest.TestCase):
                         repo, pr_number, agent_id="fixer-1", github_client=client
                     )
 
-                events = [
-                    json.loads(line)
-                    for path in glob.glob(tmp + "/**/evidence.jsonl", recursive=True)
-                    for line in open(path, encoding="utf-8")
-                    if line.strip()
-                ]
+                events = []
+                for path in glob.glob(tmp + "/**/evidence.jsonl", recursive=True):
+                    with open(path, encoding="utf-8") as handle:
+                        events.extend(json.loads(line) for line in handle if line.strip())
                 published = [e for e in events if e["event_type"] == "response_published"]
                 self.assertEqual(len(published), 1)
                 stamped = datetime.fromisoformat(published[0]["timestamp"].replace("Z", "+00:00"))
