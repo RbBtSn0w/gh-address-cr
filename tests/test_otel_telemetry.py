@@ -797,19 +797,37 @@ class TracedExecutionTests(unittest.TestCase):
                 self.assertEqual(root.attributes["gh_address_cr.command.name"], name)
                 self.assertEqual(root.attributes["gh_address_cr.command.path"], path)
 
-    def test_agent_subcommand_allowlist_matches_the_routed_commands(self) -> None:
-        import inspect
+    def test_agent_subcommand_allowlist_matches_the_usage_line(self) -> None:
         import re
 
-        from gh_address_cr.commands import agent as agent_commands
-
-        routed = set(re.findall(r'args\.repo == "([a-z-]+)"', inspect.getsource(agent_commands._route_agent_command)))
-        self.assertEqual(routed, set(agent_commands.AGENT_SUBCOMMANDS))
+        from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS
 
         _, _, _, usage = run_cli_under_memory_exporter(["agent"])
+
         match = re.search(r"usage: gh-address-cr agent \{([^}]*)\}", usage)
         self.assertIsNotNone(match, usage)
-        self.assertEqual(set(match.group(1).split(",")), set(agent_commands.AGENT_SUBCOMMANDS))
+        self.assertEqual(set(match.group(1).split(",")), set(AGENT_SUBCOMMANDS))
+
+    def test_every_allowlisted_agent_subcommand_is_routed(self) -> None:
+        from gh_address_cr.cli import main
+        from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS
+
+        def rejected_as_unknown(name: str) -> bool:
+            stderr = io.StringIO()
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(stderr),
+                contextlib.suppress(SystemExit),
+            ):
+                main(["agent", name])
+            return "Unknown agent command" in stderr.getvalue()
+
+        self.assertTrue(rejected_as_unknown("not-an-agent-subcommand"))
+        for name in AGENT_SUBCOMMANDS:
+            with self.subTest(name=name):
+                self.assertFalse(rejected_as_unknown(name))
 
     def test_command_name_allowlists_stay_in_step(self) -> None:
         from gh_address_cr import cli
