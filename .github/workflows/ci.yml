@@ -124,9 +124,45 @@ jobs:
           PY
           python -m unittest tests.contract.test_agent_journey_contract
 
+  otel-minimum-versions:
+    # lint-and-test resolves the newest OpenTelemetry release, so it can never notice that
+    # pyproject.toml allows versions lacking a semantic-conventions constant the code
+    # imports. This job installs the declared lower bounds and runs the tests against them.
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pin OpenTelemetry to the lower bounds declared in pyproject.toml
+        # Fails on any opentelemetry-* spec it cannot turn into an exact pin, so the job can
+        # never silently fall back to testing the newest release.
+        run: |
+          python scripts/otel_min_constraints.py > otel-min-constraints.txt
+          cat otel-min-constraints.txt
+
+      - name: Install project at the OpenTelemetry minimum versions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c otel-min-constraints.txt -e .
+
+      - name: Verify the installed OpenTelemetry versions are the declared floors
+        run: python scripts/otel_min_constraints.py --check-installed
+
+      - name: Unit tests at the minimum versions
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests
+
   pr-dev-preview:
     name: Publish PR Dev Preview
-    needs: lint-and-test
+    needs: [lint-and-test, otel-minimum-versions]
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&

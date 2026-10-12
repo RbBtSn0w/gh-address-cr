@@ -17,8 +17,14 @@ from gh_address_cr.agent.manifests import validate_capability_manifest
 from tests.helpers import ROOT, RUNTIME_PACKAGE_DIR, SRC_ROOT, PythonScriptTestCase
 
 PYPROJECT = ROOT / "pyproject.toml"
+# First opentelemetry-sdk release whose pinned semantic-conventions (0.61b0) defines every
+# GenAI constant src/gh_address_cr/core/otel_semconv.py imports; GEN_AI_AGENT_VERSION is the
+# newest of them. Raise this together with any new semconv import; the otel-minimum-versions
+# CI job is what proves the declared floor really imports.
+OTEL_MINIMUM = "1.40"
 RELEASE_CONFIG = ROOT / "release.config.cjs"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+OTEL_MIN_CONSTRAINTS_SCRIPT = ROOT / "scripts" / "otel_min_constraints.py"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 README = ROOT / "README.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
@@ -366,14 +372,65 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn('license = "MIT"', text)
         self.assertIn('license-files = ["LICENSE"]', text)
         self.assertIn('"packaging>=24"', text)
-        self.assertIn('"opentelemetry-api>=1.30"', text)
-        self.assertIn('"opentelemetry-sdk>=1.30"', text)
-        self.assertIn('"opentelemetry-exporter-otlp-proto-http>=1.30"', text)
+        self.assertIn(f'"opentelemetry-api>={OTEL_MINIMUM}"', text)
+        self.assertIn(f'"opentelemetry-sdk>={OTEL_MINIMUM}"', text)
+        self.assertIn(f'"opentelemetry-exporter-otlp-proto-http>={OTEL_MINIMUM}"', text)
         self.assertIn('"requests>=2.31.0"', text)
         self.assertIn("Operating System :: OS Independent", text)
         self.assertIn('Homepage = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Source = "https://github.com/RbBtSn0w/gh-address-cr"', text)
         self.assertIn('Issues = "https://github.com/RbBtSn0w/gh-address-cr/issues"', text)
+
+    def test_opentelemetry_floors_move_in_lockstep_and_are_not_below_the_known_minimum(self):
+        spec = importlib.util.spec_from_file_location("otel_min_constraints", OTEL_MIN_CONSTRAINTS_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Same parser as the CI job, so the test and the job cannot disagree about a floor.
+        floors = {name: Version(v) for name, v in module.declared_floors(PYPROJECT.read_text(encoding="utf-8")).items()}
+
+        self.assertEqual(
+            set(floors),
+            {"opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp-proto-http"},
+        )
+        self.assertEqual(len(set(floors.values())), 1, f"OpenTelemetry packages release in lockstep: {floors}")
+        # OTEL_MINIMUM is a hand-kept record of the lowest sdk that imports every constant; it cannot
+        # be derived offline, so the CI job below is the real proof.
+        self.assertGreaterEqual(next(iter(floors.values())), Version(OTEL_MINIMUM))
+
+    def _ci_job(self, name):
+        ci = CI_WORKFLOW.read_text(encoding="utf-8")
+        jobs = ci.split("\njobs:\n", 1)[1]
+        starts = [(m.group(1), m.start()) for m in re.finditer(r"(?m)^  ([a-z0-9][a-z0-9-]*):\s*$", jobs)]
+        for index, (job_name, start) in enumerate(starts):
+            if job_name == name:
+                end = starts[index + 1][1] if index + 1 < len(starts) else len(jobs)
+                return jobs[start:end]
+        self.fail(f"CI workflow has no {name} job")
+
+    def test_opentelemetry_minimum_versions_are_exercised_in_ci(self):
+        job = self._ci_job("otel-minimum-versions")
+
+        # Each step must exist and they must run in this order: derive pins, install with them,
+        # prove the install really is at the floor, then test.
+        steps = [
+            r"python scripts/otel_min_constraints\.py\s*>\s*otel-min-constraints\.txt",
+            r"pip install -c otel-min-constraints\.txt -e \.",
+            r"python scripts/otel_min_constraints\.py --check-installed",
+            r"python -m unittest discover -s tests",
+        ]
+        positions = []
+        for step in steps:
+            match = re.search(step, job)
+            self.assertIsNotNone(match, f"otel-minimum-versions is missing: {step}")
+            positions.append(match.start())
+        self.assertEqual(positions, sorted(positions), "otel-minimum-versions steps are out of order")
+
+    def test_dev_preview_waits_for_the_minimum_versions_job(self):
+        # The job is not a required status check, so gating the preview build on it is what makes
+        # a floor regression visible before an artifact is published.
+        preview = self._ci_job("pr-dev-preview")
+
+        self.assertRegex(preview, r"(?m)^    needs:\s*\[[^\]]*\blint-and-test\b[^\]]*\botel-minimum-versions\b[^\]]*\]")
 
     def test_changelog_is_release_managed_and_not_ahead_of_source_version(self):
         changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
