@@ -56,6 +56,10 @@ PUBLIC_COMMANDS = {
     "submit-action",
     "version",
 }
+# The subcommands `_route_agent_command` dispatches. Telemetry exports `agent.<sub>` only for these.
+AGENT_SUBCOMMANDS = frozenset(
+    {"manifest", "classify", "next", "submit", "resolve", "evidence", "publish", "leases", "reclaim", "orchestrate"}
+)
 
 
 def build_agent_manifest() -> dict:

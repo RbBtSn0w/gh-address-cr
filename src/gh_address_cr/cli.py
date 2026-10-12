@@ -8,11 +8,13 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
-from gh_address_cr.commands.agent import handle_agent_command
+from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS, handle_agent_command
 from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
@@ -37,6 +39,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_NAME,
     GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+    GH_ADDRESS_CR_INVOCATION_KIND,
     PROCESS_COMMAND_ARGS,
 )
 from gh_address_cr.core.primary_action import project_context_summary, project_primary_action
@@ -815,6 +818,25 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     return HighLevelReviewRuntime().handle(command, passthrough_args, human=human, lean=lean)
 
 
+class _VersionExit(SystemExit):
+    """`--version` exit. `--help` also exits 0, so telemetry tells them apart by type, not by parsing argv."""
+
+
+class _VersionAction(argparse.Action):
+    def __init__(self, option_strings: Sequence[str], dest: str = argparse.SUPPRESS, help: str | None = None) -> None:
+        super().__init__(option_strings=option_strings, dest=dest, default=argparse.SUPPRESS, nargs=0, help=help)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        sys.stdout.write(f"gh-address-cr {__version__}\n")
+        raise _VersionExit(0)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -842,8 +864,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version",
         "-v",
-        action="version",
-        version=f"gh-address-cr {__version__}",
+        action=_VersionAction,
+        help="show program's version number and exit",
     )
     parser.add_argument(
         "command",
@@ -1001,8 +1023,8 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
         GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
         attributes={
             **workflow_step_span_attributes(step_name="cli-init", step_kind=layer),
-            "gh_address_cr.command.name": str(args.command),
-            "gh_address_cr.command.path": str(args.command),
+            "gh_address_cr.command.name": _telemetry_command(args),
+            "gh_address_cr.command.path": _telemetry_command(args),
             PROCESS_COMMAND_ARGS: sanitized_args[1:],
         },
     ):
@@ -1033,13 +1055,18 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
+def _telemetry_command(args: argparse.Namespace) -> str:
+    """Return the command name that is safe to export: a dispatched command, never raw argv text."""
+    return str(args.command) if args.command in PUBLIC_COMMANDS else "unknown"
+
+
 def _command_span_name(args: argparse.Namespace) -> str:
-    if args.command != "agent":
-        return str(args.command)
-    subcommand = ""
-    if args.repo and args.repo not in {"-h", "--help"}:
-        subcommand = str(args.repo)
-    return f"agent.{subcommand}" if subcommand else "agent"
+    command = _telemetry_command(args)
+    if command != "agent":
+        return command
+    if not args.repo or args.repo in {"-h", "--help"}:
+        return "agent"
+    return f"agent.{args.repo}" if args.repo in AGENT_SUBCOMMANDS else "agent.unknown"
 
 
 def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
@@ -1051,7 +1078,7 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     command_path = _command_span_name(args)
     attributes: dict[str, str | bool | int | float] = {
         "gh_address_cr.span.kind": "command",
-        "gh_address_cr.command.name": str(args.command),
+        "gh_address_cr.command.name": _telemetry_command(args),
         "gh_address_cr.command.path": command_path,
         GEN_AI_OPERATION_NAME: "execute_tool",
         GEN_AI_TOOL_NAME: command_path,
@@ -1061,11 +1088,30 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     return attributes
 
 
+def _record_invocation_kind(kind: str) -> None:
+    """Best effort: a failing telemetry write must not replace the exit or stop the command."""
+    try:
+        from gh_address_cr.otel_tracing import set_current_span_attributes
+
+        set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: kind})
+    except Exception:
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     from gh_address_cr.otel_tracing import get_current_span_attributes, set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
-    args = parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except SystemExit as exc:
+        # --help, --version and usage errors leave during parsing, so no command was dispatched.
+        if isinstance(exc, _VersionExit):
+            kind = "version"
+        else:
+            kind = "help" if exc.code in (0, None) else "usage_error"
+        _record_invocation_kind(kind)
+        raise
     started_at = time.time()
     _reset_command_persistence_totals()
     span_attributes = _command_span_attributes(effective_argv, args)
@@ -1075,10 +1121,11 @@ def main(argv: list[str] | None = None) -> int:
     restore_command_scope = "gh_address_cr.command.path" in prior_command_attributes
     set_current_span_attributes(
         {
-            "gh_address_cr.command.name": str(args.command),
+            "gh_address_cr.command.name": str(span_attributes["gh_address_cr.command.name"]),
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    _record_invocation_kind("command")
     rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)
