@@ -106,16 +106,17 @@ Constraints that bound the solution:
    text omits one. Nothing crashes, so the cost of leaving it is low. That argues against C
    and for a small structural fix (B).
 3. **Why dictionary dispatch for `agent`.** The nine routed handlers share one signature, so
-   the table is almost free, derives the set that telemetry needs, and removes the need for a test that
-   scrapes `_route_agent_command` source text with a regular expression. That test, added with
-   the command-name allowlist change, is a stopgap and is deleted by this change.
+   the table is almost free, derives the set that telemetry needs, and makes the routed names
+   structural instead of something a test must infer. (An earlier draft of the command-name
+   allowlist change, #357, scraped `_route_agent_command` source text to check them; review
+   replaced that with a behavioral probe, which stays valid after this change.)
 4. **Why not D.** The unknown-command message and exit behavior are tested public behavior;
    argparse's own `invalid choice` output would change both.
 
 ## Consequences
 
 - Easier: adding a command or `agent` subcommand cannot be silently treated as `unknown` by
-  telemetry; `--help` lists every command; one fewer source-scraping test.
+  telemetry; `--help` lists every command; fewer lists to keep in step by hand.
 - Harder: one more small module; a visible one-line `--help` change that must be called out.
 - To revisit: if two or more commands are added in a quarter, or a third consumer needs
   per-command attributes, reconsider option C.
@@ -132,7 +133,9 @@ One refactor PR, after the Spec 042 addendum and Spec 043 changes have landed, b
 2. `_route_agent_command` dispatches the nine non-`manifest` names through a dictionary;
    `AGENT_SUBCOMMANDS` contains those names plus `manifest`, and the usage line derives from
    the complete ordered vocabulary.
-3. Delete the source-scraping drift test; keep the usage-line and list-consistency tests.
+3. Keep the behavioral routing probe, the usage-line test and the list-consistency test from
+   #357; with dictionary dispatch they guard a structural guarantee rather than being the
+   only protection.
 4. Commits: vocabulary module first, then `agent` dispatch, then tests and docs.
 
 ## Executable contract tests
