@@ -182,6 +182,58 @@ class AddressCallTests(unittest.TestCase):
         self.assertEqual(sorted(gh.calls), ["checks", "files", "stack", "threads", "user"])
 
 
+class PendingReviewPaginationTests(unittest.TestCase):
+    def test_short_page_stops_without_an_extra_empty_page_call(self):
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            rows = [{"state": "PENDING", "user": {"login": "me"}}, {"state": "APPROVED", "user": {"login": "x"}}]
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(rows), stderr="")
+
+        pending = GitHubClient(runner=runner).list_pending_reviews("o/r", "1", "me")
+
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(calls), 1)
+
+    def test_full_page_fetches_the_next_page(self):
+        pages = [[{"state": "COMMENTED"}] * 100, [{"state": "PENDING", "user": {"login": "me"}}]]
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(pages[len(calls) - 1]), stderr="")
+
+        pending = GitHubClient(runner=runner).list_pending_reviews("o/r", "1", "me")
+
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(calls), 2)
+
+
+class ThreadResolvedLookupTests(unittest.TestCase):
+    def test_is_thread_resolved_uses_a_single_node_query(self):
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"data": {"node": {"isResolved": True}}}), stderr=""
+            )
+
+        self.assertTrue(GitHubClient(runner=runner).is_thread_resolved("T1"))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("node(id:$threadId)", " ".join(calls[0]))
+
+    def test_unresolved_or_missing_node_is_false(self):
+        for node in ({"isResolved": False}, None, {}):
+            with self.subTest(node=node):
+
+                def gh(cmd, node=node):
+                    return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"data": {"node": node}}), stderr="")
+
+                self.assertFalse(GitHubClient(runner=gh).is_thread_resolved("T1"))
+
+
 class GatherReadsTests(unittest.TestCase):
     def test_outcomes_keep_submission_order_and_capture_errors(self):
         from gh_address_cr.core.parallel_reads import gather_reads

@@ -354,6 +354,13 @@ class GitHubClient:
             )
         return True
 
+    def is_thread_resolved(self, thread_id: str) -> bool:
+        """Cheap single-node read of one review thread's resolved state."""
+        query = "query($threadId:ID!){ node(id:$threadId){ ... on PullRequestReviewThread{ isResolved } } }"
+        payload = self._read_json(["api", "graphql", "-f", f"query={query}", "-F", f"threadId={thread_id}"])
+        node = (payload.get("data") or {}).get("node") if isinstance(payload, dict) else None
+        return bool(isinstance(node, dict) and node.get("isResolved") is True)
+
     def list_pending_reviews(self, repo: str, pr_number: str, login: str | None = None) -> list[dict[str, Any]]:
         page = 1
         pending: list[dict[str, Any]] = []
@@ -363,8 +370,6 @@ class GitHubClient:
                 raise GitHubError(
                     protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reviews response must be a JSON array."
                 )
-            if not payload:
-                return pending
             for review in payload:
                 if not isinstance(review, dict):
                     continue
@@ -374,6 +379,8 @@ class GitHubClient:
                 if login and review_login != login:
                     continue
                 pending.append(review)
+            if len(payload) < 100:
+                return pending
             page += 1
 
     def list_pr_checks(self, repo: str, pr_number: str, *, required: bool = False) -> list[dict[str, Any]]:

@@ -2656,11 +2656,9 @@ class StaleThreadClaimabilityTests(unittest.TestCase):
                 self.resolved.append((repo, pr_number, thread_id))
                 return True
 
-            def list_threads(self, repo, pr_number):
+            def is_thread_resolved(self, thread_id):
                 self.list_threads_calls += 1
-                if self.list_threads_calls == 1:
-                    return [{"id": "THREAD_1", "isResolved": False, "isOutdated": False}]
-                return [{"id": "THREAD_1", "isResolved": True, "isOutdated": False}]
+                return self.list_threads_calls > 1
 
         repo = "owner/repo"
         pr_number = "123"
