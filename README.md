@@ -294,12 +294,10 @@ tool calls without extra instrumentation:
   suffix such as `-beta` stays in the version). The name is lowercased and must
   be lowercase letters, digits and hyphens (<= 64 chars), so it stays one
   low-cardinality value across releases; the version may also use `.`, `_` and
-  `-` (<= 64 chars). The value is self-reported by the host, not verified.
-- `gh_address_cr.agent.identity.rejected` — `true` only when `AI_AGENT` was set
-  but its name or version was unusable (wrong format or unsafe). The rejected
-  value is never recorded. A bad name drops the whole identity, a bad version
-  drops only the version. Without this flag an absent `gen_ai.agent.name` means
-  `AI_AGENT` was unset or blank. Everything above is absent when no env is set.
+  `-` (<= 64 chars). The value is self-reported by the host, not verified. A
+  value in the wrong format or that looks unsafe is dropped without being
+  recorded: a bad name drops the whole identity, a bad version only the version.
+  All of these are absent when no env is set.
 - `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
   PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is
   a stable one-way hash, never the plain `owner/repo` string.

@@ -9,7 +9,6 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
-    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
     GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
     GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME,
     PROCESS_COMMAND_ARGS,
@@ -39,7 +38,6 @@ class OtelSemconvPinsTestCase(unittest.TestCase):
         self.assertEqual(GEN_AI_CONVERSATION_ID, "gen_ai.conversation.id")
         self.assertEqual(GEN_AI_AGENT_NAME, "gen_ai.agent.name")
         self.assertEqual(GEN_AI_AGENT_VERSION, "gen_ai.agent.version")
-        self.assertEqual(GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED, "gh_address_cr.agent.identity.rejected")
         self.assertEqual(VCS_CHANGE_ID, "vcs.change.id")
         self.assertEqual(VCS_PROVIDER_NAME, "vcs.provider.name")
         self.assertEqual(VCS_REPOSITORY_NAME, "vcs.repository.name")

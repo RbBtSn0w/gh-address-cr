@@ -4,18 +4,17 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
-    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
 )
 from gh_address_cr.core.telemetry_safety import detect_agent_session
 
 _IDENTITY_KEYS = (GEN_AI_AGENT_NAME, GEN_AI_AGENT_VERSION)
 
 
-def _detect(value: str) -> dict[str, str | bool]:
+def _detect(value: str) -> dict[str, str]:
     return detect_agent_session({"AI_AGENT": value})
 
 
-def _identity(value: str) -> dict[str, str | bool]:
+def _identity(value: str) -> dict[str, str]:
     result = _detect(value)
     return {key: result[key] for key in _IDENTITY_KEYS if key in result}
 
@@ -94,33 +93,15 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
     def test_absent_ai_agent_emits_nothing(self) -> None:
         self.assertEqual(detect_agent_session({}), {})
 
+    def test_rejected_value_is_never_recorded(self) -> None:
+        for value in ("token=abc123", "Kimi K2@1.0"):
+            with self.subTest(value=value):
+                self.assertEqual(_detect(value), {})
+
     def test_blank_ai_agent_counts_as_absent(self) -> None:
         for value in ("", "   "):
             with self.subTest(value=value):
                 self.assertEqual(_detect(value), {})
-
-
-class AgentIdentityRejectionSignalTestCase(unittest.TestCase):
-    def test_rejected_name_sets_the_rejected_flag(self) -> None:
-        for value in ("Kimi K2@1.0", "cursor/1.0", "claude-code_2-1-293_agent_extra", "/Users/someone/agent"):
-            with self.subTest(value=value):
-                self.assertEqual(_detect(value), {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True})
-
-    def test_rejected_version_sets_the_flag_and_keeps_the_name(self) -> None:
-        self.assertEqual(
-            _detect("codex@not a version"),
-            {GEN_AI_AGENT_NAME: "codex", GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True},
-        )
-
-    def test_valid_identity_has_no_rejected_flag(self) -> None:
-        for value in ("claude-code_2-1-293_agent", "codex@0.5.1", "claude-cli"):
-            with self.subTest(value=value):
-                self.assertNotIn(GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED, _detect(value))
-
-    def test_rejected_flag_never_carries_the_rejected_value(self) -> None:
-        result = _detect("token=abc123")
-        self.assertEqual(result, {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True})
-        self.assertNotIn("abc123", repr(result))
 
 
 class AgentIdentityDoesNotDisturbSessionCorrelationTestCase(unittest.TestCase):
@@ -128,7 +109,6 @@ class AgentIdentityDoesNotDisturbSessionCorrelationTestCase(unittest.TestCase):
         result = detect_agent_session({"GH_ADDRESS_CR_CONVERSATION_ID": "session-1", "AI_AGENT": "Kimi K2@1.0"})
         self.assertEqual(result[GEN_AI_CONVERSATION_ID], "session-1")
         self.assertEqual(result["gen_ai.conversation.id.source"], "GH_ADDRESS_CR_CONVERSATION_ID")
-        self.assertTrue(result[GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED])
         self.assertNotIn(GEN_AI_AGENT_NAME, result)
 
     def test_valid_ai_agent_and_conversation_id_are_both_emitted(self) -> None:

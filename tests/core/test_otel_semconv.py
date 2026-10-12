@@ -27,7 +27,6 @@ class TestOtelSemconv(unittest.TestCase):
             "VCS_PROVIDER_NAME",
             "VCS_REPOSITORY_NAME",
             "VCS_CHANGE_STATE",
-            "GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED",
             "GH_ADDRESS_CR_CLI_INIT_SPAN_NAME",
             "GH_ADDRESS_CR_SUBPROCESS_SPAN_NAME",
         ]

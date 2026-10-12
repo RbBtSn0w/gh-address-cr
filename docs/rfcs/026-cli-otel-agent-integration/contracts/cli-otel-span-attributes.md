@@ -97,14 +97,13 @@ landable subset; "GATED" = requires human confirmation before build.
   `GH_ADDRESS_CR_CONVERSATION_ID`), the span carries `gen_ai.conversation.id`
   equal to that value plus `gen_ai.conversation.id.source` naming the env var,
   and `gen_ai.agent.name` + `gen_ai.agent.version` from `AI_AGENT` when present
-  (`name@version` or Claude Code's `name_<ver>_agent`; see data-model.md). When
-  `AI_AGENT` is set but unusable, `gh_address_cr.agent.identity.rejected` is
-  `true` instead and the value is not recorded.
+  (`name@version` or Claude Code's `name_<ver>_agent`; see data-model.md). An
+  unusable `AI_AGENT` is dropped and not recorded.
 - **Enforced**: two invocations under the same session env carry an **identical**
   `gen_ai.conversation.id` (groupable). When no known env is present,
-  `gen_ai.conversation.id`, `gen_ai.conversation.id.source`, `gen_ai.agent.name`,
-  `gen_ai.agent.version` and `gh_address_cr.agent.identity.rejected` are all
-  **absent** (fail-open); the CLI needs no flag and no skill change.
+  `gen_ai.conversation.id`, `gen_ai.conversation.id.source`,
+  `gen_ai.agent.name` and `gen_ai.agent.version` are all **absent** (fail-open);
+  the CLI needs no flag and no skill change.
 - Recorded values pass the public-safe sanitation path.
 
 ## C-12 VCS GitHub-PR mapping + privacy (MVP — Tier 1)

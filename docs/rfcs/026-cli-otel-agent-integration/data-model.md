@@ -28,7 +28,6 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
 | `gen_ai.agent.name` | string | Added (Tier 2) | `AI_AGENT` env, name part | Omitted when absent or invalid. Lowercased, then must match `[a-z0-9][a-z0-9-]{0,63}`; the version is split out into `gen_ai.agent.version`. Self-reported, unverified. |
 | `gen_ai.agent.version` | string | Added (agent identity update) | `AI_AGENT` env, version part | Omitted when absent or invalid. Must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. |
-| `gh_address_cr.agent.identity.rejected` | boolean | Added (agent identity update) | derived | `true` only when `AI_AGENT` is set but its name or version was rejected; absent otherwise. Never carries the value, so an unset variable and a rejected one stay distinguishable. |
 | `vcs.change.id` | string | Added (Tier 1) | PR number from argv | Only for PR-scoped commands; omitted otherwise. FR-012. |
 | `vcs.provider.name` | string | Added (Tier 1) | constant `"github"` | Set with `vcs.change.id`. |
 | `vcs.repository.name` | string | Added (Tier 1) | **hash** of `owner/repo` (Entity 5) | Opaque, stable per repo. **No plain owner/URL ever** (R-010). |
@@ -112,9 +111,10 @@ Pure function `detect_agent_session(environ) -> dict[str, str]`:
   is a bare name, which must itself be a lowercase-hyphen label: a shape with
   underscores that no parser recognises is rejected rather than emitted whole,
   so a version can never leak back into the name. An invalid name drops the
-  whole identity; an invalid version drops only the version; either case sets
-  `gh_address_cr.agent.identity.rejected`. A blank value counts as unset.
-  Behavior change: before this update the raw `AI_AGENT` string, version
+  whole identity; an invalid version drops only the version. Nothing records
+  the rejected value, so an unusable `AI_AGENT` looks the same as an unset one;
+  the accepted format is therefore stated in `skill/SKILL.md`. A blank value
+  counts as unset. Behavior change: before this update the raw `AI_AGENT` string, version
   included, was the agent name, and any non-unsafe string was accepted.
   The attributes live in the OpenTelemetry GenAI semantic-conventions
   repository (moved out of the main registry); names are pinned by

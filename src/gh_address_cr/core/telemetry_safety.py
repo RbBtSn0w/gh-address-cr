@@ -21,7 +21,6 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
-    GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED,
     GH_ADDRESS_CR_SPAN_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_NAME,
@@ -504,13 +503,12 @@ def _safe_agent_label(value: str, *, pattern: re.Pattern[str], field: str) -> st
     return _safe_identity_label(value, field=field)
 
 
-def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str | bool]:
-    """Return gen_ai.agent.name/version from ``AI_AGENT``, or the rejected flag.
+def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str]:
+    """Return gen_ai.agent.name/version parsed from ``AI_AGENT``.
 
-    Fail-open: an unusable name drops the whole identity, an unusable version drops
-    only the version, and either case sets ``GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED``
-    so a rejected value is distinguishable from an unset one without recording it.
-    A blank value counts as unset.
+    Fail-open: an unusable name drops the whole identity and an unusable version
+    drops only the version; nothing raises and the rejected value is never
+    recorded. A blank value counts as unset.
     """
     raw = environ.get("AI_AGENT", "")
     if not raw.strip():
@@ -519,19 +517,19 @@ def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str | bool]:
     try:
         name = _safe_agent_label(raw_name.lower(), pattern=_AGENT_NAME_PATTERN, field="AI_AGENT")
     except ValueError:
-        return {GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED: True}
-    identity: dict[str, str | bool] = {GEN_AI_AGENT_NAME: name}
+        return {}
+    identity = {GEN_AI_AGENT_NAME: name}
     if raw_version is not None:
         try:
             identity[GEN_AI_AGENT_VERSION] = _safe_agent_label(
                 raw_version, pattern=_AGENT_VERSION_PATTERN, field="AI_AGENT version"
             )
         except ValueError:
-            identity[GH_ADDRESS_CR_AGENT_IDENTITY_REJECTED] = True
+            pass
     return identity
 
 
-def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str | bool]:
+def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     """Detect and return agent session correlation attributes from environ.
 
     GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
@@ -546,10 +544,9 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str | bool]:
     Agent identity follows the industry ``AI_AGENT`` convention (Vercel
     ``name@version``; Claude Code's ``name_<ver>_agent`` is also parsed) and is
     emitted as the standard ``gen_ai.agent.name`` / ``gen_ai.agent.version``
-    pair so a product is one low-cardinality name regardless of release. A set
-    but unusable ``AI_AGENT`` is flagged, not recorded.
+    pair so a product is one low-cardinality name regardless of release.
     """
-    res: dict[str, str | bool] = {}
+    res: dict[str, str] = {}
 
     # 1. Conversation ID (paired in one tuple so mypy narrows both together)
     conv_id_source: tuple[str, str] | None = None
