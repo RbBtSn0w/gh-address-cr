@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -124,7 +126,11 @@ class ReadRetryTests(unittest.TestCase):
 
 class TimeoutTests(unittest.TestCase):
     def test_default_runner_bounds_every_gh_call(self) -> None:
-        with patch("gh_address_cr.core.command_runner.run_cmd") as run_cmd:
+        with (
+            tempfile.TemporaryDirectory() as state,
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state}),
+            patch("gh_address_cr.core.command_runner.run_cmd") as run_cmd,
+        ):
             run_cmd.return_value = _result()
             GitHubClient._default_runner(["gh", "api", "user"])
         run_cmd.assert_called_once_with(["gh", "api", "user"], retries=1, timeout=GH_COMMAND_TIMEOUT_SECONDS)

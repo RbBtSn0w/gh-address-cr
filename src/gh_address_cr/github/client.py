@@ -21,6 +21,7 @@ from gh_address_cr.github.errors import (
     GitHubTransientError,
 )
 from gh_address_cr.github.pr_checks import pr_checks_result
+from gh_address_cr.github.throttle import gh_call_gate, is_rate_limit_result, record_rate_limit
 from gh_address_cr.github.transient_failures import backoff_seconds, is_transient_github_failure_text
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
@@ -565,7 +566,14 @@ class GitHubClient:
     def _default_runner(cmd: list[str]) -> subprocess.CompletedProcess:
         from gh_address_cr.core.command_runner import run_cmd
 
-        return run_cmd(cmd, retries=1, timeout=GH_COMMAND_TIMEOUT_SECONDS)
+        with gh_call_gate(cmd):
+            result = run_cmd(cmd, retries=1, timeout=GH_COMMAND_TIMEOUT_SECONDS)
+        category = None
+        if result.returncode != 0:
+            category = classify_github_failure(result.stderr, result.stdout, result.returncode, cmd)["stderr_category"]
+        if is_rate_limit_result(category, result.returncode, result.stdout):
+            record_rate_limit()
+        return result
 
 
 def _split_repo(repo: str) -> tuple[str, str]:

@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -47,7 +49,11 @@ class NativeGitHubClientTests(unittest.TestCase):
         from gh_address_cr.github.client import GitHubClient
 
         expected = completed(["gh", "api", "user"], {"login": "octocat"})
-        with patch("gh_address_cr.core.command_runner.run_cmd", return_value=expected) as run_cmd:
+        with (
+            tempfile.TemporaryDirectory() as state,
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state}),
+            patch("gh_address_cr.core.command_runner.run_cmd", return_value=expected) as run_cmd,
+        ):
             result = GitHubClient._default_runner(["gh", "api", "user"])
 
         self.assertIs(result, expected)
