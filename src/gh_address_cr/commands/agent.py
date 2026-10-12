@@ -38,28 +38,8 @@ from gh_address_cr.core import (
     workflow_matching,
 )
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMANDS
 from gh_address_cr.core.errors import WorkflowError
-
-PUBLIC_COMMANDS = {
-    "active-pr",
-    "agent",
-    "address",
-    "review",
-    "threads",
-    "findings",
-    "adapter",
-    "doctor",
-    "command-session",
-    "final-gate",
-    "review-to-findings",
-    "submit-feedback",
-    "submit-action",
-    "version",
-}
-# The subcommands `_route_agent_command` dispatches. Telemetry exports `agent.<sub>` only for these.
-AGENT_SUBCOMMANDS = frozenset(
-    {"manifest", "classify", "next", "submit", "resolve", "evidence", "publish", "leases", "reclaim", "orchestrate"}
-)
 
 
 def build_agent_manifest() -> dict:
@@ -133,8 +113,7 @@ def handle_agent_command(args: argparse.Namespace) -> int:
 def _route_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,resolve,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
-            "Agent protocol utilities.\n"
+            f"usage: gh-address-cr agent {{{','.join(AGENT_SUBCOMMANDS)}}} ...\n\nAgent protocol utilities.\n"
         )
         return 0
     if args.repo == "manifest" and not args.pr_number and not args.args:
@@ -158,10 +137,7 @@ def _route_agent_command(args: argparse.Namespace) -> int:
         return handle_agent_reclaim(args.pr_number, args.args)
     if args.repo == "orchestrate":
         return handle_agent_orchestrate(args.pr_number, args.args)
-    print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, resolve, evidence, publish, leases, reclaim, orchestrate.",
-        file=sys.stderr,
-    )
+    print(f"Unknown agent command. Supported commands: {', '.join(AGENT_SUBCOMMANDS)}.", file=sys.stderr)
     return 2
 
 
