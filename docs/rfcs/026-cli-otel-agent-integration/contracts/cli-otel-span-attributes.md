@@ -96,7 +96,8 @@ landable subset; "GATED" = requires human confirmation before build.
 - Given a host env session id (`CLAUDE_CODE_SESSION_ID`, else
   `GH_ADDRESS_CR_CONVERSATION_ID`), the span carries `gen_ai.conversation.id`
   equal to that value plus `gen_ai.conversation.id.source` naming the env var,
-  and `gen_ai.agent.name` from `AI_AGENT` when present.
+  and `gen_ai.agent.name` + `gen_ai.agent.version` from `AI_AGENT` when present
+  (`name@version` or Claude Code's `name_<ver>_agent`; see data-model.md).
 - **Enforced**: two invocations under the same session env carry an **identical**
   `gen_ai.conversation.id` (groupable). When no known env is present, all three
   attributes are **absent** (fail-open); the CLI needs no flag and no skill change.

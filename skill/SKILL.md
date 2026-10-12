@@ -173,6 +173,14 @@ For cross-invocation correlation, keep one stable session identifier:
 export GH_ADDRESS_CR_CONVERSATION_ID="<stable-session-id>"
 ```
 
+If your host does not already export `AI_AGENT`, declare the calling agent once
+per session using the `name@version` convention so telemetry can attribute runs
+to it (Claude Code already sets this):
+
+```text
+export AI_AGENT="<agent-name>@<agent-version>"
+```
+
 Process telemetry is exported by the runtime through its configured Honeycomb
 relay. It is fail-open and can be disabled with `DISABLE_TELEMETRY=1` or
 `DO_NOT_TRACK=1`.

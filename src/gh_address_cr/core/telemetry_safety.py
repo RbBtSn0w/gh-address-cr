@@ -19,6 +19,7 @@ from typing import Any
 from gh_address_cr.core.command_names import PUBLIC_COMMANDS
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
+    GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
     GH_ADDRESS_CR_SPAN_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_KIND,
@@ -468,6 +469,36 @@ def sanitize_cli_argv(
     return sanitized, vcs_attrs
 
 
+# Bounds the cardinality of agent identity labels: lowercase-hyphen product names
+# per the AI_AGENT convention, never free text.
+_AGENT_LABEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Claude Code exports AI_AGENT as `claude-code_<major>-<minor>-<patch>_agent`.
+_UNDERSCORE_AGENT_PATTERN = re.compile(r"(?P<name>[A-Za-z0-9][A-Za-z0-9-]*)_(?P<version>\d+(?:-\d+)*)_agent")
+
+
+def _split_agent_identity(raw: str) -> tuple[str, str | None]:
+    """Split an ``AI_AGENT`` value into ``(name, version)``.
+
+    Accepts the Vercel ``AI_AGENT`` convention (``name@version``) and the value
+    Claude Code actually exports (``name_<ver-with-dashes>_agent``). Anything
+    else is treated as a bare name.
+    """
+    value = raw.strip()
+    if "@" in value:
+        name, _, version = value.partition("@")
+        return name, version
+    match = _UNDERSCORE_AGENT_PATTERN.fullmatch(value)
+    if match:
+        return match.group("name"), match.group("version").replace("-", ".")
+    return value, None
+
+
+def _safe_agent_label(value: str, *, field: str) -> str:
+    if not _AGENT_LABEL_PATTERN.fullmatch(value):
+        raise ValueError(f"UNSAFE:unsupported {field} format")
+    return _safe_identity_label(value, field=field)
+
+
 def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     """Detect and return agent session correlation attributes from environ.
 
@@ -479,6 +510,11 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     onboarded by setting the designed entry point, not by adding a branch here.
     Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
     CLAUDE_CODE_SESSION_ID (passive fallback).
+
+    Agent identity follows the industry ``AI_AGENT`` convention (Vercel
+    ``name@version``; Claude Code's ``name_<ver>_agent`` is also parsed) and is
+    emitted as the standard ``gen_ai.agent.name`` / ``gen_ai.agent.version``
+    pair so a product is one low-cardinality name regardless of release.
     """
     res: dict[str, str] = {}
 
@@ -499,14 +535,19 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
         except ValueError:
             pass
 
-    # 2. Agent Name
+    # 2. Agent name and version. An invalid name drops the whole identity; an
+    # invalid version drops only the version (fail-open, never raises).
     if "AI_AGENT" in environ:
-        agent_name = environ["AI_AGENT"]
+        raw_name, raw_version = _split_agent_identity(environ["AI_AGENT"])
         try:
-            safe_agent_name = _safe_identity_label(agent_name, field="AI_AGENT")
-            res[GEN_AI_AGENT_NAME] = safe_agent_name
+            res[GEN_AI_AGENT_NAME] = _safe_agent_label(raw_name, field="AI_AGENT")
         except ValueError:
-            pass
+            return res
+        if raw_version is not None:
+            try:
+                res[GEN_AI_AGENT_VERSION] = _safe_agent_label(raw_version, field="AI_AGENT version")
+            except ValueError:
+                pass
 
     return res
 

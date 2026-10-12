@@ -284,11 +284,17 @@ tool calls without extra instrumentation:
   (position-preserving), never dropped
 - `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` — GenAI tool
   vocabulary for the invoked command
-- `gen_ai.conversation.id` (+ `.source`), `gen_ai.agent.name` — passive
-  session correlation. Set `GH_ADDRESS_CR_CONVERSATION_ID` (preferred,
-  vendor-neutral) or `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable
-  per-session value so repeated invocations group together; set `AI_AGENT` to
-  label the calling agent. All three are absent when no session env is set.
+- `gen_ai.conversation.id` (+ `.source`) — passive session correlation. Set
+  `GH_ADDRESS_CR_CONVERSATION_ID` (preferred, vendor-neutral) or
+  `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable per-session value so
+  repeated invocations group together.
+- `gen_ai.agent.name`, `gen_ai.agent.version` — the calling agent, read from the
+  `AI_AGENT` convention (`name@version`, e.g. `codex@0.5.1`; Claude Code's
+  `claude-code_2-1-293_agent` is parsed into `claude-code` + `2.1.293`). The
+  name stays one low-cardinality value across releases. The value is
+  self-reported by the host, not verified. Values that are not lowercase-hyphen
+  style labels (<= 64 chars) or that look unsafe are dropped. All of these are
+  absent when no env is set.
 - `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
   PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is
   a stable one-way hash, never the plain `owner/repo` string.
