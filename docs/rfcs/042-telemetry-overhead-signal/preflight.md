@@ -226,5 +226,5 @@ Recorded because it reshapes the value domain of `gh_address_cr.command.name` an
 - **Executable contract tests** (`tests/test_otel_telemetry.py`): unrecognized first
   arguments never appear in any span attribute; `agent.unknown`; recognized names unchanged;
   `command-session` operation spans never export raw argv; `AGENT_SUBCOMMANDS` equals the names
-  routed by `_route_agent_command` and its usage line; `cli.PUBLIC_COMMANDS`,
-  `agent.PUBLIC_COMMANDS` and the telemetry allowlist (plus `version`) stay in step.
+  routed by `_route_agent_command` and its usage line; the command-name lists are one shared
+  vocabulary (Spec 044, `tests/test_command_vocabulary.py`).

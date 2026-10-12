@@ -38,28 +38,8 @@ from gh_address_cr.core import (
     workflow_matching,
 )
 from gh_address_cr.core import session as session_store
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMANDS
 from gh_address_cr.core.errors import WorkflowError
-
-PUBLIC_COMMANDS = {
-    "active-pr",
-    "agent",
-    "address",
-    "review",
-    "threads",
-    "findings",
-    "adapter",
-    "doctor",
-    "command-session",
-    "final-gate",
-    "review-to-findings",
-    "submit-feedback",
-    "submit-action",
-    "version",
-}
-# The subcommands `_route_agent_command` dispatches. Telemetry exports `agent.<sub>` only for these.
-AGENT_SUBCOMMANDS = frozenset(
-    {"manifest", "classify", "next", "submit", "resolve", "evidence", "publish", "leases", "reclaim", "orchestrate"}
-)
 
 
 def build_agent_manifest() -> dict:
@@ -133,35 +113,16 @@ def handle_agent_command(args: argparse.Namespace) -> int:
 def _route_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
         sys.stdout.write(
-            "usage: gh-address-cr agent {manifest,classify,next,submit,resolve,evidence,publish,leases,reclaim,orchestrate} ...\n\n"
-            "Agent protocol utilities.\n"
+            f"usage: gh-address-cr agent {{{','.join(AGENT_SUBCOMMANDS)}}} ...\n\nAgent protocol utilities.\n"
         )
         return 0
     if args.repo == "manifest" and not args.pr_number and not args.args:
         sys.stdout.write(json.dumps(build_agent_manifest(), indent=2, sort_keys=True) + "\n")
         return 0
-    if args.repo == "classify":
-        return handle_agent_classify(args.pr_number, args.args)
-    if args.repo == "next":
-        return handle_agent_next(args.pr_number, args.args)
-    if args.repo == "submit":
-        return handle_agent_submit(args.pr_number, args.args)
-    if args.repo == "resolve":
-        return handle_agent_resolve(args.pr_number, args.args)
-    if args.repo == "evidence":
-        return handle_agent_evidence(args.pr_number, args.args)
-    if args.repo == "publish":
-        return handle_agent_publish(args.pr_number, args.args)
-    if args.repo == "leases":
-        return handle_agent_leases(args.pr_number, args.args)
-    if args.repo == "reclaim":
-        return handle_agent_reclaim(args.pr_number, args.args)
-    if args.repo == "orchestrate":
-        return handle_agent_orchestrate(args.pr_number, args.args)
-    print(
-        "Unknown agent command. Supported commands: manifest, classify, next, submit, resolve, evidence, publish, leases, reclaim, orchestrate.",
-        file=sys.stderr,
-    )
+    handler = _AGENT_HANDLERS.get(args.repo)
+    if handler is not None:
+        return handler(args.pr_number, args.args)
+    print(f"Unknown agent command. Supported commands: {', '.join(AGENT_SUBCOMMANDS)}.", file=sys.stderr)
     return 2
 
 
@@ -967,3 +928,18 @@ def handle_agent_orchestrate(repo: str | None, passthrough: list[str]) -> int:
     from gh_address_cr.orchestrator import harness
 
     return harness.handle_agent_orchestrate(repo, passthrough)
+
+
+# Every `agent` subcommand except `manifest` (answered by `build_agent_manifest()` above),
+# in the order of AGENT_SUBCOMMANDS. A test keeps this table and the vocabulary in step.
+_AGENT_HANDLERS = {
+    "classify": handle_agent_classify,
+    "next": handle_agent_next,
+    "submit": handle_agent_submit,
+    "resolve": handle_agent_resolve,
+    "evidence": handle_agent_evidence,
+    "publish": handle_agent_publish,
+    "leases": handle_agent_leases,
+    "reclaim": handle_agent_reclaim,
+    "orchestrate": handle_agent_orchestrate,
+}

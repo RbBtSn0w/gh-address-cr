@@ -829,15 +829,6 @@ class TracedExecutionTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertFalse(rejected_as_unknown(name))
 
-    def test_command_name_allowlists_stay_in_step(self) -> None:
-        from gh_address_cr import cli
-        from gh_address_cr.commands import agent as agent_commands
-        from gh_address_cr.core import telemetry_safety
-
-        self.assertEqual(cli.PUBLIC_COMMANDS, agent_commands.PUBLIC_COMMANDS)
-        # The telemetry allowlist deliberately omits `version`; any other difference is drift.
-        self.assertEqual(set(telemetry_safety._PUBLIC_TELEMETRY_COMMANDS) | {"version"}, cli.PUBLIC_COMMANDS)
-
     def test_command_session_operation_spans_never_export_raw_argv(self) -> None:
         secrets = ("ghp_FAKE123456", "/Users/someone/private", "RbBtSn0w/gh-address-cr")
         operations = [

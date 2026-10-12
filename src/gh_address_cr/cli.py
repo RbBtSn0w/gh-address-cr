@@ -14,7 +14,7 @@ from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
-from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS, handle_agent_command
+from gh_address_cr.commands.agent import handle_agent_command
 from gh_address_cr.commands.command_session import handle_command_session
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error as _emit_scope_resolution_error,
@@ -33,6 +33,7 @@ from gh_address_cr.commands.high_level import (
 )
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMAND_NAMES, PUBLIC_COMMANDS
 from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_OPERATION_NAME,
@@ -65,15 +66,6 @@ from gh_address_cr.intake.findings import (
 OUTPUT_MODE_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
 NATIVE_REVIEW_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
-PUBLIC_COMMANDS = {
-    *NATIVE_REVIEW_COMMANDS,
-    *UTILITY_COMMANDS,
-    "active-pr",
-    "agent",
-    "command-session",
-    "doctor",
-    "final-gate",
-}
 PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 LEAN_FLAGS = {"--lean", "--summary"}
@@ -869,7 +861,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{" + ",".join(PUBLIC_COMMAND_NAMES) + "}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"

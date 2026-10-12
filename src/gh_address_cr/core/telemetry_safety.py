@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from gh_address_cr.core.command_names import PUBLIC_COMMANDS
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
     GEN_AI_CONVERSATION_ID,
@@ -44,10 +45,6 @@ _PR_SCOPED_COMMANDS = frozenset(
         "command-session",
     }
 )
-_PUBLIC_TELEMETRY_COMMANDS = _PR_SCOPED_COMMANDS | {
-    "doctor",
-    "submit-feedback",
-}
 
 UNSAFE_METADATA_KEYS = {
     "token",
@@ -519,7 +516,7 @@ def derive_tool_name(argv: list[str] | None) -> str:
     if not argv:
         return "gh-address-cr"
     first = argv[0]
-    if first not in _PUBLIC_TELEMETRY_COMMANDS:
+    if first not in PUBLIC_COMMANDS:
         return "gh-address-cr"
     return first
 
