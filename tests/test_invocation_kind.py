@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gh_address_cr import __version__
 from tests.helpers import run_cli_under_memory_exporter
@@ -101,6 +102,25 @@ class InvocationKindTests(unittest.TestCase):
             span.attributes[KIND] for span in spans if span.name == "gh_address_cr.command_session.operation"
         ]
         self.assertEqual(operation_kinds, ["command", "help", "version", "usage_error"])
+
+    def test_a_failing_span_write_never_changes_the_exit_or_the_command(self) -> None:
+        from gh_address_cr import otel_tracing
+
+        original = otel_tracing.set_current_span_attributes
+
+        def failing_for_kind(attributes):
+            if KIND in attributes:
+                raise RuntimeError("telemetry backend failure")
+            return original(attributes)
+
+        with patch.object(otel_tracing, "set_current_span_attributes", failing_for_kind):
+            for argv, exit_code in ((["--help"], 0), (["-v"], 0), ([], 2), (["version"], 0)):
+                with self.subTest(argv=argv):
+                    result, root, _, _ = run_cli_under_memory_exporter(argv)
+
+                    self.assertEqual(result, exit_code)
+                    self.assertEqual(root.attributes["process.exit.code"], exit_code)
+                    self.assertNotIn(KIND, root.attributes)
 
 
 if __name__ == "__main__":

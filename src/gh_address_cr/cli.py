@@ -1083,6 +1083,16 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     return attributes
 
 
+def _record_invocation_kind(kind: str) -> None:
+    """Best effort: a failing telemetry write must not replace the exit or stop the command."""
+    try:
+        from gh_address_cr.otel_tracing import set_current_span_attributes
+
+        set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: kind})
+    except Exception:
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     from gh_address_cr.otel_tracing import get_current_span_attributes, set_current_span_attributes
 
@@ -1095,7 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
             kind = "version"
         else:
             kind = "help" if exc.code in (0, None) else "usage_error"
-        set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: kind})
+        _record_invocation_kind(kind)
         raise
     started_at = time.time()
     _reset_command_persistence_totals()
@@ -1110,7 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
-    set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: "command"})
+    _record_invocation_kind("command")
     rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)

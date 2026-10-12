@@ -36,7 +36,7 @@ both exit 0).
 | Self-reference risk | None. The value is known before the span ends and does not depend on telemetry. |
 | Telemetry privacy | Fixed four-value enum. No argv text, paths, or identifiers. This is independent of the command-name allowlist (a parse-accepted unknown command stays `command`; its name is exported as `unknown`). |
 | OTel layering | Attribute on the existing root span. No new child span and no promoted checkpoint. Nested `main` calls (command sessions) set it on the current child span only. |
-| Recovery / replay | A failed attribute write is ignored (`set_current_span_attributes` is fail-open). A missing value means an older runtime. |
+| Recovery / replay | Both writes go through a best-effort helper (`_record_invocation_kind` in `src/gh_address_cr/cli.py`): an exception from the span write is swallowed, so a telemetry failure can neither replace the original `SystemExit` nor stop the command. The OpenTelemetry SDK's `set_attribute` does not raise for invalid values (it drops them), so this guards non-SDK span implementations. A missing value means an older runtime. |
 
 ## Alternatives rejected
 
@@ -61,7 +61,8 @@ both exit 0).
   `agent manifest` and a rejected unknown command; exit codes unchanged; `--version` and `-v`
   still print `gh-address-cr <version>` and `--help` still prints usage; the value always belongs
   to the closed enum; only dispatched invocations carry `command.path`; command-session
-  operations classify themselves on their own spans without changing the root.
+  operations classify themselves on their own spans without changing the root; a failing
+  attribute write changes neither the exit code nor the command.
 
 ## Measure of success
 
