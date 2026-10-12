@@ -178,8 +178,9 @@ agent once per session so telemetry can attribute runs to it (Claude Code alread
 sets this). Use the `name@version` convention with the host's real name and
 version; the name must be lowercase letters, digits and hyphens (for example
 `codex`, not `Codex CLI`). Skip it if you do not know the host version. An
-unusable value is silently dropped and never recorded. Note that other tools
-that honour `AI_AGENT` also change behaviour when it is set.
+unusable name drops the whole identity and an unusable version drops only the
+version; either way nothing is recorded and no error is shown. Note that other
+tools that honour `AI_AGENT` also change behaviour when it is set.
 
 ```text
 export AI_AGENT="<agent-name>@<agent-version>"
