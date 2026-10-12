@@ -106,10 +106,11 @@ Constraints that bound the solution:
    text omits one. Nothing crashes, so the cost of leaving it is low. That argues against C
    and for a small structural fix (B).
 3. **Why dictionary dispatch for `agent`.** The nine routed handlers share one signature, so
-   the table is almost free, derives the set that telemetry needs, and makes the routed names
-   structural instead of something a test must infer. (An earlier draft of the command-name
-   allowlist change, #357, scraped `_route_agent_command` source text to check them; review
-   replaced that with a behavioral probe, which stays valid after this change.)
+   the table is almost free and makes the routed names structural instead of something a test
+   must infer. The shared vocabulary, not the dictionary, supplies the top-level command set
+   that telemetry needs. (An earlier draft of the command-name allowlist change, #357, scraped
+   `_route_agent_command` source text to check the routed names; review replaced that with a
+   behavioral probe, which stays valid after this change.)
 4. **Why not D.** The unknown-command message and exit behavior are tested public behavior;
    argparse's own `invalid choice` output would change both.
 
