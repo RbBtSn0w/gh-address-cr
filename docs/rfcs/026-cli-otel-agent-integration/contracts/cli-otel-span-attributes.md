@@ -93,17 +93,18 @@ landable subset; "GATED" = requires human confirmation before build.
   (`DISABLE_TELEMETRY=1`). Telemetry-layer failures are fail-open.
 
 ## C-11 Passive agent-session correlation (MVP — Tier 2)
-- Given a host env session id (`CLAUDE_CODE_SESSION_ID`, else
-  `GH_ADDRESS_CR_CONVERSATION_ID`), the span carries `gen_ai.conversation.id`
-  equal to that value plus `gen_ai.conversation.id.source` naming the env var,
-  and `gen_ai.agent.name` + `gen_ai.agent.version` from `AI_AGENT` when present
-  (`name@version` or Claude Code's `name_<ver>_agent`; see data-model.md). An
-  unusable `AI_AGENT` is dropped and not recorded.
+- Given a session id env (`GH_ADDRESS_CR_CONVERSATION_ID`, else the passive
+  fallback `CLAUDE_CODE_SESSION_ID`), the span carries `gen_ai.conversation.id`
+  equal to that value plus `gen_ai.conversation.id.source` naming the env var.
+- Independently of the session id, a usable `AI_AGENT` adds `gen_ai.agent.name` +
+  `gen_ai.agent.version` (`name@version` or Claude Code's `name_<ver>_agent`; see
+  data-model.md). An unusable `AI_AGENT` is dropped and not recorded.
 - **Enforced**: two invocations under the same session env carry an **identical**
-  `gen_ai.conversation.id` (groupable). When no known env is present,
-  `gen_ai.conversation.id`, `gen_ai.conversation.id.source`,
-  `gen_ai.agent.name` and `gen_ai.agent.version` are all **absent** (fail-open);
-  the CLI needs no flag and no skill change.
+  `gen_ai.conversation.id` (groupable). Each group is omitted on its own
+  (fail-open): with neither session env set, `gen_ai.conversation.id` and
+  `gen_ai.conversation.id.source` are **absent**; with no usable `AI_AGENT`,
+  `gen_ai.agent.name` and `gen_ai.agent.version` are **absent**. The CLI needs no
+  flag and no skill change.
 - Recorded values pass the public-safe sanitation path.
 
 ## C-12 VCS GitHub-PR mapping + privacy (MVP — Tier 1)
