@@ -171,6 +171,13 @@ for process tracing.
 - Side-effect boundary: tracing observes runtime behavior and remains separate from PR-scoped workflow telemetry
 - Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
 - Recovery and replay: tracing is fail-open and must not block command completion
+- Compatibility: this boundary does not freeze the exact values of identity
+  attributes. Following OpenTelemetry's stability rules (attribute values are
+  outside the guarantees and adding attributes is always allowed), a release may
+  normalise such a value and says so in its release notes; `service.version` on
+  the Resource marks the cut. For example, `gen_ai.agent.name` used to carry the
+  whole `AI_AGENT` string, version included; it now carries the lowercased
+  product name and `gen_ai.agent.version` carries the version.
 
 The installed CLI exports one process-level OTLP/HTTP trace to the production
 Gateway by default:
@@ -284,11 +291,20 @@ tool calls without extra instrumentation:
   (position-preserving), never dropped
 - `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` — GenAI tool
   vocabulary for the invoked command
-- `gen_ai.conversation.id` (+ `.source`), `gen_ai.agent.name` — passive
-  session correlation. Set `GH_ADDRESS_CR_CONVERSATION_ID` (preferred,
-  vendor-neutral) or `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable
-  per-session value so repeated invocations group together; set `AI_AGENT` to
-  label the calling agent. All three are absent when no session env is set.
+- `gen_ai.conversation.id` (+ `.source`) — passive session correlation. Set
+  `GH_ADDRESS_CR_CONVERSATION_ID` (preferred, vendor-neutral) or
+  `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable per-session value so
+  repeated invocations group together.
+- `gen_ai.agent.name`, `gen_ai.agent.version` — the calling agent, read from the
+  `AI_AGENT` convention (`name@version`, e.g. `codex@0.5.1`; Claude Code's
+  `claude-code_2-1-293_agent` is parsed into `claude-code` + `2.1.293`, and a
+  suffix such as `-beta` stays in the version). The name is lowercased and must
+  be lowercase letters, digits and hyphens (<= 64 chars), so it stays one
+  low-cardinality value across releases; the version may also use `.`, `_` and
+  `-` (<= 64 chars). The value is self-reported by the host, not verified. A
+  value in the wrong format or that looks unsafe is dropped without being
+  recorded: a bad name drops the whole identity, a bad version only the version.
+  All of these are absent when no env is set.
 - `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
   PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is
   a stable one-way hash, never the plain `owner/repo` string.

@@ -173,6 +173,20 @@ For cross-invocation correlation, keep one stable session identifier:
 export GH_ADDRESS_CR_CONVERSATION_ID="<stable-session-id>"
 ```
 
+If your host does not already export `AI_AGENT`, you may declare the calling
+agent once per session so telemetry can attribute runs to it. Claude Code already
+sets it, in its own `claude-code_<version>_agent` form, which the runtime also
+understands. Use the `name@version` convention with the host's real name and
+version; the name must be lowercase letters, digits and hyphens (for example
+`codex`, not `Codex CLI`). Skip it if you do not know the host version. An
+unusable name drops the whole identity and an unusable version drops only the
+version; either way nothing is recorded and no error is shown. Note that other
+tools that honour `AI_AGENT` also change behaviour when it is set.
+
+```text
+export AI_AGENT="<agent-name>@<agent-version>"
+```
+
 Process telemetry is exported by the runtime through its configured Honeycomb
 relay. It is fail-open and can be disabled with `DISABLE_TELEMETRY=1` or
 `DO_NOT_TRACK=1`.

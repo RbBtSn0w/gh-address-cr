@@ -3,6 +3,7 @@ import unittest
 from gh_address_cr.core.otel_semconv import (
     ERROR_TYPE,
     GEN_AI_AGENT_NAME,
+    GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -36,6 +37,7 @@ class OtelSemconvPinsTestCase(unittest.TestCase):
         self.assertEqual(GEN_AI_TOOL_CALL_RESULT, "gen_ai.tool.call.result")
         self.assertEqual(GEN_AI_CONVERSATION_ID, "gen_ai.conversation.id")
         self.assertEqual(GEN_AI_AGENT_NAME, "gen_ai.agent.name")
+        self.assertEqual(GEN_AI_AGENT_VERSION, "gen_ai.agent.version")
         self.assertEqual(VCS_CHANGE_ID, "vcs.change.id")
         self.assertEqual(VCS_PROVIDER_NAME, "vcs.provider.name")
         self.assertEqual(VCS_REPOSITORY_NAME, "vcs.repository.name")

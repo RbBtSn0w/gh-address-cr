@@ -15,6 +15,7 @@ class TestOtelSemconv(unittest.TestCase):
             "GEN_AI_TOOL_CALL_ARGUMENTS",
             "GEN_AI_CONVERSATION_ID",
             "GEN_AI_AGENT_NAME",
+            "GEN_AI_AGENT_VERSION",
             # Process attributes
             "PROCESS_EXECUTABLE_NAME",
             "PROCESS_PID",

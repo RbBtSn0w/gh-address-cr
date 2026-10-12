@@ -19,6 +19,7 @@ from typing import Any
 from gh_address_cr.core.command_names import PUBLIC_COMMANDS
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
+    GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
     GH_ADDRESS_CR_SPAN_KIND,
     GH_ADDRESS_CR_WORKFLOW_STEP_KIND,
@@ -468,17 +469,89 @@ def sanitize_cli_argv(
     return sanitized, vcs_attrs
 
 
+# AI_AGENT is self-declared, so it is parsed by shape, never by vendor name: there is no
+# vendor table here and none should be added. A new shape needs evidence from observed
+# production values and a pinned case in tests/core/test_agent_identity.py. Grouping or
+# renaming products belongs at query time (Honeycomb calculated fields) or in the gateway.
+#
+# Bounds the cardinality of agent identity: the AI_AGENT convention names a product in
+# lowercase letters, digits and hyphens. The name is lowercased before matching, so
+# case variants share one value; underscores are rejected so a versioned shape that no
+# parser recognises can never be emitted whole as a name.
+_AGENT_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_AGENT_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Claude Code exports AI_AGENT as `claude-code_<major>-<minor>-<patch>[-suffix]_agent`.
+_UNDERSCORE_AGENT_PATTERN = re.compile(r"(?P<name>[A-Za-z0-9][A-Za-z0-9-]*)_(?P<version>[0-9][A-Za-z0-9-]*)_agent")
+_DASH_BETWEEN_DIGITS = re.compile(r"(?<=[0-9])-(?=[0-9])")
+
+
+def _split_agent_identity(raw: str) -> tuple[str, str | None]:
+    """Split an ``AI_AGENT`` value into ``(name, version)``.
+
+    Accepts the Vercel ``AI_AGENT`` convention (``name@version``) and the value
+    Claude Code actually exports (``name_<ver>_agent``, where dashes between
+    digits become dots). Anything else is treated as a bare name.
+    """
+    value = raw.strip()
+    if "@" in value:
+        name, _, version = value.partition("@")
+        return name, version
+    match = _UNDERSCORE_AGENT_PATTERN.fullmatch(value)
+    if match:
+        return match.group("name"), _DASH_BETWEEN_DIGITS.sub(".", match.group("version"))
+    return value, None
+
+
+def _safe_agent_label(value: str, *, pattern: re.Pattern[str], field: str) -> str:
+    if not pattern.fullmatch(value):
+        raise ValueError(f"UNSAFE:unsupported {field} format")
+    return _safe_identity_label(value, field=field)
+
+
+def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str]:
+    """Return gen_ai.agent.name/version parsed from ``AI_AGENT``.
+
+    Fail-open: an unusable name drops the whole identity and an unusable version
+    drops only the version; nothing raises and the rejected value is never
+    recorded. A blank value counts as unset.
+    """
+    raw = environ.get("AI_AGENT", "")
+    if not raw.strip():
+        return {}
+    raw_name, raw_version = _split_agent_identity(raw)
+    try:
+        name = _safe_agent_label(raw_name.lower(), pattern=_AGENT_NAME_PATTERN, field="AI_AGENT")
+    except ValueError:
+        return {}
+    identity = {GEN_AI_AGENT_NAME: name}
+    if raw_version is not None:
+        try:
+            identity[GEN_AI_AGENT_VERSION] = _safe_agent_label(
+                raw_version, pattern=_AGENT_VERSION_PATTERN, field="AI_AGENT version"
+            )
+        except ValueError:
+            pass
+    return identity
+
+
 def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     """Detect and return agent session correlation attributes from environ.
 
     GH_ADDRESS_CR_CONVERSATION_ID is the designed, vendor-neutral entry point
     any agent can set (e.g. via skill guidance); CLAUDE_CODE_SESSION_ID is a
     passive, zero-configuration fallback used only because Claude Code exports
-    it for free. This is intentionally bounded to these two sources, not a
-    growing per-vendor detection registry (Principle X): a new agent vendor is
-    onboarded by setting the designed entry point, not by adding a branch here.
+    it for free. Conversation-id detection is intentionally bounded to these two
+    sources, not a growing per-vendor detection registry (Principle X): a new
+    agent vendor is onboarded by setting the designed entry point, not by adding
+    a branch here.
     Precedence: GH_ADDRESS_CR_CONVERSATION_ID (explicit, designed) first, then
     CLAUDE_CODE_SESSION_ID (passive fallback).
+
+    Agent identity is separate from the conversation id. It follows the industry
+    ``AI_AGENT`` convention (Vercel ``name@version``; Claude Code's
+    ``name_<ver>_agent`` is also parsed) and is emitted as the standard
+    ``gen_ai.agent.name`` / ``gen_ai.agent.version`` pair so a product is one
+    low-cardinality name regardless of release.
     """
     res: dict[str, str] = {}
 
@@ -499,14 +572,8 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
         except ValueError:
             pass
 
-    # 2. Agent Name
-    if "AI_AGENT" in environ:
-        agent_name = environ["AI_AGENT"]
-        try:
-            safe_agent_name = _safe_identity_label(agent_name, field="AI_AGENT")
-            res[GEN_AI_AGENT_NAME] = safe_agent_name
-        except ValueError:
-            pass
+    # 2. Agent name and version (fail-open; see _detect_agent_identity).
+    res.update(_detect_agent_identity(environ))
 
     return res
 
