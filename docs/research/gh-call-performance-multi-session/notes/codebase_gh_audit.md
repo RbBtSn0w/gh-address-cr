@@ -1,0 +1,142 @@
+# gh-address-cr codebase audit: gh / GitHub API call paths, cost, caching, failure handling
+
+Scope: worktree at HEAD cd17a66 (release 3.20.1, includes perf commit 37c6b2b / PR #352 "reduce serial gh round trips"). All paths below are relative to `src/gh_address_cr/` unless prefixed `tests/` or `docs/`. "Source" for every finding is the repo file:line (local code, read directly; there are no web URLs). Items marked VERIFIED were read in code; INFERENCE is my reasoning; GAP is not determinable from the repo.
+
+## Q1. Which modules shell out to `gh`, and what does each call site fetch?
+
+### Takeaway
+Nearly all review-path GitHub IO goes through one class, `GitHubClient` (`github/client.py`), which builds `gh ...` argv and runs it through `core/command_runner.run_cmd`. A few other sites (CLI preflight, active-pr, doctor, submit-feedback) call `gh` directly. Every `gh` call is a separate OS process (`gh api graphql`, `gh api <REST>`, `gh pr checks`, `gh auth status`, `gh pr list`); there is no persistent HTTP connection, so each call pays process spawn + TLS + auth-token load.
+
+### Cited Findings
+- Single subprocess funnel: `core/command_runner.py:129 run_cmd` -> `_run_subprocess_attempt` (`:73`, `subprocess.Popen`, `communicate(timeout=)`). `GitHubClient._default_runner` (`github/client.py:543-546`) calls `run_cmd(cmd, retries=1)`; `GitHubClient._run_gh` (`:520`) prepends `"gh"`. VERIFIED.
+- `GitHubClient` methods and the gh call each issues (all VERIFIED in `github/client.py`):
+  - `viewer_login()` `:453` -> `gh api user` (REST). Memoized per client instance in `self._viewer_login` (`:32`, `:454-461`); only successful reads cached.
+  - `get_stack_context()` `:34` -> `gh api graphql` (pullRequest + stack entries, `entries(first:100)`), paginated with a `while True` cursor loop (`:73-153`). Falls back to `unavailable` stack context on a "field doesn't exist" error (`:91-103`).
+  - `list_threads()` `:164` -> calls `viewer_login()` first (`:168-171`, failure swallowed to `""`), then `gh api graphql` reviewThreads `first:100` with `comments(first:100)` + `firstComment` + `latestComment` aliases (`:173-198`), paginated per 100 threads (`:197-252`). Extra `_load_thread_comments()` (`:463-490`) issues one more `gh api graphql` per thread only when that thread has >100 comments (N+1 only in that rare case).
+  - `list_pending_reviews()` `:347` -> `gh api repos/{repo}/pulls/{n}/reviews?per_page=100&page=N`, loops until an EMPTY page (`:350-367`), so a PR with <=100 reviews always costs 2 calls (the last empty page is an extra round trip). VERIFIED (loop returns only on `if not payload`).
+  - `list_pr_checks()` `:369` -> `gh pr checks N -R repo --json ... [--required]` (one gh process; internally gh does its own API calls). `retries=1`.
+  - `list_pr_files()` `:409` -> REST `/pulls/N/files?per_page=100&page=N`; stops when page `<100` rows (`:433`) so 1 call for small PRs.
+  - `list_pr_commit_shas()` `:437` -> REST `/pulls/N/commits?per_page=100`; stops when page `<100`.
+  - `post_reply()` `:299` -> `gh api graphql` mutation `addPullRequestReviewThreadReply` (one per thread).
+  - `resolve_thread()` `:325` -> `gh api graphql` mutation `resolveReviewThread` (one per thread).
+  - `evaluation_observations()` `:255` -> REST pull + REST reviews `--paginate` + a full `list_threads()` (callers: no call site found in `src/` by grep; appears unused in the main flow, INFERENCE).
+- Non-client direct `gh` call sites:
+  - `cli.py:657-679 preflight_github_cli`: `shutil.which("gh")` then raw `subprocess.run(["gh","auth","status"], text=True, capture_output=True)` (no timeout, not via `run_cmd`, so no OTel subprocess span and no SessionTelemetry record). Invoked for `GITHUB_PRECHECK_COMMANDS = {address, review, threads, adapter}` (`cli.py:77`, `:743-746`).
+  - `commands/active_pr.py:147` and `:226-257`: `gh pr list --repo --state open --head --json ...` via `run_cmd(..., timeout=GH_QUERY_TIMEOUT_SECONDS)` (`:17`, 30 s) - the only gh path with a timeout.
+  - `commands/doctor.py:61-67`: `gh auth status`, `gh api user`, `gh repo view` via `_run_doctor_gh_check`.
+  - `commands/submit_feedback.py:28` (`run_cmd_native(["gh",*args], retries=3)`), `:783` (`gh api repos/{target}/issues --method POST`, retries=1 `:42`): feedback/issue creation, off the PR-resolution hot path.
+  - `core/publisher.py:672` and `commands/agent.py:357`: `git` subprocesses (not gh): `git rev-parse HEAD`, `git diff-tree`/`git show`.
+- Callers of `GitHubClient`: `commands/high_level.py:929`, `commands/final_gate.py:155`, `core/gate.py:133` (Gatekeeper), `core/publisher.py:435`, `core/agent_protocol_submission.py:67,151,672`, `core/agent_batch.py:78,88`, `core/workflow.py:809`, `commands/agent.py:766` (`_resolve_viewer_login` builds its own client just for `gh api user`). Each of these constructs a fresh `GitHubClient()` unless one is injected - so the viewer-login memo does not cross call sites that make their own client.
+
+### Inferences
+- The gh surface is small and centralised, so a process-level batching/caching/instrumentation change (client or `run_cmd`) would cover almost all hot-path calls; the only outliers are `cli.py:679` (raw `subprocess.run`) and active-pr/doctor/submit-feedback.
+- `list_pending_reviews` costs a guaranteed extra empty-page request (could stop on `len(payload) < per_page` like `list_pr_files`/`list_pr_commit_shas` do).
+
+### Gaps
+- Internal call count of `gh pr checks` (it issues its own API requests) is opaque to the repo.
+
+## Q2. Per-command gh invocation counts; N+1, repeated fetches, pagination loops
+
+### Takeaway
+Typical small PR: `review`/`address` = 6 gh processes (1 untraced auth + 5 parallel-ish reads), `final-gate` = 5 (4 without `--require-checks`), but `agent publish` is a genuine sequential N+1: per published thread it issues reply + resolve + a FULL PR thread-list re-fetch (>= 3 gh calls per thread, up to 4 with the second poll + 1s sleep). Stack context is re-fetched from GitHub on essentially every agent subcommand and every CLI process.
+
+### Cited Findings
+- `review` / `address` / `threads` / `adapter` (`commands/high_level.py`):
+  - Preflight `gh auth status` (`cli.py:679`) = 1 call, serial, runs before everything.
+  - `_ingest_and_load_threads` (`high_level.py:895-993`) uses `gather_reads(...)` (`:932-937`) with 4 thunks: `get_stack_context`, `list_threads`, `list_pr_checks`, `list_pr_files` -> 4 parallel branches, but `list_threads` internally does `gh api user` first (`client.py:168`) -> that branch is 2 serial round trips. Total for a small PR: 1 (auth) + 1 (stack) + 2 (user + threads) + 1 (checks) + 1 (files) = 6 gh processes; critical path = auth -> (user -> threads) = 3 serial round trips.
+  - Commit message of 37c6b2b states "address/threads: 5 calls, 5 -> 2 serial round trips" (that count excludes the auth preflight). Test `tests/test_gh_call_reduction.py:124-134` pins final-gate at 5 calls (4 without checks, `:133`).
+  - Checks/files are fetched on every `address` run even when the agent only needs thread state; results only populate `metadata.check_summary` / `metadata.changed_files` (`high_level.py:945-975`) and are fail-soft (GitHubError -> diagnostic code).
+- `final-gate` (`core/gate.py:Gatekeeper.run`, `:130-228`): wave 1 `gather_reads(read_stack, viewer_login)` (`:173`), wave 2 `gather_reads(list_threads, list_pending_reviews(current_login), list_pr_checks only if --require-checks/--require-required-checks)` (`:193-199`). Calls: stack (1+), user (1), threads (1+; the `viewer_login()` inside is memoized), pending reviews (2: page 1 + empty page 2), checks (1 optional) => 5 with checks per test; ~6 counting the empty page (the test fake probably returns 1; INFERENCE). 2 serial waves. `--snapshot` skips list_threads (`:196`).
+- Stack-mode final-gate (`core/stack_gate.py:239 run_stack_gate`): opening `get_stack_context` (1+), then per stack member a new `Gatekeeper(github_client=shared_client).run(... observed_stack_context=...)` (`:253-261`) - member evaluation is SERIAL across members (driven by `evaluate_stack_gate`, not verified in detail) and each member does user (cached after first), threads, pending reviews (2), optional checks; then a closing `get_stack_context` (`:268`). For an M-member stack: ~2 + M*(3 to 4) calls. VERIFIED structure; per-member serialisation is INFERENCE.
+- `agent publish` (`core/publisher.py`): `_publish_once` (`:422-470`): `gather_reads(_verify_publish_revision_bindings -> get_stack_context, _publisher_login -> viewer_login)` (`:446`) = 2 parallel calls; `_build_publish_plans` may call `list_pr_commit_shas` once (`:97-105`, `default_commit_hash` memoized across items) only when a fix reply lacks a commit hash. Then a strict sequential loop `for plan in plans: _execute_single_publish_plan(...)` (`:455-466`). Per thread:
+  1. `client.post_reply` = 1 graphql mutation (`:230`),
+  2. `client.resolve_thread` = 1 graphql mutation (`:265`),
+  3. `_wait_for_remote_thread_resolution` (`:371-397`, called `:283`): calls `client.list_threads(repo, pr)` - the FULL PR thread listing (all threads, 100/page, comments) - up to `max_attempts=2` with `sleep_seconds=1.0` between attempts, just to confirm one thread's `isResolved`. Failure is swallowed (`except Exception: return`).
+  So >= 3 gh calls per thread, 4 + 1s sleep if the read-after-write is not yet consistent. For N threads: ~2 + 3N..4N gh calls, all sequential; and data volume per `list_threads` grows with total threads, so the wait step is O(N * threads) in payload size. Crash-reconcile branches (`_reconcile_in_flight_reply` `:300`, `_publisher_never_replied` `:332`) each add another full `list_threads` but only in the `unknown` side-effect state.
+  - Both mutations are individually idempotency-guarded by the side-effect outbox (`side_effect_outbox.side_effect_state`, `:152-163`, `:248-262`), so batching mutations would need to keep per-item outbox keys.
+- Agent protocol subcommands re-fetch stack context each invocation: `refresh_stack_context_for_request` (`core/agent_protocol_submission.py:58`, used by `core/agent_protocol.py:332,486` and `core/agent_batch.py:568`), `_current_stacked_revision_binding` (`core/workflow.py:798-830`, evidence add), the response-acceptance stack check (`core/agent_protocol_submission.py:140-165`), plus `commit_in_pr` check -> `list_pr_commit_shas` (`:660-680`) per submit with an explicit commit (not memoized across CLI processes; `agent_batch._CoherentStackContextClient` `:60-97` memoizes stack+commit list only within one batch submission). Each is a new `GitHubClient()` in a new process.
+- Viewer login: `gh api user` once per `GitHubClient` instance, i.e. once per CLI process at best (commit 37c6b2b: "agent publish: 1 viewer read per invocation instead of 1 + one per item"). `commands/agent.py:766 _resolve_viewer_login` builds a separate client -> an extra `gh api user` on the reply/resolve author-default path.
+- Pagination: stack query (cursor loop), reviewThreads (cursor loop; `_load_thread_comments` per heavy thread), reviews (page loop until empty page), files and commits (page loop until short page). All sequential; no `--paginate`, no per-page parallelism.
+
+### Inferences
+- Rough one-session estimate (single PR, ~N=5 threads, one `review`, one `agent next`/`submit` per thread, one publish, one final-gate): `review` 6 + per-thread `agent next` (stack refresh >=1, new process) and `submit` (stack >=1 + commit-shas 1 if explicit commit) ~ 5*(1..3) + publish ~2+3*5=17 + final-gate 5 + any re-runs of `address` between rounds (6 each) => on the order of 40-60 gh process spawns per PR round, of which most are repeat reads of the same unchanged stack/user/threads facts. This is an estimate from code reading, not measured.
+- Biggest wins by code evidence: (a) replace the post-resolve `list_threads` poll with a mutation-response check (`resolveReviewThread` already returns `thread{isResolved}` and `client.resolve_thread` already raises if not true, `client.py:340-344`, so the extra full-list re-read looks redundant) or a single node(id:) query; (b) batch multiple thread replies+resolves into one aliased GraphQL mutation document; (c) in `list_pending_reviews`, stop on a short page; (d) skip `gh auth status` preflight or fold it into `gh api user` (which is needed anyway for the viewer login); (e) cross-process cache of viewer login / stack context; (f) skip checks/files fetch on `threads`/mid-loop `address` when not needed.
+
+### Gaps
+- Exact number of `gh` internals per `gh pr checks`; real-world timing per call (see Q5 for what telemetry exists).
+
+## Q3. Caching / memoization and scope
+
+### Takeaway
+The only gh-result cache is the in-memory `GitHubClient._viewer_login` (process/instance scope, successful reads only, added in #352). Nothing is TTL-cached and nothing is reused across CLI invocations; the stack context is persisted into the session as a "non-authoritative observation" but is always re-fetched.
+
+### Cited Findings
+- `github/client.py:31-32,453-461`: `self._viewer_login` memo, per `GitHubClient` instance; failure not cached (`tests/test_gh_call_reduction.py:102-111` asserts a failed read is retried).
+- `core/agent_batch.py:60-97 _CoherentStackContextClient`: per-batch memo of stack context and commit SHAs ("Lazily reuse one stack observation, and one PR commit list, for an atomic batch submission") - scope = one batch submission in one process.
+- `core/publisher.py:75-79`: `default_commit_hash` memoized across items within one publish plan build (a git, not gh, value; but gates one `list_pr_commit_shas` call).
+- Stack context persisted to session via `session_store.cache_pull_request_context(session, ctx.to_dict())` (used in `high_level.py:942`, `gate.py:182-184`, `publisher.py` verify, submission `:152`) and read back by `cached_stack_context(...)` for display/binding only (`gate.py:~318`); the read paths still call `get_stack_context` on every invocation (VERIFIED by the call sites above). Per AGENTS.md Principle I/IX, GitHub facts are "typed external facts", the session (`runtime.sqlite3`) is authoritative for runtime state, and artifacts are not truth - this constrains any disk cache design (cache must be a derived, non-authoritative projection with an expiry/revision check).
+- No TTL, ETag / `If-None-Match` / conditional-request use, no thread snapshot reuse between `address` and `final-gate` (except the explicit `final-gate --snapshot` path, `core/gate.py:196,_load_thread_snapshot :232`, which is a user-supplied file, not an automatic cache). grep for `etag`, `ttl`, `lru_cache`, `If-None` in `src/` finds no gh-related cache (grep for "429/secondary/Retry-After" also found nothing, see Q4).
+- Concurrency inside a process: `core/parallel_reads.py gather_reads` (ThreadPoolExecutor, one worker per thunk, copy of contextvars, outcomes returned in submission order). Used in 3 places only: `high_level.py:932`, `gate.py:173,193`, `publisher.py:446`. `SessionTelemetry.record` is lock-guarded (`core/telemetry_runtime.py:228`).
+
+### Inferences
+- Because each agent subcommand is a separate short-lived process (CLI design, AGENTS.md "short-lived CLI execution"), per-process memoization can never remove repeated reads across `next`/`submit`/`publish`/`final-gate`; only an on-disk, revision-keyed cache (or a long-lived daemon / batch command) can. A cache would need to be a derived projection with expiry to respect Principle I/IX; stack context already has a persisted copy, so a "fresh-if-observed-within-N-seconds" check is a small design step.
+
+### Gaps
+- Whether thread snapshots from `address` could safely feed `final-gate` is a policy question (final-gate is a "protected kernel surface", AGENTS.md IX) - not answerable from code; final-gate currently requires fresh GitHub reads by design.
+
+## Q4. Retry / backoff / timeout / rate-limit handling; failure classification and reason codes
+
+### Takeaway
+Effective retry for GitHub reads is zero, no GitHub call on the review path has a timeout (except active-pr's 30 s), and there is no 429/secondary-rate-limit backoff or `Retry-After` handling. The retry machinery exists in two layers, but both are configured to 1 attempt on the hot path. Failure classification is rich (reason codes, waiting_on, redacted diagnostics) but the transient-marker set is narrow.
+
+### Cited Findings
+- Two retry layers (VERIFIED):
+  1. `core/command_runner.run_cmd(retries=3 default)` `:129-178`: retries a `gh` command (only when `cmd[0]=="gh"`, `_should_retry_gh :120`) on exit 124 (timeout) or transient text, with `time.sleep(2**attempt)` (1 s, 2 s) between attempts.
+  2. `GitHubClient._run_gh(args, retries)` `client.py:520-540`: same idea (sleep `2**attempt`) on `_is_transient` text.
+  BUT `GitHubClient._default_runner` passes `retries=1` to `run_cmd` (`client.py:546`) and `_read_json(..., retries=1)` default (`:492`), every call site uses the default (`:381` `retries=1`; `grep retries=` shows no caller passing >1 within client). Therefore `attempts = max(1, 1) = 1` in both layers: NO retry is actually performed for any `GitHubClient` read or mutation. Only `submit_feedback.py:28` uses `retries=3` (via run_cmd). Mutations being un-retried is consistent with `tests/test_network_write_contracts.py:212 ... does_not_retry_non_idempotent_write`; the read path being un-retried looks unintentional (a `test_submit_feedback_read_json_requests_retrying_github_read` at `:197` shows retry intent for submit_feedback reads only). The sleep-based backoff has no jitter.
+- Transient markers (`github/transient_failures.py:3-18`): `"502"`, `"503"`, `"error connecting"`, `"failed to connect"`, `"temporary failure"`, `"timeout"`, `"timed out"`, `"connection reset"`, `"graphql error"`, `"graphql failed"` (substring match on lower-cased stderr+stdout). NOT included: `500`, `504`, `429`, "secondary rate limit", "abuse", "retry-after", `"Something went wrong"` GraphQL body, `RESOURCE_LIMITS_EXCEEDED`/`NODE_LIMIT`. Substring `"502"` can false-match any text containing those digits (e.g. IDs) - INFERENCE.
+- A GraphQL-level error delivered with exit 0 (`{"errors":[...]}`) is checked AFTER the retry loop in `_read_json` (`:509-517`), so it is never retried even if transient (INFERENCE from code order).
+- Timeouts: `run_cmd(timeout=None)` default; `GitHubClient._default_runner` passes none (`client.py:546`) -> a hung `gh` blocks forever. `cli.py:679` `subprocess.run(["gh","auth","status"])` also has no timeout. Only `commands/active_pr.py` (30 s `GH_QUERY_TIMEOUT_SECONDS`, git 5-s style timeout) and adapter commands (`ADAPTER_TIMEOUT_SECONDS`) use timeouts. A timed-out process is killed and reaped with a 5 s bound (`command_runner.py:30,60-70`) and reported as exit 124.
+- Classification layers:
+  - `github/diagnostics.classify_github_failure` (`:60`): categories `auth` (exit 4 or markers incl. `401`, "gh auth login", "bad credentials"), `permission_mismatch`, `sandbox` ("permission denied", "operation not permitted"...), `environment`, `network` ("could not resolve host", "network is unreachable", + transient network markers), `rate_limit` (`"rate limit"`, `"secondary rate"`), `not_found` ("not found", "404"), `api` ("graphql","api"), `unknown`. Order matters: sandbox/permission-denied precede network and rate_limit, so a 403 whose text contains "permission denied" would be labelled sandbox (INFERENCE). HTTP 403 as such is not a marker in diagnostics.py (it is in command_runner's classifier only).
+  - `github/client._raise_classified_error` (`:772-793`) maps category -> exception class with `reason_code` and `retryable`: `GITHUB_AUTH_FAILED` (retryable False), `GITHUB_NETWORK_FAILED` (True), `GITHUB_ENVIRONMENT_FAILED` (False; environment+sandbox), `GITHUB_RATE_LIMITED` (True), `GITHUB_NOT_FOUND` (False), `GITHUB_TRANSIENT_ERROR` (True), fallback `GITHUB_API_FAILED`; additional codes `GITHUB_PR_HAS_NO_CHECKS` (`errors.py:41-48`), `GITHUB_INVALID_JSON` (`client.py:499`), `GITHUB_INCOMPLETE_RESPONSE` (protocol_codes), `INVALID_REPOSITORY`. `retryable` is metadata only - no caller auto-retries on it (grep: `retryable` is not consumed to loop).
+  - Preflight reason codes (`cli.py:625-654`): `GH_NOT_FOUND`, `GH_NETWORK_FAILED`, `GH_PERMISSION_MISMATCH`, `GH_ENVIRONMENT_FAILED`, `GH_RATE_LIMITED`, `GH_AUTH_FAILED` (default/unknown), exit code `PR_IO_PREFLIGHT_EXIT=5`; `github_waiting_on()` (`diagnostics.py:83`) yields `github_auth|github_network|github_permission|github_environment|github_rate_limit|github`. Note unknown/`api` category errors in preflight fall through to `GH_AUTH_FAILED` (`cli.py:652-656`), mislabelling e.g. a 5xx on `gh auth status` as an auth problem (INFERENCE from the fallthrough default).
+  - Telemetry-side classifier `command_runner._classify_subprocess_error` (`:246-272`): `timeout`(124), `not_found`(127 spawn), `authentication_failed` (exit 4 or markers), `rate_limited` ("rate limit", "rate_limit", "http 429"), `permission_denied` ("http 403"...), `invalid_response`, else `_OTHER`. Different vocabulary from the GitHubError reason codes (two parallel classifiers).
+  - How surfaced: `high_level._handle_github_error` (`:~1000-1030`) -> BLOCKED summary, exit 5, `reason_code=exc.reason_code`, `waiting_on=github_waiting_on(diagnostics)`, diagnostics redacted (`diagnostics.py:135-140` strips emails/tokens/secrets). Fail-soft exceptions: stack context (-> `unavailable`, `gate.py:158-166`, `high_level.py:938-939`), checks/files (-> diagnostic code in session metadata), viewer login inside `list_threads` (-> `""`, which silently disables `viewer_reply_checked`, `client.py:168-171,224`), post-resolve poll (swallowed, `publisher.py:386-387`), `_reconcile_in_flight_reply` (swallowed -> None).
+  - `gh pr checks` exit-code semantics are handled specially (`github/pr_checks.py`: exit 8 pending, exit 1 with JSON = failed checks, 1 + "no checks reported" = `no_checks`).
+- Fail-fast vs fail-open split follows AGENTS.md: core flows are fail-open only for telemetry, GitHub read failures block (exit 5).
+
+### Inferences
+- A transient 502/503/network blip on any of the 5-6 reads currently aborts the whole `address`/`final-gate` run with BLOCKED/exit 5, and the user/agent must rerun (re-paying every call). With parallel reads (`gather_reads`) a failing sibling does not cancel others; the first failing outcome in submission order wins. Real retry (idempotent reads only) with jitter plus a per-call timeout and 429/`Retry-After`/secondary-rate-limit handling is entirely absent.
+- Secondary-rate-limit exposure grows with parallel fan-out (`gather_reads` uses N workers at once) and with N sequential mutations in `agent publish`; GitHub docs advise serial mutations and 1 s spacing for content-creating requests, but I did not fetch that doc in this audit (outside repo scope), so treat as background knowledge, not a cited finding.
+
+### Gaps
+- No code or doc path found that reads `Retry-After` / `X-RateLimit-*` headers or calls `gh api rate_limit`. No real-world failure-rate data in the repo.
+
+## Q5. Does telemetry already quantify gh call counts and durations?
+
+### Takeaway
+Yes, per call: every `run_cmd` emits an OTel child span and a `SessionTelemetry` metric with a bounded operation label (`github.graphql`, `github.rest`, `github.auth`, `github.cli`), duration, exit code, attempts, and an error classification. It does not distinguish which GraphQL query, and the preflight `gh auth status` is not covered.
+
+### Cited Findings
+- OTel span `gh_address_cr.subprocess` (`core/otel_semconv.py:42`), `SpanKind.CLIENT`, created in `run_cmd` `:160-170`; attributes: `gh_address_cr.subprocess.operation`, `...attempts_configured`, `...attempts_used`, `...duration_ms`, `process.executable.name`, `process.pid`, `process.exit.code`, `error.type/category/expected` on non-zero exit (`:171-204`). Events `gh_address_cr.subprocess.start/end` (`:152-159,207-215`). Layer-model doc: `docs/rfcs/027-otel-layered-model`, AGENTS.md Principle VIII.
+- Operation labelling `core/telemetry_safety.subprocess_operation` (`:~383-405`): `gh api graphql` -> `github.graphql`, `gh api` -> `github.rest`, `gh auth` -> `github.auth`, other gh (`pr checks`, `pr list`) -> `github.cli`. Argv is intentionally not retained (privacy rule), so graphql queries (stack vs threads vs mutation) cannot be told apart from telemetry alone.
+- `SessionTelemetry.record(command=operation, start_time, end_time, exit_code, outcome)` is called per subprocess (`command_runner.py:217-224`) and persisted per session (`core/telemetry_runtime.py:216-300`, JSONL file); the efficiency report (`core/telemetry_reporting.py`) computes slowest operations, per-operation p50/p90 (`_operation_latency :433-450`), error-prone operations, latency-growth flags (`:~420-428`). So `github.*` call counts per session and duration distributions are derivable from existing telemetry/reports; this is the natural baseline for before/after measurement.
+- Gaps in telemetry: raw `subprocess.run` in `cli.py:679` and `commands/doctor.py` are uninstrumented; no counter of "calls per command" / redundant-call detection; retries are always 1 attempt so `attempts_used` is currently always 1 for the client path. `is_retry` in SessionTelemetry is about command re-runs after failure (`telemetry_runtime.py:254-259`), not HTTP retries.
+- Prior perf work already merged: commit `37c6b2b` (PR #352, "perf(github): reduce serial gh round trips in final-gate, address and agent publish", refs issue #347): viewer-login memo + `gather_reads`; claims final-gate 6->5 calls / 6->2 serial round trips; address/threads 5 calls / 5->2 serial round trips. Tests: `tests/test_gh_call_reduction.py` (viewer once per client, failure not cached, overlap, error ordering, stack failure fail-open, context propagation, telemetry lock).
+
+### Gaps
+- No stored real-session telemetry in the repo to compute actual per-session gh counts/latencies; would require running a session with telemetry file output or querying the OTel backend.
+
+## Q6. Prior discussion in git log / docs / rfcs
+
+### Takeaway
+gh performance has one explicit prior effort (#347 / #352, serial round-trip reduction); gh failure handling has several fix commits; no RFC dedicated to gh performance, caching, batching, or rate limiting.
+
+### Cited Findings
+- Relevant commits (`git log`): `37c6b2b perf(github): reduce serial gh round trips ... (#352)`; `868ab91 fix(telemetry): classify gh exit code 4 as authentication failure and fail-fast (#267)`; `4a73f19 fix(github): treat a PR without check runs as a state, not an API failure (#318)`; `7f5bbea fix(final-gate): block with a verdict when required checks do not exist (#323)`; `b2b1aa6 test: keep the test suite off the real GitHub CLI and API (#326)`.
+- `docs/rfcs/` (025-041) contain no spec on gh batching, caching, ETag, or rate limiting (grep for round trip / rate limit / N+1 hit only 028, 029, 030, 031 research, 034, 036, 037, 039, 041 for unrelated or tangential mentions). `docs/rfcs/031-stacked-pr-support/research.md:139` records "Retry until stable: rejected for v1 loop safety; one explicit refresh is deterministic" - i.e., stack context is intentionally re-read explicitly per action, relevant if proposing a stack cache. `docs/rfcs/036-runtime-transaction-hot-path` concerns the local sqlite hot path, not gh. `docs/rfcs/041-telemetry-shutdown-wait` concerns telemetry flush.
+- Compatibility/process constraints that bound any optimisation (AGENTS.md): public CLI and machine-readable contracts must be preserved or versioned; changes crossing blast-radius triggers (final-gate truth semantics, GitHub side effects widening, session persistence, new artifact-backed decision surfaces) require an Architecture Preflight in `docs/rfcs/` before implementation; GitHub reads are external facts, not authoritative state; `final-gate` is a protected kernel surface (fact -> projection -> policy); telemetry must stay public-safe and fail-open.
+
+### Gaps
+- Issue #347 text and any rate-limit incident issues are on GitHub, not in the repo; not read (read-only local audit). Worth a `gh issue view 347` by the report writer.
