@@ -103,6 +103,9 @@ def graphql(args, state):
         thread["isResolved"] = True
         save_state(state)
         emit({"data": {"resolveReviewThread": {"thread": {"id": thread["id"], "isResolved": True}}}})
+    if "node(id:$threadId)" in query:
+        thread = threads.get(variables["threadId"])
+        emit({"data": {"node": {"isResolved": bool(thread["isResolved"])} if thread else None}})
     if "reviewThreads" in query:
         nodes = [thread_node(thread) for thread in state["threads"]]
         emit({"data": {"repository": {"pullRequest": {"reviewThreads": page(nodes)}}}})

@@ -275,7 +275,7 @@ def _execute_single_publish_plan(
             payload={"thread_id": thread_id, "idempotency_key": resolve_key},
             timestamp=timestamp,
         )
-        _wait_for_remote_thread_resolution(client, repo, str(pr_number), thread_id)
+        _wait_for_remote_thread_resolution(client, thread_id)
 
     item["state"] = "closed"
     item["status"] = "CLOSED"
@@ -374,29 +374,21 @@ def _publisher_never_replied(client: Any, repo: str, pr_number: str, thread_id: 
 
 def _wait_for_remote_thread_resolution(
     client: Any,
-    repo: str,
-    pr_number: str,
     thread_id: str,
     *,
     max_attempts: int = 2,
     sleep_seconds: float = 1.0,
 ) -> None:
-    list_threads = getattr(client, "list_threads", None)
-    if not callable(list_threads):
+    # One node lookup per check, not a full PR thread listing: the wait only needs this thread's state.
+    is_thread_resolved = getattr(client, "is_thread_resolved", None)
+    if not callable(is_thread_resolved):
         return
     for attempt in range(max_attempts):
         try:
-            threads = list_threads(repo, pr_number)
+            if is_thread_resolved(thread_id):
+                return
         except Exception:
             return
-        for thread in threads or []:
-            if not isinstance(thread, dict):
-                continue
-            if str(thread.get("id") or "") != thread_id:
-                continue
-            if bool(thread.get("isResolved")):
-                return
-            break
         if attempt < max_attempts - 1:
             time.sleep(sleep_seconds)
 

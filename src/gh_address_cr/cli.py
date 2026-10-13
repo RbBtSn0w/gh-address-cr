@@ -50,6 +50,7 @@ from gh_address_cr.core.telemetry_safety import (
     workflow_step_span_attributes,
 )
 from gh_address_cr.github.diagnostics import classify_github_failure
+from gh_address_cr.github.transient_failures import backoff_seconds, is_transient_github_failure_text
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
 )
@@ -69,6 +70,8 @@ UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
 PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 LEAN_FLAGS = {"--lean", "--summary"}
+_PREFLIGHT_AUTH_ATTEMPTS = 2
+_PREFLIGHT_AUTH_TIMEOUT_SECONDS = 30.0
 GITHUB_PRECHECK_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
@@ -644,12 +647,42 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
             "Wait for GitHub rate limits to recover or use a token with sufficient quota, then rerun the command.",
             "GitHub CLI `gh` is authenticated, but GitHub reported rate limiting.",
         )
+    if is_transient_github_failure_text(str(diagnostics.get("stderr_excerpt") or "")):
+        # A 5xx or timeout from `gh auth status` says GitHub was unreachable, not that credentials are bad.
+        return (
+            "GH_NETWORK_FAILED",
+            "github_network",
+            "Retry once GitHub is reachable again; the failure looked transient rather than an authentication problem.",
+            "GitHub CLI `gh` hit a transient GitHub or network failure while checking authentication.",
+        )
     return (
         "GH_AUTH_FAILED",
         "github_auth",
         "Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
         "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
     )
+
+
+def _run_gh_auth_status(auth_command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run the auth preflight with a timeout and one jittered retry on transient failures."""
+    attempt = 0
+    while True:
+        try:
+            result = subprocess.run(
+                auth_command, text=True, capture_output=True, timeout=_PREFLIGHT_AUTH_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(
+                auth_command, 124, "", f"Command timed out after {_PREFLIGHT_AUTH_TIMEOUT_SECONDS} seconds."
+            )
+        attempt += 1
+        if (
+            result.returncode == 0
+            or attempt >= _PREFLIGHT_AUTH_ATTEMPTS
+            or not is_transient_github_failure_text(result.stderr, result.stdout)
+        ):
+            return result
+        time.sleep(backoff_seconds(attempt - 1))
 
 
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
@@ -674,7 +707,7 @@ def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) ->
         )
 
     auth_command = ["gh", "auth", "status"]
-    result = subprocess.run(auth_command, text=True, capture_output=True)
+    result = _run_gh_auth_status(auth_command)
     if result.returncode != 0 and not _gh_auth_fixture_is_unimplemented(result):
         diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, auth_command)
         reason_code, waiting_on, next_action, message = _preflight_gh_failure_response(diagnostics)

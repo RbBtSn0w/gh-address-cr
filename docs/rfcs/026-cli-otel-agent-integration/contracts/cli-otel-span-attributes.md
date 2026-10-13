@@ -159,7 +159,9 @@ landable subset; "GATED" = requires human confirmation before build.
   `gh_address_cr.subprocess.command_args`, raw stdin/stdout/stderr, or any
   alternate/hash representation of argv. They carry the bounded
   `gh_address_cr.subprocess.operation` taxonomy plus
-  `attempts_configured`/`attempts_used`.
+  `attempts_configured`/`attempts_used` and the boolean
+  `gh_address_cr.subprocess.mutation` (true only for a GraphQL mutation; it lets
+  a trace count reads versus writes per session without recording argv).
 - Failed subprocess spans carry bounded literal `error.type`, `error.category`,
   and `error.expected` values from the `otel-tracing.v2` taxonomy;
   retry-then-success spans carry none of these fields.

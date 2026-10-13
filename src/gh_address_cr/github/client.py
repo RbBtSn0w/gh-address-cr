@@ -21,12 +21,26 @@ from gh_address_cr.github.errors import (
     GitHubTransientError,
 )
 from gh_address_cr.github.pr_checks import pr_checks_result
-from gh_address_cr.github.transient_failures import is_transient_github_failure_text
+from gh_address_cr.github.throttle import gh_call_gate, is_rate_limit_result, record_rate_limit
+from gh_address_cr.github.transient_failures import backoff_seconds, is_transient_github_failure_text
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 
+# Idempotent reads are retried on transient failures; mutations never are (a reply is not idempotent).
+READ_ATTEMPTS = 3
+MUTATION_ATTEMPTS = 1
+# A hung `gh` must not block the pipeline forever; GitHub itself cuts GraphQL requests off at 10s.
+GH_COMMAND_TIMEOUT_SECONDS = 60.0
+# Categories that are deterministic: retrying cannot change the outcome.
+_NON_RETRYABLE_CATEGORIES = frozenset({"auth", "not_found", "rate_limit", "environment", "sandbox"})
+
 class GitHubClient:
+    # Clients on the real `gh` runner share the authenticated login within one process, so the several
+    # clients one invocation builds issue a single `gh api user`. Injected runners (tests) never touch it.
+    _process_viewer_login: str | None = None
+
     def __init__(self, *, runner: Runner | None = None):
+        self._uses_default_runner = runner is None
         self._runner = runner or self._default_runner
         # Authenticated login is stable within one invocation; only successful reads are cached.
         self._viewer_login: str | None = None
@@ -313,7 +327,8 @@ class GitHubClient:
                 f"threadId={thread_id}",
                 "-F",
                 f"body={body}",
-            ]
+            ],
+            retries=MUTATION_ATTEMPTS,
         )
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url")
         if not isinstance(reply_url, str) or not reply_url.strip():
@@ -335,7 +350,8 @@ class GitHubClient:
                 f"query={query}",
                 "-F",
                 f"threadId={thread_id}",
-            ]
+            ],
+            retries=MUTATION_ATTEMPTS,
         )
         resolved = payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved")
         if resolved is not True:
@@ -343,6 +359,13 @@ class GitHubClient:
                 protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub resolve response did not confirm isResolved=true."
             )
         return True
+
+    def is_thread_resolved(self, thread_id: str) -> bool:
+        """Cheap single-node read of one review thread's resolved state."""
+        query = "query($threadId:ID!){ node(id:$threadId){ ... on PullRequestReviewThread{ isResolved } } }"
+        payload = self._read_json(["api", "graphql", "-f", f"query={query}", "-F", f"threadId={thread_id}"])
+        node = (payload.get("data") or {}).get("node") if isinstance(payload, dict) else None
+        return bool(isinstance(node, dict) and node.get("isResolved") is True)
 
     def list_pending_reviews(self, repo: str, pr_number: str, login: str | None = None) -> list[dict[str, Any]]:
         page = 1
@@ -353,8 +376,6 @@ class GitHubClient:
                 raise GitHubError(
                     protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub reviews response must be a JSON array."
                 )
-            if not payload:
-                return pending
             for review in payload:
                 if not isinstance(review, dict):
                     continue
@@ -364,6 +385,8 @@ class GitHubClient:
                 if login and review_login != login:
                     continue
                 pending.append(review)
+            if len(payload) < 100:
+                return pending
             page += 1
 
     def list_pr_checks(self, repo: str, pr_number: str, *, required: bool = False) -> list[dict[str, Any]]:
@@ -378,7 +401,7 @@ class GitHubClient:
         ]
         if required:
             cmd.append("--required")
-        result = self._run_gh(cmd, retries=1)
+        result = self._run_gh(cmd)
         outcome = pr_checks_result(result.returncode, result.stdout, result.stderr)
         if outcome == "no_checks":
             raise GitHubNoChecksError(
@@ -453,12 +476,21 @@ class GitHubClient:
     def viewer_login(self) -> str:
         if self._viewer_login is not None:
             return self._viewer_login
+        if self._uses_default_runner and GitHubClient._process_viewer_login is not None:
+            self._viewer_login = GitHubClient._process_viewer_login
+            return self._viewer_login
         payload = self._read_json(["api", "user"])
         login = payload.get("login")
         if not isinstance(login, str) or not login.strip():
             raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub user response did not include login.")
         self._viewer_login = login
+        if self._uses_default_runner:
+            GitHubClient._process_viewer_login = login
         return login
+
+    @classmethod
+    def reset_process_cache(cls) -> None:
+        cls._process_viewer_login = None
 
     def _load_thread_comments(self, thread_id: str, initial_connection: dict[str, Any] | None) -> list[dict[str, Any]]:
         comments = _connection_nodes(initial_connection)
@@ -489,8 +521,20 @@ class GitHubClient:
             has_next_page, cursor = _comment_page_state(comment_connection)
         return comments
 
-    def _read_json(self, args: list[str], *, retries: int = 1) -> Any:
-        result = self._run_gh(args, retries=retries)
+    def _read_json(self, args: list[str], *, retries: int = READ_ATTEMPTS) -> Any:
+        attempts = max(1, retries)
+        for attempt in range(attempts):
+            try:
+                return self._read_json_once(args)
+            except GitHubError as exc:
+                if attempt >= attempts - 1 or not _is_retryable_failure(exc):
+                    raise
+                _record_retry(attempt, exc)
+                time.sleep(backoff_seconds(attempt))
+        raise AssertionError("unreachable: the final attempt returns or raises")
+
+    def _read_json_once(self, args: list[str]) -> Any:
+        result = self._run_gh(args)
         if result.returncode != 0:
             _raise_classified_error(result.stderr, result.stdout, result.returncode, _completed_command(result))
         try:
@@ -517,33 +561,33 @@ class GitHubClient:
                 )
         return payload
 
-    def _run_gh(self, args: list[str], *, retries: int) -> subprocess.CompletedProcess:
+    def _run_gh(self, args: list[str]) -> subprocess.CompletedProcess:
         cmd = ["gh", *args]
-        attempts = max(1, retries)
-        for attempt in range(attempts):
-            try:
-                result = self._runner(cmd)
-            except FileNotFoundError as exc:
-                raise GitHubEnvironmentError(
+        try:
+            return self._runner(cmd)
+        except FileNotFoundError as exc:
+            raise GitHubEnvironmentError(
+                "Missing GitHub CLI `gh` on PATH.",
+                diagnostics=classify_github_failure(
                     "Missing GitHub CLI `gh` on PATH.",
-                    diagnostics=classify_github_failure(
-                        "Missing GitHub CLI `gh` on PATH.",
-                        "",
-                        None,
-                        cmd,
-                    ),
-                ) from exc
-            if result.returncode == 0 or not _is_transient(result.stderr, result.stdout):
-                return result
-            if attempt < attempts - 1:
-                time.sleep(2**attempt)
-        return result
+                    "",
+                    None,
+                    cmd,
+                ),
+            ) from exc
 
     @staticmethod
     def _default_runner(cmd: list[str]) -> subprocess.CompletedProcess:
         from gh_address_cr.core.command_runner import run_cmd
 
-        return run_cmd(cmd, retries=1)
+        with gh_call_gate(cmd):
+            result = run_cmd(cmd, retries=1, timeout=GH_COMMAND_TIMEOUT_SECONDS)
+        category = None
+        if result.returncode != 0:
+            category = classify_github_failure(result.stderr, result.stdout, result.returncode, cmd)["stderr_category"]
+        if is_rate_limit_result(category, result.returncode, result.stdout):
+            record_rate_limit()
+        return result
 
 
 def _split_repo(repo: str) -> tuple[str, str]:
@@ -804,3 +848,24 @@ def _completed_command(result: subprocess.CompletedProcess) -> list[str]:
 
 def _is_transient(stderr: str | None, stdout: str | None) -> bool:
     return is_transient_github_failure_text(stderr, stdout)
+
+
+def _is_retryable_failure(error: GitHubError) -> bool:
+    """Only transient transport/server failures are worth another read attempt."""
+    if error.reason_code not in {"GITHUB_TRANSIENT_ERROR", "GITHUB_NETWORK_FAILED"}:
+        return False
+    if _is_stack_capability_error(str(error)):
+        return False
+    return error.diagnostics.get("stderr_category") not in _NON_RETRYABLE_CATEGORIES
+
+
+def _record_retry(attempt: int, error: GitHubError) -> None:
+    from gh_address_cr.otel_tracing import add_current_span_event
+
+    add_current_span_event(
+        "gh_address_cr.github.retry",
+        {
+            "gh_address_cr.github.retry.attempt": attempt + 1,
+            "gh_address_cr.github.retry.reason_code": error.reason_code,
+        },
+    )

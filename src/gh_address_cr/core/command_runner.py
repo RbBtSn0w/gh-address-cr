@@ -21,6 +21,7 @@ from gh_address_cr.core.telemetry_safety import (
     subprocess_operation,
     workflow_step_span_attributes,
 )
+from gh_address_cr.github.throttle import is_mutation_command
 from gh_address_cr.github.transient_failures import is_transient_github_failure_text
 
 # Bounded reap after killing a timed-out subprocess so the cleanup path can
@@ -165,6 +166,8 @@ def run_cmd(
             "gh_address_cr.command.name": operation,
             "gh_address_cr.subprocess.operation": operation,
             "gh_address_cr.subprocess.attempts_configured": attempts,
+            # Lets a trace split a session's gh calls into reads and writes without recording argv.
+            "gh_address_cr.subprocess.mutation": is_mutation_command(cmd),
             PROCESS_EXECUTABLE_NAME: os.path.basename(cmd[0]) if cmd else "subprocess",
         },
     ) as span:
