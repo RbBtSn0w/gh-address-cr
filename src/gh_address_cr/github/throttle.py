@@ -29,6 +29,7 @@ READ_SLOTS = 8
 SLOT_WAIT_SECONDS = 10.0
 MUTATION_WAIT_SECONDS = 30.0
 MUTATION_SPACING_SECONDS = 1.0
+BACKOFF_LOCK_WAIT_SECONDS = 1.0
 # GitHub's documented minimum wait when a rate-limit response carries no reset time.
 BACKOFF_SECONDS = 60.0
 _POLL_SECONDS = 0.1
@@ -38,6 +39,7 @@ _GRAPHQL_RATE_LIMITED_RE = re.compile(r'"type"\s*:\s*"RATE_LIMITED"')
 _BACKOFF_FILE = "backoff-until.json"
 _LAST_MUTATION_FILE = "last-mutation.json"
 _MUTATION_LOCK = "mutation"
+_BACKOFF_LOCK = "backoff"
 
 
 def is_mutation_command(cmd: Sequence[str]) -> bool:
@@ -52,15 +54,24 @@ def is_rate_limit_result(category: str | None, returncode: int, stdout: str | No
 
 
 def record_rate_limit() -> None:
-    """Open (or extend) the shared backoff window after observing a rate-limit signal."""
+    """Open (or extend) the shared backoff window after observing a rate-limit signal.
+
+    The read-modify-write runs under a short lock so concurrent signals cannot overwrite a
+    later expiry with an earlier one; if the lock or the file is unavailable the hint is dropped.
+    """
     root = _root()
     if root is None:
         return
-    until = time.time() + BACKOFF_SECONDS
+    lock = _acquire_named(root, _BACKOFF_LOCK, BACKOFF_LOCK_WAIT_SECONDS)
+    if lock is None:
+        return
     try:
+        until = time.time() + BACKOFF_SECONDS
         write_json_atomic(root / _BACKOFF_FILE, {"until": max(until, _read_epoch(root / _BACKOFF_FILE, "until"))})
     except OSError:
         return
+    finally:
+        lock.release()
 
 
 @contextmanager
@@ -78,6 +89,13 @@ def gh_call_gate(cmd: Sequence[str]) -> Iterator[None]:
     else:
         lock = _acquire_slot(root, SLOT_WAIT_SECONDS)
     _emit_wait("mutation" if mutation else "read", started, timed_out=lock is None)
+    try:
+        # A queued call may have waited while another session opened the backoff: check again.
+        _raise_if_backoff_open(root)
+    except GitHubRateLimitError:
+        if lock is not None:
+            lock.release()
+        raise
     try:
         if mutation:
             _space_mutation(root)

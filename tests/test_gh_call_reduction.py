@@ -141,6 +141,21 @@ class ProcessViewerLoginTests(unittest.TestCase):
         self.assertEqual((first.calls.count("user"), second.calls.count("user")), (1, 1))
 
 
+class AdapterInvalidatesLoginTests(unittest.TestCase):
+    def test_adapter_run_drops_the_cached_login_even_when_it_fails(self):
+        from gh_address_cr.commands.high_level import FindingsFormatError, HighLevelReviewRuntime
+
+        GitHubClient._process_viewer_login = "before-adapter"
+        self.addCleanup(GitHubClient.reset_process_cache)
+        parsed = SimpleNamespace(input=None, adapter_cmd=["adapter"], sync=False, source=None)
+
+        with patch("gh_address_cr.commands.high_level._run_adapter_command", return_value=(None, "adapter failed")):
+            with self.assertRaises(FindingsFormatError):
+                HighLevelReviewRuntime()._ingest_and_load_threads("adapter", parsed, {}, None, "o/r", "1")
+
+        self.assertIsNone(GitHubClient._process_viewer_login)
+
+
 class FinalGateCallTests(unittest.TestCase):
     def run_gate(self, gh, **kwargs):
         from gh_address_cr.core.gate import Gatekeeper

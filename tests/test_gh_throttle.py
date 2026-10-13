@@ -79,6 +79,43 @@ class BackoffTests(ThrottleTestCase):
         self.assertEqual(json.loads((self.root / "backoff-until.json").read_text())["until"], far)
 
 
+class RecheckAfterWaitTests(ThrottleTestCase):
+    def test_backoff_opened_while_queued_stops_the_call_and_frees_the_lane(self) -> None:
+        self.root.mkdir(parents=True)
+        lane = try_acquire_execution_lock(self.root, "mutation")
+
+        def release_and_open_backoff(_seconds: float) -> None:
+            lane.release()
+            throttle.record_rate_limit()
+
+        ran = []
+        with patch("gh_address_cr.github.throttle.time.sleep", side_effect=release_and_open_backoff):
+            with self.assertRaises(GitHubRateLimitError):
+                with throttle.gh_call_gate(MUTATION_CMD):
+                    ran.append(True)
+        self.assertEqual(ran, [])
+        freed = try_acquire_execution_lock(self.root, "mutation")
+        self.assertIsNotNone(freed)
+        freed.release()
+        self.assertFalse((self.root / "last-mutation.json").exists())
+
+
+class BackoffSerializationTests(ThrottleTestCase):
+    def test_signal_is_dropped_when_the_backoff_lock_is_held(self) -> None:
+        self.root.mkdir(parents=True)
+        held = try_acquire_execution_lock(self.root, "backoff")
+        self.addCleanup(held.release)
+        with patch.object(throttle, "BACKOFF_LOCK_WAIT_SECONDS", 0.1):
+            throttle.record_rate_limit()
+        self.assertFalse((self.root / "backoff-until.json").exists())
+
+    def test_lock_is_released_after_recording(self) -> None:
+        throttle.record_rate_limit()
+        lock = try_acquire_execution_lock(self.root, "backoff")
+        self.assertIsNotNone(lock)
+        lock.release()
+
+
 class FailOpenTests(unittest.TestCase):
     def test_unwritable_state_dir_does_not_block_the_call(self) -> None:
         with tempfile.NamedTemporaryFile() as blocker, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": blocker.name}):
