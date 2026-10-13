@@ -158,6 +158,9 @@ If `reason_code` is `GH_AUTH_FAILED` or `GITHUB_AUTH_FAILED`:
 If `reason_code` is `GH_NETWORK_FAILED`, `GITHUB_NETWORK_FAILED`, `GH_ENVIRONMENT_FAILED`, or `GITHUB_ENVIRONMENT_FAILED`:
 - **Action**: Inspect `diagnostics.command`, `diagnostics.stderr_category`, and `diagnostics.stderr_excerpt`. Fix network, sandbox, PATH, or local permission issues before retrying; do not treat these as code-review findings.
 
+If `reason_code` is `GH_RATE_LIMITED` or `GITHUB_RATE_LIMITED`:
+- **Action**: GitHub rate limiting was observed, by this session or by another session sharing the same token and state directory. The runtime then refuses to contact GitHub for about 60 seconds (the message says how long). Wait that long, then rerun the same command; do not loop on it, and do not switch to raw `gh` calls to get around it. Concurrent sessions should keep the default shared state directory so they share this backoff.
+
 If `reason_code` is `GH_PERMISSION_MISMATCH`:
 - **Action**: Treat this as a wrapper/runtime permission-sync problem, not a generic auth or sandbox failure. Inspect `diagnostics.source_scope`, `diagnostics.stderr_excerpt`, and the active runner grants, sync the wrapper/runtime permission view, then rerun the blocked command. The stable `waiting_on` category is `github_permission`.
 

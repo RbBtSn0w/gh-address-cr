@@ -911,7 +911,11 @@ class HighLevelReviewRuntime:
                 handoff_sha256=parsed.handoff_sha256,
             )
         elif command == "adapter":
-            raw, error = _run_adapter_command(parsed.adapter_cmd)
+            try:
+                raw, error = _run_adapter_command(parsed.adapter_cmd)
+            finally:
+                # A caller-supplied adapter may switch the active gh account; never reuse a login read before it ran.
+                GitHubClient.reset_process_cache()
             if error:
                 raise FindingsFormatError(error)
             _ingest_native_findings(

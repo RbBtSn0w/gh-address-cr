@@ -111,6 +111,51 @@ class ViewerLoginMemoTests(unittest.TestCase):
         self.assertEqual(gh.calls.count("user"), 2)
 
 
+class ProcessViewerLoginTests(unittest.TestCase):
+    def setUp(self):
+        GitHubClient.reset_process_cache()
+        self.addCleanup(GitHubClient.reset_process_cache)
+
+    def test_default_runner_clients_share_one_login_read(self):
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"login": "me"}), stderr="")
+
+        with (
+            tempfile.TemporaryDirectory() as state,
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state}),
+            patch("gh_address_cr.core.command_runner.run_cmd", side_effect=fake_run_cmd),
+        ):
+            self.assertEqual(GitHubClient().viewer_login(), "me")
+            self.assertEqual(GitHubClient().viewer_login(), "me")
+
+        self.assertEqual(len(calls), 1)
+
+    def test_injected_runner_clients_never_share_the_process_cache(self):
+        first, second = FakeGh(), FakeGh()
+        GitHubClient(runner=first).viewer_login()
+        GitHubClient(runner=second).viewer_login()
+
+        self.assertEqual((first.calls.count("user"), second.calls.count("user")), (1, 1))
+
+
+class AdapterInvalidatesLoginTests(unittest.TestCase):
+    def test_adapter_run_drops_the_cached_login_even_when_it_fails(self):
+        from gh_address_cr.commands.high_level import FindingsFormatError, HighLevelReviewRuntime
+
+        GitHubClient._process_viewer_login = "before-adapter"
+        self.addCleanup(GitHubClient.reset_process_cache)
+        parsed = SimpleNamespace(input=None, adapter_cmd=["adapter"], sync=False, source=None)
+
+        with patch("gh_address_cr.commands.high_level._run_adapter_command", return_value=(None, "adapter failed")):
+            with self.assertRaises(FindingsFormatError):
+                HighLevelReviewRuntime()._ingest_and_load_threads("adapter", parsed, {}, None, "o/r", "1")
+
+        self.assertIsNone(GitHubClient._process_viewer_login)
+
+
 class FinalGateCallTests(unittest.TestCase):
     def run_gate(self, gh, **kwargs):
         from gh_address_cr.core.gate import Gatekeeper
@@ -180,6 +225,93 @@ class AddressCallTests(unittest.TestCase):
 
         # Same 5 calls as before #347, but issued together instead of five serial round trips.
         self.assertEqual(sorted(gh.calls), ["checks", "files", "stack", "threads", "user"])
+
+
+class PendingReviewPaginationTests(unittest.TestCase):
+    def test_short_page_stops_without_an_extra_empty_page_call(self):
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            rows = [{"state": "PENDING", "user": {"login": "me"}}, {"state": "APPROVED", "user": {"login": "x"}}]
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(rows), stderr="")
+
+        pending = GitHubClient(runner=runner).list_pending_reviews("o/r", "1", "me")
+
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(calls), 1)
+
+    def test_full_page_fetches_the_next_page(self):
+        pages = [[{"state": "COMMENTED"}] * 100, [{"state": "PENDING", "user": {"login": "me"}}]]
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(pages[len(calls) - 1]), stderr="")
+
+        pending = GitHubClient(runner=runner).list_pending_reviews("o/r", "1", "me")
+
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(calls), 2)
+
+
+class ThreadResolvedLookupTests(unittest.TestCase):
+    def test_is_thread_resolved_uses_a_single_node_query(self):
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"data": {"node": {"isResolved": True}}}), stderr=""
+            )
+
+        self.assertTrue(GitHubClient(runner=runner).is_thread_resolved("T1"))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("node(id:$threadId)", " ".join(calls[0]))
+
+    def test_unresolved_or_missing_node_is_false(self):
+        for node in ({"isResolved": False}, None, {}):
+            with self.subTest(node=node):
+
+                def gh(cmd, node=node):
+                    return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"data": {"node": node}}), stderr="")
+
+                self.assertFalse(GitHubClient(runner=gh).is_thread_resolved("T1"))
+
+
+class PublishWaitCallTests(unittest.TestCase):
+    """Per-thread gh budget of the publish settle-wait: node lookups only, never a PR-wide listing."""
+
+    def run_wait(self, resolved_on):
+        from gh_address_cr.core import publisher
+
+        class Client:
+            def __init__(self):
+                self.lookups = 0
+                self.listings = 0
+
+            def is_thread_resolved(self, thread_id):
+                self.lookups += 1
+                return self.lookups >= resolved_on
+
+            def list_threads(self, repo, pr_number):
+                self.listings += 1
+                return []
+
+        client = Client()
+        with patch("gh_address_cr.core.publisher.time.sleep"):
+            publisher._wait_for_remote_thread_resolution(client, "T1")
+        return client
+
+    def test_settled_thread_costs_one_lookup(self):
+        client = self.run_wait(resolved_on=1)
+
+        self.assertEqual((client.lookups, client.listings), (1, 0))
+
+    def test_unsettled_thread_is_bounded_at_two_lookups(self):
+        client = self.run_wait(resolved_on=99)
+
+        self.assertEqual((client.lookups, client.listings), (2, 0))
 
 
 class GatherReadsTests(unittest.TestCase):
