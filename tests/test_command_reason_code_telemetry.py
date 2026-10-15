@@ -15,6 +15,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+import gh_address_cr
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
     output_generic_agent_error,
@@ -262,10 +263,12 @@ class MachineSummaryChokePointContractTests(unittest.TestCase):
     NON_SUMMARY_WRITERS = {
         "commands/review_to_findings.py": 1,  # the normalized findings array itself
     }
-    STDOUT_JSON = re.compile(r"(?:sys\.stdout\.write|print)\(json\.dumps\(|json\.dump\([^)]*sys\.stdout")
+    # `\s*` also catches a call wrapped as `print(\n    json.dumps(...)\n)`.
+    STDOUT_JSON = re.compile(r"(?:sys\.stdout\.write|print)\(\s*json\.dumps\(|json\.dump\([^)]*sys\.stdout")
 
     def test_json_stdout_writes_only_happen_in_reason_code_aware_writers(self):
-        package = Path(__file__).resolve().parents[1] / "src" / "gh_address_cr"
+        # Scan the package the other tests here import, not a path assumed from the checkout layout.
+        package = Path(gh_address_cr.__file__).resolve().parent
         offenders = []
         for path in sorted(package.rglob("*.py")):
             relative = path.relative_to(package).as_posix()
