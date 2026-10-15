@@ -1,3 +1,20 @@
+## [3.21.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.20.1...v3.21.0) (2026-10-15)
+
+### Features
+
+* **telemetry:** add an invocation kind to the root span ([#358](https://github.com/RbBtSn0w/gh-address-cr/issues/358)) ([0324e9a](https://github.com/RbBtSn0w/gh-address-cr/commit/0324e9a611c8e0e799999f4f820c18c62e6356ce))
+* **telemetry:** split AI_AGENT into gen_ai.agent.name and version ([#361](https://github.com/RbBtSn0w/gh-address-cr/issues/361)) ([0d1cf74](https://github.com/RbBtSn0w/gh-address-cr/commit/0d1cf744f47882c152db71f47d9eba78a09d1835))
+
+### Bug Fixes
+
+* **deps:** raise the OpenTelemetry floor to 1.40 and test it in CI ([#362](https://github.com/RbBtSn0w/gh-address-cr/issues/362)) ([4e0e3da](https://github.com/RbBtSn0w/gh-address-cr/commit/4e0e3dac7f3b1bee9713e42c81ef848f303f4db3))
+* document and remediate terminal-thread reason codes ([#366](https://github.com/RbBtSn0w/gh-address-cr/issues/366)) ([#367](https://github.com/RbBtSn0w/gh-address-cr/issues/367)) ([9366330](https://github.com/RbBtSn0w/gh-address-cr/commit/9366330698764d7015c312b1867822b043095fa0))
+* **github:** retry transient gh reads and coordinate gh calls across sessions ([#363](https://github.com/RbBtSn0w/gh-address-cr/issues/363)) ([005ee0b](https://github.com/RbBtSn0w/gh-address-cr/commit/005ee0b75cb40f6eba8085671bc6929165e3bb5d))
+* **stack:** treat post-push headRef lag as transient instead of rejecting the request ([#369](https://github.com/RbBtSn0w/gh-address-cr/issues/369)) ([89b0548](https://github.com/RbBtSn0w/gh-address-cr/commit/89b05488ad8d330ee140f2e46d7bccd5f7c6e1b7)), closes [#365](https://github.com/RbBtSn0w/gh-address-cr/issues/365)
+* **telemetry:** attribute reason codes and Gemini/Codex hosts ([#368](https://github.com/RbBtSn0w/gh-address-cr/issues/368)) ([992819d](https://github.com/RbBtSn0w/gh-address-cr/commit/992819db5b58dee6aa3ac6b758a5491ab9186278)), closes [#365](https://github.com/RbBtSn0w/gh-address-cr/issues/365)
+* **telemetry:** calibrate the overhead budget and make exit-wait and reason_code observable ([#356](https://github.com/RbBtSn0w/gh-address-cr/issues/356)) ([517eed9](https://github.com/RbBtSn0w/gh-address-cr/commit/517eed92b43a3aa713c5197c2057423f3016062b))
+* **telemetry:** export only known command names ([#357](https://github.com/RbBtSn0w/gh-address-cr/issues/357)) ([2c44b3b](https://github.com/RbBtSn0w/gh-address-cr/commit/2c44b3bbe1de6ac0afeb711ea1ba8eecf8382278))
+
 ## [3.20.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.20.0...v3.20.1) (2026-10-10)
 
 ### Bug Fixes
