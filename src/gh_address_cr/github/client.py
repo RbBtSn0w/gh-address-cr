@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from gh_address_cr.core import protocol_codes
-from gh_address_cr.core.runtime_kernel.stack import StackContext, project_stack_context
+from gh_address_cr.core.runtime_kernel.stack import StackContext, project_stack_context, unavailable_stack_context
 from gh_address_cr.github.diagnostics import classify_github_failure
 from gh_address_cr.github.errors import (
     GitHubAuthError,
@@ -29,6 +29,9 @@ Runner = Callable[[list[str]], subprocess.CompletedProcess]
 # Idempotent reads are retried on transient failures; mutations never are (a reply is not idempotent).
 READ_ATTEMPTS = 3
 MUTATION_ATTEMPTS = 1
+# Right after a push GitHub briefly serves `headRef.target` from the previous commit (#365, Spec 046).
+HEAD_REF_LAG_READS = 3
+HEAD_REF_OID_LAG = "head_ref_oid_lag"
 # A hung `gh` must not block the pipeline forever; GitHub itself cuts GraphQL requests off at 10s.
 GH_COMMAND_TIMEOUT_SECONDS = 60.0
 # Categories that are deterministic: retrying cannot change the outcome.
@@ -52,7 +55,30 @@ class GitHubClient:
         host without stacked PRs (for example an older GitHub Enterprise Server)
         can report stack context as unavailable without disabling the
         established PR-scoped resolution flow.
+
+        A read whose only defect is a post-push ``headRef`` lag is repeated a
+        bounded number of times (Spec 046). A lag that never converges is
+        ``unavailable`` for an unstacked PR, whose head tree gates nothing, and
+        stays ``invalid`` for a stacked read, whose evidence binds to the head
+        tree. Every other invariant failure is returned after one read.
         """
+        for attempt in range(HEAD_REF_LAG_READS):
+            pull_requests: list[dict[str, Any]] = []
+            context = self._read_stack_context(repo, pr_number, pull_requests)
+            if not _is_head_ref_lag(context, pull_requests):
+                if attempt:
+                    _record_head_ref_lag(attempt + 1, "invalid" if context.availability == "invalid" else "converged")
+                return context
+            if attempt < HEAD_REF_LAG_READS - 1:
+                time.sleep(backoff_seconds(attempt))
+        _record_head_ref_lag(HEAD_REF_LAG_READS, "exhausted")
+        if pull_requests[0].get("stack") is not None:
+            # Fail closed: a stacked request issued without a head tree would carry no revision binding.
+            return _invalid_stack_context(repo, pr_number, context.observed_at, HEAD_REF_OID_LAG)
+        return unavailable_stack_context(repo, str(pr_number), observed_at=context.observed_at, cause=HEAD_REF_OID_LAG)
+
+    def _read_stack_context(self, repo: str, pr_number: str, pull_requests: list[dict[str, Any]]) -> StackContext:
+        """Read one stack observation, collecting every pull request payload it saw into ``pull_requests``."""
         owner, name = _split_repo(repo)
         query = """query($owner:String!,$name:String!,$number:Int!,$after:String){
   repository(owner:$owner,name:$name){
@@ -121,6 +147,7 @@ class GitHubClient:
                     protocol_codes.GITHUB_INCOMPLETE_RESPONSE,
                     "GitHub stack response did not include pullRequest.",
                 )
+            pull_requests.append(pr_payload)
             if selected_pr is None:
                 selected_pr = pr_payload
                 raw_stack = pr_payload.get("stack")
@@ -158,6 +185,7 @@ class GitHubClient:
                 member_pr = node.get("pullRequest")
                 if not isinstance(member_pr, dict):
                     return _invalid_stack_context(repo, pr_number, observed_at, "member_pull_request_missing")
+                pull_requests.append(member_pr)
                 member_rows.append(_stack_member_from_pull_request(member_pr, position=node.get("position")))
             has_next_page, next_cursor = _comment_page_state(entries)
             if not has_next_page:
@@ -624,6 +652,46 @@ def _head_tree_oid(payload: dict[str, Any]) -> str | None:
     tree = target.get("tree")
     tree_oid = tree.get("oid") if isinstance(tree, dict) else None
     return str(tree_oid) if tree_oid else None
+
+
+def _is_head_ref_lag(context: StackContext, pull_requests: list[dict[str, Any]]) -> bool:
+    """Return whether every missing head tree in this read is explained by a post-push ``headRef`` lag.
+
+    One lagging PR must not relabel a genuinely missing tree on another member as lag.
+    """
+    if context.invalid_invariant != "missing_head_tree_oid":
+        return False
+    missing = [
+        payload
+        for payload in pull_requests
+        if str(payload.get("state") or "").upper() != "MERGED" and _head_tree_oid(payload) is None
+    ]
+    return bool(missing) and all(_head_ref_lagging(payload) for payload in missing)
+
+
+def _head_ref_lagging(payload: dict[str, Any]) -> bool:
+    """Return whether ``headRef`` still points at another commit than ``headRefOid`` on an open PR.
+
+    A merged or closed PR's head branch may legitimately move afterwards, so a mismatch there is permanent.
+    """
+    if str(payload.get("state") or "").upper() != "OPEN":
+        return False
+    head_ref = payload.get("headRef")
+    target = head_ref.get("target") if isinstance(head_ref, dict) else None
+    target_oid = target.get("oid") if isinstance(target, dict) else None
+    return bool(target_oid) and target_oid != payload.get("headRefOid")
+
+
+def _record_head_ref_lag(reads: int, outcome: str) -> None:
+    from gh_address_cr.otel_tracing import add_current_span_event
+
+    add_current_span_event(
+        "gh_address_cr.github.stack.head_ref_lag",
+        {
+            "gh_address_cr.github.stack.head_ref_lag.reads": reads,
+            "gh_address_cr.github.stack.head_ref_lag.outcome": outcome,
+        },
+    )
 
 
 def _stack_page_identity(payload: dict[str, Any]) -> tuple[Any, ...]:
