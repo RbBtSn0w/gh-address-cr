@@ -5,7 +5,7 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
 )
-from gh_address_cr.core.telemetry_safety import detect_agent_session
+from gh_address_cr.core.telemetry_safety import GEN_AI_AGENT_NAME_SOURCE, detect_agent_session
 
 _IDENTITY_KEYS = (GEN_AI_AGENT_NAME, GEN_AI_AGENT_VERSION)
 
@@ -37,6 +37,9 @@ class AgentIdentityParsingTestCase(unittest.TestCase):
             _identity("claude-code_2-1-293-beta_agent"),
             {GEN_AI_AGENT_NAME: "claude-code", GEN_AI_AGENT_VERSION: "2.1.293-beta"},
         )
+
+    def test_declared_identity_names_ai_agent_as_its_source(self) -> None:
+        self.assertEqual(_detect("codex@0.5.1")[GEN_AI_AGENT_NAME_SOURCE], "AI_AGENT")
 
     def test_bare_name_has_no_version(self) -> None:
         self.assertEqual(_identity("claude-cli"), {GEN_AI_AGENT_NAME: "claude-cli"})
@@ -130,6 +133,49 @@ class AgentIdentityDoesNotDisturbSessionCorrelationTestCase(unittest.TestCase):
         self.assertEqual(result[GEN_AI_CONVERSATION_ID], "session-2")
         self.assertEqual(result[GEN_AI_AGENT_NAME], "claude-code")
         self.assertEqual(result[GEN_AI_AGENT_VERSION], "2.1.293")
+
+
+class PassiveAgentHostTestCase(unittest.TestCase):
+    """Hosts that never export AI_AGENT are identified by presence of a variable they set."""
+
+    def test_gemini_cli_is_detected_from_its_shell_marker(self) -> None:
+        result = detect_agent_session({"GEMINI_CLI": "1"})
+        self.assertEqual(result[GEN_AI_AGENT_NAME], "gemini-cli")
+        self.assertEqual(result[GEN_AI_AGENT_NAME_SOURCE], "GEMINI_CLI")
+        self.assertNotIn(GEN_AI_AGENT_VERSION, result)
+
+    def test_codex_is_detected_without_recording_the_thread_id(self) -> None:
+        thread_id = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        result = detect_agent_session({"CODEX_THREAD_ID": thread_id})
+        self.assertEqual(result, {GEN_AI_AGENT_NAME: "codex", GEN_AI_AGENT_NAME_SOURCE: "CODEX_THREAD_ID"})
+        self.assertNotIn(thread_id, result.values())
+
+    def test_codex_sandbox_marker_alone_identifies_codex(self) -> None:
+        result = detect_agent_session({"CODEX_SANDBOX": "seatbelt"})
+        self.assertEqual(result, {GEN_AI_AGENT_NAME: "codex", GEN_AI_AGENT_NAME_SOURCE: "CODEX_SANDBOX"})
+
+    def test_blank_marker_counts_as_absent(self) -> None:
+        for variable in ("GEMINI_CLI", "CODEX_THREAD_ID", "CODEX_SANDBOX"):
+            with self.subTest(variable=variable):
+                self.assertEqual(detect_agent_session({variable: "  "}), {})
+
+    def test_ai_agent_wins_over_a_passive_marker(self) -> None:
+        result = detect_agent_session({"AI_AGENT": "claude-code_2-1-293_agent", "GEMINI_CLI": "1"})
+        self.assertEqual(result[GEN_AI_AGENT_NAME], "claude-code")
+        self.assertEqual(result[GEN_AI_AGENT_NAME_SOURCE], "AI_AGENT")
+
+    def test_unusable_ai_agent_does_not_fall_back_to_a_marker(self) -> None:
+        # A host that declared itself is never relabelled from a marker it may have inherited.
+        self.assertEqual(detect_agent_session({"AI_AGENT": "Kimi K2@1.0", "CODEX_THREAD_ID": "t"}), {})
+
+    def test_gemini_precedes_codex_like_the_reference_convention(self) -> None:
+        result = detect_agent_session({"CODEX_THREAD_ID": "t", "GEMINI_CLI": "1"})
+        self.assertEqual(result[GEN_AI_AGENT_NAME], "gemini-cli")
+
+    def test_unrelated_vendor_variables_are_not_a_registry(self) -> None:
+        for variable in ("CLAUDECODE", "CURSOR_TRACE_ID", "CODEX_CI", "REPL_ID"):
+            with self.subTest(variable=variable):
+                self.assertEqual(detect_agent_session({variable: "1"}), {})
 
 
 if __name__ == "__main__":

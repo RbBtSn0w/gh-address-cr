@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 
+from gh_address_cr.commands.common import write_json_summary
 from gh_address_cr.core import protocol_codes
 from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.github.diagnostics import classify_github_failure, github_waiting_on
@@ -22,7 +23,7 @@ class DetachedHeadError(RuntimeError):
 
 
 def _emit_active_pr_payload(payload: dict, *, stderr: str | None = None) -> int:
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     if stderr:
         print(stderr, file=sys.stderr)
     return int(payload["exit_code"])

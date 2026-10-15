@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
+from gh_address_cr.commands.common import note_summary_reason_code
 from gh_address_cr.core import audit_log as core_audit_log
 from gh_address_cr.core import io as core_io
 from gh_address_cr.core import paths as core_paths
@@ -603,6 +604,7 @@ def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) 
 
 
 def emit_result(payload: dict, exit_code: int, *, error_message: str | None = None) -> int:
+    note_summary_reason_code(payload)
     sys.stdout.write(json.dumps(payload))
     if error_message:
         print(error_message, file=sys.stderr)
