@@ -627,6 +627,7 @@ def _require_fallback_commit_in_pr(
         return
     head_ref = project_context_summary(session, selected_item_id=None)["pull_request"]["head_ref"]
     branch = f"`{head_ref}`" if head_ref else "the pull request's head branch"
+    recovery = f"Push the fix, check out {branch} at the pushed commit, then rerun publish."
     _record_publish_blocked(session, ledger, item_id, agent_id, protocol_codes.COMMIT_NOT_IN_PR)
     session_store.save_session(repo, pr_number, session)
     raise WorkflowError(
@@ -639,7 +640,15 @@ def _require_fallback_commit_in_pr(
             f"Push the fix, check out {branch} at the pushed commit, then rerun "
             f"`gh-address-cr agent publish {repo} {pr_number}`."
         ),
-        payload={"item_id": item_id},
+        # The accepted fix cited no commit, so the generic "resubmit with the pushed commit"
+        # remediation would send the agent to the wrong command.
+        payload={
+            "item_id": item_id,
+            "remediation": {
+                "summary": f"The local HEAD fallback is not a commit of this pull request. {recovery}",
+                "command": command_templates.publish(repo, pr_number),
+            },
+        },
     )
 
 
