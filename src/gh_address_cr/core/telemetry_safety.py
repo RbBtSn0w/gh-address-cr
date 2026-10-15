@@ -470,7 +470,8 @@ def sanitize_cli_argv(
 
 
 # AI_AGENT is self-declared, so it is parsed by shape, never by vendor name: there is no
-# vendor table here and none should be added. A new shape needs evidence from observed
+# vendor table in the parser and none should be added. (Hosts that never set AI_AGENT are
+# covered by _PASSIVE_AGENT_HOSTS below, which reads presence only.) A new shape needs evidence from observed
 # production values and a pinned case in tests/core/test_agent_identity.py. Grouping or
 # renaming products belongs at query time (Honeycomb calculated fields) or in the gateway.
 #
@@ -508,22 +509,51 @@ def _safe_agent_label(value: str, *, pattern: re.Pattern[str], field: str) -> st
     return _safe_identity_label(value, field=field)
 
 
+GEN_AI_AGENT_NAME_SOURCE = "gen_ai.agent.name.source"
+
+# Hosts that do not export AI_AGENT, identified by an environment variable the host itself
+# sets on the shell commands it runs. This follows the fallback order of Vercel's
+# @vercel/detect-agent (the AI_AGENT convention's reference implementation) and is bounded
+# to hosts with source evidence; Principle X rules out growing it into a vendor registry.
+# - GEMINI_CLI: Gemini CLI sets GEMINI_CLI=1 for run_shell_command subprocesses
+#   (gemini-cli docs/tools/shell.md). The name is the one Gemini CLI's own telemetry uses.
+# - CODEX_THREAD_ID / CODEX_SANDBOX: Codex injects the thread id into every shell tool
+#   environment and sets CODEX_SANDBOX when the command runs sandboxed
+#   (openai/codex codex-rs/core/src/exec_env.rs and spawn.rs).
+# Only presence is read: values (CODEX_THREAD_ID is an id) are never recorded. The
+# variable name becomes gen_ai.agent.name.source, so inferred hosts stay distinguishable
+# from self-declared AI_AGENT values.
+_PASSIVE_AGENT_HOSTS: tuple[tuple[str, str], ...] = (
+    ("GEMINI_CLI", "gemini-cli"),
+    ("CODEX_THREAD_ID", "codex"),
+    ("CODEX_SANDBOX", "codex"),
+)
+
+
+def _detect_passive_agent_host(environ: Mapping[str, str]) -> dict[str, str]:
+    for variable, name in _PASSIVE_AGENT_HOSTS:
+        if environ.get(variable, "").strip():
+            return {GEN_AI_AGENT_NAME: name, GEN_AI_AGENT_NAME_SOURCE: variable}
+    return {}
+
+
 def _detect_agent_identity(environ: Mapping[str, str]) -> dict[str, str]:
-    """Return gen_ai.agent.name/version parsed from ``AI_AGENT``.
+    """Return gen_ai.agent.name/version parsed from ``AI_AGENT``, else a passive host match.
 
     Fail-open: an unusable name drops the whole identity and an unusable version
     drops only the version; nothing raises and the rejected value is never
-    recorded. A blank value counts as unset.
+    recorded. A blank value counts as unset. A set ``AI_AGENT`` always wins, even
+    when unusable: the passive fallback only covers hosts that declare nothing.
     """
     raw = environ.get("AI_AGENT", "")
     if not raw.strip():
-        return {}
+        return _detect_passive_agent_host(environ)
     raw_name, raw_version = _split_agent_identity(raw)
     try:
         name = _safe_agent_label(raw_name.lower(), pattern=_AGENT_NAME_PATTERN, field="AI_AGENT")
     except ValueError:
         return {}
-    identity = {GEN_AI_AGENT_NAME: name}
+    identity = {GEN_AI_AGENT_NAME: name, GEN_AI_AGENT_NAME_SOURCE: "AI_AGENT"}
     if raw_version is not None:
         try:
             identity[GEN_AI_AGENT_VERSION] = _safe_agent_label(
@@ -551,7 +581,9 @@ def detect_agent_session(environ: Mapping[str, str]) -> dict[str, str]:
     ``AI_AGENT`` convention (Vercel ``name@version``; Claude Code's
     ``name_<ver>_agent`` is also parsed) and is emitted as the standard
     ``gen_ai.agent.name`` / ``gen_ai.agent.version`` pair so a product is one
-    low-cardinality name regardless of release.
+    low-cardinality name regardless of release. Hosts that do not set
+    ``AI_AGENT`` fall back to the bounded ``_PASSIVE_AGENT_HOSTS`` presence
+    table; ``gen_ai.agent.name.source`` names the variable that decided.
     """
     res: dict[str, str] = {}
 

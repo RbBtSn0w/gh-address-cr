@@ -308,6 +308,13 @@ tool calls without extra instrumentation:
   `-` (<= 64 chars). The value is self-reported by the host, not verified. A
   value in the wrong format or that looks unsafe is dropped without being
   recorded: a bad name drops the whole identity, a bad version only the version.
+  Hosts that never set `AI_AGENT` are identified by a marker variable the host
+  sets on the shell commands it runs: `GEMINI_CLI` gives `gemini-cli`, and
+  `CODEX_THREAD_ID` or `CODEX_SANDBOX` gives `codex` (no version). Only the
+  marker's presence is read, never its value, and a set `AI_AGENT` always wins,
+  even when it is unusable. `gen_ai.agent.name.source` names the variable that
+  decided (`AI_AGENT`, `GEMINI_CLI`, `CODEX_THREAD_ID` or `CODEX_SANDBOX`), so a
+  declared identity stays distinguishable from an inferred one.
   All of these are absent when no env is set.
 - `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
   PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is

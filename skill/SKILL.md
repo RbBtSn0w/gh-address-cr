@@ -176,7 +176,8 @@ export GH_ADDRESS_CR_CONVERSATION_ID="<stable-session-id>"
 If your host does not already export `AI_AGENT`, you may declare the calling
 agent once per session so telemetry can attribute runs to it. Claude Code already
 sets it, in its own `claude-code_<version>_agent` form, which the runtime also
-understands. Use the `name@version` convention with the host's real name and
+understands. Gemini CLI and Codex are recognised without it from the variables
+they set on shell commands, but only by name; set `AI_AGENT` to record a version. Use the `name@version` convention with the host's real name and
 version; the name must be lowercase letters, digits and hyphens (for example
 `codex`, not `Codex CLI`). Skip it if you do not know the host version. An
 unusable name drops the whole identity and an unusable version drops only the
