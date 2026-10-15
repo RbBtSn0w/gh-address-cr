@@ -806,7 +806,11 @@ def _current_stacked_revision_binding(
         from gh_address_cr.github.client import GitHubClient
 
         github_client = GitHubClient()
-    from gh_address_cr.core.runtime_kernel.stack import StackContext, revision_binding_for_context
+    from gh_address_cr.core.runtime_kernel.stack import (
+        StackContext,
+        revision_binding_for_context,
+        stack_diagnostic_payload,
+    )
 
     try:
         current = github_client.get_stack_context(repo, str(pr_number))
@@ -838,6 +842,7 @@ def _current_stacked_revision_binding(
             waiting_on="stack_refresh",
             exit_code=5,
             message="Validation evidence was not recorded because current stack context is invalid.",
+            payload=stack_diagnostic_payload(current),
         )
     if current.availability == "unavailable" and was_known_stacked:
         raise WorkflowError(
@@ -846,6 +851,7 @@ def _current_stacked_revision_binding(
             waiting_on="stack_refresh",
             exit_code=5,
             message="Validation evidence was not recorded because current stack context is unavailable.",
+            payload=stack_diagnostic_payload(current),
         )
     if current.availability != "present":
         return None

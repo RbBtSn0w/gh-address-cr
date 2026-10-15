@@ -21,6 +21,12 @@ authority, or `final-gate` semantics.
 
 - `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub stacked-PR
   capability (older GitHub Enterprise Server hosts do not have it) or inspect the bounded diagnostic, then refresh the selected PR.
+  Right after a `git push`, GitHub briefly reports the new head commit before
+  the head branch catches up. The runtime already re-reads that window before
+  answering; if a command is still rejected with
+  `stack_diagnostic.invariant = head_ref_oid_lag` (under either code), wait a
+  few seconds and rerun the same command. Do not re-push or change evidence for
+  it. Any other `stack_diagnostic.invariant` names a real stack defect to inspect.
 - `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
   refresh the affected layer, and rerun validation; never publish old evidence.
   Runtime-rejected stale or cross-layer requests release their unusable lease,

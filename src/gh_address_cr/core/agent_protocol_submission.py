@@ -37,7 +37,12 @@ from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.github_thread_state import is_claimable_github_thread, is_stale_github_thread_item
 from gh_address_cr.core.leases import LeaseSubmissionError, accept_lease, submit_lease
 from gh_address_cr.core.models import ActionRequest, UnsupportedProtocolVersionError
-from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding, unavailable_stack_context
+from gh_address_cr.core.runtime_kernel.stack import (
+    StackContext,
+    compare_revision_binding,
+    stack_diagnostic_payload,
+    unavailable_stack_context,
+)
 from gh_address_cr.core.utils import (
     fix_reply_severity_rejection_reason as _fix_reply_severity_rejection_reason,
 )
@@ -70,6 +75,8 @@ def refresh_stack_context_for_request(
     except Exception:
         stack_context = unavailable_stack_context(repo, str(pr_number))
     session_store.cache_pull_request_context(session, stack_context.to_dict())
+    # Lets a rejected agent tell a post-push lag (`head_ref_oid_lag`) from a broken stack.
+    diagnostic_payload = stack_diagnostic_payload(stack_context)
     if stack_context.availability == "invalid":
         raise WorkflowError(
             status="REQUEST_REJECTED",
@@ -77,6 +84,7 @@ def refresh_stack_context_for_request(
             waiting_on="stack_refresh",
             exit_code=5,
             message="ActionRequest was not issued because current stack context is invalid.",
+            payload=diagnostic_payload,
         )
     if stack_context.availability == "unavailable" and was_known_stacked:
         raise WorkflowError(
@@ -85,6 +93,7 @@ def refresh_stack_context_for_request(
             waiting_on="stack_refresh",
             exit_code=5,
             message="ActionRequest was not issued because known stacked-PR context could not be refreshed.",
+            payload=diagnostic_payload,
         )
     return stack_context
 
@@ -136,6 +145,7 @@ def verify_request_revision_binding(
     )
     was_known_stacked = session_store.has_observed_stack_membership(session)
     reason: str | None
+    current: StackContext | None = None
     if binding is not None and str(binding.get("pr_number") or "") != str(pr_number):
         reason = protocol_codes.STACK_ACTION_CONTEXT_MISMATCH
     elif binding is None and request_stack_availability == "invalid":
@@ -150,10 +160,11 @@ def verify_request_revision_binding(
 
             github_client = GitHubClient()
         try:
-            current = github_client.get_stack_context(repo, str(pr_number))
+            observed = github_client.get_stack_context(repo, str(pr_number))
         except Exception:
-            current = None
-        if not isinstance(current, StackContext):
+            observed = None
+        current = observed if isinstance(observed, StackContext) else None
+        if current is None:
             reason = protocol_codes.STACK_CONTEXT_UNAVAILABLE if binding is not None or was_known_stacked else None
         else:
             session_store.cache_pull_request_context(session, current.to_dict())
@@ -180,8 +191,15 @@ def verify_request_revision_binding(
         waiting_on="stack_refresh",
         exit_code=5,
         message=f"ActionResponse rejected: {reason}",
-        payload={"item_id": prepared["item_id"], "lease_id": prepared["lease_id"]},
+        payload={
+            "item_id": prepared["item_id"],
+            "lease_id": prepared["lease_id"],
+            **(stack_diagnostic_payload(current) if reason in _STACK_CONTEXT_REASONS else {}),
+        },
     )
+
+
+_STACK_CONTEXT_REASONS = frozenset({protocol_codes.STACK_CONTEXT_INVALID, protocol_codes.STACK_CONTEXT_UNAVAILABLE})
 
 
 def load_response_json_object(

@@ -50,6 +50,7 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `exit_code`
 - `diagnostics`
 - `handling_boundary`
+- `stack_diagnostic` (on `STACK_CONTEXT_INVALID` / `STACK_CONTEXT_UNAVAILABLE` rejections from request issue, response submit, publish, and validation evidence: `{reason_code, invariant?}`; `invariant` is omitted when no bounded cause is known; no revision ids)
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category. `commands` contains executable command templates for the current PR; prefer those over reconstructing commands manually. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 

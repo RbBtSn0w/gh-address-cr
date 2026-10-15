@@ -26,7 +26,7 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.reply_templates import (
     reject_reply as render_reject_reply,
 )
-from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
+from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding, stack_diagnostic_payload
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
@@ -526,6 +526,12 @@ def _verify_publish_revision_bindings(
             waiting_on=waiting_on,
             exit_code=5,
             message=f"Publish blocked before GitHub side effects: {reason}",
+            payload=(
+                stack_diagnostic_payload(current)
+                if isinstance(current, StackContext)
+                and reason in {protocol_codes.STACK_CONTEXT_INVALID, protocol_codes.STACK_CONTEXT_UNAVAILABLE}
+                else {}
+            ),
         )
 
 

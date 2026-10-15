@@ -157,6 +157,9 @@ Sources:
   member's tree must be read for the same commit as `headRefOid`; use
   `headRef { target { ... on Commit { oid tree { oid } } } }` in the stack query and
   reject the observation as invalid when its `oid` differs from `headRefOid`.
+  Refined for the post-push lag case by Spec 046: a lagging read is re-read a
+  bounded number of times; if the lag persists, an unstacked read projects
+  `unavailable` and a stacked read stays `invalid` with invariant `head_ref_oid_lag`.
 
 ## 7. Open decisions (maintainer)
 
