@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -332,6 +334,31 @@ class HeadRefLagRequestBindingTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.status, "REQUEST_REJECTED")
         self.assertEqual(caught.exception.reason_code, "STACK_CONTEXT_UNAVAILABLE")
+        summary = caught.exception.to_summary(repo="octo/example", pr_number="101")
+        self.assertEqual(
+            summary["stack_diagnostic"],
+            {"reason_code": "STACK_CONTEXT_UNAVAILABLE", "invariant": "head_ref_oid_lag"},
+        )
+
+    def test_real_invariant_failure_rejects_with_named_invariant(self, sleep):
+        from gh_address_cr.core.agent_protocol_submission import refresh_stack_context_for_request
+        from gh_address_cr.core.errors import WorkflowError
+
+        payload = load_stacked_pr_fixture("absent.json")
+        payload["data"]["repository"]["pullRequest"]["headRef"] = None
+
+        with self.assertRaises(WorkflowError) as caught:
+            refresh_stack_context_for_request(
+                "octo/example", "101", {"metadata": {}}, github_client=GitHubClient(runner=payload_runner(payload))
+            )
+
+        summary = caught.exception.to_summary(repo="octo/example", pr_number="101")
+        self.assertEqual(summary["reason_code"], "STACK_CONTEXT_INVALID")
+        self.assertEqual(
+            summary["stack_diagnostic"],
+            {"reason_code": "STACK_CONTEXT_INVALID", "invariant": "missing_head_tree_oid"},
+        )
+        sleep.assert_not_called()
 
     def test_persistent_lag_on_first_observed_stacked_pr_rejects_request(self, sleep):
         from gh_address_cr.core.agent_protocol_submission import refresh_stack_context_for_request
@@ -348,6 +375,9 @@ class HeadRefLagRequestBindingTests(unittest.TestCase):
 
         summary = caught.exception.to_summary(repo="octo/example", pr_number="102")
         self.assertEqual(summary["reason_code"], "STACK_CONTEXT_INVALID")
+        self.assertEqual(
+            summary["stack_diagnostic"], {"reason_code": "STACK_CONTEXT_INVALID", "invariant": "head_ref_oid_lag"}
+        )
 
     def test_unbound_response_is_rejected_when_stacked_lag_persists_at_submit(self, sleep):
         from gh_address_cr.core import agent_protocol_submission
@@ -383,6 +413,84 @@ class HeadRefLagRequestBindingTests(unittest.TestCase):
                 )
 
         self.assertEqual(caught.exception.reason_code, "STACK_CONTEXT_INVALID")
+        summary = caught.exception.to_summary(repo="octo/example", pr_number="102")
+        self.assertEqual(summary["stack_diagnostic"]["invariant"], "head_ref_oid_lag")
+
+    def test_stack_diagnostic_omits_invariant_when_there_is_no_cause(self, sleep):
+        from gh_address_cr.core.agent_protocol_submission import refresh_stack_context_for_request
+        from gh_address_cr.core.errors import WorkflowError
+
+        class FailingClient:
+            def get_stack_context(self, repo, pr_number):
+                raise RuntimeError("gh unavailable")
+
+        session = {"metadata": {"pull_request_context": {"stack_membership_observed": True}}}
+        with self.assertRaises(WorkflowError) as caught:
+            refresh_stack_context_for_request("octo/example", "101", session, github_client=FailingClient())
+
+        summary = caught.exception.to_summary(repo="octo/example", pr_number="101")
+        self.assertEqual(summary["stack_diagnostic"], {"reason_code": "STACK_CONTEXT_UNAVAILABLE"})
+
+    def test_publish_and_validation_evidence_rejections_carry_stack_diagnostic(self, sleep):
+        from gh_address_cr.core.errors import WorkflowError
+        from gh_address_cr.core.publisher import _verify_publish_revision_bindings
+        from gh_address_cr.core.workflow import _current_stacked_revision_binding
+
+        expected = {"reason_code": "STACK_CONTEXT_INVALID", "invariant": "head_ref_oid_lag"}
+        for label in ("publish", "validation_evidence"):
+            with self.subTest(label):
+                client = GitHubClient(
+                    runner=payload_runner(
+                        *(
+                            lagging_member(load_stacked_pr_fixture("three_layer.json"), 1)
+                            for _ in range(HEAD_REF_LAG_READS)
+                        )
+                    )
+                )
+                with self.assertRaises(WorkflowError) as caught:
+                    if label == "publish":
+                        item = {"accepted_response": {"validation_commands": [{"command": "unit", "result": "passed"}]}}
+                        _verify_publish_revision_bindings(
+                            "octo/example", "102", {"metadata": {}}, [("github-thread:abc", item)], client
+                        )
+                    else:
+                        _current_stacked_revision_binding("octo/example", "102", {"metadata": {}}, github_client=client)
+
+                summary = caught.exception.to_summary(repo="octo/example", pr_number="102")
+                self.assertEqual(summary["reason_code"], "STACK_CONTEXT_INVALID")
+                self.assertEqual(summary["stack_diagnostic"], expected)
+
+    def test_agent_next_rejection_json_carries_stack_diagnostic(self, sleep):
+        from gh_address_cr import cli
+        from gh_address_cr.core.session import SessionManager
+        from tests.test_control_plane_workflow import github_thread
+
+        repo, pr_number = "octo/example", "101"
+        runner = payload_runner(*(lagging(load_stacked_pr_fixture("absent.json")) for _ in range(HEAD_REF_LAG_READS)))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            manager = SessionManager(repo, pr_number)
+            session = manager.create(status="ACTIVE")
+            item = github_thread("github-thread:PRRT_lag", decision="fix")
+            session["items"] = {item["item_id"]: item}
+            session["metadata"]["pull_request_context"] = {"stack_membership_observed": True}
+            manager.save(session)
+            stdout = io.StringIO()
+            with (
+                patch(
+                    "gh_address_cr.core.agent_protocol_submission.GitHubClient",
+                    return_value=GitHubClient(runner=runner),
+                ),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                rc = cli.main(["agent", "next", repo, pr_number, "--role", "fixer", "--item-id", item["item_id"]])
+
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(rc, 5)
+        self.assertEqual(summary["status"], "REQUEST_REJECTED")
+        self.assertEqual(summary["reason_code"], "STACK_CONTEXT_UNAVAILABLE")
+        self.assertEqual(summary["stack_diagnostic"]["invariant"], "head_ref_oid_lag")
+        self.assertEqual(len(runner.calls), HEAD_REF_LAG_READS)
 
 
 if __name__ == "__main__":

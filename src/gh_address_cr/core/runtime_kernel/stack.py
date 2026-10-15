@@ -262,6 +262,14 @@ def unavailable_stack_context(
     )
 
 
+def stack_diagnostic_payload(context: StackContext | None) -> JsonDict:
+    """Return the bounded ``stack_diagnostic`` summary field (reason code, optional invariant; no revision ids)."""
+    if context is None or not context.diagnostic_code:
+        return {}
+    diagnostic = context.to_dict().get("diagnostic")
+    return {"stack_diagnostic": diagnostic} if isinstance(diagnostic, dict) else {}
+
+
 def stack_context_for_member(context: StackContext, pr_number: str) -> StackContext:
     """Select one member from an already coherent stack observation."""
     target = str(pr_number)
