@@ -26,7 +26,7 @@ from gh_address_cr.core.reply_templates import (
 from gh_address_cr.core.reply_templates import (
     reject_reply as render_reject_reply,
 )
-from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding
+from gh_address_cr.core.runtime_kernel.stack import StackContext, compare_revision_binding, stack_diagnostic_payload
 from gh_address_cr.core.severity import (
     review_priority_for_publish,
 )
@@ -275,7 +275,7 @@ def _execute_single_publish_plan(
             payload={"thread_id": thread_id, "idempotency_key": resolve_key},
             timestamp=timestamp,
         )
-        _wait_for_remote_thread_resolution(client, repo, str(pr_number), thread_id)
+        _wait_for_remote_thread_resolution(client, thread_id)
 
     item["state"] = "closed"
     item["status"] = "CLOSED"
@@ -374,29 +374,21 @@ def _publisher_never_replied(client: Any, repo: str, pr_number: str, thread_id: 
 
 def _wait_for_remote_thread_resolution(
     client: Any,
-    repo: str,
-    pr_number: str,
     thread_id: str,
     *,
     max_attempts: int = 2,
     sleep_seconds: float = 1.0,
 ) -> None:
-    list_threads = getattr(client, "list_threads", None)
-    if not callable(list_threads):
+    # One node lookup per check, not a full PR thread listing: the wait only needs this thread's state.
+    is_thread_resolved = getattr(client, "is_thread_resolved", None)
+    if not callable(is_thread_resolved):
         return
     for attempt in range(max_attempts):
         try:
-            threads = list_threads(repo, pr_number)
+            if is_thread_resolved(thread_id):
+                return
         except Exception:
             return
-        for thread in threads or []:
-            if not isinstance(thread, dict):
-                continue
-            if str(thread.get("id") or "") != thread_id:
-                continue
-            if bool(thread.get("isResolved")):
-                return
-            break
         if attempt < max_attempts - 1:
             time.sleep(sleep_seconds)
 
@@ -427,8 +419,6 @@ def _publish_once(
     agent_id: str,
     now: datetime | None,
 ) -> dict[str, Any]:
-    current_time = _coerce_now(now)
-    timestamp = _format_timestamp(current_time)
     _configure_publish_telemetry(repo, pr_number)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
@@ -454,6 +444,10 @@ def _publish_once(
 
     published: list[str] = []
     for plan in plans:
+        # Stamp at execution time, after the session was loaded: a timestamp taken before the
+        # GitHub reads can predate an acceptance that landed meanwhile, which would project as
+        # verified-before-addressed (docs/rfcs/042-telemetry-overhead-signal). An injected `now`
+        # still pins the stamp for deterministic callers.
         item_id = _execute_single_publish_plan(
             plan,
             repo,
@@ -463,7 +457,7 @@ def _publish_once(
             client,
             publisher_login,
             agent_id,
-            timestamp,
+            _format_timestamp(_coerce_now(now)),
         )
         published.append(item_id)
 
@@ -532,6 +526,12 @@ def _verify_publish_revision_bindings(
             waiting_on=waiting_on,
             exit_code=5,
             message=f"Publish blocked before GitHub side effects: {reason}",
+            payload=(
+                stack_diagnostic_payload(current)
+                if isinstance(current, StackContext)
+                and reason in {protocol_codes.STACK_CONTEXT_INVALID, protocol_codes.STACK_CONTEXT_UNAVAILABLE}
+                else {}
+            ),
         )
 
 
@@ -633,6 +633,7 @@ def _require_fallback_commit_in_pr(
         return
     head_ref = project_context_summary(session, selected_item_id=None)["pull_request"]["head_ref"]
     branch = f"`{head_ref}`" if head_ref else "the pull request's head branch"
+    recovery = f"Push the fix, check out {branch} at the pushed commit, then rerun publish."
     _record_publish_blocked(session, ledger, item_id, agent_id, protocol_codes.COMMIT_NOT_IN_PR)
     session_store.save_session(repo, pr_number, session)
     raise WorkflowError(
@@ -645,7 +646,15 @@ def _require_fallback_commit_in_pr(
             f"Push the fix, check out {branch} at the pushed commit, then rerun "
             f"`gh-address-cr agent publish {repo} {pr_number}`."
         ),
-        payload={"item_id": item_id},
+        # The accepted fix cited no commit, so the generic "resubmit with the pushed commit"
+        # remediation would send the agent to the wrong command.
+        payload={
+            "item_id": item_id,
+            "remediation": {
+                "summary": f"The local HEAD fallback is not a commit of this pull request. {recovery}",
+                "command": command_templates.publish(repo, pr_number),
+            },
+        },
     )
 
 

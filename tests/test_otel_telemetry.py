@@ -19,6 +19,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from tests.helpers import run_cli_under_memory_exporter
+
 
 class _DelayedOTLPHandler(BaseHTTPRequestHandler):
     response_completed = threading.Event()
@@ -680,6 +682,216 @@ class TracedExecutionTests(unittest.TestCase):
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].attributes["gh_address_cr.command.path"], "version")
         self.assertEqual(spans[0].attributes["gh_address_cr.command.exit_code"], 0)
+
+    def _run_version_under_memory_exporter(self, state_dir: str):
+        from gh_address_cr.__main__ import main
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_previous_shutdown_wait")
+
+        with (
+            patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": state_dir}),
+            patch("sys.argv", ["gh-address-cr", "version"]),
+            patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+            patch("gh_address_cr.__main__.shutdown_telemetry"),
+        ):
+            result = main(["version"])
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        return result, spans[0]
+
+    def test_preflight_failures_put_reason_code_on_the_root_span(self) -> None:
+        from gh_address_cr.__main__ import main
+
+        for argv, reason in (
+            (["review", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["address", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["threads", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+            (["final-gate", "octo/example", "not-a-number"], "INVALID_PR_NUMBER"),
+        ):
+            with self.subTest(argv=argv), tempfile.TemporaryDirectory() as tmp:
+                exporter = InMemorySpanExporter()
+                provider = TracerProvider()
+                provider.add_span_processor(SimpleSpanProcessor(exporter))
+                tracer = provider.get_tracer("test_reason_code_root_span")
+
+                with (
+                    patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+                    patch("sys.argv", ["gh-address-cr", *argv]),
+                    patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+                    patch("gh_address_cr.__main__.shutdown_telemetry"),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    result = main(argv)
+
+                root = next(span for span in exporter.get_finished_spans() if span.name == "gh-address-cr.cli")
+                self.assertEqual(result, 5)
+                self.assertEqual(root.attributes["process.exit.code"], 5)
+                self.assertEqual(root.attributes["gh_address_cr.command.reason_code"], reason)
+
+    def test_unsafe_reason_code_is_not_exported_on_the_root_span(self) -> None:
+        from gh_address_cr.__main__ import main
+        from gh_address_cr.core.telemetry_runtime import note_command_reason_code
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test_reason_code_unsafe")
+
+        def cli_main(_argv):
+            note_command_reason_code("/Users/secret/path token=ghp_x")
+            return 5
+
+        with (
+            patch("sys.argv", ["gh-address-cr", "version"]),
+            patch("gh_address_cr.__main__.initialize_telemetry", return_value=tracer),
+            patch("gh_address_cr.__main__.shutdown_telemetry"),
+            patch("gh_address_cr.__main__.cli_main", side_effect=cli_main),
+        ):
+            main(["version"])
+
+        root = next(span for span in exporter.get_finished_spans() if span.name == "gh-address-cr.cli")
+        self.assertNotIn("gh_address_cr.command.reason_code", root.attributes)
+
+    def test_unrecognized_command_text_is_never_exported_on_any_span(self) -> None:
+        for raw in (
+            "bogus",
+            "my-token-ghp_FAKE123456",
+            "/Users/someone/private/path",
+            "address RbBtSn0w/gh-address-cr 343 --lean",
+        ):
+            with self.subTest(raw=raw):
+                result, root, spans, _ = run_cli_under_memory_exporter([raw])
+
+                self.assertEqual(result, 2)
+                self.assertEqual(root.attributes["process.exit.code"], 2)
+                self.assertEqual(root.attributes["gh_address_cr.command.name"], "unknown")
+                self.assertEqual(root.attributes["gh_address_cr.command.path"], "unknown")
+                exported = [str(value) for span in spans for value in span.attributes.values()]
+                self.assertFalse([value for value in exported if raw in value])
+
+    def test_unrecognized_agent_subcommand_is_exported_as_agent_unknown(self) -> None:
+        raw = "secret-sub-ghp_FAKE123456"
+        _, root, spans, _ = run_cli_under_memory_exporter(["agent", raw])
+
+        self.assertEqual(root.attributes["gh_address_cr.command.name"], "agent")
+        self.assertEqual(root.attributes["gh_address_cr.command.path"], "agent.unknown")
+        exported = [str(value) for span in spans for value in span.attributes.values()]
+        self.assertFalse([value for value in exported if raw in value])
+
+    def test_recognized_commands_keep_their_names_on_the_root_span(self) -> None:
+        for argv, name, path in (
+            (["version"], "version", "version"),
+            (["agent", "manifest"], "agent", "agent.manifest"),
+            (["agent"], "agent", "agent"),
+            (["agent", "--help"], "agent", "agent"),
+        ):
+            with self.subTest(argv=argv):
+                result, root, _, _ = run_cli_under_memory_exporter(argv)
+
+                self.assertEqual(result, 0)
+                self.assertEqual(root.attributes["gh_address_cr.command.name"], name)
+                self.assertEqual(root.attributes["gh_address_cr.command.path"], path)
+
+    def test_agent_subcommand_allowlist_matches_the_usage_line(self) -> None:
+        import re
+
+        from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS
+
+        _, _, _, usage = run_cli_under_memory_exporter(["agent"])
+
+        match = re.search(r"usage: gh-address-cr agent \{([^}]*)\}", usage)
+        self.assertIsNotNone(match, usage)
+        self.assertEqual(set(match.group(1).split(",")), set(AGENT_SUBCOMMANDS))
+
+    def test_every_allowlisted_agent_subcommand_is_routed(self) -> None:
+        from gh_address_cr.cli import main
+        from gh_address_cr.commands.agent import AGENT_SUBCOMMANDS
+
+        def rejected_as_unknown(name: str) -> bool:
+            stderr = io.StringIO()
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(stderr),
+                contextlib.suppress(SystemExit),
+            ):
+                main(["agent", name])
+            return "Unknown agent command" in stderr.getvalue()
+
+        self.assertTrue(rejected_as_unknown("not-an-agent-subcommand"))
+        for name in AGENT_SUBCOMMANDS:
+            with self.subTest(name=name):
+                self.assertFalse(rejected_as_unknown(name))
+
+    def test_command_session_operation_spans_never_export_raw_argv(self) -> None:
+        secrets = ("ghp_FAKE123456", "/Users/someone/private", "RbBtSn0w/gh-address-cr")
+        operations = [
+            {"id": "flag-with-value", "argv": ["--token=ghp_FAKE123456"]},
+            {"id": "flag-then-value", "argv": ["--secret", "ghp_FAKE123456"]},
+            {"id": "unknown-command", "argv": ["my-token-ghp_FAKE123456"]},
+            {"id": "path", "argv": ["/Users/someone/private"]},
+            {"id": "quoted-command", "argv": ["address RbBtSn0w/gh-address-cr 343 --lean"]},
+            {"id": "agent-unknown-sub", "argv": ["agent", "ghp_FAKE123456"]},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            session_file = Path(tmp) / "commands.json"
+            session_file.write_text(json.dumps({"operations": operations}), encoding="utf-8")
+
+            _, _, spans, _ = run_cli_under_memory_exporter(["command-session", "--input", str(session_file)])
+
+        exported = [str(value) for span in spans for value in span.attributes.values()]
+        for secret in secrets:
+            self.assertFalse([value for value in exported if secret in value], secret)
+        operation_spans = [span for span in spans if span.name == "gh_address_cr.command_session.operation"]
+        self.assertEqual(len(operation_spans), len(operations))
+        for span in operation_spans:
+            self.assertIn(span.attributes["gh_address_cr.command.name"], {"gh-address-cr", "unknown", "agent"})
+
+    def test_root_span_reports_the_previous_invocation_shutdown_wait(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        attribute = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(300.0, timed_out=True)
+
+            result, span = self._run_version_under_memory_exporter(tmp)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(span.attributes[attribute], 300.0)
+        self.assertIs(span.attributes["gh_address_cr.telemetry.previous_shutdown_timed_out"], True)
+
+    def test_root_span_reports_a_completed_previous_shutdown_as_not_timed_out(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import record_shutdown_wait
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            record_shutdown_wait(12.5, timed_out=False)
+
+            _, span = self._run_version_under_memory_exporter(tmp)
+
+        self.assertEqual(span.attributes["gh_address_cr.telemetry.previous_shutdown_wait_ms"], 12.5)
+        self.assertIs(span.attributes["gh_address_cr.telemetry.previous_shutdown_timed_out"], False)
+
+    def test_root_span_omits_previous_shutdown_wait_when_record_is_unusable(self) -> None:
+        from gh_address_cr.core.telemetry_shutdown import shutdown_wait_file
+
+        attribute = "gh_address_cr.telemetry.previous_shutdown_wait_ms"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": tmp}):
+            result, span = self._run_version_under_memory_exporter(tmp)
+            self.assertEqual(result, 0)
+            self.assertNotIn(attribute, span.attributes)
+            self.assertNotIn("gh_address_cr.telemetry.previous_shutdown_timed_out", span.attributes)
+
+            shutdown_wait_file().write_text('{"wait_ms": "slow"}', encoding="utf-8")
+            result, span = self._run_version_under_memory_exporter(tmp)
+            self.assertEqual(result, 0)
+            self.assertNotIn(attribute, span.attributes)
+            self.assertNotIn("gh_address_cr.telemetry.previous_shutdown_timed_out", span.attributes)
 
     @patch("gh_address_cr.__main__.shutdown_telemetry")
     @patch("gh_address_cr.__main__.initialize_telemetry")

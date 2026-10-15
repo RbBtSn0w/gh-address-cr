@@ -171,6 +171,13 @@ for process tracing.
 - Side-effect boundary: tracing observes runtime behavior and remains separate from PR-scoped workflow telemetry
 - Artifact truth boundary: trace artifacts are observability outputs, not runtime truth
 - Recovery and replay: tracing is fail-open and must not block command completion
+- Compatibility: this boundary does not freeze the exact values of identity
+  attributes. Following OpenTelemetry's stability rules (attribute values are
+  outside the guarantees and adding attributes is always allowed), a release may
+  normalise such a value and says so in its release notes; `service.version` on
+  the Resource marks the cut. For example, `gen_ai.agent.name` used to carry the
+  whole `AI_AGENT` string, version included; it now carries the lowercased
+  product name and `gen_ai.agent.version` carries the version.
 
 The installed CLI exports one process-level OTLP/HTTP trace to the production
 Gateway by default:
@@ -216,7 +223,37 @@ The CLI entrypoint initializes tracing before dispatch and calls
 abandons any export still in flight, so a slow or unreachable gateway cannot
 delay the command. The measured wait is recorded locally and counted in the
 next efficiency report's `telemetry_overhead_ms` (see
-`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`).
+`docs/rfcs/041-telemetry-shutdown-wait/preflight.md`). The overhead budget
+(`telemetry_overhead_budget_ms`, currently 500 ms) is derived from that bound plus
+a 200 ms build margin, so a single timed-out export cannot raise
+`TELEMETRY_OVERHEAD_EXCEEDED` on its own. The root span also carries the previous
+invocation's wait as `gh_address_cr.telemetry.previous_shutdown_wait_ms` (plus
+`gh_address_cr.telemetry.previous_shutdown_timed_out`), and the command's
+`gh_address_cr.command.reason_code` (see
+`docs/rfcs/042-telemetry-overhead-signal/preflight.md`). The reason code is the
+one the command's JSON summary carries, on failure and success alike: every
+summary is written through one writer (`write_json_summary` in
+`src/gh_address_cr/commands/common.py`) that records it, and human-mode output
+records the same code without printing JSON.
+
+The root span's `gh_address_cr.command.name` and `gh_address_cr.command.path` are
+built only from a fixed set of names, never from raw argv text: a dispatched
+command (`address`, `final-gate`, `agent.manifest`, ...); `unknown` for any other
+first argument, including text a caller mistakenly quoted into one argument
+(`agent.unknown` for an unrecognized `agent` subcommand); or, for an invocation that
+exits before dispatch (`--help`, `-h`, `--version`, no arguments), the placeholder
+`gh-address-cr` with no `command.path`. Operations inside a `command-session` follow
+the same rule. `command.path` and `gh_address_cr.command.exit_code` exist only for
+invocations that reach command dispatch, so count invocations and exit status from
+`process.exit.code`, not from `command.exit_code`.
+
+The root span's `gh_address_cr.invocation.kind` says how the invocation ended:
+`command` (argument parsing succeeded and the command was dispatched or rejected by
+dispatch), `help`, `version`, or `usage_error` (the last three exit during
+argument parsing, before any command runs). Filter on `command` to count invocations
+that reached dispatch; help, version and no-argument calls otherwise make up about
+half of all production root spans (see
+`docs/rfcs/043-telemetry-invocation-kind/preflight.md`).
 For a custom operation:
 
 ```python
@@ -258,11 +295,27 @@ tool calls without extra instrumentation:
   (position-preserving), never dropped
 - `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` — GenAI tool
   vocabulary for the invoked command
-- `gen_ai.conversation.id` (+ `.source`), `gen_ai.agent.name` — passive
-  session correlation. Set `GH_ADDRESS_CR_CONVERSATION_ID` (preferred,
-  vendor-neutral) or `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable
-  per-session value so repeated invocations group together; set `AI_AGENT` to
-  label the calling agent. All three are absent when no session env is set.
+- `gen_ai.conversation.id` (+ `.source`) — passive session correlation. Set
+  `GH_ADDRESS_CR_CONVERSATION_ID` (preferred, vendor-neutral) or
+  `CLAUDE_CODE_SESSION_ID` (passive fallback) to a stable per-session value so
+  repeated invocations group together.
+- `gen_ai.agent.name`, `gen_ai.agent.version` — the calling agent, read from the
+  `AI_AGENT` convention (`name@version`, e.g. `codex@0.5.1`; Claude Code's
+  `claude-code_2-1-293_agent` is parsed into `claude-code` + `2.1.293`, and a
+  suffix such as `-beta` stays in the version). The name is lowercased and must
+  be lowercase letters, digits and hyphens (<= 64 chars), so it stays one
+  low-cardinality value across releases; the version may also use `.`, `_` and
+  `-` (<= 64 chars). The value is self-reported by the host, not verified. A
+  value in the wrong format or that looks unsafe is dropped without being
+  recorded: a bad name drops the whole identity, a bad version only the version.
+  Hosts that never set `AI_AGENT` are identified by a marker variable the host
+  sets on the shell commands it runs: `GEMINI_CLI` gives `gemini-cli`, and
+  `CODEX_THREAD_ID` or `CODEX_SANDBOX` gives `codex` (no version). Only the
+  marker's presence is read, never its value, and a set `AI_AGENT` always wins,
+  even when it is unusable. `gen_ai.agent.name.source` names the variable that
+  decided (`AI_AGENT`, `GEMINI_CLI`, `CODEX_THREAD_ID` or `CODEX_SANDBOX`), so a
+  declared identity stays distinguishable from an inferred one.
+  All of these are absent when no env is set.
 - `vcs.change.id`, `vcs.provider.name` (`github`), `vcs.repository.name` — for
   PR-scoped commands only (`owner/repo <pr_number>`); `vcs.repository.name` is
   a stable one-way hash, never the plain `owner/repo` string.

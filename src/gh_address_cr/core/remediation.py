@@ -69,6 +69,31 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
             "command": command_templates.classify(repo, pr_number),
         }
 
+    if code == protocol_codes.COMMIT_NOT_IN_PR:
+        return {
+            "summary": (
+                "The cited commit is not one of this pull request's commits. A hex SHA of four or more "
+                "characters is enough; shorter prefixes and refs such as HEAD never match. Push the fix to the "
+                "PR head branch, re-read its SHA after any rebase or amend, then rerun the rejected command "
+                "citing it, keeping its other flags (such as `--closed`): `--commit` on `agent resolve`, or "
+                "`fix_reply.commit_hash` in the file passed to `agent submit` / `agent resolve --input`."
+            ),
+            # Raised from item, submit, --closed, --input and --files routes: any single
+            # route-specific template would send some of them down the wrong path.
+            "command": command_templates.address(repo, pr_number),
+        }
+
+    if code == protocol_codes.STALE_THREADS_REQUIRE_RESOLVE_STALE:
+        return {
+            "summary": (
+                "The `--input` batch includes STALE or outdated GitHub threads (`item_ids`); nothing was "
+                "recorded, and `--input` does not accept `--stale`. Drop those ids from the batch file and "
+                "resubmit the rest, then resolve them with a `--files ... --stale` fix, or item by item "
+                "(`agent resolve <item_id> ...`, or `--disposition clarify|reject|defer --why <text>` to decline)."
+            ),
+            "command": command_templates.resolve_stale(repo, pr_number),
+        }
+
     if code == protocol_codes.MISSING_PUBLISH_REPLY or code == protocol_codes.MISSING_FIX_REPLY_COMMIT_HASH:
         return {
             "summary": (

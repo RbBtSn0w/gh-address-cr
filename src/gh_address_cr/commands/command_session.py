@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+from gh_address_cr.commands.common import write_json_summary
+
 
 def handle_command_session(passthrough: list[str]) -> int:
     """Run a batch of CLI operations in-process and return a combined JSON summary.
@@ -26,7 +28,7 @@ def handle_command_session(passthrough: list[str]) -> int:
     from gh_address_cr.core.telemetry_safety import (
         _safe_diagnostic_text,
         classify_workflow_span_layer,
-        command_label,
+        derive_tool_name,
         workflow_step_span_attributes,
     )
     from gh_address_cr.otel_tracing import add_current_span_event, set_current_span_attributes, start_child_span
@@ -47,7 +49,7 @@ def handle_command_session(passthrough: list[str]) -> int:
             "exit_code": 2,
             "diagnostics": [str(exc)],
         }
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        write_json_summary(summary)
         return 2
     operations = payload.get("operations") if isinstance(payload, dict) else None
     if not isinstance(operations, list):
@@ -59,7 +61,7 @@ def handle_command_session(passthrough: list[str]) -> int:
             "results": [],
             "exit_code": 2,
         }
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        write_json_summary(summary)
         return 2
 
     results = []
@@ -88,7 +90,9 @@ def handle_command_session(passthrough: list[str]) -> int:
             )
             continue
         op_started_at = time.monotonic()
-        op_command = command_label(argv) or "command"
+        # An operation argv starts with a gh-address-cr command, not an executable, so use the command
+        # allowlist: command_label keeps argv[0] verbatim and would export e.g. `--token=...`.
+        op_command = derive_tool_name(argv)
         safe_operation_id = _safe_diagnostic_text(operation_id)
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -153,5 +157,5 @@ def handle_command_session(passthrough: list[str]) -> int:
         "results": results,
         "exit_code": session_exit,
     }
-    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    write_json_summary(summary)
     return session_exit

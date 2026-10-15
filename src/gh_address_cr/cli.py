@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from gh_address_cr import __version__
 from gh_address_cr.commands.active_pr import handle_active_pr_command
@@ -23,6 +25,7 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
+from gh_address_cr.commands.common import write_json_summary
 from gh_address_cr.commands.doctor import handle_doctor_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
@@ -31,12 +34,14 @@ from gh_address_cr.commands.high_level import (
 )
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core import workflow
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMAND_NAMES, PUBLIC_COMMANDS
 from gh_address_cr.core.io import write_json_atomic
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_NAME,
     GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
+    GH_ADDRESS_CR_INVOCATION_KIND,
     PROCESS_COMMAND_ARGS,
 )
 from gh_address_cr.core.primary_action import project_context_summary, project_primary_action
@@ -46,6 +51,7 @@ from gh_address_cr.core.telemetry_safety import (
     workflow_step_span_attributes,
 )
 from gh_address_cr.github.diagnostics import classify_github_failure
+from gh_address_cr.github.transient_failures import backoff_seconds, is_transient_github_failure_text
 from gh_address_cr.intake.findings import (
     canonical_findings_payload,
 )
@@ -62,18 +68,11 @@ from gh_address_cr.intake.findings import (
 OUTPUT_MODE_COMMANDS = {"address", "review", "threads", "findings", "adapter", "submit-action", "version", "final-gate"}
 NATIVE_REVIEW_COMMANDS = {"address", "review", "threads", "findings", "adapter", "version"}
 UTILITY_COMMANDS = {"review-to-findings", "submit-feedback", "submit-action"}
-PUBLIC_COMMANDS = {
-    *NATIVE_REVIEW_COMMANDS,
-    *UTILITY_COMMANDS,
-    "active-pr",
-    "agent",
-    "command-session",
-    "doctor",
-    "final-gate",
-}
 PR_SCOPED_IMPLICIT_COMMANDS = {"address", "review", "threads", "final-gate"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 LEAN_FLAGS = {"--lean", "--summary"}
+_PREFLIGHT_AUTH_ATTEMPTS = 2
+_PREFLIGHT_AUTH_TIMEOUT_SECONDS = 30.0
 GITHUB_PRECHECK_COMMANDS = {"address", "review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
 WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
@@ -591,6 +590,9 @@ def output_preflight_error(
     persist: bool = True,
     diagnostics: dict | None = None,
 ) -> int:
+    from gh_address_cr.core.telemetry_runtime import note_command_reason_code
+
+    note_command_reason_code(reason_code)
     if not args.human:
         summary = build_preflight_summary(
             args.command,
@@ -606,7 +608,7 @@ def output_preflight_error(
         )
         if persist:
             persist_machine_summary(repo, pr_number, summary)
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        write_json_summary(summary)
     print(message, file=sys.stderr)
     return exit_code
 
@@ -646,12 +648,42 @@ def _preflight_gh_failure_response(diagnostics: dict) -> tuple[str, str, str, st
             "Wait for GitHub rate limits to recover or use a token with sufficient quota, then rerun the command.",
             "GitHub CLI `gh` is authenticated, but GitHub reported rate limiting.",
         )
+    if is_transient_github_failure_text(str(diagnostics.get("stderr_excerpt") or "")):
+        # A 5xx or timeout from `gh auth status` says GitHub was unreachable, not that credentials are bad.
+        return (
+            "GH_NETWORK_FAILED",
+            "github_network",
+            "Retry once GitHub is reachable again; the failure looked transient rather than an authentication problem.",
+            "GitHub CLI `gh` hit a transient GitHub or network failure while checking authentication.",
+        )
     return (
         "GH_AUTH_FAILED",
         "github_auth",
         "Authenticate GitHub CLI with `gh auth login`, then rerun the command.",
         "GitHub CLI `gh` is not authenticated. Run `gh auth status` and fix authentication before rerunning.",
     )
+
+
+def _run_gh_auth_status(auth_command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run the auth preflight with a timeout and one jittered retry on transient failures."""
+    attempt = 0
+    while True:
+        try:
+            result = subprocess.run(
+                auth_command, text=True, capture_output=True, timeout=_PREFLIGHT_AUTH_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(
+                auth_command, 124, "", f"Command timed out after {_PREFLIGHT_AUTH_TIMEOUT_SECONDS} seconds."
+            )
+        attempt += 1
+        if (
+            result.returncode == 0
+            or attempt >= _PREFLIGHT_AUTH_ATTEMPTS
+            or not is_transient_github_failure_text(result.stderr, result.stdout)
+        ):
+            return result
+        time.sleep(backoff_seconds(attempt - 1))
 
 
 def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) -> int | None:
@@ -676,7 +708,7 @@ def preflight_github_cli(args: argparse.Namespace, repo: str, pr_number: str) ->
         )
 
     auth_command = ["gh", "auth", "status"]
-    result = subprocess.run(auth_command, text=True, capture_output=True)
+    result = _run_gh_auth_status(auth_command)
     if result.returncode != 0 and not _gh_auth_fixture_is_unimplemented(result):
         diagnostics = classify_github_failure(result.stderr, result.stdout, result.returncode, auth_command)
         reason_code, waiting_on, next_action, message = _preflight_gh_failure_response(diagnostics)
@@ -812,6 +844,25 @@ def handle_native_high_level(command: str, passthrough_args: list[str], *, human
     return HighLevelReviewRuntime().handle(command, passthrough_args, human=human, lean=lean)
 
 
+class _VersionExit(SystemExit):
+    """`--version` exit. `--help` also exits 0, so telemetry tells them apart by type, not by parsing argv."""
+
+
+class _VersionAction(argparse.Action):
+    def __init__(self, option_strings: Sequence[str], dest: str = argparse.SUPPRESS, help: str | None = None) -> None:
+        super().__init__(option_strings=option_strings, dest=dest, default=argparse.SUPPRESS, nargs=0, help=help)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        sys.stdout.write(f"gh-address-cr {__version__}\n")
+        raise _VersionExit(0)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gh-address-cr",
@@ -839,12 +890,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version",
         "-v",
-        action="version",
-        version=f"gh-address-cr {__version__}",
+        action=_VersionAction,
+        help="show program's version number and exit",
     )
     parser.add_argument(
         "command",
-        metavar="{active-pr,address,review,threads,findings,adapter,doctor,command-session,final-gate,review-to-findings,submit-feedback,submit-action,version}",
+        metavar="{" + ",".join(PUBLIC_COMMAND_NAMES) + "}",
         help=(
             "High-level commands:\n"
             "  gh-address-cr active-pr [--repo owner/repo] [--head branch]\n"
@@ -920,7 +971,7 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         compatibility = workflow.runtime_compatibility()
-        sys.stdout.write(json.dumps(compatibility, indent=2, sort_keys=True) + "\n")
+        write_json_summary(compatibility)
         return int(compatibility["exit_code"])
 
     return None
@@ -998,8 +1049,8 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
         GH_ADDRESS_CR_CLI_INIT_SPAN_NAME,
         attributes={
             **workflow_step_span_attributes(step_name="cli-init", step_kind=layer),
-            "gh_address_cr.command.name": str(args.command),
-            "gh_address_cr.command.path": str(args.command),
+            "gh_address_cr.command.name": _telemetry_command(args),
+            "gh_address_cr.command.path": _telemetry_command(args),
             PROCESS_COMMAND_ARGS: sanitized_args[1:],
         },
     ):
@@ -1030,13 +1081,18 @@ def _dispatch_high_level_commands(args: argparse.Namespace) -> int:
     return handle_native_high_level(args.command, args.args, human=args.human, lean=getattr(args, "lean", False))
 
 
+def _telemetry_command(args: argparse.Namespace) -> str:
+    """Return the command name that is safe to export: a dispatched command, never raw argv text."""
+    return str(args.command) if args.command in PUBLIC_COMMANDS else "unknown"
+
+
 def _command_span_name(args: argparse.Namespace) -> str:
-    if args.command != "agent":
-        return str(args.command)
-    subcommand = ""
-    if args.repo and args.repo not in {"-h", "--help"}:
-        subcommand = str(args.repo)
-    return f"agent.{subcommand}" if subcommand else "agent"
+    command = _telemetry_command(args)
+    if command != "agent":
+        return command
+    if not args.repo or args.repo in {"-h", "--help"}:
+        return "agent"
+    return f"agent.{args.repo}" if args.repo in AGENT_SUBCOMMANDS else "agent.unknown"
 
 
 def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace) -> dict[str, str | bool | int | float]:
@@ -1048,7 +1104,7 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     command_path = _command_span_name(args)
     attributes: dict[str, str | bool | int | float] = {
         "gh_address_cr.span.kind": "command",
-        "gh_address_cr.command.name": str(args.command),
+        "gh_address_cr.command.name": _telemetry_command(args),
         "gh_address_cr.command.path": command_path,
         GEN_AI_OPERATION_NAME: "execute_tool",
         GEN_AI_TOOL_NAME: command_path,
@@ -1058,11 +1114,30 @@ def _command_span_attributes(effective_argv: list[str], args: argparse.Namespace
     return attributes
 
 
+def _record_invocation_kind(kind: str) -> None:
+    """Best effort: a failing telemetry write must not replace the exit or stop the command."""
+    try:
+        from gh_address_cr.otel_tracing import set_current_span_attributes
+
+        set_current_span_attributes({GH_ADDRESS_CR_INVOCATION_KIND: kind})
+    except Exception:
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     from gh_address_cr.otel_tracing import get_current_span_attributes, set_current_span_attributes
 
     effective_argv = list(argv) if argv is not None else sys.argv[1:]
-    args = parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except SystemExit as exc:
+        # --help, --version and usage errors leave during parsing, so no command was dispatched.
+        if isinstance(exc, _VersionExit):
+            kind = "version"
+        else:
+            kind = "help" if exc.code in (0, None) else "usage_error"
+        _record_invocation_kind(kind)
+        raise
     started_at = time.time()
     _reset_command_persistence_totals()
     span_attributes = _command_span_attributes(effective_argv, args)
@@ -1072,10 +1147,11 @@ def main(argv: list[str] | None = None) -> int:
     restore_command_scope = "gh_address_cr.command.path" in prior_command_attributes
     set_current_span_attributes(
         {
-            "gh_address_cr.command.name": str(args.command),
+            "gh_address_cr.command.name": str(span_attributes["gh_address_cr.command.name"]),
             "gh_address_cr.command.path": str(span_attributes["gh_address_cr.command.path"]),
         }
     )
+    _record_invocation_kind("command")
     rc: int | None = None
     try:
         rc = _dispatch_management_commands(args)
@@ -1094,9 +1170,19 @@ def main(argv: list[str] | None = None) -> int:
         set_current_span_attributes({"gh_address_cr.command.exit_code": rc})
         return rc
     finally:
+        _export_command_reason_code()
         _record_command_metric(args, started_at=started_at, exit_code=rc if isinstance(rc, int) else 1)
         if restore_command_scope:
             set_current_span_attributes(prior_command_attributes)
+
+
+def _export_command_reason_code() -> None:
+    try:
+        from gh_address_cr.core.telemetry_runtime import export_command_reason_code
+
+        export_command_reason_code()
+    except Exception:
+        return
 
 
 def _reset_command_persistence_totals() -> None:

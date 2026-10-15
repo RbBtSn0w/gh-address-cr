@@ -73,10 +73,17 @@ _REASON_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 def note_command_reason_code(reason_code: str | None) -> None:
     """Record the reason code the current command emitted, for its outcome metric and the current span.
 
-    Failure output helpers call this from the command handler, where the current span is the
-    CLI root span.
+    Failure output helpers call this from the command handler. Some handlers run under a child span
+    (for example ``gh_address_cr.cli.init``), so ``export_command_reason_code`` re-applies the value to
+    the command-level span when the command finishes.
     """
     _COMMAND_REASON_CODE.set(reason_code)
+    export_command_reason_code()
+
+
+def export_command_reason_code() -> None:
+    """Set the recorded reason code on the current span when it is a safe fixed-enum value."""
+    reason_code = _COMMAND_REASON_CODE.get()
     if reason_code and _REASON_CODE_PATTERN.fullmatch(reason_code):
         try:
             from gh_address_cr.otel_tracing import set_current_span_attributes

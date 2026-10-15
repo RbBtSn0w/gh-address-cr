@@ -12,6 +12,8 @@ from gh_address_cr.core.otel_semconv import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_NAME,
+    GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_TIMED_OUT,
+    GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_WAIT_MS,
     PROCESS_COMMAND_ARGS,
     PROCESS_EXECUTABLE_NAME,
     PROCESS_PARENT_PID,
@@ -22,6 +24,7 @@ from gh_address_cr.core.telemetry_safety import (
     detect_agent_session,
     sanitize_cli_argv,
 )
+from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_record
 from gh_address_cr.otel_tracing import (
     initialize_telemetry,
     resolve_parent_context,
@@ -63,6 +66,13 @@ def main(argv: list[str] | None = None) -> int:
 
     attributes.update(detect_agent_session(os.environ))
     attributes.update(vcs_attrs)
+
+    previous_shutdown = read_last_shutdown_record()
+    if previous_shutdown is not None:
+        previous_wait_ms, previous_timed_out = previous_shutdown
+        attributes[GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_WAIT_MS] = previous_wait_ms
+        if previous_timed_out is not None:
+            attributes[GH_ADDRESS_CR_TELEMETRY_PREVIOUS_SHUTDOWN_TIMED_OUT] = previous_timed_out
 
     try:
         # The process span remains the invocation anchor. Child workflow spans,

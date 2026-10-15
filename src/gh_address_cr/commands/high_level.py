@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -16,6 +15,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
+from gh_address_cr.commands.common import write_json_summary
 from gh_address_cr.core import command_templates
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as session_store
@@ -805,7 +805,7 @@ def _emit_native_summary(summary: dict, *, human: bool) -> None:
             print(action["command"])
         print(action["why_now"])
         return
-    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    write_json_summary(summary)
 
 
 @contextmanager
@@ -869,7 +869,7 @@ class HighLevelReviewRuntime:
                 waiting_on="findings_input",
                 next_action="`--sync` requires an explicit --source so missing findings stay scoped to one producer.",
             )
-            sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+            write_json_summary(summary)
             return 2, None
         if command in {"review", "findings"} and parsed.input:
             try:
@@ -888,7 +888,7 @@ class HighLevelReviewRuntime:
                     waiting_on="findings_input",
                     next_action=str(exc),
                 )
-                sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+                write_json_summary(summary)
                 return 2, None
         return None, None
 
@@ -911,7 +911,11 @@ class HighLevelReviewRuntime:
                 handoff_sha256=parsed.handoff_sha256,
             )
         elif command == "adapter":
-            raw, error = _run_adapter_command(parsed.adapter_cmd)
+            try:
+                raw, error = _run_adapter_command(parsed.adapter_cmd)
+            finally:
+                # A caller-supplied adapter may switch the active gh account; never reuse a login read before it ran.
+                GitHubClient.reset_process_cache()
             if error:
                 raise FindingsFormatError(error)
             _ingest_native_findings(

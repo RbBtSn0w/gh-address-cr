@@ -120,6 +120,20 @@ class TestCommandRunnerCallerSpan(unittest.TestCase):
         self.assertNotIn(ERROR_EXPECTED, span.attributes)
         self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
 
+    def test_span_marks_graphql_mutations_without_recording_argv(self) -> None:
+        for cmd, expected in (
+            (["gh", "api", "graphql", "-f", "query=mutation($t:ID!){ x }"], True),
+            (["gh", "api", "graphql", "-f", "query=query { viewer { login } }"], False),
+        ):
+            with self.subTest(expected=expected):
+                self.exporter.clear()
+                process = self._mock_process(returncode=0, stdout="{}")
+                with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):
+                    run_traced(self.tracer, "gh-address-cr.cli", lambda cmd=cmd: run_cmd(cmd, retries=1))
+                span = self._subprocess_span()
+                self.assertIs(span.attributes["gh_address_cr.subprocess.mutation"], expected)
+                self.assertFalse(any("query" in str(value) for value in span.attributes.values()))
+
     def test_rate_limit_failure_records_low_cardinality_error_classification(self) -> None:
         process = self._mock_process(returncode=1, stderr="HTTP 429: API rate limit exceeded")
         with patch("gh_address_cr.core.command_runner.subprocess.Popen", return_value=process):

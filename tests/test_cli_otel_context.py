@@ -10,6 +10,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from gh_address_cr.core.otel_semconv import (
     GEN_AI_AGENT_NAME,
+    GEN_AI_AGENT_VERSION,
     GEN_AI_CONVERSATION_ID,
     GH_ADDRESS_CR_COMMAND_SESSION_OPERATION_SPAN_NAME,
     PROCESS_PARENT_PID,
@@ -173,6 +174,31 @@ class TestCliOtelContext(unittest.TestCase):
         self.assertEqual(span.attributes.get(GEN_AI_CONVERSATION_ID), "test-gh-session-456")
         self.assertEqual(span.attributes.get("gen_ai.conversation.id.source"), "GH_ADDRESS_CR_CONVERSATION_ID")
         self.assertEqual(span.attributes.get(GEN_AI_AGENT_NAME), "claude-cli")
+
+    def test_agent_identity_claude_code_format_splits_name_and_version(self) -> None:
+        """Claude Code's AI_AGENT yields a stable name plus gen_ai.agent.version (via __main__)."""
+        with patch.dict(os.environ, {"AI_AGENT": "claude-code_2-1-293_agent"}, clear=True):
+            span = self._run_via_main_and_get_span()
+
+        self.assertEqual(span.attributes.get(GEN_AI_AGENT_NAME), "claude-code")
+        self.assertEqual(span.attributes.get(GEN_AI_AGENT_VERSION), "2.1.293")
+
+    def test_agent_identity_vercel_format_splits_name_and_version(self) -> None:
+        """The Vercel name@version convention yields the same attribute pair (via __main__)."""
+        with patch.dict(os.environ, {"AI_AGENT": "codex@0.5.1"}, clear=True):
+            span = self._run_via_main_and_get_span()
+
+        self.assertEqual(span.attributes.get(GEN_AI_AGENT_NAME), "codex")
+        self.assertEqual(span.attributes.get(GEN_AI_AGENT_VERSION), "0.5.1")
+
+    def test_unusable_agent_identity_is_dropped_without_recording_the_value(self) -> None:
+        """A set-but-unusable AI_AGENT leaves no identity attribute and never leaks the value (via __main__)."""
+        with patch.dict(os.environ, {"AI_AGENT": "Kimi K2@1.0"}, clear=True):
+            span = self._run_via_main_and_get_span()
+
+        self.assertNotIn(GEN_AI_AGENT_NAME, span.attributes)
+        self.assertNotIn(GEN_AI_AGENT_VERSION, span.attributes)
+        self.assertNotIn("Kimi", repr(dict(span.attributes)))
 
     def test_agent_session_correlation_case_c(self) -> None:
         """T012 Case C: neither session ID set → attributes absent (via __main__)."""

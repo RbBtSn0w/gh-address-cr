@@ -59,7 +59,11 @@ from gh_address_cr.core.telemetry_safety import (
     _safe_diagnostic_text,
     _safe_runtime_operation,
 )
-from gh_address_cr.core.telemetry_shutdown import read_last_shutdown_wait_ms
+from gh_address_cr.core.telemetry_shutdown import (
+    SHUTDOWN_JOIN_TIMEOUT_SECONDS,
+    TELEMETRY_BUILD_MARGIN_MS,
+    read_last_shutdown_wait_ms,
+)
 
 __all__ = [
     "CodexHostJsonAdapter",
@@ -442,7 +446,7 @@ def autodiscovery_miss_import_summary(repo: str, pr_number: str, *, diagnostics:
     return summary
 
 
-TELEMETRY_OVERHEAD_BUDGET_MS = 250
+TELEMETRY_OVERHEAD_BUDGET_MS = round(SHUTDOWN_JOIN_TIMEOUT_SECONDS * 1000) + TELEMETRY_BUILD_MARGIN_MS
 
 
 def build_efficiency_report(repo: str, pr_number: str) -> EfficiencyReportPayload:

@@ -108,6 +108,8 @@ class StackContext:
     topology_fingerprint: str | None = None
     diagnostic_code: str | None = None
     invalid_invariant: str | None = None
+    # Optional bounded cause of an `unavailable` observation, e.g. `head_ref_oid_lag` (Spec 046).
+    diagnostic_cause: str | None = None
 
     @property
     def schema_version(self) -> str:
@@ -134,7 +136,11 @@ class StackContext:
         if self.diagnostic_code:
             payload["diagnostic"] = {
                 "reason_code": self.diagnostic_code,
-                **({"invariant": self.invalid_invariant} if self.invalid_invariant else {}),
+                **(
+                    {"invariant": self.invalid_invariant or self.diagnostic_cause}
+                    if self.invalid_invariant or self.diagnostic_cause
+                    else {}
+                ),
             }
         return payload
 
@@ -171,6 +177,7 @@ def project_stack_context(payload: Mapping[str, Any]) -> StackContext:
             selected_pr_number=selected_pr_number,
             observed_at=observed_at,
             diagnostic_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            diagnostic_cause=str(payload.get("diagnostic_cause") or "") or None,
         )
     if availability == "invalid":
         return _invalid_context(
@@ -236,7 +243,9 @@ def project_stack_context(payload: Mapping[str, Any]) -> StackContext:
     return StackContext(**{**context.__dict__, "topology_fingerprint": _fingerprint_present(context)})
 
 
-def unavailable_stack_context(repo: str, pr_number: str, *, observed_at: str | None = None) -> StackContext:
+def unavailable_stack_context(
+    repo: str, pr_number: str, *, observed_at: str | None = None, cause: str | None = None
+) -> StackContext:
     """Return the bounded fail-open projection for a stack read the host cannot serve."""
     timestamp = observed_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return project_stack_context(
@@ -247,9 +256,18 @@ def unavailable_stack_context(repo: str, pr_number: str, *, observed_at: str | N
             "selected_pr_number": str(pr_number),
             "observed_at": timestamp,
             "diagnostic_code": protocol_codes.STACK_CONTEXT_UNAVAILABLE,
+            **({"diagnostic_cause": cause} if cause else {}),
             "members": [],
         }
     )
+
+
+def stack_diagnostic_payload(context: StackContext | None) -> JsonDict:
+    """Return the bounded ``stack_diagnostic`` summary field (reason code, optional invariant; no revision ids)."""
+    if context is None or not context.diagnostic_code:
+        return {}
+    diagnostic = context.to_dict().get("diagnostic")
+    return {"stack_diagnostic": diagnostic} if isinstance(diagnostic, dict) else {}
 
 
 def stack_context_for_member(context: StackContext, pr_number: str) -> StackContext:

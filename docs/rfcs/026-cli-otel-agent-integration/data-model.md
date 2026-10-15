@@ -26,7 +26,8 @@ Span kind: `INTERNAL` (CLI callee, per CLI convention). Attributes:
 | `gen_ai.tool.call.result` | — | **OMITTED v1** | — | Not capturable at span boundary (R-005, G-3). |
 | `gen_ai.conversation.id` | string | Added (Tier 2) | designed entry point `GH_ADDRESS_CR_CONVERSATION_ID` → else passive fallback `CLAUDE_CODE_SESSION_ID` | Omitted when none present (fail-open). Public-safe (session UUID). R-009/FR-011. |
 | `gen_ai.conversation.id.source` | string | Added (Tier 2) | name of the env var used | Audit/provenance; only set with conversation.id. |
-| `gen_ai.agent.name` | string | Added (Tier 2) | `AI_AGENT` env | Omitted when absent. Public-safe product string. |
+| `gen_ai.agent.name` | string | Added (Tier 2) | `AI_AGENT` env, name part | Omitted when absent or invalid. Lowercased, then must match `[a-z0-9][a-z0-9-]{0,63}`; the version is split out into `gen_ai.agent.version`. Self-reported, unverified. |
+| `gen_ai.agent.version` | string | Added (agent identity update) | `AI_AGENT` env, version part | Omitted when absent or invalid. Must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. |
 | `vcs.change.id` | string | Added (Tier 1) | PR number from argv | Only for PR-scoped commands; omitted otherwise. FR-012. |
 | `vcs.provider.name` | string | Added (Tier 1) | constant `"github"` | Set with `vcs.change.id`. |
 | `vcs.repository.name` | string | Added (Tier 1) | **hash** of `owner/repo` (Entity 5) | Opaque, stable per repo. **No plain owner/URL ever** (R-010). |
@@ -103,7 +104,22 @@ Pure function `detect_agent_session(environ) -> dict[str, str]`:
   `{gen_ai.conversation.id: <value>, gen_ai.conversation.id.source: <env name>}`.
   A new agent vendor is onboarded by having it set the designed entry point —
   **not** by adding a new detection branch here.
-- **Agent name**: `AI_AGENT` → `gen_ai.agent.name` when present.
+- **Agent identity**: `AI_AGENT` → `gen_ai.agent.name` + `gen_ai.agent.version`
+  when present. Accepted forms: `name@version` (Vercel `AI_AGENT` convention)
+  and `name_<ver>_agent` (what Claude Code exports; dashes between digits
+  become dots, a suffix such as `-beta` stays in the version). Any other value
+  is a bare name, which must itself be a lowercase-hyphen label: a shape with
+  underscores that no parser recognises is rejected rather than emitted whole,
+  so a version can never leak back into the name. An invalid name drops the
+  whole identity; an invalid version drops only the version. Nothing records
+  the rejected value, so an unusable `AI_AGENT` looks the same as an unset one;
+  the accepted format is therefore stated in `skill/SKILL.md`. A blank value
+  counts as unset. Behavior change: before this update the raw `AI_AGENT` string, version
+  included, was the agent name, and any non-unsafe string was accepted.
+  The attributes live in the OpenTelemetry GenAI semantic-conventions
+  repository (moved out of the main registry); names are pinned by
+  `tests/test_otel_semconv_pins.py`. No model attribute is emitted: hosts do not
+  propagate `TRACEPARENT`, and no standard lets a downstream tool learn the model.
 - Empty dict when nothing matches (→ attributes omitted, fail-open).
 - All returned values pass the public-safe sanitation path before use.
 

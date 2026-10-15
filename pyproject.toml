@@ -25,9 +25,9 @@ classifiers = [
   "Topic :: Software Development :: Version Control :: Git",
 ]
 dependencies = [
-  "opentelemetry-api>=1.30",
-  "opentelemetry-exporter-otlp-proto-http>=1.30",
-  "opentelemetry-sdk>=1.30",
+  "opentelemetry-api>=1.40",
+  "opentelemetry-exporter-otlp-proto-http>=1.40",
+  "opentelemetry-sdk>=1.40",
   "packaging>=24",
   "requests>=2.31.0",
 ]

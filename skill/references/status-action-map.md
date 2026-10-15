@@ -21,6 +21,12 @@ authority, or `final-gate` semantics.
 
 - `STACK_CONTEXT_UNAVAILABLE` / `STACK_CONTEXT_INVALID`: restore GitHub stacked-PR
   capability (older GitHub Enterprise Server hosts do not have it) or inspect the bounded diagnostic, then refresh the selected PR.
+  Right after a `git push`, GitHub briefly reports the new head commit before
+  the head branch catches up. The runtime already re-reads that window before
+  answering; if a command is still rejected with
+  `stack_diagnostic.invariant = head_ref_oid_lag` (under either code), wait a
+  few seconds and rerun the same command. Do not re-push or change evidence for
+  it. Any other `stack_diagnostic.invariant` names a real stack defect to inspect.
 - `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
   refresh the affected layer, and rerun validation; never publish old evidence.
   Runtime-rejected stale or cross-layer requests release their unusable lease,
@@ -112,6 +118,12 @@ If `reason_code` is `WAITING_FOR_SIMPLE_ADDRESS`:
 - **GitHub review comment reply tasks**: A reply draft is not a submitted task. Fill the issued `response_skeleton_path` or `batch_response_skeleton`, then run `gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>` or `gh-address-cr agent resolve <owner/repo> <pr_number> --input <batch-response.json>` before `gh-address-cr agent publish <owner/repo> <pr_number>`.
 - **Lean path**: Re-run `gh-address-cr address <owner/repo> <pr_number> --lean` or `gh-address-cr threads <owner/repo> <pr_number> --lean` when only item IDs, claimability, and evidence presence are needed.
 
+If `reason_code` is `MISSING_CLASSIFICATION`:
+- **Action**: `agent next --role fixer` (or `agent submit` for a fix) was called for an item with no triage classification. For a GitHub review thread, prefer item-scoped `agent resolve`, which records the classification itself. Otherwise run `gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>` first, then rerun the rejected command: `agent next` claimed nothing, while `agent submit` keeps its lease, so resubmit the same response. Do not add a `resolution` field to satisfy this code. Threads that appear after a new review push are unclassified too, so classify them before requesting a fixer lease.
+
+If `reason_code` is `MISSING_CLASSIFICATION_NOTE`:
+- **Action**: The classification was recorded without a note. Rerun `gh-address-cr agent classify <owner/repo> <pr_number> <item_id> --classification <fix|clarify|defer|reject> --note <why>` with a non-empty `--note`, or pass a non-empty `--why` to item-scoped `agent resolve`.
+
 If `reason_code` is `PER_THREAD_EVIDENCE_REQUIRED`:
 - **Action**: Run the returned `commands.batch_next` or `gh-address-cr agent next <owner/repo> <pr_number> --batch --agent-id <id>` to claim eligible GitHub review threads and write `batch-response-skeleton.json`. Fill common files/validation plus per-thread summary/why, then run the returned `resolve_batch` command and publish.
 
@@ -129,7 +141,7 @@ If `reason_code` is `FINAL_GATE_REQUIRED_CHECKS_MISSING`:
 - **Action**: `final-gate` ran with `--require-checks` or `--require-required-checks`, but the PR has no check runs, or its base branch has no required status checks. This is a verdict, not a GitHub failure. Either configure CI or required status checks and rerun, or rerun `gh-address-cr final-gate <owner/repo> <pr_number>` without the flag when the PR workflow does not need checks.
 
 If `reason_code` is `COMMIT_NOT_IN_PR`:
-- **Action**: The commit a fix reply would cite is not one of the pull request's commits, so nothing was posted. On `agent resolve` / `agent submit` (`ACTION_REJECTED` or `BATCH_ACTION_REJECTED`), the explicit `--commit` or `fix_reply.commit_hash` is wrong: push the fix to the PR branch and resubmit with that commit. On `agent publish` (`PUBLISH_BLOCKED`), the fix gave no commit and the local `HEAD` fallback is outside the PR: push the fix, check out the PR head branch named in `next_action` at the pushed commit, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`. Abbreviated SHAs of at least four characters are accepted.
+- **Action**: The commit a fix reply would cite is not one of the pull request's commits, so nothing was posted. A hex SHA of at least four characters is enough, so lengthening such a SHA will not help; a shorter prefix or a ref such as `HEAD` never matches. Otherwise the commit is unpushed, was made on another branch, or was rewritten by a rebase or amend. On `agent resolve` / `agent submit` (`ACTION_REJECTED` or `BATCH_ACTION_REJECTED`), the explicit `--commit` or `fix_reply.commit_hash` is wrong: push the fix to the PR branch and rerun the rejected command citing the pushed commit, keeping its other flags such as `--closed` (for an `--input` batch, set each `fix_reply.commit_hash`; a `--files` or `--stale` selection is rerun with the new `--commit`). On `agent publish` (`PUBLISH_BLOCKED`), the fix gave no commit and the local `HEAD` fallback is outside the PR: push the fix, check out the PR head branch named in `next_action` at the pushed commit, then rerun `gh-address-cr agent publish <owner/repo> <pr_number>`.
 
 If `reason_code` is `THREAD_ALREADY_RESOLVED`:
 - **Action**: `agent resolve` was called for a thread already resolved on GitHub. Nothing was recorded. Run the `agent resolve <owner/repo> <pr_number> <item_id> --closed ...` command from `next_action`: with `--commit <sha> --files <paths> --summary <text> --why <text> --validation <cmd=passed>` after a code fix, or `--disposition clarify --why <text>` when no change was made. The runtime reopens the thread locally, posts the reply, and resolves it again in the same call; then rerun `gh-address-cr final-gate <owner/repo> <pr_number>`.
@@ -149,6 +161,9 @@ If `reason_code` is `LEASE_LOCKED_ITEM`:
 If a GitHub thread has `state=stale` or `status=STALE`:
 - **Action**: Do not mark it resolved directly. Use `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale`, then publish and rerun final-gate.
 
+If `reason_code` is `STALE_THREADS_REQUIRE_RESOLVE_STALE`:
+- **Action**: The `agent resolve --input` batch includes threads GitHub marks outdated because the commented lines changed (named in `item_ids`). Nothing was recorded, and `--input` rejects `--stale` (`RESOLVE_EVIDENCE_INCOHERENT`). Drop those item ids from the batch file and resubmit the rest. Resolve the dropped threads with `gh-address-cr agent resolve <owner/repo> <pr_number> --commit <sha> --files <paths> --validation <cmd=passed> --stale` for a fix, or item by item with `agent resolve <owner/repo> <pr_number> <item_id> --disposition clarify|reject|defer --why <text>` for a decline. Then publish and rerun final-gate.
+
 If `reason_code` is `AUTO_SIMPLE_NOT_ELIGIBLE`:
 - **Action**: Stop the lightweight path and run the normal `review`, `findings`, or `adapter` workflow to handle local findings.
 
@@ -157,6 +172,9 @@ If `reason_code` is `GH_AUTH_FAILED` or `GITHUB_AUTH_FAILED`:
 
 If `reason_code` is `GH_NETWORK_FAILED`, `GITHUB_NETWORK_FAILED`, `GH_ENVIRONMENT_FAILED`, or `GITHUB_ENVIRONMENT_FAILED`:
 - **Action**: Inspect `diagnostics.command`, `diagnostics.stderr_category`, and `diagnostics.stderr_excerpt`. Fix network, sandbox, PATH, or local permission issues before retrying; do not treat these as code-review findings.
+
+If `reason_code` is `GH_RATE_LIMITED` or `GITHUB_RATE_LIMITED`:
+- **Action**: GitHub rate limiting was observed, by this session or by another session sharing the same token and state directory. The runtime then refuses to contact GitHub for about 60 seconds (the message says how long). Wait that long, then rerun the same command; do not loop on it, and do not switch to raw `gh` calls to get around it. Concurrent sessions should keep the default shared state directory so they share this backoff.
 
 If `reason_code` is `GH_PERMISSION_MISMATCH`:
 - **Action**: Treat this as a wrapper/runtime permission-sync problem, not a generic auth or sandbox failure. Inspect `diagnostics.source_scope`, `diagnostics.stderr_excerpt`, and the active runner grants, sync the wrapper/runtime permission view, then rerun the blocked command. The stable `waiting_on` category is `github_permission`.

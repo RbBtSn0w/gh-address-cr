@@ -9,6 +9,7 @@ from typing import Any, List, Optional
 from uuid import uuid4
 
 from gh_address_cr import __version__
+from gh_address_cr.commands.common import note_summary_reason_code
 from gh_address_cr.core import agent_protocol, protocol_codes
 from gh_address_cr.core import gate as core_gate
 from gh_address_cr.core import session as core_session
@@ -44,6 +45,11 @@ def _output_signal(
     }
     if warnings:
         payload["warnings"] = warnings
+    _write_payload(payload)
+
+
+def _write_payload(payload: dict[str, Any]) -> None:
+    note_summary_reason_code(payload)
     sys.stdout.write(json.dumps(payload) + "\n")
 
 
@@ -305,9 +311,9 @@ def handle_autopilot(args: List[str]) -> int:
         payload["status"] = "FAILED"
         payload["reason_code"] = "AUTOPILOT_EXECUTION_NOT_ENABLED"
         payload["next_action"] = "This guarded v1 only supports dry-run planning."
-        sys.stdout.write(json.dumps(payload) + "\n")
+        _write_payload(payload)
         return 2
-    sys.stdout.write(json.dumps(payload) + "\n")
+    _write_payload(payload)
     return 0
 
 
@@ -536,7 +542,7 @@ def handle_step(args: List[str]) -> int:
         payload = {"status": "DISPATCHED", "reason_code": "NEW_TASK", "next_action": "PROCEED", "packet": packet}
         if warnings:
             payload["warnings"] = warnings
-        sys.stdout.write(json.dumps(payload) + "\n")
+        _write_payload(payload)
         return 0
     except Exception as e:
         # The core claim already committed; without a dispatch no worker will ever submit
@@ -603,7 +609,7 @@ def handle_status(args: List[str]) -> int:
         }
         if warnings:
             payload["warnings"] = warnings
-        sys.stdout.write(json.dumps(payload) + "\n")
+        _write_payload(payload)
         return 0
     except (OrchestrationSessionError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else str(e.code)

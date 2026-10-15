@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from gh_address_cr.core import paths as core_paths
 from gh_address_cr.core.remediation import remediation_for
@@ -48,22 +48,33 @@ def prepend_optional(value: str | None, args: list[str]) -> list[str]:
     return [*([value] if value else []), *args]
 
 
-def _note_reason_code(reason_code: object) -> None:
-    """Telemetry only: a failed command's reason code is what makes its outcome diagnosable."""
+def note_summary_reason_code(payload: Mapping[str, Any]) -> None:
+    """Telemetry only: record the reason code a command's machine summary carries.
+
+    A failed command's reason code is what makes its outcome diagnosable, so every
+    summary emitter routes through here instead of noting codes per call site.
+    """
     from gh_address_cr.core.telemetry_runtime import note_command_reason_code
 
-    note_command_reason_code(reason_code if isinstance(reason_code, str) else None)
+    reason_code = payload.get("reason_code")
+    # A payload without a code (a manifest, a listing) must not erase one already recorded.
+    if isinstance(reason_code, str):
+        note_command_reason_code(reason_code)
+
+
+def write_json_summary(payload: Mapping[str, Any]) -> None:
+    """Write a machine summary to stdout and record its reason code for telemetry."""
+    note_summary_reason_code(payload)
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def output_workflow_error(exc: Any, *, repo: str, pr_number: str) -> int:
-    _note_reason_code(getattr(exc, "reason_code", None))
-    sys.stdout.write(json.dumps(exc.to_summary(repo=repo, pr_number=pr_number), indent=2, sort_keys=True) + "\n")
+    write_json_summary(exc.to_summary(repo=repo, pr_number=pr_number))
     print(str(exc), file=sys.stderr)
     return int(exc.exit_code)
 
 
 def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, message: str) -> int:
-    _note_reason_code(reason_code)
     payload = {
         "status": "FAILED",
         "repo": repo,
@@ -73,7 +84,7 @@ def output_generic_agent_error(repo: str, pr_number: str, reason_code: str, mess
         "next_action": message,
         "exit_code": 5,
     }
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     print(message, file=sys.stderr)
     return 5
 
@@ -83,7 +94,6 @@ def output_session_error(exc: Any, *, repo: str | None, pr_number: str | None) -
     from gh_address_cr.core.session import session_error_guidance
 
     guidance = session_error_guidance(exc)
-    _note_reason_code(guidance.get("reason_code"))
     payload = {
         "status": "FAILED",
         "repo": repo,
@@ -94,7 +104,7 @@ def output_session_error(exc: Any, *, repo: str | None, pr_number: str | None) -
             guidance["reason_code"], repo=repo or "<owner/repo>", pr_number=pr_number or "<pr_number>"
         ),
     }
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     print(guidance["next_action"], file=sys.stderr)
     return 5
 
@@ -178,12 +188,11 @@ def emit_scope_resolution_error(payload: dict) -> int:
     # remediation command is built from literal placeholders, not real values.
     # command_templates.quote_arg keeps a "<...>"-shaped argument literal, so the
     # rendered command reads as an instructive template rather than a broken one.
-    _note_reason_code(payload.get("reason_code"))
     payload = {
         **payload,
         "remediation": remediation_for(payload.get("reason_code"), repo="<owner/repo>", pr_number="<pr_number>"),
     }
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     print(payload["next_action"], file=sys.stderr)
     return int(payload["exit_code"])
 
