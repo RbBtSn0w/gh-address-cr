@@ -64,7 +64,7 @@ def thread_node(thread):
     return {
         "id": thread["id"],
         "isResolved": thread["isResolved"],
-        "isOutdated": False,
+        "isOutdated": thread.get("isOutdated", False),
         "path": thread["path"],
         "line": thread["line"],
         "comments": page([comment(row, with_body=False) for row in comments]),
