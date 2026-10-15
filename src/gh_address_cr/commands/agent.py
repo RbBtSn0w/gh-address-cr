@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from datetime import datetime
@@ -23,6 +22,7 @@ from gh_address_cr.commands.common import (
     output_generic_agent_error,
     output_session_error,
     output_workflow_error,
+    write_json_summary,
 )
 from gh_address_cr.commands.common import (
     prepend_optional as _prepend_optional,
@@ -117,7 +117,7 @@ def _route_agent_command(args: argparse.Namespace) -> int:
         )
         return 0
     if args.repo == "manifest" and not args.pr_number and not args.args:
-        sys.stdout.write(json.dumps(build_agent_manifest(), indent=2, sort_keys=True) + "\n")
+        write_json_summary(build_agent_manifest())
         return 0
     handler = _AGENT_HANDLERS.get(args.repo)
     if handler is not None:
@@ -188,7 +188,7 @@ def handle_agent_classify(repo: str | None, passthrough: list[str]) -> int:
         )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -238,7 +238,7 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
             )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -267,7 +267,7 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
         )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -408,7 +408,7 @@ def handle_agent_resolve(repo: str | None, passthrough: list[str]) -> int:
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     payload.setdefault("published", _resolve_published_flag(payload))
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -851,7 +851,7 @@ def handle_agent_evidence(repo: str | None, passthrough: list[str]) -> int:
             )
     except WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -880,7 +880,7 @@ def handle_agent_publish(repo: str | None, passthrough: list[str]) -> int:
         return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, "PUBLISH_ERROR", str(exc))
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -899,7 +899,7 @@ def handle_agent_leases(repo: str | None, passthrough: list[str]) -> int:
         return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 
@@ -920,7 +920,7 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
         return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, protocol_codes.SESSION_ERROR, str(exc))
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
     return 0
 
 

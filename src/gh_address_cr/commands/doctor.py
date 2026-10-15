@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
+from gh_address_cr.commands.common import write_json_summary
 from gh_address_cr.core import session as session_store
 from gh_address_cr.core.command_runner import run_cmd
 from gh_address_cr.github.diagnostics import classify_github_failure
@@ -96,5 +95,5 @@ def handle_doctor_command(args: argparse.Namespace) -> int:
         else "Rerun the blocked gh-address-cr command.",
         "exit_code": 5 if failed else 0,
     }
-    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    write_json_summary(summary)
     return int(summary["exit_code"])

@@ -25,6 +25,7 @@ from gh_address_cr.commands.common import (
 from gh_address_cr.commands.common import (
     root_passthrough_args as _root_passthrough_args,
 )
+from gh_address_cr.commands.common import write_json_summary
 from gh_address_cr.commands.doctor import handle_doctor_command
 from gh_address_cr.commands.final_gate import handle_final_gate
 from gh_address_cr.commands.high_level import (
@@ -607,7 +608,7 @@ def output_preflight_error(
         )
         if persist:
             persist_machine_summary(repo, pr_number, summary)
-        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        write_json_summary(summary)
     print(message, file=sys.stderr)
     return exit_code
 
@@ -970,7 +971,7 @@ def _dispatch_management_commands(args: argparse.Namespace) -> int | None:
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         compatibility = workflow.runtime_compatibility()
-        sys.stdout.write(json.dumps(compatibility, indent=2, sort_keys=True) + "\n")
+        write_json_summary(compatibility)
         return int(compatibility["exit_code"])
 
     return None

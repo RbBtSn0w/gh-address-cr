@@ -19,6 +19,7 @@ from gh_address_cr.commands.common import (
     maybe_prepend_implicit_scope,
     output_session_error,
     prepend_optional,
+    write_json_summary,
 )
 from gh_address_cr.core import command_templates as core_command_templates
 from gh_address_cr.core import cr_metrics as core_cr_metrics
@@ -144,7 +145,7 @@ def _emit_machine_summary(
             include_sha256=True,
             lifecycle_report=lifecycle_report,
         )
-    sys.stdout.write(json.dumps(machine_summary, indent=2, sort_keys=True) + "\n")
+    write_json_summary(machine_summary)
 
 
 def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: bool) -> int:
@@ -158,18 +159,16 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
             require_required_checks=parsed.require_required_checks,
         )
     except FileNotFoundError as exc:
-        if machine_requested:
-            emit_final_gate_machine_error(
-                parsed.repo,
-                parsed.pr_number,
-                "FINAL_GATE_INPUT_MISSING",
-                str(exc),
-                2,
-                completion_scope="stack_segment",
-                stack_merge_readiness="unknown",
-            )
-        else:
-            print(str(exc), file=sys.stderr)
+        report_final_gate_error(
+            parsed.repo,
+            parsed.pr_number,
+            "FINAL_GATE_INPUT_MISSING",
+            str(exc),
+            2,
+            machine_requested=machine_requested,
+            completion_scope="stack_segment",
+            stack_merge_readiness="unknown",
+        )
         return 2
     except core_stack_gate.StackContextDiscoveryError as exc:
         from gh_address_cr.github.errors import GitHubAuthError
@@ -185,41 +184,37 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
                 f"`{core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number)}`."
             )
         )
-        if machine_requested:
-            emit_final_gate_machine_error(
-                parsed.repo,
-                parsed.pr_number,
-                "STACK_CONTEXT_UNAVAILABLE",
-                message,
-                5,
-                waiting_on="github_auth" if is_auth else "stack_context",
-                completion_scope="stack_segment",
-                stack_merge_readiness="unknown",
-                next_action=next_action,
-                commands={
-                    "address": core_command_templates.address(parsed.repo, parsed.pr_number),
-                    "final_gate_stack": core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number),
-                },
-            )
-        else:
-            print(message, file=sys.stderr)
-            if is_auth:
-                print("GitHub CLI `gh` is not authenticated. Run `gh auth login` before rerunning.", file=sys.stderr)
+        report_final_gate_error(
+            parsed.repo,
+            parsed.pr_number,
+            "STACK_CONTEXT_UNAVAILABLE",
+            message,
+            5,
+            machine_requested=machine_requested,
+            waiting_on="github_auth" if is_auth else "stack_context",
+            completion_scope="stack_segment",
+            stack_merge_readiness="unknown",
+            next_action=next_action,
+            commands={
+                "address": core_command_templates.address(parsed.repo, parsed.pr_number),
+                "final_gate_stack": core_command_templates.final_gate_stack(parsed.repo, parsed.pr_number),
+            },
+        )
+        if is_auth and not machine_requested:
+            print("GitHub CLI `gh` is not authenticated. Run `gh auth login` before rerunning.", file=sys.stderr)
         return 5
     except Exception as exc:
         message = f"Stack final gate failed to evaluate: {exc}"
-        if machine_requested:
-            emit_final_gate_machine_error(
-                parsed.repo,
-                parsed.pr_number,
-                "FINAL_GATE_EVALUATION_FAILED",
-                message,
-                5,
-                completion_scope="stack_segment",
-                stack_merge_readiness="unknown",
-            )
-        else:
-            print(message, file=sys.stderr)
+        report_final_gate_error(
+            parsed.repo,
+            parsed.pr_number,
+            "FINAL_GATE_EVALUATION_FAILED",
+            message,
+            5,
+            machine_requested=machine_requested,
+            completion_scope="stack_segment",
+            stack_merge_readiness="unknown",
+        )
         return 5
     note_command_reason_code(stack_result.blocking_reason_code)
     stack_payload = stack_result.to_machine_summary()
@@ -266,7 +261,7 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
             lifecycle_report=lifecycle_report,
         )
     if machine_requested:
-        sys.stdout.write(json.dumps(stack_payload, indent=2, sort_keys=True) + "\n")
+        write_json_summary(stack_payload)
     else:
         emit_stack_final_gate_result(stack_result, stack_artifact, stack_telemetry)
     if not stack_result.passed and not machine_requested:
@@ -319,17 +314,15 @@ def handle_final_gate(repo: str | None, pr_number: str | None, passthrough: list
     except session_store.SessionError as exc:
         return output_session_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     except FileNotFoundError as exc:
-        if machine_requested:
-            emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2)
-        else:
-            print(str(exc), file=sys.stderr)
+        report_final_gate_error(
+            parsed.repo, parsed.pr_number, "FINAL_GATE_INPUT_MISSING", str(exc), 2, machine_requested=machine_requested
+        )
         return 2
     except Exception as exc:
         message = f"Final gate failed to evaluate: {exc}"
-        if machine_requested:
-            emit_final_gate_machine_error(parsed.repo, parsed.pr_number, "FINAL_GATE_EVALUATION_FAILED", message, 5)
-        else:
-            print(message, file=sys.stderr)
+        report_final_gate_error(
+            parsed.repo, parsed.pr_number, "FINAL_GATE_EVALUATION_FAILED", message, 5, machine_requested=machine_requested
+        )
         return 5
 
     note_command_reason_code(result.reason_code)
@@ -553,19 +546,29 @@ def write_stack_final_gate_artifacts(
     return artifact, telemetry_report
 
 
-def emit_final_gate_machine_error(
+def report_final_gate_error(
     repo: str,
     pr_number: str,
     reason_code: str,
     message: str,
     exit_code: int,
     *,
+    machine_requested: bool,
     waiting_on: str = "final_gate",
     completion_scope: str | None = None,
     stack_merge_readiness: str | None = None,
     next_action: str | None = None,
     commands: dict[str, str] | None = None,
 ) -> None:
+    """Report a final-gate failure that happened before a gate result existed.
+
+    The reason code is recorded for telemetry in both output modes; only machine mode
+    writes the JSON summary, while human mode prints the message to stderr.
+    """
+    if not machine_requested:
+        note_command_reason_code(reason_code)
+        print(message, file=sys.stderr)
+        return
     payload = {
         "status": "BLOCKED",
         "reason_code": reason_code,
@@ -584,7 +587,7 @@ def emit_final_gate_machine_error(
         payload["stack_merge_readiness"] = stack_merge_readiness
     if commands is not None:
         payload["commands"] = commands
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_summary(payload)
 
 
 def rewrite_archived_efficiency_report_path(summary_path: Path, report_artifact: str) -> None:

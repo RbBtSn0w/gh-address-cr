@@ -228,9 +228,13 @@ next efficiency report's `telemetry_overhead_ms` (see
 a 200 ms build margin, so a single timed-out export cannot raise
 `TELEMETRY_OVERHEAD_EXCEEDED` on its own. The root span also carries the previous
 invocation's wait as `gh_address_cr.telemetry.previous_shutdown_wait_ms` (plus
-`gh_address_cr.telemetry.previous_shutdown_timed_out`), and a failing command's
+`gh_address_cr.telemetry.previous_shutdown_timed_out`), and the command's
 `gh_address_cr.command.reason_code` (see
-`docs/rfcs/042-telemetry-overhead-signal/preflight.md`).
+`docs/rfcs/042-telemetry-overhead-signal/preflight.md`). The reason code is the
+one the command's JSON summary carries, on failure and success alike: every
+summary is written through one writer (`write_json_summary` in
+`src/gh_address_cr/commands/common.py`) that records it, and human-mode output
+records the same code without printing JSON.
 
 The root span's `gh_address_cr.command.name` and `gh_address_cr.command.path` are
 built only from a fixed set of names, never from raw argv text: a dispatched
