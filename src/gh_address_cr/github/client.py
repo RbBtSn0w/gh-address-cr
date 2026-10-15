@@ -679,7 +679,9 @@ def _head_ref_lagging(payload: dict[str, Any]) -> bool:
     head_ref = payload.get("headRef")
     target = head_ref.get("target") if isinstance(head_ref, dict) else None
     target_oid = target.get("oid") if isinstance(target, dict) else None
-    return bool(target_oid) and target_oid != payload.get("headRefOid")
+    # Both sides must be present: a missing `headRefOid` is a malformed read, not a lag to wait out.
+    head_ref_oid = payload.get("headRefOid")
+    return bool(target_oid) and bool(head_ref_oid) and target_oid != head_ref_oid
 
 
 def _record_head_ref_lag(reads: int, outcome: str) -> None:

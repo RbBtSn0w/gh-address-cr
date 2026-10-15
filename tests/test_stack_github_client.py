@@ -289,6 +289,23 @@ class HeadRefLagTests(unittest.TestCase):
         self.assertEqual(len(runner.calls), 1)
         sleep.assert_not_called()
 
+    def test_missing_head_ref_oid_is_not_lag(self, sleep):
+        # A missing `headRefOid` is a malformed read; it must not pass as lag and mask itself.
+        unstacked = lagging(load_stacked_pr_fixture("absent.json"))
+        unstacked["data"]["repository"]["pullRequest"]["headRefOid"] = None
+        stacked = lagging_member(load_stacked_pr_fixture("three_layer.json"), 0)
+        stacked["data"]["repository"]["pullRequest"]["stack"]["entries"]["nodes"][1]["pullRequest"]["headRefOid"] = None
+        for payload in (unstacked, stacked):
+            runner = payload_runner(payload)
+
+            context = GitHubClient(runner=runner).get_stack_context("octo/example", "102")
+
+            with self.subTest(stacked=payload is stacked):
+                self.assertEqual(context.availability, "invalid")
+                self.assertNotEqual(context.invalid_invariant, "head_ref_oid_lag")
+                self.assertEqual(len(runner.calls), 1)
+        sleep.assert_not_called()
+
     def test_reread_that_turns_into_a_real_defect_is_not_reported_converged(self, sleep):
         defect = load_stacked_pr_fixture("absent.json")
         defect["data"]["repository"]["pullRequest"]["headRef"] = None
