@@ -61,7 +61,6 @@ from gh_address_cr.core.utils import (
     publish_outcome_status as _publish_outcome_status,
 )
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
-from gh_address_cr.core.workflow_matching import FIX_ALL_STALE_ROUTE_REASON
 from gh_address_cr.evidence.ledger import EvidenceRecord
 
 EVIDENCE_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -391,7 +390,7 @@ def _validate_fix_all_input_stale_threads(repo: str, pr_number: str, batch: dict
     )
     raise WorkflowError(
         status=protocol_codes.FAST_FIX_ALL_REJECTED,
-        reason_code=FIX_ALL_STALE_ROUTE_REASON,
+        reason_code=protocol_codes.STALE_THREADS_REQUIRE_RESOLVE_STALE,
         waiting_on="stale_resolution_input",
         exit_code=4,
         message=next_action,

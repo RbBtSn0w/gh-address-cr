@@ -1,6 +1,6 @@
 import unittest
 
-from gh_address_cr.core import protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.remediation import remediation_for
 
@@ -22,6 +22,88 @@ class TestRemediation(unittest.TestCase):
         result = remediation_for(protocol_codes.MISSING_CLASSIFICATION, repo="owner/repo", pr_number="123")
 
         self.assertIn("agent classify", result["command"])
+
+    def test_commit_not_in_pr_says_push_and_rerun_the_rejected_command(self):
+        # Abbreviations of four or more characters already match (commit_membership), so
+        # an agent told only "COMMIT_NOT_IN_PR" blames the short SHA instead of the push (#366).
+        # The code is raised from resolve, submit, --closed, --input and --files routes, so
+        # the summary must send the agent back to the command it ran, flags included.
+        result = remediation_for(protocol_codes.COMMIT_NOT_IN_PR, repo="owner/repo", pr_number="123")
+
+        summary = result["summary"]
+        self.assertNotIn("Consult `references/status-action-map.md`", summary)
+        self.assertIn("push", summary.lower())
+        self.assertIn("four or more characters", summary)
+        self.assertIn("HEAD", summary)
+        self.assertIn("rerun the rejected command", summary)
+        self.assertIn("--closed", summary)
+        self.assertIn("fix_reply.commit_hash", summary)
+        self.assertEqual(result["command"], command_templates.address("owner/repo", "123"))
+
+    def test_commit_not_in_pr_on_publish_routes_to_publish(self):
+        from unittest.mock import MagicMock, patch
+
+        from gh_address_cr.core import publisher
+
+        client = MagicMock()
+        client.list_pr_commit_shas.return_value = ["a" * 40]
+        session = {"items": {}}
+        with (
+            patch.object(publisher, "_record_publish_blocked"),
+            patch.object(publisher.session_store, "save_session"),
+            patch.object(
+                publisher,
+                "project_context_summary",
+                return_value={"pull_request": {"head_ref": "feature"}},
+            ),
+        ):
+            with self.assertRaises(WorkflowError) as ctx:
+                publisher._require_fallback_commit_in_pr(
+                    session, None, "github-thread:T1", "agent", "owner/repo", "123", client, "b" * 40
+                )
+
+        summary = ctx.exception.to_summary(repo="owner/repo", pr_number="123")
+        self.assertEqual(summary["reason_code"], protocol_codes.COMMIT_NOT_IN_PR)
+        self.assertIn("agent publish", summary["remediation"]["command"])
+        self.assertNotIn("agent resolve", summary["remediation"]["command"])
+        self.assertIn("`feature`", summary["remediation"]["summary"])
+
+    def test_commit_not_in_pr_on_batch_leaves_batch_recovery_in_charge(self):
+        # BATCH_ACTION_REJECTED also comes from the runtime-written `--files`/`--stale`
+        # batches, and `_augment_batch_recovery_error` merges the raise-site payload last.
+        # A raise-site remediation would name a batch file those callers never wrote and
+        # would replace the partial-acceptance "do not resubmit this file" remediation.
+        from unittest.mock import patch
+
+        from gh_address_cr.core import agent_protocol_submission as submission
+
+        session = {"repo": "owner/repo", "pr_number": "123"}
+        with patch.object(submission, "record_response_rejected"):
+            with self.assertRaises(WorkflowError) as ctx:
+                submission.raise_response_rejected(
+                    session,
+                    None,
+                    {"lease_id": "lease_1"},
+                    protocol_codes.COMMIT_NOT_IN_PR,
+                    status=protocol_codes.BATCH_ACTION_REJECTED,
+                )
+
+        self.assertNotIn("remediation", ctx.exception.payload)
+        message = str(ctx.exception)
+        self.assertIn("rerun the rejected command", message)
+        self.assertIn("batch file", message)
+
+    def test_stale_route_code_routes_to_resolve_stale(self):
+        result = remediation_for(
+            protocol_codes.STALE_THREADS_REQUIRE_RESOLVE_STALE, repo="owner/repo", pr_number="123"
+        )
+
+        self.assertNotIn("Consult `references/status-action-map.md`", result["summary"])
+        # Only the `--input` batch guard can emit this code: `--files` selections drop
+        # stale rows before routing, so the summary must lead with the batch.
+        self.assertIn("`--input` batch", result["summary"])
+        self.assertIn("--stale", result["command"])
+        self.assertIn("--commit", result["command"])
 
     def test_open_missing_family_is_absorbed_by_the_prefix_rule(self):
         # `required_response_field` mints codes from f"MISSING_{field.upper()}", so codes

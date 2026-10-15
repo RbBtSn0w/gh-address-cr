@@ -33,7 +33,6 @@ from gh_address_cr.core.utils import normalize_string_list as _normalize_string_
 from gh_address_cr.core.utils import publish_outcome_status
 
 FIX_ALL_PER_THREAD_EVIDENCE_REASON = "PER_THREAD_EVIDENCE_REQUIRED"
-FIX_ALL_STALE_ROUTE_REASON = "STALE_THREADS_REQUIRE_RESOLVE_STALE"
 
 MATCHING_THREAD_FAILURE_STATUS = {
     ("FAST_FIX_ALL", False): "FAST_FIX_ALL_NO_ACCEPTED",
@@ -221,7 +220,7 @@ def _enforce_fast_fix_routing(
         )
         raise WorkflowError(
             status=ctx.rejected_status,
-            reason_code=FIX_ALL_STALE_ROUTE_REASON,
+            reason_code=protocol_codes.STALE_THREADS_REQUIRE_RESOLVE_STALE,
             waiting_on="stale_resolution_input",
             exit_code=4,
             message=next_action,

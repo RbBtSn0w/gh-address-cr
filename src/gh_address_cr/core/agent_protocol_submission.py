@@ -610,11 +610,14 @@ def _response_rejection_message(payload_name: str, reason_code: str, *, repo: st
             f"`gh-address-cr agent submit {repo} {pr_number} --input <response.json>`."
         )
     if reason_code == protocol_codes.COMMIT_NOT_IN_PR:
+        # A BatchActionResponse also comes from the runtime-written `--files`/`--stale`
+        # selections, so "rerun what was rejected" is the only advice right for every route.
         return (
             f"{payload_name} rejected: COMMIT_NOT_IN_PR. The cited commit is not one of this pull request's "
-            "commits. Push the fix to the PR branch, then resubmit citing that commit "
-            f"(`gh-address-cr agent resolve {repo} {pr_number} <item_id> --commit <sha> ...` or "
-            '`"fix_reply": {"commit_hash": "<sha>"}`).'
+            "commits: cite a hex SHA of at least four characters (not a ref such as HEAD) of a commit pushed "
+            "to the PR branch, then rerun the rejected command with it "
+            f"(`--commit <sha>` on `gh-address-cr agent resolve {repo} {pr_number} ...`, or "
+            '`"fix_reply": {"commit_hash": "<sha>"}` in the response or batch file).'
         )
     return f"{payload_name} rejected: {reason_code}"
 
