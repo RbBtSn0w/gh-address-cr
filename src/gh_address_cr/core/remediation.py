@@ -78,7 +78,9 @@ def remediation_for(reason_code: str | None, *, repo: str, pr_number: str) -> di
                 "citing it, keeping its other flags (such as `--closed`): `--commit` on `agent resolve`, or "
                 "`fix_reply.commit_hash` in the file passed to `agent submit` / `agent resolve --input`."
             ),
-            "command": command_templates.resolve_single(repo, pr_number),
+            # Raised from item, submit, --closed, --input and --files routes: any single
+            # route-specific template would send some of them down the wrong path.
+            "command": command_templates.address(repo, pr_number),
         }
 
     if code == protocol_codes.STALE_THREADS_REQUIRE_RESOLVE_STALE:

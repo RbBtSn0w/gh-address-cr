@@ -1,6 +1,6 @@
 import unittest
 
-from gh_address_cr.core import protocol_codes
+from gh_address_cr.core import command_templates, protocol_codes
 from gh_address_cr.core.errors import WorkflowError
 from gh_address_cr.core.remediation import remediation_for
 
@@ -38,7 +38,7 @@ class TestRemediation(unittest.TestCase):
         self.assertIn("rerun the rejected command", summary)
         self.assertIn("--closed", summary)
         self.assertIn("fix_reply.commit_hash", summary)
-        self.assertIn("agent resolve", result["command"])
+        self.assertEqual(result["command"], command_templates.address("owner/repo", "123"))
 
     def test_commit_not_in_pr_on_publish_routes_to_publish(self):
         from unittest.mock import MagicMock, patch
