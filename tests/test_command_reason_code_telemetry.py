@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import os
-import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +15,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import gh_address_cr
 from gh_address_cr.commands.common import (
     emit_scope_resolution_error,
     output_generic_agent_error,
@@ -263,17 +262,61 @@ class MachineSummaryChokePointContractTests(unittest.TestCase):
     NON_SUMMARY_WRITERS = {
         "commands/review_to_findings.py": 1,  # the normalized findings array itself
     }
-    # `\s*` also catches a call wrapped as `print(\n    json.dumps(...)\n)`.
-    STDOUT_JSON = re.compile(r"(?:sys\.stdout\.write|print)\(\s*json\.dumps\(|json\.dump\([^)]*sys\.stdout")
+
+    @staticmethod
+    def _dotted(node: ast.AST) -> str:
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        return ".".join(reversed(parts))
+
+    @classmethod
+    def stdout_json_writes(cls, source: str) -> int:
+        """Count `print(json.dumps(...))`, `sys.stdout.write(json.dumps(...))` and `json.dump(..., sys.stdout)`.
+
+        Parsed, not pattern-matched, so line wrapping and nested calls in arguments cannot hide a write.
+        """
+        count = 0
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = cls._dotted(node.func)
+            if func in {"print", "sys.stdout.write"}:
+                # The serialized payload may be wrapped, e.g. `json.dumps(...) + "\\n"`.
+                count += bool(node.args) and any(
+                    isinstance(inner, ast.Call) and cls._dotted(inner.func) == "json.dumps"
+                    for inner in ast.walk(node.args[0])
+                )
+            elif func == "json.dump":
+                targets = node.args[1:2] + [kw.value for kw in node.keywords if kw.arg == "fp"]
+                count += any(cls._dotted(target) == "sys.stdout" for target in targets)
+        return count
+
+    def test_stdout_json_scan_sees_wrapped_and_nested_calls(self):
+        for source in (
+            "print(json.dumps(x))",
+            "print(\n    json.dumps(x)\n)",
+            "sys.stdout.write(json.dumps(make(x)))",
+            "json.dump(make_payload(), sys.stdout)",
+            "json.dump(x, fp=sys.stdout, indent=2)",
+            'sys.stdout.write(json.dumps(x, indent=2) + "\\n")',
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(self.stdout_json_writes(source), 1)
+        self.assertEqual(self.stdout_json_writes("json.dump(x, handle)\nprint(json.loads(s))"), 0)
 
     def test_json_stdout_writes_only_happen_in_reason_code_aware_writers(self):
-        # Scan the package the other tests here import, not a path assumed from the checkout layout.
-        package = Path(gh_address_cr.__file__).resolve().parent
+        # A static scan of this checkout's source: the imported package can resolve to another
+        # tree (an editable install from a different worktree), so it is not the scan target.
+        package = Path(__file__).resolve().parents[1] / "src" / "gh_address_cr"
         offenders = []
         for path in sorted(package.rglob("*.py")):
             relative = path.relative_to(package).as_posix()
             text = path.read_text(encoding="utf-8")
-            count = len(self.STDOUT_JSON.findall(text))
+            count = self.stdout_json_writes(text)
             if relative in self.NON_SUMMARY_WRITERS:
                 self.assertEqual(count, self.NON_SUMMARY_WRITERS[relative], relative)
             elif relative in self.ALLOWED_WRITERS:
