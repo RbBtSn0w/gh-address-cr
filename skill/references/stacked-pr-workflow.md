@@ -50,7 +50,9 @@ session per stack member, not one shared review session. For a stack with bottom
 Stack merge operations remain GitHub-owned. A direct merge of a selected member
 includes all lower unmerged members in one atomic contiguous operation; if one
 member is blocked, none of that group merges. A merge-queue submission is not a
-completed merge; observe the queue and final PR states before claiming success. Use `gh stack sync` for routine
+completed merge; observe the queue and final PR states before claiming success.
+
+Use `gh stack sync` for routine
 synchronization and `gh stack rebase` only when an explicit cascading rebase is
 needed. After either operation, refresh every affected member, discard stale
 ActionRequests and validation evidence, and repeat the corresponding PR-scoped
@@ -129,8 +131,8 @@ feature dependencies were established. Do not attribute such a check to the
 runtime unless its machine contract actually reports it.
 
 When the user requests overall Stack readiness or merge, run final-gate --stack
-through the selected upper member, with --require-checks or the required-checks
-mode appropriate to the task, after propagation is proven. Single-PR requests
+through the selected upper member, with `--require-checks` or
+`--require-required-checks` as appropriate to the task, after propagation is proven. Single-PR requests
 remain single-PR scope and do not silently authorize merging or rewriting peers.
 
 For FINAL_GATE_STALE_REVISION_EVIDENCE, compare old and current content trees and
