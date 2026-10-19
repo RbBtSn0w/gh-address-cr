@@ -1,0 +1,63 @@
+{
+  "earlier_snapshot": {
+    "101": "a2",
+    "102": "b1",
+    "103": "c1"
+  },
+  "latest_remote_members": [
+    {
+      "pr": 101,
+      "state": "MERGED"
+    },
+    {
+      "pr": 102,
+      "head": "b2",
+      "tree": "tb2",
+      "base": "trunk",
+      "checks": "green",
+      "review_gate": "PASSED"
+    },
+    {
+      "pr": 103,
+      "head": "c1",
+      "tree": "tc1",
+      "base": "feature/b",
+      "checks": "green",
+      "review_gate": "PASSED"
+    }
+  ],
+  "local_stack_view": {
+    "102": "b1",
+    "103": "c1"
+  },
+  "git_observations": {
+    "b2_is_ancestor_of_c1": false
+  },
+  "tests": [
+    {
+      "checkout": "feature/b",
+      "head": "b1",
+      "tree": "tb1",
+      "result": "passed"
+    }
+  ],
+  "cached_runtime_evidence": {
+    "102": {
+      "head": "b1",
+      "tree": "tb1"
+    },
+    "103": {
+      "head": "c1",
+      "tree": "tc1"
+    }
+  },
+  "possible_next_tool_result": {
+    "operation": "native push",
+    "updated": [
+      102
+    ],
+    "rejected": [
+      103
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "local_checkout": "feature/a",
+  "members": [
+    {
+      "pr": 101,
+      "head": "a2",
+      "parent": "trunk",
+      "review_gate": "PASSED",
+      "completion_scope": "pull_request",
+      "checks": "green",
+      "unresolved": 0
+    },
+    {
+      "pr": 102,
+      "head": "b1",
+      "parent": "a1",
+      "base_branch": "feature/a",
+      "checks": "green",
+      "unresolved": 0
+    },
+    {
+      "pr": 103,
+      "head": "c1",
+      "parent": "b1",
+      "base_branch": "feature/b",
+      "checks": "green",
+      "unresolved": 0
+    }
+  ],
+  "git_observations": {
+    "a1_is_ancestor_of_a2": true,
+    "a2_is_ancestor_of_b1": false
+  },
+  "recent_actions": [
+    "PR101 lower-layer repair a2 was committed, validated and pushed.",
+    "PR101 replies were published and its final-gate passed."
+  ],
+  "coderabbit": "idle"
+}
