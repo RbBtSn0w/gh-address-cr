@@ -131,11 +131,20 @@ Work bottom-up and use `gh-address-cr final-gate <owner/repo> <pr_number>
 stack creation, checkout, rebase, push, modification, queueing, merge, and
 unstack operations to GitHub's `gh stack` tooling.
 
+Before claiming a multi-PR monitor or review is complete, read
+`references/stacked-pr-workflow.md`. Track any pending lower-to-upper propagation
+through its handoff and return check. A passing selected-PR gate does not prove
+that upper branches contain that repair. A request to finish or merge the whole
+Stack requests aggregate proof even when the user does not name `--stack`.
+
 If feedback arrives on a lower member while development is on an upper member,
 do not apply the fix to the upper branch. Read the owning PR and head branch
 from `ActionRequest.repository_context.stack_context.selected_pr`, then use the
 authorized handoff in `references/stacked-pr-workflow.md`. The review worker
-must stop rather than switching branches or propagating the stack itself.
+must pause that item and hand it off rather than switching branches or
+propagating the stack itself. Reuse existing user authorization where it covers
+the separate workflow; obtain only missing authority and keep independent work
+moving.
 
 If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`,
 `clarify`, `defer`, or `reject` through runtime evidence, then rerun the same
