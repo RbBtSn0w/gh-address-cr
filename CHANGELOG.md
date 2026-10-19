@@ -1,3 +1,9 @@
+## [3.21.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.0...v3.21.1) (2026-10-19)
+
+### Bug Fixes
+
+* **skill:** close stack review propagation handoff ([#371](https://github.com/RbBtSn0w/gh-address-cr/issues/371)) ([2982f90](https://github.com/RbBtSn0w/gh-address-cr/commit/2982f90c6a3bd8bee19aa654cb5638d2878763f1))
+
 ## [3.21.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.20.1...v3.21.0) (2026-10-15)
 
 ### Features
