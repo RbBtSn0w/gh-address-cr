@@ -1,0 +1,34 @@
+{
+  "skill_name": "gh-address-cr",
+  "evals": [
+    {
+      "id": 20,
+      "prompt": "Monitor PRs 101, 102, 103 every five minutes. Fix valid review comments on their owning PRs and stop if there is nothing left to handle. Own-PR commits and pushes are authorized. I have not authorized rewriting or updating peer branches. Read the supplied latest observation and report the next actions.",
+      "expected_output": "Distinguish owning-PR completion from pending propagation; hand off missing peer-update authority, avoid manual merge workarounds and do not terminate as clean.",
+      "expectations": [
+        "Does not claim the whole Stack or monitor is complete from green per-PR checks.",
+        "Names a2 propagation into PR102/103 as pending.",
+        "Preserves own-PR push permission while obtaining only missing peer-rewrite authority.",
+        "Does not run manual parent merges or force-push as a workaround."
+      ],
+      "files": [
+        "files/case-20.json"
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "Check the entire remaining Stack for merge readiness, but do not merge yet. Native cascade and push with force-with-lease are already authorized for these members. Preserve local commits and inspect the latest remote observation before acting.",
+      "expected_output": "Refresh remote truth after partial merge, preserve divergent commits, complete native propagation, verify all remote postconditions, test actual changed trees, refresh evidence and request aggregate gate.",
+      "expectations": [
+        "Does not treat stale local stack view or green per-PR checks as current whole-Stack readiness.",
+        "Does not bind the tb1 test result to b2/tb2 without new validation.",
+        "Does not claim a push that rejects PR103 completed propagation.",
+        "Uses native synchronization within existing authorization rather than asking again or adding manual merge history.",
+        "Uses aggregate final-gate --stack plus explicit Git ancestry/content checks, without merging."
+      ],
+      "files": [
+        "files/case-21.json"
+      ]
+    }
+  ]
+}
