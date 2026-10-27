@@ -57,6 +57,7 @@ ORACLE_MODULE = "eval_oracle_test"
 SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_PID$|CLAUDE_EFFORT$|CLAUDE_PREVIEW_|"
                           r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$)|_PAT$|_TOKEN$")
 CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Skill"
+SUBPROCESS_TIMEOUT_S = 300
 GH_WRITE_MARKERS = ("mutation", "addPullRequestReviewThreadReply", "resolveReviewThread")
 
 
@@ -65,7 +66,11 @@ class EvalError(RuntimeError):
 
 
 def git(cwd: Path, *args: str, env: dict[str, str] | None = None) -> str:
-    completed = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True,
+                                   timeout=SUBPROCESS_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise EvalError(f"git {args[0]} timed out") from exc
     if completed.returncode != 0:
         raise EvalError(f"git {' '.join(args)} failed: {completed.stderr.strip()}")
     return completed.stdout.strip()
@@ -155,6 +160,8 @@ def fixture_env(run_dir: Path, bin_dir: Path, conversation_id: str) -> dict[str,
             "GH_ADDRESS_CR_STATE_DIR": str(run_dir / "state"),
             "GH_ADDRESS_CR_CONVERSATION_ID": conversation_id,
             "DISABLE_TELEMETRY": "1",
+            # Keeps test runs from leaving __pycache__ for `git add -A` to commit.
+            "PYTHONDONTWRITEBYTECODE": "1",
             "FAKE_GH_STATE": str(run_dir / "gh-state.json"),
             "FAKE_GH_REMOTE": str(run_dir / "origin.git"),
             "FAKE_GH_CALLERS": str(run_dir / "gh-callers.jsonl"),
@@ -258,13 +265,17 @@ def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str) -
 
 
 def run_runtime(fixture: Fixture, *args: str) -> dict[str, Any]:
-    completed = subprocess.run(
-        [str(runtime_bin() / "gh-address-cr"), *args],
-        cwd=fixture.checkout,
-        env=fixture.env,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            [str(runtime_bin() / "gh-address-cr"), *args],
+            cwd=fixture.checkout,
+            env=fixture.env,
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise EvalError(f"gh-address-cr {step_label(list(args))} timed out") from exc
     stdout = completed.stdout.strip()
     payload: dict[str, Any] = {}
     if "{" in stdout:
@@ -275,6 +286,11 @@ def run_runtime(fixture: Fixture, *args: str) -> dict[str, Any]:
     payload["_exit_code"] = completed.returncode
     payload["_output"] = completed.stdout + completed.stderr
     return payload
+
+
+def step_label(args: list[str]) -> str:
+    """The same `agent resolve`-style label the Claude trace records, without operands."""
+    return " ".join(args[:2]) if args[0] in ("agent", "telemetry") else args[0]
 
 
 def scripted_resolve_args(fixture: Fixture, item: dict[str, Any], commit: str, files: list[str]) -> list[str]:
@@ -312,7 +328,7 @@ def run_scripted(fixture: Fixture) -> dict[str, Any]:
     commands += [["agent", "publish", fixture.repo, fixture.pr], ["final-gate", fixture.repo, fixture.pr]]
     for args in commands:
         result = run_runtime(fixture, *args)
-        steps.append({"command": args[:2], "exit_code": result["_exit_code"], "status": result.get("status"),
+        steps.append({"command": step_label(args), "exit_code": result["_exit_code"], "status": result.get("status"),
                       "reason_code": result.get("reason_code")})
     return {"agent": "scripted", "exit_code": 0, "steps": steps}
 
@@ -598,15 +614,16 @@ def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: P
     sample = load_sample(sample_id)
     run_out = out_dir / sample_id / f"run-{repeat}"
     run_out.mkdir(parents=True, exist_ok=True)
-    fixture = build_fixture(sample, work_root / f"{sample_id}-{repeat}", f"eval-{out_dir.name}-{sample_id}-{repeat}")
+    run_dir = work_root / f"{sample_id}-{repeat}"
     try:
+        fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}")
         agent = run_scripted(fixture) if options.agent == "scripted" else run_claude(fixture, options, run_out)
         record = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat, "agent": agent, **grade(fixture)}
     except EvalError as exc:
         record = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat, "error": str(exc)}
     finally:
         if not options.keep:
-            shutil.rmtree(fixture.run_dir, ignore_errors=True)
+            shutil.rmtree(run_dir, ignore_errors=True)
     record["passed"] = all((record.get(name) or {}).get("passed") for name in CRITERIA)
     (run_out / "run.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return record

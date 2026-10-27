@@ -8,6 +8,7 @@ to GitHub around the runtime.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import importlib.util
 import json
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.helpers import ROOT
 
@@ -185,6 +187,41 @@ class FindingResolutionEvalTests(unittest.TestCase):
         conflict_row = summary["deviations"]["RESOLVE_AXIS_CONFLICT"]
         self.assertEqual((conflict_row["runs"], conflict_row["next_steps"]), (["b#1"], {"agent resolve": 1}))
         self.assertIn("Verified remediation", EVAL.render_markdown(summary))
+
+    def test_scripted_step_with_an_off_path_code_reaches_the_summary(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        steps = EVAL.run_scripted(fixture)["steps"]
+        self.assertEqual([step["command"] for step in steps], ["address", "agent resolve", "agent publish", "final-gate"])
+        # The scripted shape: string label, scalar reason_code. A failed control must still summarize.
+        steps[-1]["reason_code"] = "FINAL_GATE_MISSING_REPLY_EVIDENCE"
+        record = {"sample": "s", "axis": "baseline", "repeat": 1, "passed": False, "agent": {"steps": steps}}
+
+        summary = EVAL.aggregate([record], {"run_id": "t", "agent": "scripted", "model": None, "repeats": 1})
+
+        row = summary["deviations"]["FINAL_GATE_MISSING_REPLY_EVIDENCE"]
+        self.assertEqual((row["steps"], row["next_steps"], row["runs_passed"]), ({"final-gate": 1}, {"none": 1}, 0))
+
+    def test_pushed_binary_file_does_not_break_the_fake(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        (fixture.checkout / "app" / "blob.bin").write_bytes(b"\x00\x01\x02")
+        EVAL.git(fixture.checkout, "add", "app/blob.bin", env=fixture.env)
+        EVAL.git(fixture.checkout, "commit", "-q", "-m", "add blob", env=fixture.env)
+        EVAL.git(fixture.checkout, "push", "-q", "origin", "HEAD", env=fixture.env)
+
+        EVAL.run_runtime(fixture, "address", fixture.repo, fixture.pr, "--lean")
+
+        files = {row["filename"]: row for row in fixture.gh_state()["files"]}
+        self.assertEqual(files["app/blob.bin"]["changes"], 0)
+        self.assertTrue(all(call["handled"] for call in fixture.gh_calls()))
+
+    def test_fixture_setup_failure_becomes_a_failed_run_record(self):
+        options = argparse.Namespace(agent="scripted", keep=False)
+        out_dir = self.root / "out"
+        with mock.patch.object(EVAL, "build_fixture", side_effect=EVAL.EvalError("git clone timed out")):
+            record = EVAL.run_one("nonfinite-shutdown-wait", 1, options, out_dir, self.root)
+
+        self.assertEqual((record["passed"], record["error"]), (False, "git clone timed out"))
+        self.assertTrue((out_dir / "nonfinite-shutdown-wait" / "run-1" / "run.json").is_file())
 
     def test_reason_codes_map_to_attribution_axes(self):
         self.assertEqual(EVAL.reason_axis("LEASE_CONFLICT"), "lease")

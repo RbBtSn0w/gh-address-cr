@@ -51,7 +51,9 @@ def sync_pr_head(state):
     files = []
     for line in git("diff", "--numstat", base, head).splitlines():
         added, deleted, name = line.split("\t", 2)
-        additions, deletions = int(added), int(deleted)
+        # numstat prints `-` for binary files.
+        additions = int(added) if added.isdigit() else 0
+        deletions = int(deleted) if deleted.isdigit() else 0
         files.append(
             {
                 "filename": name,
