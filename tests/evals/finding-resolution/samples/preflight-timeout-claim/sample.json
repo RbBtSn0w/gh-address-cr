@@ -4,7 +4,7 @@
   "axis": "classification",
   "purpose": "A false positive: the PR description and code already agree, so the right outcome is a decline with no code change.",
   "source": {
-    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "repository": "RbBtSn0w/gh-address-cr",
     "pr": 363,
     "path": "src/gh_address_cr/cli.py",
     "reviewer": "copilot-pull-request-reviewer",

@@ -4,7 +4,7 @@
   "axis": "lease",
   "purpose": "Two valid findings on one file; both must be claimed, fixed, and published in one session.",
   "source": {
-    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "repository": "RbBtSn0w/gh-address-cr",
     "pr": 327,
     "path": "scripts/compare_telemetry_by_runtime.py",
     "reviewer": "copilot-pull-request-reviewer",

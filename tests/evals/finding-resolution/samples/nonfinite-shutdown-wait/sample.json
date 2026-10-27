@@ -4,7 +4,7 @@
   "axis": "baseline",
   "purpose": "One valid CodeRabbit finding with an embedded agent prompt; the plain fix path.",
   "source": {
-    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "repository": "RbBtSn0w/gh-address-cr",
     "pr": 351,
     "path": "src/gh_address_cr/core/telemetry_shutdown.py",
     "reviewer": "coderabbitai",

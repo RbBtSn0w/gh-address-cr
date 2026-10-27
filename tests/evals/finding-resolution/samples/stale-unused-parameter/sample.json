@@ -4,7 +4,7 @@
   "axis": "recovery",
   "purpose": "An outdated thread whose finding a later PR commit already fixed; it must be closed through stale evidence, not left or re-fixed.",
   "source": {
-    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "repository": "RbBtSn0w/gh-address-cr",
     "pr": 324,
     "path": "src/gh_address_cr/core/workflow.py",
     "reviewer": "copilot-pull-request-reviewer",

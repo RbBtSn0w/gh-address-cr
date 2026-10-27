@@ -4,7 +4,7 @@
   "axis": "verification",
   "purpose": "A valid finding where a naive suffix match breaks an existing test, so running the tests decides the fix.",
   "source": {
-    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "repository": "RbBtSn0w/gh-address-cr",
     "pr": 318,
     "path": "src/gh_address_cr/github/pr_checks.py",
     "reviewer": "copilot-pull-request-reviewer",
