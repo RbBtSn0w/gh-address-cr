@@ -1,0 +1,50 @@
+{
+  "schema": "gh_address_cr_finding_eval_sample.v1",
+  "id": "nonfinite-shutdown-wait",
+  "axis": "baseline",
+  "purpose": "One valid CodeRabbit finding with an embedded agent prompt; the plain fix path.",
+  "source": {
+    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "pr": 351,
+    "path": "src/gh_address_cr/core/telemetry_shutdown.py",
+    "reviewer": "coderabbitai",
+    "handled_as": "fix (d0e9751)"
+  },
+  "pull_request": {
+    "number": 351,
+    "title": "perf(telemetry): bound exit-time export wait and count it in overhead",
+    "head_ref": "perf/telemetry-shutdown-wait",
+    "body": "## Summary\n\n- Record the exit-time telemetry export wait so the next efficiency report can fold it into `telemetry_overhead_ms`.\n\n## Validation\n\n- `python3 -m unittest discover -s tests`\n"
+  },
+  "commits": [
+    {
+      "tree": "head",
+      "message": "perf(telemetry): record the exit-time export wait"
+    }
+  ],
+  "threads": [
+    {
+      "id": "PRRT_eval351nonfinite",
+      "author": "coderabbitai",
+      "body": "threads/nonfinite-wait.md",
+      "path": "app/telemetry_shutdown.py",
+      "anchor": "or value < 0:",
+      "expected": [
+        "fix"
+      ]
+    }
+  ],
+  "reference": {
+    "tree": "solution",
+    "message": "fix(telemetry): reject non-finite shutdown waits",
+    "items": [
+      {
+        "thread": "PRRT_eval351nonfinite",
+        "disposition": "fix",
+        "summary": "Reject NaN and Infinity shutdown waits.",
+        "why": "Persisted telemetry is untrusted; non-finite values must not reach the report."
+      }
+    ]
+  },
+  "oracle": "oracle.py"
+}

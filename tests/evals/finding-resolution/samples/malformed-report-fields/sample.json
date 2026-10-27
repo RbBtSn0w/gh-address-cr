@@ -1,0 +1,66 @@
+{
+  "schema": "gh_address_cr_finding_eval_sample.v1",
+  "id": "malformed-report-fields",
+  "axis": "lease",
+  "purpose": "Two valid findings on one file; both must be claimed, fixed, and published in one session.",
+  "source": {
+    "repository": "RbBtSn0w/gh-address-cr-skill",
+    "pr": 327,
+    "path": "scripts/compare_telemetry_by_runtime.py",
+    "reviewer": "copilot-pull-request-reviewer",
+    "handled_as": "fix (08308e7, 3bd6372)"
+  },
+  "pull_request": {
+    "number": 327,
+    "title": "feat(telemetry): record the runtime build in efficiency reports and compare by it",
+    "head_ref": "feat/compare-by-runtime",
+    "body": "## Summary\n\n- Group archived efficiency reports by runtime build so a regression can be pinned to the build that introduced it.\n\n## Validation\n\n- `python3 -m unittest discover -s tests`\n"
+  },
+  "commits": [
+    {
+      "tree": "head",
+      "message": "feat(telemetry): compare archived efficiency reports by runtime"
+    }
+  ],
+  "threads": [
+    {
+      "id": "PRRT_eval327flags",
+      "author": "copilot-pull-request-reviewer",
+      "body": "threads/string-flags.md",
+      "path": "app/compare_reports.py",
+      "anchor": "row.get(\"inefficiency_flags\") or []",
+      "expected": [
+        "fix"
+      ]
+    },
+    {
+      "id": "PRRT_eval327needs",
+      "author": "copilot-pull-request-reviewer",
+      "body": "threads/needs-action-count.md",
+      "path": "app/compare_reports.py",
+      "anchor": "int(row.get(\"needs_action_count\") or 0)",
+      "expected": [
+        "fix"
+      ]
+    }
+  ],
+  "reference": {
+    "tree": "solution",
+    "message": "fix(telemetry): skip malformed archived report fields",
+    "items": [
+      {
+        "thread": "PRRT_eval327flags",
+        "disposition": "fix",
+        "summary": "Count inefficiency_flags only when it is a list.",
+        "why": "Iterating a string produced one bogus flag kind per character."
+      },
+      {
+        "thread": "PRRT_eval327needs",
+        "disposition": "fix",
+        "summary": "Read needs_action_count through _count(); malformed values count as zero.",
+        "why": "A non-numeric archived value raised and aborted the whole summary."
+      }
+    ]
+  },
+  "oracle": "oracle.py"
+}
