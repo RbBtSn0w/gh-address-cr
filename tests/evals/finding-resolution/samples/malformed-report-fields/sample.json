@@ -34,6 +34,7 @@
       ],
       "oracle_tests": [
         "Oracle.test_string_flags_are_not_split_into_characters",
+        "Oracle.test_mapping_flags_do_not_count_their_keys",
         "Oracle.test_list_flags_still_count"
       ]
     },

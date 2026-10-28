@@ -15,6 +15,11 @@ class Oracle(unittest.TestCase):
         # Wrapping the string in a list or skipping it are both fixes; per-character kinds are not.
         self.assertNotIn("other", kinds)
 
+    def test_mapping_flags_do_not_count_their_keys(self):
+        # The thread names keys as well as characters; a dict is not a flag list.
+        kinds = summarize([report(inefficiency_flags={"address had 3 failures": 1})])["1.0 package"]["flag_kinds"]
+        self.assertEqual(kinds, {})
+
     def test_list_flags_still_count(self):
         kinds = summarize([report(inefficiency_flags=["address had 3 failures"])])["1.0 package"]["flag_kinds"]
         self.assertEqual(kinds, {"error_prone:address": 1})

@@ -56,10 +56,10 @@ class FindingResolutionEvalTests(unittest.TestCase):
         for sample_id in EVAL.sample_ids():
             with self.subTest(sample=sample_id):
                 fixture = self.fixture(sample_id)
-                EVAL.run_scripted(fixture)
+                steps = EVAL.run_scripted(fixture)["steps"]
                 result = EVAL.grade(fixture)
                 for name in EVAL.CRITERIA:
-                    self.assertTrue(result[name]["passed"], (name, result[name]))
+                    self.assertTrue(result[name]["passed"], (name, result[name], steps))
                 self.assertIsNotNone((result["runtime"] or {}).get("version"))
                 self.assertEqual(result["agent_gh_calls"], [])
 
@@ -94,6 +94,21 @@ class FindingResolutionEvalTests(unittest.TestCase):
         self.assertTrue(result["legal_state"]["passed"], "the runtime accepts any commit in the PR")
         self.assertTrue(result["consistent_evidence"]["checks"]["fix_commits_in_pr"])
         self.assertFalse(result["consistent_evidence"]["checks"]["oracle_passes_at_cited_commit"])
+
+    def test_flags_oracle_rejects_a_fix_that_only_skips_strings(self):
+        fixture = self.fixture("malformed-report-fields")
+        clone = EVAL.clone_pushed_head(fixture, "strings-only")
+        module = clone / "app" / "compare_reports.py"
+        module.write_text(module.read_text(encoding="utf-8").replace(
+            '            kinds.update({flag_kind(str(flag)) for flag in row.get("inefficiency_flags") or []})',
+            '            flags = row.get("inefficiency_flags") or []\n'
+            '            if not isinstance(flags, str):\n'
+            '                kinds.update({flag_kind(str(flag)) for flag in flags})',
+        ), encoding="utf-8")
+        flags_thread = next(t for t in fixture.sample["threads"] if t["id"] == "PRRT_eval327flags")
+
+        self.assertFalse(EVAL.run_oracle(fixture, clone, flags_thread["oracle_tests"]),
+                         "a fix that still counts dict keys must not pass the flags finding")
 
     def two_finding_run(self, *, flags_commit):
         """Fix `malformed-report-fields` in two commits: A fixes the flags finding, B the count finding."""
