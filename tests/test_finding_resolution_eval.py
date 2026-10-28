@@ -100,12 +100,15 @@ class FindingResolutionEvalTests(unittest.TestCase):
         fixture = self.fixture("malformed-report-fields")
         clone = EVAL.clone_pushed_head(fixture, "strings-only")
         module = clone / "app" / "compare_reports.py"
-        module.write_text(module.read_text(encoding="utf-8").replace(
+        original = module.read_text(encoding="utf-8")
+        patched = original.replace(
             '            kinds.update({flag_kind(str(flag)) for flag in row.get("inefficiency_flags") or []})',
             '            flags = row.get("inefficiency_flags") or []\n'
             '            if not isinstance(flags, str):\n'
             '                kinds.update({flag_kind(str(flag)) for flag in flags})',
-        ), encoding="utf-8")
+        )
+        self.assertNotEqual(patched, original, "the replacement anchor no longer matches the sample")
+        module.write_text(patched, encoding="utf-8")
         flags_thread = next(t for t in fixture.sample["threads"] if t["id"] == "PRRT_eval327flags")
 
         self.assertFalse(EVAL.run_oracle(fixture, clone, flags_thread["oracle_tests"]),
@@ -211,10 +214,13 @@ class FindingResolutionEvalTests(unittest.TestCase):
         for name in ("src/app.py", "docs/notes.md"):
             (repo / name).parent.mkdir(parents=True, exist_ok=True)
             (repo / name).write_text("one\n", encoding="utf-8")
-        for args in (("init", "-q"), ("add", "-A"), ("-c", "user.name=eval", "-c", "user.email=eval@example.test",
-                                                     "commit", "-q", "-m", "init")):
-            subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
-        with mock.patch.object(EVAL, "ROOT", repo):
+        # A git location override inherited from the host (a hook, say) must not redirect the eval's git calls.
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.root / "elsewhere.git")}), \
+                mock.patch.object(EVAL, "ROOT", repo):
+            for args in (("init", "-q"), ("add", "-A"),
+                         ("-c", "user.name=eval", "-c", "user.email=eval@example.test", "commit", "-q", "-m", "init")):
+                EVAL.git(repo, *args)
+            self.assertFalse((self.root / "elsewhere.git").exists())
             clean = EVAL.checkout_state()
             (repo / "docs" / "notes.md").write_text("two\n", encoding="utf-8")
             self.assertEqual(EVAL.checkout_state(), clean, "a change outside the live inputs is not flagged")

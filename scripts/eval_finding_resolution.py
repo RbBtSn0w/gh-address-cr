@@ -55,9 +55,12 @@ AGENT_LOGIN = "agent-login"
 SCRIPTED_AGENT_ID = "eval-reference"
 FIXTURE_TEST_COMMAND = [sys.executable, "-m", "unittest", "discover", "-s", "tests"]
 ORACLE_MODULE = "eval_oracle_test"
-# Host-session and credential variables a nested agent must not inherit.
+# Host-session and credential variables a nested agent must not inherit, and git location overrides
+# (set inside a git hook, for example) that would point every git call at another repository.
 SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_PID$|CLAUDE_EFFORT$|CLAUDE_PREVIEW_|"
-                          r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$)|_PAT$|_TOKEN$")
+                          r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$|"
+                          r"GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|"
+                          r"NAMESPACE)$)|_PAT$|_TOKEN$")
 CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Skill"
 SUBPROCESS_TIMEOUT_S = 300
 HARNESS_PATHS = ("scripts/eval_finding_resolution.py", "tests/evals/finding-resolution", "tests/test_finding_resolution_eval.py")
@@ -72,6 +75,8 @@ class EvalError(RuntimeError):
 
 
 def git(cwd: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    if env is None:
+        env = {key: value for key, value in os.environ.items() if not SCRUBBED_ENV.search(key)}
     try:
         completed = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True,
                                    timeout=SUBPROCESS_TIMEOUT_S)
