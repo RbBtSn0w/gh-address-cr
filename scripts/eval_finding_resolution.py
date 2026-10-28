@@ -59,6 +59,7 @@ SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_P
                           r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$)|_PAT$|_TOKEN$")
 CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Skill"
 SUBPROCESS_TIMEOUT_S = 300
+HARNESS_PATHS = ("scripts/eval_finding_resolution.py", "tests/evals/finding-resolution", "tests/test_finding_resolution_eval.py")
 GH_WRITE_MARKERS = ("mutation", "addPullRequestReviewThreadReply", "resolveReviewThread")
 
 
@@ -804,7 +805,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"# Finding-resolution eval `{summary['run_id']}`",
         "",
         f"- Agent: `{summary['agent']}`" + (f" (`{summary['model']}`)" if summary.get("model") else ""),
-        f"- Runtime: `{summary.get('runtime_commit')}`; repeats per sample: {summary['repeats']}",
+        f"- Commit: `{summary.get('runtime_commit')}`"
+        + "".join(f" ({name} uncommitted)" for name, key in (("runtime", "runtime_dirty"), ("harness", "harness_dirty"))
+                  if summary.get(key))
+        + f"; repeats per sample: {summary['repeats']}",
         f"- Passed: **{summary['passed']}/{summary['runs']}** runs"
         + (f"; cost ${summary['total_cost_usd']:.2f}" if summary.get("total_cost_usd") is not None else ""),
         f"- Evidence consistency: {render_rate(summary['evidence_consistency'], 'runs')}",
@@ -875,6 +879,8 @@ def run_eval(options: argparse.Namespace) -> dict[str, Any]:
         "repeats": options.repeats,
         "runtime_commit": git(ROOT, "rev-parse", "--short", "HEAD"),
         "runtime_dirty": bool(git(ROOT, "status", "--porcelain", "--", "src", "skill")),
+        # The grader is part of the result: uncommitted harness changes are not named by the commit.
+        "harness_dirty": bool(git(ROOT, "status", "--porcelain", "--", *HARNESS_PATHS)),
     }
     records = []
     # Fixtures live outside this repository so a nested agent cannot discover its
@@ -926,8 +932,9 @@ def main(argv: list[str] | None = None) -> int:
     if options.command == "report":
         records = [load_record(path) for path in sorted(options.run_dir.glob("*/run-*/run.json"))]
         meta = json.loads((options.run_dir / "summary.json").read_text(encoding="utf-8"))
-        summary = write_summary(options.run_dir, records, {key: meta[key] for key in
-                                ("run_id", "agent", "model", "repeats", "runtime_commit", "runtime_dirty")})
+        summary = write_summary(options.run_dir, records, {key: meta.get(key) for key in
+                                ("run_id", "agent", "model", "repeats", "runtime_commit", "runtime_dirty",
+                                 "harness_dirty")})
     else:
         summary = run_eval(options)
     sys.stdout.write(render_markdown(summary))
