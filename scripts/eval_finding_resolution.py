@@ -33,6 +33,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -381,6 +382,38 @@ def runtime_subcommand(command: str) -> str | None:
     return match.group(1) if match else None
 
 
+def run_process_group(command: list[str], *, cwd: Path, env: dict[str, str], stdout: Any,
+                      timeout: float) -> tuple[int, str]:
+    """Run the agent as its own process group and stop the whole group before returning.
+
+    Tool processes the agent started can outlive it, on timeout or in the background;
+    grading and fixture cleanup must not race them.
+    """
+    process = subprocess.Popen(command, cwd=cwd, env=env, stdout=stdout, stderr=subprocess.PIPE, text=True,
+                               start_new_session=True)
+    try:
+        _, stderr = process.communicate(timeout=timeout)
+        exit_code = process.returncode
+    except subprocess.TimeoutExpired:
+        exit_code, stderr = 124, "timed out"
+    stop_process_group(process)
+    return exit_code, stderr or ""
+
+
+def stop_process_group(process: subprocess.Popen[str]) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        deadline = time.monotonic() + 5
+        try:
+            os.killpg(process.pid, sig)
+            while time.monotonic() < deadline:
+                process.poll()  # reap the leader so an exited group stops answering
+                os.killpg(process.pid, 0)
+                time.sleep(0.05)
+        # macOS answers EPERM, not ESRCH, for a group left with only zombies; the group is our own child.
+        except (ProcessLookupError, PermissionError):
+            return
+
+
 def run_claude(fixture: Fixture, options: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
     claude = shutil.which("claude", path=fixture.env["PATH"])
     if not claude:
@@ -399,12 +432,8 @@ def run_claude(fixture: Fixture, options: argparse.Namespace, out_dir: Path) -> 
     ]
     started = time.monotonic()
     with transcript.open("w", encoding="utf-8") as handle:
-        try:
-            completed = subprocess.run(command, cwd=fixture.checkout, env=fixture.env, stdout=handle,
-                                       stderr=subprocess.PIPE, text=True, timeout=options.timeout)
-            exit_code, stderr = completed.returncode, completed.stderr
-        except subprocess.TimeoutExpired:
-            exit_code, stderr = 124, "timed out"
+        exit_code, stderr = run_process_group(command, cwd=fixture.checkout, env=fixture.env, stdout=handle,
+                                              timeout=options.timeout)
     trace = claude_trace(transcript)
     result = trace["result"]
     return {
@@ -430,21 +459,33 @@ def latest(paths: list[Path]) -> Path | None:
     return max(paths, key=lambda path: path.stat().st_mtime) if paths else None
 
 
+def read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
 def runtime_artifacts(fixture: Fixture) -> dict[str, Any]:
+    """Evidence of one completion unit: the latest session and the gate, ledger and report beside it.
+
+    A passing gate archives its whole workspace, so these files sit in one directory. Reading
+    them from anywhere else would let an older session's PASSED vouch for the current one.
+    """
     session_path = latest(list(fixture.state_dir.rglob("session.json")))
-    report_path = latest(list(fixture.state_dir.rglob("efficiency-report.json")))
-    ledger = []
-    for path in fixture.state_dir.rglob("evidence.jsonl"):
-        ledger += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    passed = any("reason_code: PASSED" in path.read_text(encoding="utf-8")
-                 for path in fixture.state_dir.rglob("audit_summary.md"))
-    session = json.loads(session_path.read_text(encoding="utf-8")) if session_path else {}
+    unit = session_path.parent if session_path else fixture.state_dir / "missing-session"
+    session = read_json(unit / "session.json")
+    ledger_path = unit / "evidence.jsonl"
+    ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()
+              if line.strip()] if ledger_path.is_file() else []
+    audit_path = unit / "audit_summary.md"
+    passed = audit_path.is_file() and "reason_code: PASSED" in audit_path.read_text(encoding="utf-8")
+    context = (session.get("metadata") or {}).get("pull_request_context") or {}
     return {
         "items": session.get("items", {}),
         "lease_events": len(session.get("lease_events") or []),
-        "report": json.loads(report_path.read_text(encoding="utf-8")) if report_path else {},
+        "report": read_json(unit / "efficiency-report.json"),
         "ledger": ledger,
         "final_gate_passed": passed,
+        # The PR head this session last observed; for a passed gate, the head it gated.
+        "session_head": ((context.get("stack_context") or {}).get("selected_pr") or {}).get("head_oid"),
     }
 
 
@@ -465,6 +506,9 @@ def grade_legal_state(fixture: Fixture, artifacts: dict[str, Any]) -> dict[str, 
     calls = fixture.gh_calls()
     checks = {
         "final_gate_passed": artifacts["final_gate_passed"],
+        # A push after the gate leaves the pushed head unproven.
+        "gate_saw_pushed_head": artifacts["session_head"] == git(
+            fixture.remote, "rev-parse", f"refs/heads/{fixture.sample['pull_request']['head_ref']}", env=fixture.env),
         "all_threads_resolved": all(thread["isResolved"] for thread in threads),
         "every_thread_replied": all(any(row["author"] == AGENT_LOGIN for row in thread["comments"])
                                     for thread in threads),
@@ -489,9 +533,11 @@ def clone_pushed_head(fixture: Fixture, name: str) -> Path:
     return clone
 
 
-def run_oracle(fixture: Fixture, clone: Path) -> bool:
+def run_oracle(fixture: Fixture, clone: Path, tests: list[str] | None = None) -> bool:
+    """Run the hidden oracle, or only the named `Class.test` cases of it."""
     shutil.copyfile(fixture.sample["dir"] / fixture.sample["oracle"], clone / f"{ORACLE_MODULE}.py")
-    return run_in(clone, [sys.executable, "-m", "unittest", ORACLE_MODULE], fixture.env)
+    targets = [f"{ORACLE_MODULE}.{test}" for test in tests] if tests else [ORACLE_MODULE]
+    return run_in(clone, [sys.executable, "-m", "unittest", *targets], fixture.env)
 
 
 def thread_dispositions(fixture: Fixture, items: dict[str, Any]) -> dict[str, str | None]:
@@ -528,35 +574,47 @@ def runnable_validation(command: str) -> list[str] | None:
     return None
 
 
-def oracle_at(fixture: Fixture, sha: str) -> bool:
+def oracle_at_cited_commits(fixture: Fixture, cited: dict[str, str]) -> dict[str, bool]:
+    """Each finding's own oracle cases at the commit its reply cites.
+
+    Binding per finding, not the whole oracle at the newest citation: a wrong citation is
+    caught even when another finding cites a later commit, and sequential fixes (commit A
+    fixes finding A, commit B fixes finding B) still pass.
+    """
+    threads = {f"github-thread:{thread['id']}": thread for thread in fixture.sample["threads"]}
     clone = clone_pushed_head(fixture, "cited")
-    git(clone, "checkout", "-q", sha, env=fixture.env)
-    return run_oracle(fixture, clone)
+    results = {}
+    for item_id, sha in cited.items():
+        git(clone, "checkout", "-q", sha, env=fixture.env)
+        results[item_id] = run_oracle(fixture, clone, (threads.get(item_id) or {}).get("oracle_tests"))
+    return results
 
 
 def grade_evidence(fixture: Fixture, artifacts: dict[str, Any], clone: Path) -> dict[str, Any]:
     head_ref = fixture.sample["pull_request"]["head_ref"]
     pr_commits = git(fixture.remote, "rev-list", "--reverse", f"{fixture.base_sha}..refs/heads/{head_ref}",
                      env=fixture.env).split()
-    fixes = [item for item in artifacts["items"].values()
-             if (item.get("accepted_response") or {}).get("resolution") == "fix"]
-    resolved, validations = [], []
-    for item in fixes:
+    fixes = {item_id: item for item_id, item in artifacts["items"].items()
+             if (item.get("accepted_response") or {}).get("resolution") == "fix"}
+    resolved: dict[str, str | None] = {}
+    validations = []
+    for item_id, item in fixes.items():
         response = item["accepted_response"]
         cited = str((response.get("fix_reply") or {}).get("commit_hash") or "")
-        resolved.append(next((sha for sha in pr_commits if cited and sha.startswith(cited)), None))
+        resolved[item_id] = next((sha for sha in pr_commits if cited and sha.startswith(cited)), None)
         validations.append([row.get("command", "") for row in response.get("validation_commands") or []])
     runnable = [argv for commands in validations for argv in map(runnable_validation, commands) if argv]
-    in_pr = [sha for sha in resolved if sha]
+    in_pr = {item_id: sha for item_id, sha in resolved.items() if sha}
+    # Reachability alone accepts a citation of the commit that introduced the defect.
+    oracle = oracle_at_cited_commits(fixture, in_pr) if len(in_pr) == len(resolved) else {}
     checks = {
-        "fix_commits_in_pr": all(resolved),
+        "fix_commits_in_pr": all(resolved.values()),
         "every_fix_has_validation": all(validations),
         "runnable_validations_pass": all(run_in(clone, argv, fixture.env) for argv in runnable),
-        # Reachability alone accepts a citation of the commit that introduced the defect.
-        "oracle_passes_at_cited_commit": not fixes
-        or (len(in_pr) == len(resolved) and oracle_at(fixture, max(in_pr, key=pr_commits.index))),
+        "oracle_passes_at_cited_commit": len(oracle) == len(fixes) and all(oracle.values()),
     }
     return {"passed": all(checks.values()), "checks": checks, "validation_commands": validations,
+            "oracle_at_cited_commit": oracle,
             "runnable_validation_count": len(runnable),
             # Reported, not gated: SKILL.md allows label-only validation such as `unit-tests=passed`.
             "fix_count": len(validations),
@@ -615,12 +673,15 @@ def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: P
     run_out = out_dir / sample_id / f"run-{repeat}"
     run_out.mkdir(parents=True, exist_ok=True)
     run_dir = work_root / f"{sample_id}-{repeat}"
+    record: dict[str, Any] = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat,
+                              "expects_fix": any("fix" in thread["expected"] for thread in sample["threads"])}
     try:
         fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}")
-        agent = run_scripted(fixture) if options.agent == "scripted" else run_claude(fixture, options, run_out)
-        record = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat, "agent": agent, **grade(fixture)}
+        # Kept before grading: a grader error must not lose the agent's cost, steps, or transcript link.
+        record["agent"] = run_scripted(fixture) if options.agent == "scripted" else run_claude(fixture, options, run_out)
+        record.update(grade(fixture))
     except EvalError as exc:
-        record = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat, "error": str(exc)}
+        record["error"] = str(exc)
     finally:
         if not options.keep:
             shutil.rmtree(run_dir, ignore_errors=True)
@@ -647,6 +708,11 @@ def friction_codes(record: dict[str, Any]) -> list[str]:
 
 def fix_count(record: dict[str, Any]) -> int:
     return (record.get("consistent_evidence") or {}).get("fix_count", 0)
+
+
+def expects_fix(record: dict[str, Any]) -> bool:
+    # Records written before `expects_fix` existed ran to an accepted fix whenever their sample expects one.
+    return bool(record.get("expects_fix", fix_count(record) > 0))
 
 
 def verified_remediation(record: dict[str, Any]) -> bool:
@@ -721,8 +787,13 @@ def aggregate(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
         "evidence_consistency": rate(sum(1 for row in records if (row.get("consistent_evidence") or {}).get("passed")),
                                      len(records)),
         "evidence_rerunnability": rate(rerunnable, fixes),
+        # Conditional on an accepted fix: evidence completeness among runs that produced one.
         "verified_remediation": rate(sum(1 for row in records if verified_remediation(row)),
                                      sum(1 for row in records if fix_count(row))),
+        # Every run whose sample expects a fix, early failures included, so a version that fails
+        # sooner cannot score higher.
+        "fix_attempt_success": rate(sum(1 for row in records if verified_remediation(row)),
+                                    sum(1 for row in records if expects_fix(row))),
         "deviations": summarize_deviations(records),
         "total_cost_usd": round(sum(costs), 4) if costs else None,
     }
@@ -740,6 +811,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- Evidence rerunnability: {render_rate(summary['evidence_rerunnability'], 'fixes')}",
         f"- **Verified remediation** (passed, and every fix's validation re-ran): "
         f"{render_rate(summary['verified_remediation'], 'runs with fixes')}",
+        f"- **Fix attempt success** (verified remediation over every run that expects a fix): "
+        f"{render_rate(summary['fix_attempt_success'], 'fix-expecting runs')}",
         "",
         "| Sample | Axis | Pass | Legal state | Effective fix | Evidence | Rerunnable evidence | Verified | Same disposition |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -826,8 +899,8 @@ def load_record(path: Path) -> dict[str, Any]:
     """A graded run. Steps are re-derived from the raw transcript, so a reporting change never needs a re-run."""
     record = json.loads(path.read_text(encoding="utf-8"))
     transcript = path.parent / "transcript.jsonl"
-    if (record.get("agent") or {}).get("agent") == "claude" and transcript.is_file():
-        record["agent"]["steps"] = claude_trace(transcript)["commands"]
+    if transcript.is_file() and (record.get("agent") or {}).get("agent", "claude") == "claude":
+        record.setdefault("agent", {"agent": "claude"})["steps"] = claude_trace(transcript)["commands"]
     return record
 
 

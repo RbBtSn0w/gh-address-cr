@@ -17,6 +17,17 @@ Each sample keeps the reviewer's comment verbatim in `threads/`. The one change
 is that file paths are remapped to the fixture's `app/` package. The code is a
 minimal, self-contained reconstruction of the pre-fix module.
 
+## Coverage
+
+The axis labels name what each sample exercises, not the whole axis:
+
+- **lease**: one agent handling two findings on one file, serially, through the lease lifecycle the runtime records. Concurrent claims, lease expiry, and crash-then-resume are not covered.
+- **recovery**: a thread that is outdated at start and fixed by a later PR commit. Bot auto-resolve on push, publish interrupted midway, and threads going outdated after a push are not covered.
+
+The fixtures are minimal reconstructions, so results are a small regression
+baseline, not a production success rate, and not a comparison with an agent
+that does not use `gh-address-cr`.
+
 ## Layout
 
 - `samples/<id>/sample.json`: the PR, its commits (`base/`, `head/`, `head-2/` overlays), threads, expected dispositions, and the reference solution.
@@ -44,7 +55,8 @@ minimal, self-contained reconstruction of the pre-fix module.
 A run passes when all three criteria hold:
 
 - **legal_state**:
-  - `final-gate` passed;
+  - `final-gate` passed, read from the latest session's own workspace or archive (an older session's PASSED does not count);
+  - that gate saw the final pushed head (a push after the gate fails this);
   - every thread is resolved and replied to;
   - every reply is in the runtime evidence ledger;
   - the agent made no direct `gh` writes;
@@ -54,13 +66,17 @@ A run passes when all three criteria hold:
   - the fixture's tests and the oracle pass on the pushed head.
 - **consistent_evidence**:
   - every fix cites a commit in the PR and carries validation evidence;
+  - at each fix's cited commit, that finding's own oracle cases pass (`oracle_tests` in `sample.json`; default: the whole oracle), so one wrong citation fails even if another finding cites a later commit;
   - runnable recorded validation commands pass on the pushed head.
 
-The summary reports three evidence numbers:
+The summary reports four evidence numbers. Their units differ: five samples
+hold six threads, so five repeats give 25 runs, 25 fix items, and 20 runs that
+expect a fix.
 
 - **Evidence consistency**: the gated criterion above. It counts runs.
 - **Evidence rerunnability**: fixes whose recorded validation the grader could re-run. It counts fixes.
-- **Verified remediation**: runs that passed and whose every fix's validation re-ran. Decline-only runs have no fix, so they are excluded.
+- **Verified remediation**: runs that passed and whose every fix's validation re-ran, over runs that produced an accepted fix. It measures evidence completeness and is conditional: a run that fails before any fix leaves the denominator.
+- **Fix attempt success**: the same numerator over every run whose sample expects a fix, early failures included. Compare versions with this one, so that failing sooner cannot raise the score.
 
 A label-only record is visible in these numbers without being scored as a failed fix.
 
@@ -91,3 +107,11 @@ An axis label is therefore backed by runtime state, not only by the sample's cla
 A k/5 result below 5/5 is the signal. Use `failed_checks` and the reason-code
 table (grouped by lease, recovery, verification, classification and input) to
 decide which layer to improve. Do not add an abstraction first.
+
+## Re-reporting versus re-grading
+
+`report` re-derives steps, deviations, and summary numbers from each run's
+`run.json` and `transcript.jsonl`. It does not rebuild git state or rerun
+oracles. Fixtures are deleted after grading unless the run used `--keep`. A
+grader change therefore needs kept fixtures or a fresh run of the affected
+samples; results graded before the change stay a baseline of the older grader.

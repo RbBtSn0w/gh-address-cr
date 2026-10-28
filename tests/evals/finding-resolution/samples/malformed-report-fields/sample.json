@@ -31,6 +31,10 @@
       "anchor": "row.get(\"inefficiency_flags\") or []",
       "expected": [
         "fix"
+      ],
+      "oracle_tests": [
+        "Oracle.test_string_flags_are_not_split_into_characters",
+        "Oracle.test_list_flags_still_count"
       ]
     },
     {
@@ -41,6 +45,9 @@
       "anchor": "int(row.get(\"needs_action_count\") or 0)",
       "expected": [
         "fix"
+      ],
+      "oracle_tests": [
+        "Oracle.test_non_numeric_needs_action_count_does_not_abort"
       ]
     }
   ],

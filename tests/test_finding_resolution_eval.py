@@ -12,6 +12,8 @@ import argparse
 import copy
 import importlib.util
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -92,6 +94,77 @@ class FindingResolutionEvalTests(unittest.TestCase):
         self.assertTrue(result["legal_state"]["passed"], "the runtime accepts any commit in the PR")
         self.assertTrue(result["consistent_evidence"]["checks"]["fix_commits_in_pr"])
         self.assertFalse(result["consistent_evidence"]["checks"]["oracle_passes_at_cited_commit"])
+
+    def two_finding_run(self, *, flags_commit):
+        """Fix `malformed-report-fields` in two commits: A fixes the flags finding, B the count finding."""
+        fixture = self.fixture("malformed-report-fields")
+        sample = fixture.sample
+        module = fixture.checkout / "app" / "compare_reports.py"
+        flags_only = module.read_text(encoding="utf-8").replace(
+            '            kinds.update({flag_kind(str(flag)) for flag in row.get("inefficiency_flags") or []})',
+            '            flags = row.get("inefficiency_flags")\n'
+            '            if isinstance(flags, list):\n'
+            '                kinds.update({flag_kind(str(flag)) for flag in flags})',
+        )
+        commits = {}
+        for name, text in (("a", flags_only),
+                           ("b", (sample["dir"] / "solution" / "app" / "compare_reports.py").read_text(encoding="utf-8"))):
+            module.write_text(text, encoding="utf-8")
+            EVAL.git(fixture.checkout, "commit", "-q", "-am", f"fix: part {name}", env=fixture.env)
+            commits[name] = EVAL.git(fixture.checkout, "rev-parse", "HEAD", env=fixture.env)
+        EVAL.git(fixture.checkout, "push", "-q", "origin", "HEAD", env=fixture.env)
+        cited = {"PRRT_eval327flags": commits["a"] if flags_commit == "a" else fixture.pr_commits[0],
+                 "PRRT_eval327needs": commits["b"]}
+        EVAL.run_runtime(fixture, "address", fixture.repo, fixture.pr, "--lean")
+        for item in sample["reference"]["items"]:
+            EVAL.run_runtime(fixture, *EVAL.scripted_resolve_args(fixture, item, cited[item["thread"]],
+                                                                  ["app/compare_reports.py"]))
+        EVAL.run_runtime(fixture, "agent", "publish", fixture.repo, fixture.pr)
+        EVAL.run_runtime(fixture, "final-gate", fixture.repo, fixture.pr)
+        return EVAL.grade(fixture)
+
+    def test_sequential_fixes_each_citing_their_own_commit_pass(self):
+        result = self.two_finding_run(flags_commit="a")
+
+        self.assertTrue(result["legal_state"]["passed"], result["legal_state"])
+        self.assertTrue(result["consistent_evidence"]["passed"], result["consistent_evidence"])
+
+    def test_one_wrong_citation_fails_even_when_another_cites_a_later_commit(self):
+        result = self.two_finding_run(flags_commit="introducing")
+
+        evidence = result["consistent_evidence"]
+        self.assertTrue(evidence["checks"]["fix_commits_in_pr"])
+        self.assertFalse(evidence["checks"]["oracle_passes_at_cited_commit"])
+        self.assertEqual(evidence["oracle_at_cited_commit"], {"github-thread:PRRT_eval327flags": False,
+                                                              "github-thread:PRRT_eval327needs": True})
+
+    def test_an_earlier_passed_gate_does_not_vouch_for_the_current_session(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        EVAL.run_scripted(fixture)
+        # A new review arrives after the passing gate archived the first session.
+        state = fixture.gh_state()
+        state["threads"].append({"id": "PRRT_late", "isResolved": False, "isOutdated": False, "path": "app/__init__.py",
+                                 "line": 1, "comments": [{"url": "https://github.test/review/late",
+                                                          "author": "reviewer-bot", "body": "Late finding."}]})
+        fixture.state_path.write_text(json.dumps(state), encoding="utf-8")
+        EVAL.run_runtime(fixture, "address", fixture.repo, fixture.pr, "--lean")
+        EVAL.run_runtime(fixture, "final-gate", fixture.repo, fixture.pr)
+
+        checks = EVAL.grade(fixture)["legal_state"]["checks"]
+
+        self.assertFalse(checks["final_gate_passed"])
+
+    def test_push_after_the_gate_leaves_the_pushed_head_unproven(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        EVAL.run_scripted(fixture)
+        (fixture.checkout / "README.md").write_text("changed after the gate\n", encoding="utf-8")
+        EVAL.git(fixture.checkout, "commit", "-q", "-am", "docs: after gate", env=fixture.env)
+        EVAL.git(fixture.checkout, "push", "-q", "origin", "HEAD", env=fixture.env)
+
+        checks = EVAL.grade(fixture)["legal_state"]["checks"]
+
+        self.assertTrue(checks["final_gate_passed"])
+        self.assertFalse(checks["gate_saw_pushed_head"])
 
     def test_unfinished_run_fails_every_criterion_that_needs_the_fix(self):
         fixture = self.fixture("nonfinite-shutdown-wait")
@@ -188,6 +261,18 @@ class FindingResolutionEvalTests(unittest.TestCase):
         self.assertEqual((conflict_row["runs"], conflict_row["next_steps"]), (["b#1"], {"agent resolve": 1}))
         self.assertIn("Verified remediation", EVAL.render_markdown(summary))
 
+    def test_fix_attempt_success_counts_runs_that_failed_before_a_fix(self):
+        def record(repeat, fixes, passed):
+            evidence = {"passed": passed, "checks": {}, "fix_count": fixes, "fixes_with_rerunnable_validation": fixes}
+            return {"sample": "a", "axis": "baseline", "repeat": repeat, "passed": passed, "expects_fix": True,
+                    "agent": {"steps": []}, "consistent_evidence": evidence}
+
+        summary = EVAL.aggregate([record(1, 1, True)] + [record(n, 0, False) for n in range(2, 6)],
+                                 {"run_id": "t", "agent": "scripted", "model": None, "repeats": 5})
+
+        self.assertEqual(summary["verified_remediation"], {"count": 1, "of": 1, "rate": 1.0})
+        self.assertEqual(summary["fix_attempt_success"], {"count": 1, "of": 5, "rate": 0.2})
+
     def test_scripted_step_with_an_off_path_code_reaches_the_summary(self):
         fixture = self.fixture("nonfinite-shutdown-wait")
         steps = EVAL.run_scripted(fixture)["steps"]
@@ -222,6 +307,51 @@ class FindingResolutionEvalTests(unittest.TestCase):
 
         self.assertEqual((record["passed"], record["error"]), (False, "git clone timed out"))
         self.assertTrue((out_dir / "nonfinite-shutdown-wait" / "run-1" / "run.json").is_file())
+
+    def test_agent_timeout_stops_tool_processes_before_grading(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        pid_file = self.root / "tool.pid"
+        fake_claude = fixture.run_dir / "bin" / "claude"
+        # The agent starts a tool process that would outlive it and keep touching the fixture.
+        fake_claude.write_text(f'#!/bin/sh\nsleep 30 &\necho $! > "{pid_file}"\nsleep 30\n', encoding="utf-8")
+        fake_claude.chmod(0o755)
+        options = argparse.Namespace(model="m", max_turns=1, max_budget_usd=0.01,
+                                     allowed_tools=EVAL.CLAUDE_TOOLS, timeout=0.5)
+        out_dir = self.root / "agent-out"
+        out_dir.mkdir()
+
+        agent = EVAL.run_claude(fixture, options, out_dir)
+
+        tool_pid = int(pid_file.read_text(encoding="utf-8"))
+        self.addCleanup(self.kill_quietly, tool_pid)
+        self.assertEqual(agent["exit_code"], 124)
+        self.assertFalse(self.alive(tool_pid), "a tool process outlived the timed-out agent into grading")
+
+    @staticmethod
+    def alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    @staticmethod
+    def kill_quietly(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def test_grading_failure_keeps_the_agent_result(self):
+        options = argparse.Namespace(agent="scripted", keep=False)
+        out_dir = self.root / "out"
+        with mock.patch.object(EVAL, "grade", side_effect=EVAL.EvalError("git clone timed out")):
+            record = EVAL.run_one("nonfinite-shutdown-wait", 1, options, out_dir, self.root)
+
+        self.assertEqual((record["passed"], record["error"]), (False, "git clone timed out"))
+        self.assertEqual([step["command"] for step in record["agent"]["steps"]],
+                         ["address", "agent resolve", "agent publish", "final-gate"])
+        self.assertTrue(record["expects_fix"])
 
     def test_reason_codes_map_to_attribution_axes(self):
         self.assertEqual(EVAL.reason_axis("LEASE_CONFLICT"), "lease")
