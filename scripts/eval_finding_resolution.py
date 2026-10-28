@@ -28,6 +28,7 @@ serial, telemetry export is disabled, and results land in build/ (git-ignored).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -60,6 +61,9 @@ SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_P
 CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Skill"
 SUBPROCESS_TIMEOUT_S = 300
 HARNESS_PATHS = ("scripts/eval_finding_resolution.py", "tests/evals/finding-resolution", "tests/test_finding_resolution_eval.py")
+# Read from the checkout by every run: the runtime under test (an editable install of src/), the
+# samples and oracles, and both fakes. The skill is not here because each eval snapshots it.
+LIVE_INPUTS = ("src", "tests/fixtures/agent_journey", *HARNESS_PATHS)
 GH_WRITE_MARKERS = ("mutation", "addPullRequestReviewThreadReply", "resolveReviewThread")
 
 
@@ -206,7 +210,24 @@ def thread_state(sample: dict[str, Any], checkout: Path, shas: list[str], env: d
     return threads
 
 
-def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str) -> Fixture:
+def payload_digest(payload: Path) -> str:
+    """Content hash of a skill payload: names the exact guidance a run's agent read."""
+    digest = hashlib.sha256()
+    for path in sorted(item for item in payload.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(payload).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def checkout_state() -> str:
+    """HEAD plus every uncommitted change to the live inputs; a change mid-eval means runs measured different code."""
+    digest = hashlib.sha256()
+    for args in (("rev-parse", "HEAD"), ("status", "--porcelain", "--", *LIVE_INPUTS), ("diff", "HEAD", "--", *LIVE_INPUTS)):
+        digest.update(git(ROOT, *args).encode() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str,
+                  skill_payload: Path = SKILL_PAYLOAD) -> Fixture:
     run_dir.mkdir(parents=True)
     bin_dir = run_dir / "bin"
     bin_dir.mkdir()
@@ -227,7 +248,7 @@ def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str) -
     git(checkout, "remote", "add", "origin", str(remote), env=env)
     git(checkout, "push", "-q", "-u", "origin", "main", head_ref, env=env)
     # The skill is installed per project; keep it out of what the agent commits.
-    shutil.copytree(SKILL_PAYLOAD, checkout / ".claude" / "skills" / "gh-address-cr")
+    shutil.copytree(skill_payload, checkout / ".claude" / "skills" / "gh-address-cr")
     with (checkout / ".git" / "info" / "exclude").open("a", encoding="utf-8") as handle:
         handle.write(".claude/\n")
     repo = f"{REPO_OWNER}/{sample['id']}"
@@ -464,28 +485,43 @@ def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
-def runtime_artifacts(fixture: Fixture) -> dict[str, Any]:
-    """Evidence of one completion unit: the latest session and the gate, ledger and report beside it.
+def audit_passed(unit: Path) -> bool:
+    audit_path = unit / "audit_summary.md"
+    return audit_path.is_file() and "reason_code: PASSED" in audit_path.read_text(encoding="utf-8")
 
-    A passing gate archives its whole workspace, so these files sit in one directory. Reading
-    them from anywhere else would let an older session's PASSED vouch for the current one.
+
+def records_handling(session: dict[str, Any], fixture: Fixture) -> bool:
+    items = session.get("items") or {}
+    return any((items.get(f"github-thread:{thread['id']}") or {}).get("accepted_response")
+               for thread in fixture.sample["threads"])
+
+
+def runtime_artifacts(fixture: Fixture) -> dict[str, Any]:
+    """The latest gate, and the evidence of the session that handled the threads.
+
+    A passing gate archives its whole workspace (session, ledger, report, audit) as one
+    directory, copied with its timestamps, so mtime order is the order sessions were opened. The latest session decides completion: an older session's PASSED never
+    vouches for it. Evidence comes from the latest session that recorded handling, because
+    a second final-gate after the archive opens a fresh session with no handling in it.
     """
-    session_path = latest(list(fixture.state_dir.rglob("session.json")))
-    unit = session_path.parent if session_path else fixture.state_dir / "missing-session"
-    session = read_json(unit / "session.json")
-    ledger_path = unit / "evidence.jsonl"
+    sessions = sorted(fixture.state_dir.rglob("session.json"), key=lambda path: path.stat().st_mtime)
+    gate_unit = sessions[-1].parent if sessions else fixture.state_dir / "missing-session"
+    evidence_unit = next((path.parent for path in reversed(sessions) if records_handling(read_json(path), fixture)),
+                         gate_unit)
+    gate_session = read_json(gate_unit / "session.json")
+    session = read_json(evidence_unit / "session.json")
+    ledger_path = evidence_unit / "evidence.jsonl"
     ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()
               if line.strip()] if ledger_path.is_file() else []
-    audit_path = unit / "audit_summary.md"
-    passed = audit_path.is_file() and "reason_code: PASSED" in audit_path.read_text(encoding="utf-8")
-    context = (session.get("metadata") or {}).get("pull_request_context") or {}
+    context = (gate_session.get("metadata") or {}).get("pull_request_context") or {}
     return {
         "items": session.get("items", {}),
         "lease_events": len(session.get("lease_events") or []),
-        "report": read_json(unit / "efficiency-report.json"),
+        "report": read_json(evidence_unit / "efficiency-report.json"),
         "ledger": ledger,
-        "final_gate_passed": passed,
-        # The PR head this session last observed; for a passed gate, the head it gated.
+        "final_gate_passed": audit_passed(gate_unit),
+        "handling_session_gated": audit_passed(evidence_unit),
+        # The PR head the latest session last observed; for a passed gate, the head it gated.
         "session_head": ((context.get("stack_context") or {}).get("selected_pr") or {}).get("head_oid"),
     }
 
@@ -507,6 +543,7 @@ def grade_legal_state(fixture: Fixture, artifacts: dict[str, Any]) -> dict[str, 
     calls = fixture.gh_calls()
     checks = {
         "final_gate_passed": artifacts["final_gate_passed"],
+        "handling_session_gated": artifacts["handling_session_gated"],
         # A push after the gate leaves the pushed head unproven.
         "gate_saw_pushed_head": artifacts["session_head"] == git(
             fixture.remote, "rev-parse", f"refs/heads/{fixture.sample['pull_request']['head_ref']}", env=fixture.env),
@@ -669,7 +706,8 @@ def reason_axis(code: str) -> str:
     return "other"
 
 
-def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: Path, work_root: Path) -> dict[str, Any]:
+def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: Path, work_root: Path,
+            skill_payload: Path = SKILL_PAYLOAD, checkout: str | None = None) -> dict[str, Any]:
     sample = load_sample(sample_id)
     run_out = out_dir / sample_id / f"run-{repeat}"
     run_out.mkdir(parents=True, exist_ok=True)
@@ -677,7 +715,7 @@ def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: P
     record: dict[str, Any] = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat,
                               "expects_fix": any("fix" in thread["expected"] for thread in sample["threads"])}
     try:
-        fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}")
+        fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}", skill_payload)
         # Kept before grading: a grader error must not lose the agent's cost, steps, or transcript link.
         record["agent"] = run_scripted(fixture) if options.agent == "scripted" else run_claude(fixture, options, run_out)
         record.update(grade(fixture))
@@ -687,6 +725,9 @@ def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: P
         if not options.keep:
             shutil.rmtree(run_dir, ignore_errors=True)
     record["passed"] = all((record.get(name) or {}).get("passed") for name in CRITERIA)
+    if checkout is not None and checkout_state() != checkout:
+        # Not a criterion: the agent did nothing wrong, but the run is not named by the eval's commit.
+        record["checkout_changed"] = True
     (run_out / "run.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return record
 
@@ -797,6 +838,7 @@ def aggregate(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                                     sum(1 for row in records if expects_fix(row))),
         "deviations": summarize_deviations(records),
         "total_cost_usd": round(sum(costs), 4) if costs else None,
+        "checkout_changed_runs": [f"{row['sample']}#{row['repeat']}" for row in records if row.get("checkout_changed")],
     }
 
 
@@ -808,7 +850,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- Commit: `{summary.get('runtime_commit')}`"
         + "".join(f" ({name} uncommitted)" for name, key in (("runtime", "runtime_dirty"), ("harness", "harness_dirty"))
                   if summary.get(key))
+        + (f"; skill `{summary['skill_sha256']}`" if summary.get("skill_sha256") else "")
         + f"; repeats per sample: {summary['repeats']}",
+        *([f"- **Warning**: the checkout changed during {', '.join(summary['checkout_changed_runs'])}; "
+           "those runs did not measure the commit above"] if summary.get("checkout_changed_runs") else []),
         f"- Passed: **{summary['passed']}/{summary['runs']}** runs"
         + (f"; cost ${summary['total_cost_usd']:.2f}" if summary.get("total_cost_usd") is not None else ""),
         f"- Evidence consistency: {render_rate(summary['evidence_consistency'], 'runs')}",
@@ -887,9 +932,15 @@ def run_eval(options: argparse.Namespace) -> dict[str, Any]:
     # AGENTS.md, the oracles, or the reference solutions by walking up from its cwd.
     work_root = Path(tempfile.mkdtemp(prefix="gh-address-cr-eval-"))
     try:
+        # One skill snapshot for every run. The other live inputs cannot be snapshotted (the runtime is an
+        # editable install), so a change to them is flagged per run instead.
+        skill_payload = work_root / "skill-payload"
+        shutil.copytree(SKILL_PAYLOAD, skill_payload)
+        meta["skill_sha256"] = payload_digest(skill_payload)
+        checkout = checkout_state()
         for repeat in range(1, options.repeats + 1):
             for sample_id in options.samples or sample_ids():
-                record = run_one(sample_id, repeat, options, out_dir, work_root)
+                record = run_one(sample_id, repeat, options, out_dir, work_root, skill_payload, checkout)
                 records.append(record)
                 print(f"{sample_id} run {repeat}: {'PASS' if record['passed'] else 'FAIL'}", file=sys.stderr, flush=True)
                 write_summary(out_dir, records, meta)
@@ -934,7 +985,7 @@ def main(argv: list[str] | None = None) -> int:
         meta = json.loads((options.run_dir / "summary.json").read_text(encoding="utf-8"))
         summary = write_summary(options.run_dir, records, {key: meta.get(key) for key in
                                 ("run_id", "agent", "model", "repeats", "runtime_commit", "runtime_dirty",
-                                 "harness_dirty")})
+                                 "harness_dirty", "skill_sha256")})
     else:
         summary = run_eval(options)
     sys.stdout.write(render_markdown(summary))

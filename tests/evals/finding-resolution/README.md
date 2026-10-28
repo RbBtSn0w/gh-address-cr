@@ -44,11 +44,19 @@ that does not use `gh-address-cr`.
 - `--agent scripted` follows the reference solution. It must pass 5/5 and runs offline in `tests/test_finding_resolution_eval.py`.
 - `--agent claude` launches headless Claude Code. It is configured as follows:
   - It runs with project settings only, so no user `CLAUDE.md`, plugins or MCP servers load.
-  - The skill is installed from `skill/` into the fixture.
+  - The skill is installed into the fixture from one snapshot of `skill/`, taken when the eval starts. The summary names it with a content hash (`skill_sha256`).
   - The runtime is the interpreter's `gh-address-cr`.
   - GitHub credentials are scrubbed and telemetry export is off.
   - Runs are serial.
   - Results go to `build/evals/finding-resolution/<run-id>/`: `summary.md`, `summary.json`, and per-run `run.json` and `transcript.jsonl`.
+
+Do not switch branches or edit this checkout while an eval runs. Only the skill
+is snapshotted. The runtime is an editable install of `src/`, and the samples,
+oracles, and fakes are read from the checkout by every run. A run that ends with
+any of these changed since the eval started records `checkout_changed`. The
+summary lists those runs in a warning, because they did not measure the commit
+the summary names. To keep developing during an eval, run it from a separate
+worktree with its own virtual environment.
 
 ## Reading results
 
@@ -57,6 +65,7 @@ A run passes when all three criteria hold:
 - **legal_state**:
   - `final-gate` passed, read from the latest session's own workspace or archive (an older session's PASSED does not count);
   - that gate saw the final pushed head (a push after the gate fails this);
+  - the session that recorded the handling also passed its gate (`handling_session_gated`). Handling evidence is read from that session. A rerun of `final-gate` after a pass opens a fresh, empty session, and that session must not hide the evidence;
   - every thread is resolved and replied to;
   - every reply is in the runtime evidence ledger;
   - the agent made no direct `gh` writes;

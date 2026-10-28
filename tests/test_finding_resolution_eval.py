@@ -13,6 +13,7 @@ import copy
 import importlib.util
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -168,6 +169,71 @@ class FindingResolutionEvalTests(unittest.TestCase):
         checks = EVAL.grade(fixture)["legal_state"]["checks"]
 
         self.assertFalse(checks["final_gate_passed"])
+
+    def test_rerunning_final_gate_after_it_passed_keeps_the_handling_evidence(self):
+        # Seen in a real run: the agent reran final-gate only to print its summary; the
+        # passing gate had archived the workspace, so the rerun opened an empty session.
+        fixture = self.fixture("malformed-report-fields")
+        EVAL.run_scripted(fixture)
+        EVAL.run_runtime(fixture, "final-gate", fixture.repo, fixture.pr)
+
+        result = EVAL.grade(fixture)
+
+        for name in EVAL.CRITERIA:
+            self.assertTrue(result[name]["passed"], (name, result[name]))
+        self.assertTrue(result["legal_state"]["checks"]["handling_session_gated"])
+
+    def test_eval_runs_read_one_skill_snapshot(self):
+        # Seen in a real run: the checkout switched branches mid-eval, so later runs read other guidance.
+        live = self.root / "live-skill"
+        shutil.copytree(EVAL.SKILL_PAYLOAD, live)
+        before = EVAL.payload_digest(live)
+        installed = []
+        build = EVAL.build_fixture
+
+        def capture(sample, run_dir, conversation_id, skill_payload=EVAL.SKILL_PAYLOAD):
+            fixture = build(sample, run_dir, conversation_id, skill_payload)
+            installed.append(EVAL.payload_digest(fixture.checkout / ".claude" / "skills" / "gh-address-cr"))
+            (live / "SKILL.md").write_text("edited mid-eval\n", encoding="utf-8")
+            return fixture
+
+        options = argparse.Namespace(agent="scripted", model=None, repeats=2, samples=["preflight-timeout-claim"],
+                                     output_root=self.root / "results", run_id="snapshot", keep=False)
+        with mock.patch.object(EVAL, "SKILL_PAYLOAD", live), \
+                mock.patch.object(EVAL, "build_fixture", side_effect=capture):
+            summary = EVAL.run_eval(options)
+
+        self.assertEqual(installed, [before, before], "an edit to skill/ mid-eval reached a later run")
+        self.assertEqual(summary["skill_sha256"], before)
+
+    def test_checkout_state_tracks_live_inputs_only(self):
+        repo = self.root / "repo"
+        for name in ("src/app.py", "docs/notes.md"):
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text("one\n", encoding="utf-8")
+        for args in (("init", "-q"), ("add", "-A"), ("-c", "user.name=eval", "-c", "user.email=eval@example.test",
+                                                     "commit", "-q", "-m", "init")):
+            subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+        with mock.patch.object(EVAL, "ROOT", repo):
+            clean = EVAL.checkout_state()
+            (repo / "docs" / "notes.md").write_text("two\n", encoding="utf-8")
+            self.assertEqual(EVAL.checkout_state(), clean, "a change outside the live inputs is not flagged")
+            (repo / "src" / "app.py").write_text("two\n", encoding="utf-8")
+            edited = EVAL.checkout_state()
+            self.assertNotEqual(edited, clean)
+            (repo / "src" / "app.py").write_text("three\n", encoding="utf-8")
+            self.assertNotEqual(EVAL.checkout_state(), edited, "a second edit to an already modified file counts")
+
+    def test_runs_after_a_checkout_change_are_flagged(self):
+        options = argparse.Namespace(agent="scripted", model=None, repeats=2, samples=["preflight-timeout-claim"],
+                                     output_root=self.root / "results", run_id="switched", keep=False)
+        # Read once when the eval starts, then after each run.
+        with mock.patch.object(EVAL, "checkout_state", side_effect=["start", "start", "switched"]):
+            summary = EVAL.run_eval(options)
+
+        self.assertEqual(summary["checkout_changed_runs"], ["preflight-timeout-claim#2"])
+        self.assertEqual(summary["passed"], 2, "a checkout change is a validity warning, not an agent failure")
+        self.assertIn("checkout changed during preflight-timeout-claim#2", EVAL.render_markdown(summary))
 
     def test_push_after_the_gate_leaves_the_pushed_head_unproven(self):
         fixture = self.fixture("nonfinite-shutdown-wait")
