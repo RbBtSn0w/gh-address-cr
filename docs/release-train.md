@@ -37,7 +37,10 @@ Commit guards avoid empty trains; proposal lookup avoids duplicates. The fallbac
 scan matches the current Python release rules; the actual semantic-release
 analyzer remains the publication authority. Merged PR closing references are
 carried from the commit range into the proposal body, preserving maintainer
-notes on update. API errors stop proposal creation.
+notes before and after a bounded generated section on update. Ambiguous markers
+stop without overwriting the body. Closing keywords accept an optional colon;
+breaking-note detection follows configured whitespace/list-prefix formatting.
+API errors stop proposal creation.
 
 Sync checks out main and probes develop before use. It creates a reviewed
 `main -> develop` sync PR when necessary; it neither writes trunk refs nor
@@ -108,3 +111,13 @@ On the isolated `codex/release-train-audit` branch from integration head
 
 Suggested commit: `fix(ci): require reviewed release promotion and sync`.
 The primary workspace's pre-existing edits were not changed.
+
+## PR review correction
+
+Three confirmed review concerns have focused regression coverage: breaking notes
+accepted by the existing analyzer (indentation, list prefixes and case), optional
+colons in closing references, and preservation of human notes on both sides of
+an explicitly bounded generated block. Malformed or ambiguous block markers
+stop the update without writing the PR body. Twelve workflow tests pass after
+seven initially failing regression subcases reproduced these gaps. These fixes
+change neither publication authority nor the retained/recovery policy.

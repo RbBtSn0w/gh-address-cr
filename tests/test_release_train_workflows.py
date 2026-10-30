@@ -23,7 +23,7 @@ def script(workflow, step):
 
 
 class ReleaseTrainWorkflowTests(unittest.TestCase):
-    def execute(self, workflow, step, *, ahead="2", commits="fix: repair", existing="", refs="present", fail_api=False, equal_tree=False, diff_error=False):
+    def execute(self, workflow, step, *, ahead="2", commits="fix: repair", existing="", refs="present", fail_api=False, equal_tree=False, diff_error=False, pr_body="Fixes #12", existing_body="Maintainer notes"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake = root / "fake"
@@ -50,10 +50,10 @@ else:
     if args[:2] == ["pr", "list"]: print(os.environ["EXISTING"])
     elif args[0] == "api":
         if os.environ["FAIL_API"] == "1": sys.exit(1)
-        print('[[{"body":"Fixes #12", "number":7, "merged_at":"2026-10-30"}]]')
+        print(json.dumps([[{"body":os.environ["PR_BODY"], "number":7, "merged_at":"2026-10-30"}]]))
     elif args[:2] == ["pr", "create"]:
         print(Path(args[args.index("--body-file") + 1]).read_text())
-    elif args[:2] == ["pr", "view"]: print('{"body":"Maintainer notes"}')
+    elif args[:2] == ["pr", "view"]: print(json.dumps({"body":os.environ["EXISTING_BODY"]}))
     elif args[:2] == ["pr", "edit"]:
         print(Path(args[args.index("--body-file") + 1]).read_text())
     else: sys.exit(81)
@@ -64,7 +64,7 @@ else:
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
                        CALLS=str(root / "calls"), AHEAD=ahead, COMMITS=commits, EXISTING=existing,
                        REFS=refs, DIFF_ERROR="1" if diff_error else "0", EQUAL_TREE="1" if equal_tree else "0", FAIL_API="1" if fail_api else "0", HAS_CUSTOM_TOKEN="true",
-                       RUNNER_TEMP=directory, GITHUB_REPOSITORY="owner/repo")
+                       RUNNER_TEMP=directory, GITHUB_REPOSITORY="owner/repo", PR_BODY=pr_body, EXISTING_BODY=existing_body)
             result = subprocess.run(["bash", "-c", script(workflow, step)], cwd=root,
                                     env=env, text=True, capture_output=True, timeout=10)
             calls = [json.loads(row) for row in (root / "calls").read_text().splitlines()]
@@ -126,3 +126,39 @@ else:
         result, calls = self.promotion(commits="build!: update contract")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any(row[:3] == ["gh", "pr", "create"] for row in calls))
+
+    def test_breaking_note_formats_match_release_analyzer(self):
+        for note in ("  BREAKING CHANGE: incompatible", "* breaking-change: incompatible", " |*BREAKING CHANGE incompatible"):
+            with self.subTest(note=note):
+                result, calls = self.promotion(commits="build: adjust\n\n" + note)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(any(row[:3] == ["gh", "pr", "create"] for row in calls))
+        result, calls = self.promotion(commits="build: adjust\n\n  BREAKING CHANGE:   ")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(row[:3] == ["gh", "pr", "create"] for row in calls))
+
+    def test_closing_keyword_colons_are_carried_forward(self):
+        result, _ = self.promotion(pr_body="Closes: #12; FIXES : #13; resolves #14")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for number in (12, 13, 14):
+            self.assertIn(f"Closes #{number}", result.stdout)
+
+    def test_notes_outside_generated_block_survive_repeated_updates(self):
+        start, end = "<!-- release-train-proposal -->", "<!-- /release-train-proposal -->"
+        body = f"Before notes\n{start}\nOld generated content\n{end}\nAfter notes"
+        for _ in range(2):
+            result, _ = self.promotion(existing="42", existing_body=body)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Before notes", result.stdout)
+            self.assertIn("After notes", result.stdout)
+            self.assertNotIn("Old generated content", result.stdout)
+            self.assertEqual(result.stdout.count(start), 1)
+            self.assertEqual(result.stdout.count(end), 1)
+            body = result.stdout
+
+    def test_ambiguous_generated_blocks_are_not_overwritten(self):
+        for body in ("<!-- release-train-proposal -->\nHuman notes", "<!-- /release-train-proposal -->"):
+            with self.subTest(body=body):
+                result, calls = self.promotion(existing="42", existing_body=body)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(row[:3] == ["gh", "pr", "edit"] for row in calls))

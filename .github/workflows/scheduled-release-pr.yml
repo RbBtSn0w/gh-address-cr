@@ -68,7 +68,8 @@ jobs:
           fi
           # Python package: match release.config.cjs, including its refactor patch rule.
           git log --format=%B origin/main..origin/develop > "$RUNNER_TEMP/release-commits.txt"
-          if ! grep -Eq '^(feat|fix|perf|refactor)(\([^)]*\))?!?: |^[[:alnum:]_-]+(\([^)]*\))?!: |^BREAKING[ -]CHANGE: .+' "$RUNNER_TEMP/release-commits.txt"; then
+          if ! grep -Eq '^(feat|fix|perf|refactor)(\([^)]*\))?!?: |^[[:alnum:]_-]+(\([^)]*\))?!: ' "$RUNNER_TEMP/release-commits.txt" &&
+             ! grep -Eiq '^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]+[^[:space:]]' "$RUNNER_TEMP/release-commits.txt"; then
             echo "No releasable Conventional Commits; no proposal."
             exit 0
           fi
@@ -90,11 +91,12 @@ jobs:
               for pr in page:
                   if not pr.get("merged_at"):
                       continue
-                  for number in re.findall(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#([0-9]+)\b", pr.get("body") or ""):
+                  for number in re.findall(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?[ \t]+#([0-9]+)\b", pr.get("body") or ""):
                       print("Closes #" + number)
           PYREFS
           done < "$RUNNER_TEMP/release-shas.txt"
           sort -u "$RUNNER_TEMP/release-issues.txt" >> "$body"
+          printf '%s\n' '<!-- /release-train-proposal -->' >> "$body"
           pr="$(gh pr list --base main --head develop --state open --json number --jq '.[0].number')"
           if [ -z "$pr" ]; then
             gh pr create --base main --head develop --title "chore(release): promote develop to stable" --body-file "$body"
@@ -107,9 +109,18 @@ jobs:
           from pathlib import Path
           existing = json.load(open(sys.argv[1]))["body"] or ""
           marker = "<!-- release-train-proposal -->"
-          notes = existing.split(marker, 1)[0].rstrip()
+          end_marker = "<!-- /release-train-proposal -->"
           path = Path(sys.argv[2])
-          path.write_text(notes + "\n\n" + path.read_text())
+          generated = path.read_text()
+          if marker not in existing and end_marker not in existing:
+              updated = existing.rstrip() + "\n\n" + generated
+          elif existing.count(marker) == existing.count(end_marker) == 1 and existing.index(marker) < existing.index(end_marker):
+              start = existing.index(marker)
+              end = existing.index(end_marker) + len(end_marker)
+              updated = existing[:start] + generated.rstrip() + existing[end:]
+          else:
+              raise SystemExit("Ambiguous proposal markers; preserve the body for human repair.")
+          path.write_text(updated)
           PYBODY
             gh pr edit "$pr" --body-file "$body"
           fi
