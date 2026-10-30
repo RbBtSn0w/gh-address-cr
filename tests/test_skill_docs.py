@@ -975,3 +975,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("PUBLISH_RECONCILE_REQUIRED", status_text)
         self.assertIn("do not retry `agent publish` blindly", status_text)
         self.assertIn("agent evidence add", status_text)
+
+    def test_validation_examples_are_rerunnable_commands(self):
+        # Eval evidence (#373): agents copied the `unit-tests=passed@4200ms` label verbatim,
+        # leaving validation a reviewer cannot rerun.
+        for path in (SKILL_MD, AGENT_PROTOCOL_MD):
+            text = path.read_text(encoding="utf-8")
+            examples = re.findall(r'--validation "([^"<]+)"', text) + re.findall(r"\(e\.g\. `([^`<]+=passed[^`]*)`\)", text)
+            self.assertTrue(examples, f"{path.name} shows no concrete --validation example")
+            for example in examples:
+                command = example.rpartition("=")[0]
+                with self.subTest(doc=path.name, example=example):
+                    self.assertRegex(command, r"^\S+\s+\S", "a validation example must be a command, not a label")
+            self.assertNotIn("unit-tests=passed", text)
+
+        normalized = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
+        self.assertIn("published in the GitHub reply", normalized)
+        self.assertIn("never include absolute local paths, tokens, or credentials", normalized)
