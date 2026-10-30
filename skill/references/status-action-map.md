@@ -27,6 +27,15 @@ authority, or `final-gate` semantics.
   `stack_diagnostic.invariant = head_ref_oid_lag` (under either code), wait a
   few seconds and rerun the same command. Do not re-push or change evidence for
   it. Any other `stack_diagnostic.invariant` names a real stack defect to inspect.
+  Request-time rejections also report `rejection_persistence`: canonical
+  `storage` is `committed`, `not_committed` or `unknown`; the evidence
+  `projection` is `current`, `failed` or `not_attempted`. When committed,
+  `record_id` identifies the diagnostic in the normal evidence/archive.
+  `reason_code` inside this diagnostic is a storage failure category
+  (`PERSISTENCE_BUSY`, `PERSISTENCE_INVALID`, `STALE_REVISION`,
+  `SESSION_NOT_FOUND`, `STATE_DIR_NOT_WRITABLE` or `DIAGNOSTIC_WRITE_FAILED`).
+  Preserve the original rejection's recovery action. A diagnostic write
+  failure grants no permission to publish, resolve, or bypass the stack check.
 - `STALE_REQUEST_CONTEXT` / `STACK_CONTEXT_STALE`: discard the old request,
   refresh the affected layer, and rerun validation; never publish old evidence.
   Runtime-rejected stale or cross-layer requests release their unusable lease,

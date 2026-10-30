@@ -51,6 +51,7 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `diagnostics`
 - `handling_boundary`
 - `stack_diagnostic` (on `STACK_CONTEXT_INVALID` / `STACK_CONTEXT_UNAVAILABLE` rejections from request issue, response submit, publish, and validation evidence: `{reason_code, invariant?}`; `invariant` is omitted when no bounded cause is known; no revision ids)
+- `rejection_persistence` (on those two request-time rejections only: `schema_version=request-rejection-persistence.v1`, `storage=committed|not_committed|unknown`, `projection=current|failed|not_attempted`, `record_id` when committed, and an optional bounded storage failure `reason_code`). A committed `request-rejection.v1` event survives in the existing evidence projection/archive; it is diagnostic evidence, never a handled item or reply.
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category. `commands` contains executable command templates for the current PR; prefer those over reconstructing commands manually. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 

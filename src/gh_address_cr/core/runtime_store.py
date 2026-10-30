@@ -38,6 +38,7 @@ _SAFE_OPERATIONS = {
     "outbox_plan",
     "outbox_recovery",
     "outbox_result",
+    "request_rejection",
     "schema_upgrade",
     "session_update",
     "status_update",

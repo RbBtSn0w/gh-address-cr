@@ -135,6 +135,16 @@ or deleting these projections does not change runtime truth. Unsupported schemas
 recovery-bundle divergence, stale revisions, and bounded writer contention fail
 explicitly instead of falling back to uncoordinated file writes.
 
+Request-time `STACK_CONTEXT_INVALID` and known-stack
+`STACK_CONTEXT_UNAVAILABLE` rejections also record a session-scoped
+`request-rejection.v1` event in canonical evidence. The error's
+`rejection_persistence` diagnostic distinguishes `committed`, `not_committed`
+and `unknown` storage from `current`, `failed` or `not_attempted` projection.
+Committed records remain in `evidence.jsonl` and the normal workspace archive;
+the diagnostic names their `record_id`. A missing or damaged diagnostic store
+does not replace the original rejection, issue a request, or change final-gate
+truth. See `docs/rfcs/047-request-rejection-evidence/preflight.md`.
+
 Completion means the latest final gate reports:
 
 - zero unresolved review threads
