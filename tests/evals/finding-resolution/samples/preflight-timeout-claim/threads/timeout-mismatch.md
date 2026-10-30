@@ -1,0 +1,1 @@
+PR description states the `gh auth status` preflight is bounded by a 60s timeout, but the implementation sets `_PREFLIGHT_AUTH_TIMEOUT_SECONDS = 30.0`. This mismatch makes it hard to reason about the contract and could lead to incorrect expectations when debugging timeouts.

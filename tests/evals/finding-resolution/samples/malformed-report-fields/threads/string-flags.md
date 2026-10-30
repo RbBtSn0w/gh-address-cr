@@ -1,0 +1,1 @@
+`inefficiency_flags` is expected to be a list in the report schema, but archived JSON can be malformed (e.g., a string). Iterating `row.get('inefficiency_flags') or []` will iterate characters/keys and produce bogus flag kinds. Normalize to a list before iterating, similar to other telemetry JSON consumers.

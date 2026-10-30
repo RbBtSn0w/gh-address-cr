@@ -1,0 +1,56 @@
+{
+  "schema": "gh_address_cr_finding_eval_sample.v1",
+  "id": "stale-unused-parameter",
+  "axis": "recovery",
+  "purpose": "An outdated thread whose finding a later PR commit already fixed; it must be closed through stale evidence, not left or re-fixed.",
+  "source": {
+    "repository": "RbBtSn0w/gh-address-cr",
+    "pr": 324,
+    "path": "src/gh_address_cr/core/workflow.py",
+    "reviewer": "copilot-pull-request-reviewer",
+    "handled_as": "fix (e11cfe7)"
+  },
+  "pull_request": {
+    "number": 324,
+    "title": "feat(agent): reply on a thread resolved on GitHub without one via --closed",
+    "head_ref": "feat/closed-thread-reply",
+    "body": "## Summary\n\n- Reopen a thread that was resolved on GitHub without a reply from this session so the runtime can answer it.\n\n## Validation\n\n- `python3 -m unittest discover -s tests`\n"
+  },
+  "commits": [
+    {
+      "tree": "head",
+      "message": "feat(agent): reopen threads resolved on GitHub without a reply"
+    },
+    {
+      "tree": "head-2",
+      "message": "refactor(agent): drop the unused agent_id from reopen_resolved_thread_for_reply"
+    }
+  ],
+  "threads": [
+    {
+      "id": "PRRT_eval324agentid",
+      "author": "copilot-pull-request-reviewer",
+      "body": "threads/unused-agent-id.md",
+      "path": "app/threads.py",
+      "anchor": "def reopen_resolved_thread_for_reply(",
+      "anchor_commit": 1,
+      "outdated": true,
+      "expected": [
+        "fix"
+      ]
+    }
+  ],
+  "reference": {
+    "cite_commit": 2,
+    "items": [
+      {
+        "thread": "PRRT_eval324agentid",
+        "disposition": "fix",
+        "stale": true,
+        "summary": "Removed the unused agent_id parameter and its call-site argument.",
+        "why": "It never affected behavior, and an agent id is too high-cardinality for the event."
+      }
+    ]
+  },
+  "oracle": "oracle.py"
+}

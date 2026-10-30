@@ -1,0 +1,1 @@
+`is_pr_checks_command` only strips POSIX `/` paths and requires the executable name to be exactly `gh`. On Windows, commands are often `gh.exe` and may include `\\` path separators, so this matcher will fail and the `gh pr checks` outcome override won’t apply.
