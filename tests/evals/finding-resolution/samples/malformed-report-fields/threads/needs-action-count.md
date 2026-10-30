@@ -1,0 +1,1 @@
+`needs_action_total` assumes `needs_action_count` is always `int`-coercible. Because this script explicitly tolerates malformed archived JSON, a non-numeric value (e.g., string/object) will raise `ValueError`/`TypeError` and abort the whole summary/check. Consider a safe coercion that treats malformed/missing counts as 0, similar to how `inefficiency_flags` is handled.

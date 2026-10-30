@@ -51,6 +51,7 @@ High-level commands emit structured JSON by default. Agents must consume these f
 - `diagnostics`
 - `handling_boundary`
 - `stack_diagnostic` (on `STACK_CONTEXT_INVALID` / `STACK_CONTEXT_UNAVAILABLE` rejections from request issue, response submit, publish, and validation evidence: `{reason_code, invariant?}`; `invariant` is omitted when no bounded cause is known; no revision ids)
+- `rejection_persistence` (on those two request-time rejections only: `schema_version=request-rejection-persistence.v1`, `storage=committed|not_committed|unknown`, `projection=current|failed|not_attempted`, `record_id` when committed, and an optional bounded storage failure `reason_code`). A committed `request-rejection.v1` event survives in the existing evidence projection/archive; it is diagnostic evidence, never a handled item or reply.
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category. `commands` contains executable command templates for the current PR; prefer those over reconstructing commands manually. Lean output keeps only `item_id`, `thread_id`, `path`, `line`, `state`, `status`, `is_resolved`, `is_outdated`, `claimable`, `accepted_response_present`, and `reply_evidence_present`.
 
@@ -214,7 +215,7 @@ Review signal is evidence-backed. The runtime stores `P0`, `P1`, `P2`, `P3`, or 
 
 Clarify, defer, and reject responses require `reply_markdown`. GitHub side-effect claims from AI agents are invalid. Efficiency telemetry is reported through `final-gate`, `audit_summary.md`, and structured efficiency reports, not appended to individual GitHub review-thread replies; agents must not manually add telemetry summaries to PR thread comments.
 
-For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved. The result token may carry a trailing measured-duration suffix `@<n>ms` or `@<n>s` (e.g. `unit-tests=passed@4200ms`); the runtime records that duration for efficiency reporting. Omitting the suffix records zero duration and surfaces a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic instead of a misleading `0ms` slowest-operation row, so include real timing by default.
+For `--validation`, use `<command>=<result>` when you need a result other than the default `passed`. Values without an explicit result suffix are treated as the full command, so environment assignments like `PYENV_VERSION=3.10.19 python -m unittest` are preserved. The result token may carry a trailing measured-duration suffix `@<n>ms` or `@<n>s` (e.g. `python3 -m unittest discover -s tests=passed@4200ms`); the runtime records that duration for efficiency reporting. Record the exact command you ran, repository-relative and free of absolute local paths or secrets, because it is published in the reply and is what a reviewer reruns; a label such as `unit-tests` cannot be re-verified. Omitting the suffix records zero duration and surfaces a `TELEMETRY_TIMING_UNAVAILABLE` diagnostic instead of a misleading `0ms` slowest-operation row, so include real timing by default.
 
 ## Batch Notes
 

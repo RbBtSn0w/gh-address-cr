@@ -66,7 +66,7 @@ jobs:
       - name: Install release dependencies
         if: steps.publish-target.outputs.target == 'pypi'
         run: |
-          npm install --no-save \
+          npm install --no-save --no-audit --no-fund \
             semantic-release \
             @semantic-release/changelog \
             @semantic-release/commit-analyzer \
@@ -176,7 +176,8 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
         run: |
-          sdist="$(ls dist/*.tar.gz | head -n 1)"
+          sdists=(dist/*.tar.gz)
+          sdist="${sdists[0]}"
           python scripts/release/render_homebrew_formula.py \
             --version "$PACKAGE_VERSION" \
             --sdist-path "$sdist" \

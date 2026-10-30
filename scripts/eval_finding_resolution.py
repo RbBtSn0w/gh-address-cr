@@ -1,0 +1,1042 @@
+#!/usr/bin/env python3
+"""Repeatable finding-resolution eval: real review findings, each run N times.
+
+Each run builds a hermetic PR fixture from a sample in
+`tests/evals/finding-resolution/samples/`: a git checkout whose feature branch
+is the PR head, a bare `origin` it pushes to, and a fake `gh` whose review
+threads carry the real bot comment. An agent handles the PR with the packaged
+skill and this checkout's runtime, then deterministic graders score the run:
+
+- legal_state: final-gate passed; every thread is resolved and carries a reply
+  the runtime published; the agent made no direct `gh` writes; the fake modelled
+  every runtime `gh` call.
+- effective_fix: each thread's disposition is one the sample expects; the hidden
+  oracle and the fixture's own tests pass on the pushed PR head.
+- consistent_evidence: every fix cites a commit in the PR and carries validation
+  evidence; recorded validation commands that are runnable pass on the pushed head.
+
+    .venv/bin/python scripts/eval_finding_resolution.py run --agent scripted
+    .venv/bin/python scripts/eval_finding_resolution.py run --agent external --runner runner.json --repeats 5
+    .venv/bin/python scripts/eval_finding_resolution.py report build/evals/finding-resolution/<run-id>
+
+`--agent scripted` follows each sample's reference solution through the CLI and
+must score 100%; it is the offline control in tests/test_finding_resolution_eval.py.
+`--agent external` launches an explicitly configured argv command using a versioned
+JSON request/result contract. Runs are serial, fixture telemetry export is disabled,
+and results land in build/ (git-ignored).
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMANDS
+from gh_address_cr.telemetry import add_current_span_event, start_child_span
+
+ROOT = Path(__file__).resolve().parents[1]
+EVAL_DIR = ROOT / "tests" / "evals" / "finding-resolution"
+SAMPLES_DIR = EVAL_DIR / "samples"
+FAKE_GH = EVAL_DIR / "fake_gh.py"
+JOURNEY_FAKE_GH = ROOT / "tests" / "fixtures" / "agent_journey" / "fake_gh.py"
+RESULTS_ROOT = ROOT / "build" / "evals" / "finding-resolution"
+SKILL_PAYLOAD = ROOT / "skill"
+REPO_OWNER = "eval-fixture"
+AGENT_LOGIN = "agent-login"
+SCRIPTED_AGENT_ID = "eval-reference"
+FIXTURE_TEST_COMMAND = [sys.executable, "-m", "unittest", "discover", "-s", "tests"]
+ORACLE_MODULE = "eval_oracle_test"
+# Host-session and credential variables a nested agent must not inherit, and git location overrides
+# (set inside a git hook, for example) that would point every git call at another repository.
+SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_PID$|CLAUDE_EFFORT$|CLAUDE_PREVIEW_|"
+                          r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$|"
+                          r"GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|"
+                          r"NAMESPACE)$)|_PAT$|_TOKEN$")
+SUBPROCESS_TIMEOUT_S = 300
+HARNESS_PATHS = ("scripts/eval_finding_resolution.py", "tests/evals/finding-resolution", "tests/test_finding_resolution_eval.py")
+# Read from the checkout by every run: the runtime under test (an editable install of src/), the
+# samples and oracles, and both fakes. The skill is not here because each eval snapshots it.
+LIVE_INPUTS = ("src", "tests/fixtures/agent_journey", *HARNESS_PATHS)
+GH_WRITE_MARKERS = ("mutation", "addPullRequestReviewThreadReply", "resolveReviewThread")
+
+
+class EvalError(RuntimeError):
+    pass
+
+
+def git(cwd: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    if env is None:
+        env = {key: value for key, value in os.environ.items() if not SCRUBBED_ENV.search(key)}
+    try:
+        completed = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True,
+                                   timeout=SUBPROCESS_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise EvalError(f"git {args[0]} timed out") from exc
+    if completed.returncode != 0:
+        raise EvalError(f"git {' '.join(args)} failed: {completed.stderr.strip()}")
+    return completed.stdout.strip()
+
+
+# -- samples -------------------------------------------------------------------
+
+
+def sample_ids() -> list[str]:
+    return sorted(path.parent.name for path in SAMPLES_DIR.glob("*/sample.json"))
+
+
+def load_sample(sample_id: str) -> dict[str, Any]:
+    path = SAMPLES_DIR / sample_id / "sample.json"
+    if not path.is_file():
+        raise EvalError(f"unknown sample {sample_id!r}; known: {', '.join(sample_ids())}")
+    sample = json.loads(path.read_text(encoding="utf-8"))
+    sample["dir"] = path.parent
+    return sample
+
+
+def overlay(tree: Path, checkout: Path) -> None:
+    for source in sorted(tree.rglob("*")):
+        if source.is_file():
+            target = checkout / source.relative_to(tree)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+
+
+def anchor_line(text: str, anchor: str) -> int:
+    lines = [number for number, line in enumerate(text.splitlines(), start=1) if anchor in line]
+    if len(lines) != 1:
+        raise EvalError(f"anchor {anchor!r} must match exactly one line, matched {len(lines)}")
+    return lines[0]
+
+
+# -- fixture -------------------------------------------------------------------
+
+
+@dataclass
+class Fixture:
+    sample: dict[str, Any]
+    run_dir: Path
+    checkout: Path
+    remote: Path
+    state_path: Path
+    callers_path: Path
+    unhandled_path: Path
+    state_dir: Path
+    env: dict[str, str]
+    repo: str
+    pr: str
+    base_sha: str
+    pr_commits: list[str]
+
+    def gh_state(self) -> dict[str, Any]:
+        return json.loads(self.state_path.read_text(encoding="utf-8"))
+
+    def gh_calls(self) -> list[dict[str, Any]]:
+        if not self.callers_path.exists():
+            return []
+        return [json.loads(line) for line in self.callers_path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def runtime_bin() -> Path:
+    """The bin directory of the interpreter running this script; it must provide this checkout's runtime."""
+    bin_dir = Path(sys.executable).parent
+    if not (bin_dir / "gh-address-cr").is_file():
+        raise EvalError(f"{bin_dir} has no gh-address-cr; run with the dev venv (scripts/dev_setup.sh, .venv/bin/python)")
+    return bin_dir
+
+
+def fixture_env(run_dir: Path, bin_dir: Path, conversation_id: str) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if not SCRUBBED_ENV.search(key)}
+    gh_config = run_dir / "gh-config"
+    gh_config.mkdir()
+    gitconfig = run_dir / "gitconfig"
+    gitconfig.write_text("[user]\n\tname = eval-agent\n\temail = eval-agent@example.test\n[commit]\n\tgpgsign = false\n",
+                         encoding="utf-8")
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{runtime_bin()}:{env.get('PATH', '')}",
+            "GH_CONFIG_DIR": str(gh_config),
+            "GH_PROMPT_DISABLED": "1",
+            "GIT_CONFIG_GLOBAL": str(gitconfig),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GH_ADDRESS_CR_STATE_DIR": str(run_dir / "state"),
+            "GH_ADDRESS_CR_CONVERSATION_ID": conversation_id,
+            "DISABLE_TELEMETRY": "1",
+            # Keeps test runs from leaving __pycache__ for `git add -A` to commit.
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "FAKE_GH_STATE": str(run_dir / "gh-state.json"),
+            "FAKE_GH_REMOTE": str(run_dir / "origin.git"),
+            "FAKE_GH_CALLERS": str(run_dir / "gh-callers.jsonl"),
+            "FAKE_GH_CALLS": str(run_dir / "gh-calls.jsonl"),
+            "FAKE_GH_UNHANDLED": str(run_dir / "gh-unhandled.log"),
+            "FAKE_GH_DELEGATE": str(JOURNEY_FAKE_GH),
+        }
+    )
+    return env
+
+
+def commit_trees(sample: dict[str, Any], checkout: Path, env: dict[str, str]) -> list[str]:
+    shas = []
+    for commit in sample["commits"]:
+        overlay(sample["dir"] / commit["tree"], checkout)
+        git(checkout, "add", "-A", env=env)
+        git(checkout, "commit", "-q", "-m", commit["message"], env=env)
+        shas.append(git(checkout, "rev-parse", "HEAD", env=env))
+    return shas
+
+
+def thread_state(sample: dict[str, Any], checkout: Path, shas: list[str], env: dict[str, str]) -> list[dict[str, Any]]:
+    threads = []
+    for index, thread in enumerate(sample["threads"], start=1):
+        anchor_sha = shas[thread.get("anchor_commit", len(shas)) - 1]
+        text = git(checkout, "show", f"{anchor_sha}:{thread['path']}", env=env)
+        line = anchor_line(text, thread["anchor"])
+        body = (sample["dir"] / thread["body"]).read_text(encoding="utf-8")
+        threads.append(
+            {
+                "id": thread["id"],
+                "isResolved": False,
+                "isOutdated": bool(thread.get("outdated")),
+                "path": thread["path"],
+                # GitHub reports no current line for an outdated thread.
+                "line": None if thread.get("outdated") else line,
+                "comments": [{"url": f"https://github.test/review/{index}", "author": thread["author"], "body": body}],
+            }
+        )
+    return threads
+
+
+def payload_digest(payload: Path) -> str:
+    """Content hash of a skill payload: names the exact guidance a run's agent read."""
+    digest = hashlib.sha256()
+    for path in sorted(item for item in payload.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(payload).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def checkout_state() -> str:
+    """HEAD plus every uncommitted change to the live inputs; a change mid-eval means runs measured different code."""
+    digest = hashlib.sha256()
+    for args in (("rev-parse", "HEAD"), ("status", "--porcelain", "--", *LIVE_INPUTS), ("diff", "HEAD", "--", *LIVE_INPUTS)):
+        digest.update(git(ROOT, *args).encode() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str,
+                  skill_payload: Path = SKILL_PAYLOAD) -> Fixture:
+    run_dir.mkdir(parents=True)
+    bin_dir = run_dir / "bin"
+    bin_dir.mkdir()
+    shutil.copyfile(FAKE_GH, bin_dir / "gh")
+    (bin_dir / "gh").chmod(0o755)
+    env = fixture_env(run_dir, bin_dir, conversation_id)
+    remote, checkout = run_dir / "origin.git", run_dir / "checkout"
+    git(run_dir, "init", "-q", "--bare", "-b", "main", str(remote), env=env)
+    checkout.mkdir()
+    git(checkout, "init", "-q", "-b", "main", env=env)
+    overlay(sample["dir"] / "base", checkout)
+    git(checkout, "add", "-A", env=env)
+    git(checkout, "commit", "-q", "-m", "chore: initial import", env=env)
+    base_sha = git(checkout, "rev-parse", "HEAD", env=env)
+    head_ref = sample["pull_request"]["head_ref"]
+    git(checkout, "checkout", "-q", "-b", head_ref, env=env)
+    shas = commit_trees(sample, checkout, env)
+    git(checkout, "remote", "add", "origin", str(remote), env=env)
+    git(checkout, "push", "-q", "-u", "origin", "main", head_ref, env=env)
+    # The skill is installed per project; keep it out of what the agent commits.
+    shutil.copytree(skill_payload, checkout / ".eval" / "skill")
+    with (checkout / ".git" / "info" / "exclude").open("a", encoding="utf-8") as handle:
+        handle.write(".eval/\n")
+    repo = f"{REPO_OWNER}/{sample['id']}"
+    pr = str(sample["pull_request"]["number"])
+    state = {
+        "repo": repo,
+        "pr_number": pr,
+        "head_ref": head_ref,
+        "head_sha": shas[-1],
+        "base_sha": base_sha,
+        "commits": shas,
+        "files": [],
+        "title": sample["pull_request"]["title"],
+        "body": sample["pull_request"]["body"],
+        "threads": thread_state(sample, checkout, shas, env),
+    }
+    state_path = run_dir / "gh-state.json"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    return Fixture(
+        sample=sample,
+        run_dir=run_dir,
+        checkout=checkout,
+        remote=remote,
+        state_path=state_path,
+        callers_path=run_dir / "gh-callers.jsonl",
+        unhandled_path=run_dir / "gh-unhandled.log",
+        state_dir=run_dir / "state",
+        env=env,
+        repo=repo,
+        pr=pr,
+        base_sha=base_sha,
+        pr_commits=shas,
+    )
+
+
+# -- agents --------------------------------------------------------------------
+
+
+def run_runtime(fixture: Fixture, *args: str) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            [str(runtime_bin() / "gh-address-cr"), *args],
+            cwd=fixture.checkout,
+            env=fixture.env,
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise EvalError(f"gh-address-cr {step_label(list(args))} timed out") from exc
+    stdout = completed.stdout.strip()
+    payload: dict[str, Any] = {}
+    if "{" in stdout:
+        try:
+            payload = json.loads(stdout[stdout.find("{"):])
+        except ValueError:
+            payload = {}
+    payload["_exit_code"] = completed.returncode
+    payload["_output"] = completed.stdout + completed.stderr
+    return payload
+
+
+def step_label(args: list[str]) -> str:
+    """A bounded runtime step label, without operands."""
+    return " ".join(args[:2]) if args[0] in ("agent", "telemetry") else args[0]
+
+
+def scripted_resolve_args(fixture: Fixture, item: dict[str, Any], commit: str, files: list[str]) -> list[str]:
+    args = ["agent", "resolve", fixture.repo, fixture.pr, f"github-thread:{item['thread']}"]
+    if item["disposition"] == "fix":
+        args += ["--commit", commit, "--summary", item["summary"], "--why", item["why"]]
+        for path in files:
+            args += ["--file", path]
+        args += ["--validation", f"{shlex.join(['python3', *FIXTURE_TEST_COMMAND[1:]])}=passed"]
+    else:
+        args += ["--disposition", item["disposition"], "--why", item["why"]]
+    if item.get("stale"):
+        args.append("--stale")
+    return args + ["--agent-id", SCRIPTED_AGENT_ID]
+
+
+def run_scripted(fixture: Fixture) -> dict[str, Any]:
+    """Follow the sample's reference solution the way SKILL.md routes a GitHub thread."""
+    reference = fixture.sample["reference"]
+    steps: list[dict[str, Any]] = []
+    commit = ""
+    files: list[str] = []
+    if reference.get("tree"):
+        overlay(fixture.sample["dir"] / reference["tree"], fixture.checkout)
+        git(fixture.checkout, "add", "-A", env=fixture.env)
+        git(fixture.checkout, "commit", "-q", "-m", reference["message"], env=fixture.env)
+        git(fixture.checkout, "push", "-q", "origin", "HEAD", env=fixture.env)
+        commit = git(fixture.checkout, "rev-parse", "HEAD", env=fixture.env)
+    elif reference.get("cite_commit"):
+        commit = fixture.pr_commits[reference["cite_commit"] - 1]
+    if commit:
+        files = git(fixture.checkout, "show", "--name-only", "--format=", commit, env=fixture.env).splitlines()
+    commands = [["address", fixture.repo, fixture.pr, "--lean"]]
+    commands += [scripted_resolve_args(fixture, item, commit, files) for item in reference["items"]]
+    commands += [["agent", "publish", fixture.repo, fixture.pr], ["final-gate", fixture.repo, fixture.pr]]
+    for args in commands:
+        result = run_runtime(fixture, *args)
+        steps.append({"command": step_label(args), "exit_code": result["_exit_code"], "status": result.get("status"),
+                      "reason_code": result.get("reason_code")})
+    return {"agent": "scripted", "exit_code": 0, "steps": steps}
+
+
+RUNNER_CONFIG_LIMIT = 64 * 1024
+RUNNER_RESULT_LIMIT = 1024 * 1024
+STEP_COMMANDS = (PUBLIC_COMMANDS - {"agent"}) | frozenset(f"agent {name}" for name in AGENT_SUBCOMMANDS)
+
+
+def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise EvalError("runner_duplicate_field")
+        result[key] = value
+    return result
+
+
+def bounded_json(path: Path, limit: int) -> Any:
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit:
+            raise EvalError("runner_output_too_large")
+        return json.loads(raw, object_pairs_hook=strict_object)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        raise EvalError("runner_invalid_json") from exc
+
+
+def load_runner_config(path: Path) -> list[str]:
+    value = bounded_json(path, RUNNER_CONFIG_LIMIT)
+    if not isinstance(value, dict) or set(value) != {"schema_version", "command"}:
+        raise EvalError("runner_invalid_config")
+    command = value["command"]
+    if value["schema_version"] != "finding-eval-runner.v1":
+        raise EvalError("runner_unsupported_config_version")
+    if (not isinstance(command, list) or not 1 <= len(command) <= 64
+            or any(not isinstance(arg, str) or not arg or len(arg) > 8192 or "\0" in arg for arg in command)):
+        raise EvalError("runner_invalid_command")
+    return command
+
+
+def validate_runner_result(value: Any) -> dict[str, Any]:
+    required = {"schema_version", "identity", "steps"}
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"cost_usd"}:
+        raise EvalError("runner_invalid_result_fields")
+    if value["schema_version"] != "finding-eval-result.v1":
+        raise EvalError("runner_unsupported_result_version")
+    if not isinstance(value["identity"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value["identity"]):
+        raise EvalError("runner_invalid_identity")
+    steps = value["steps"]
+    if not isinstance(steps, list) or len(steps) > 1000:
+        raise EvalError("runner_invalid_steps")
+    for step in steps:
+        if not isinstance(step, dict) or set(step) != {"command", "codes", "exit_code"}:
+            raise EvalError("runner_invalid_step_fields")
+        if not isinstance(step["command"], str) or step["command"] not in STEP_COMMANDS:
+            raise EvalError("runner_invalid_step_command")
+        codes = step["codes"]
+        if (not isinstance(codes, list) or len(codes) > 16
+                or any(not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code) for code in codes)):
+            raise EvalError("runner_invalid_step_codes")
+        if type(step["exit_code"]) is not int or not -255 <= step["exit_code"] <= 255:
+            raise EvalError("runner_invalid_step_exit_code")
+    if "cost_usd" in value:
+        cost = value["cost_usd"]
+        if type(cost) not in (int, float) or cost < 0 or cost > sys.float_info.max or not math.isfinite(cost):
+            raise EvalError("runner_invalid_cost")
+    return value
+
+
+def run_process_group(command: list[str], *, cwd: Path, env: dict[str, str], stdout: Any,
+                      stderr: Any, request: str, timeout: float) -> int:
+    """Stop the agent and its tools before any grader reads the fixture."""
+    name = Path(command[0]).name
+    with start_child_span(name, kind=SpanKind.CLIENT) as span:
+        span.set_attribute("process.executable.name", name)
+        try:
+            process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=stdout,
+                                       stderr=stderr, text=True, start_new_session=True)
+        except OSError as exc:
+            span.set_attribute("error.type", "runner_launch_failed")
+            span.set_status(Status(StatusCode.ERROR))
+            raise EvalError("runner_launch_failed") from exc
+        span.set_attribute("process.pid", process.pid)
+        try:
+            process.communicate(input=request, timeout=timeout)
+            exit_code = process.returncode
+        except subprocess.TimeoutExpired:
+            exit_code = 124
+        finally:
+            stop_process_group(process)
+            if process.stdin is not None:
+                process.stdin.close()
+        span.set_attribute("process.exit.code", exit_code)
+        if exit_code:
+            span.set_attribute("error.type", "runner_timeout" if exit_code == 124 else "runner_nonzero_exit")
+            span.set_status(Status(StatusCode.ERROR))
+        return exit_code
+
+
+def stop_process_group(process: subprocess.Popen[str]) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        deadline = time.monotonic() + 5
+        try:
+            os.killpg(process.pid, sig)
+            while time.monotonic() < deadline:
+                process.poll()  # reap the leader so an exited group stops answering
+                os.killpg(process.pid, 0)
+                time.sleep(0.05)
+        # macOS answers EPERM, not ESRCH, for a group left with only zombies; the group is our own child.
+        except (ProcessLookupError, PermissionError):
+            return
+
+
+def run_external(fixture: Fixture, options: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
+    request = {"schema_version": "finding-eval-request.v1", "repo": fixture.repo, "pr": fixture.pr,
+               "task": "address", "skill_path": ".eval/skill"}
+    request_text = json.dumps(request) + "\n"
+    (out_dir / "request.json").write_text(request_text, encoding="utf-8")
+    started = time.monotonic()
+    result: dict[str, Any] = {"agent": "external", "steps": [], "succeeded": False}
+    try:
+        with (out_dir / "runner.stdout").open("w", encoding="utf-8") as stdout, \
+                (out_dir / "runner.stderr").open("w", encoding="utf-8") as stderr:
+            exit_code = run_process_group(options.runner_command, cwd=fixture.checkout, env=fixture.env,
+                                          stdout=stdout, stderr=stderr, request=request_text, timeout=options.timeout)
+        result["exit_code"] = exit_code
+        # A valid result can retain cost/steps even when the process failed. It cannot vouch for success.
+        try:
+            value = validate_runner_result(bounded_json(out_dir / "runner.stdout", RUNNER_RESULT_LIMIT))
+        except EvalError:
+            if exit_code:
+                raise EvalError("runner_timeout" if exit_code == 124 else "runner_nonzero_exit") from None
+            raise
+        (out_dir / "result.json").write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        result.update({key: value[key] for key in ("identity", "steps", "cost_usd") if key in value})
+        if exit_code:
+            raise EvalError("runner_timeout" if exit_code == 124 else "runner_nonzero_exit")
+        result["succeeded"] = True
+    except EvalError as exc:
+        result["error"] = str(exc)
+    result["duration_s"] = round(time.monotonic() - started, 1)
+    add_current_span_event("finding_eval.runner_result", attributes={
+        "succeeded": result["succeeded"], "outcome": result.get("error", "runner_completed"),
+    })
+    return result
+
+
+# -- graders -------------------------------------------------------------------
+
+
+def latest(paths: list[Path]) -> Path | None:
+    return max(paths, key=lambda path: path.stat().st_mtime) if paths else None
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def audit_passed(unit: Path) -> bool:
+    audit_path = unit / "audit_summary.md"
+    return audit_path.is_file() and "reason_code: PASSED" in audit_path.read_text(encoding="utf-8")
+
+
+def records_handling(session: dict[str, Any], fixture: Fixture) -> bool:
+    items = session.get("items") or {}
+    return any((items.get(f"github-thread:{thread['id']}") or {}).get("accepted_response")
+               for thread in fixture.sample["threads"])
+
+
+def runtime_artifacts(fixture: Fixture) -> dict[str, Any]:
+    """The latest gate, and the evidence of the session that handled the threads.
+
+    A passing gate archives its whole workspace (session, ledger, report, audit) as one
+    directory, copied with its timestamps, so mtime order is the order sessions were opened. The latest session decides completion: an older session's PASSED never
+    vouches for it. Evidence comes from the latest session that recorded handling, because
+    a second final-gate after the archive opens a fresh session with no handling in it.
+    """
+    sessions = sorted(fixture.state_dir.rglob("session.json"), key=lambda path: path.stat().st_mtime)
+    gate_unit = sessions[-1].parent if sessions else fixture.state_dir / "missing-session"
+    evidence_unit = next((path.parent for path in reversed(sessions) if records_handling(read_json(path), fixture)),
+                         gate_unit)
+    gate_session = read_json(gate_unit / "session.json")
+    session = read_json(evidence_unit / "session.json")
+    ledger_path = evidence_unit / "evidence.jsonl"
+    ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()
+              if line.strip()] if ledger_path.is_file() else []
+    context = (gate_session.get("metadata") or {}).get("pull_request_context") or {}
+    return {
+        "items": session.get("items", {}),
+        "lease_events": len(session.get("lease_events") or []),
+        "report": read_json(evidence_unit / "efficiency-report.json"),
+        "ledger": ledger,
+        "final_gate_passed": audit_passed(gate_unit),
+        "handling_session_gated": audit_passed(evidence_unit),
+        # The PR head the latest session last observed; for a passed gate, the head it gated.
+        "session_head": ((context.get("stack_context") or {}).get("selected_pr") or {}).get("head_oid"),
+    }
+
+
+def is_gh_write(args: list[str]) -> bool:
+    if args[:2] in (["pr", "comment"], ["pr", "review"], ["pr", "merge"], ["pr", "close"], ["pr", "edit"]):
+        return True
+    if any(marker in arg for arg in args for marker in GH_WRITE_MARKERS):
+        return True
+    methods = [args[index + 1].upper() for index, arg in enumerate(args[:-1]) if arg in ("-X", "--method")]
+    return any(method != "GET" for method in methods)
+
+
+def grade_legal_state(fixture: Fixture, artifacts: dict[str, Any]) -> dict[str, Any]:
+    threads = fixture.gh_state()["threads"]
+    ledger_replies = {row["payload"].get("reply_url") for row in artifacts["ledger"]
+                      if row.get("event_type") == "reply_posted"}
+    agent_replies = [row["url"] for thread in threads for row in thread["comments"] if row["author"] == AGENT_LOGIN]
+    calls = fixture.gh_calls()
+    checks = {
+        "final_gate_passed": artifacts["final_gate_passed"],
+        "handling_session_gated": artifacts["handling_session_gated"],
+        # A push after the gate leaves the pushed head unproven.
+        "gate_saw_pushed_head": artifacts["session_head"] == git(
+            fixture.remote, "rev-parse", f"refs/heads/{fixture.sample['pull_request']['head_ref']}", env=fixture.env),
+        "all_threads_resolved": all(thread["isResolved"] for thread in threads),
+        "every_thread_replied": all(any(row["author"] == AGENT_LOGIN for row in thread["comments"])
+                                    for thread in threads),
+        "replies_ledger_backed": all(url in ledger_replies for url in agent_replies),
+        "no_direct_gh_writes": not any(call["caller"] == "agent" and is_gh_write(call["args"]) for call in calls),
+        "fake_modelled_runtime_calls": all(call.get("handled", True) for call in calls if call["caller"] == "runtime"),
+    }
+    return {"passed": all(checks.values()), "checks": checks}
+
+
+def run_in(clone: Path, command: list[str], env: dict[str, str]) -> bool:
+    try:
+        return subprocess.run(command, cwd=clone, env=env, capture_output=True, text=True, timeout=300).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def clone_pushed_head(fixture: Fixture, name: str) -> Path:
+    clone = fixture.run_dir / name
+    git(fixture.run_dir, "clone", "-q", "--branch", fixture.sample["pull_request"]["head_ref"], str(fixture.remote),
+        str(clone), env=fixture.env)
+    return clone
+
+
+def run_oracle(fixture: Fixture, clone: Path, tests: list[str] | None = None) -> bool:
+    """Run the hidden oracle, or only the named `Class.test` cases of it."""
+    shutil.copyfile(fixture.sample["dir"] / fixture.sample["oracle"], clone / f"{ORACLE_MODULE}.py")
+    targets = [f"{ORACLE_MODULE}.{test}" for test in tests] if tests else [ORACLE_MODULE]
+    return run_in(clone, [sys.executable, "-m", "unittest", *targets], fixture.env)
+
+
+def thread_dispositions(fixture: Fixture, items: dict[str, Any]) -> dict[str, str | None]:
+    dispositions = {}
+    for thread in fixture.sample["threads"]:
+        item = items.get(f"github-thread:{thread['id']}") or {}
+        response = item.get("accepted_response") or {}
+        dispositions[thread["id"]] = response.get("resolution") or item.get("decision")
+    return dispositions
+
+
+def grade_effective_fix(fixture: Fixture, artifacts: dict[str, Any], clone: Path) -> dict[str, Any]:
+    dispositions = thread_dispositions(fixture, artifacts["items"])
+    checks = {
+        "dispositions_expected": all(dispositions[thread["id"]] in thread["expected"]
+                                     for thread in fixture.sample["threads"]),
+        "fixture_tests_pass": run_in(clone, FIXTURE_TEST_COMMAND, fixture.env),
+    }
+    checks["oracle_passes"] = run_oracle(fixture, clone)
+    return {"passed": all(checks.values()), "checks": checks, "dispositions": dispositions}
+
+
+def runnable_validation(command: str) -> list[str] | None:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    executable = os.path.basename(argv[0]) if argv else ""
+    if executable.startswith("python"):
+        return [sys.executable, *argv[1:]]
+    # Agents record `python3 -m unittest ...` as `unittest ...`; it names the same run.
+    if executable == "unittest":
+        return [sys.executable, "-m", "unittest", *argv[1:]]
+    return None
+
+
+def oracle_at_cited_commits(fixture: Fixture, cited: dict[str, str]) -> dict[str, bool]:
+    """Each finding's own oracle cases at the commit its reply cites.
+
+    Binding per finding, not the whole oracle at the newest citation: a wrong citation is
+    caught even when another finding cites a later commit, and sequential fixes (commit A
+    fixes finding A, commit B fixes finding B) still pass.
+    """
+    threads = {f"github-thread:{thread['id']}": thread for thread in fixture.sample["threads"]}
+    clone = clone_pushed_head(fixture, "cited")
+    results = {}
+    for item_id, sha in cited.items():
+        git(clone, "checkout", "-q", sha, env=fixture.env)
+        results[item_id] = run_oracle(fixture, clone, (threads.get(item_id) or {}).get("oracle_tests"))
+    return results
+
+
+def grade_evidence(fixture: Fixture, artifacts: dict[str, Any], clone: Path) -> dict[str, Any]:
+    head_ref = fixture.sample["pull_request"]["head_ref"]
+    pr_commits = git(fixture.remote, "rev-list", "--reverse", f"{fixture.base_sha}..refs/heads/{head_ref}",
+                     env=fixture.env).split()
+    fixes = {item_id: item for item_id, item in artifacts["items"].items()
+             if (item.get("accepted_response") or {}).get("resolution") == "fix"}
+    resolved: dict[str, str | None] = {}
+    validations = []
+    for item_id, item in fixes.items():
+        response = item["accepted_response"]
+        cited = str((response.get("fix_reply") or {}).get("commit_hash") or "")
+        resolved[item_id] = next((sha for sha in pr_commits if cited and sha.startswith(cited)), None)
+        validations.append([row.get("command", "") for row in response.get("validation_commands") or []])
+    runnable = [argv for commands in validations for argv in map(runnable_validation, commands) if argv]
+    in_pr = {item_id: sha for item_id, sha in resolved.items() if sha}
+    # Reachability alone accepts a citation of the commit that introduced the defect.
+    oracle = oracle_at_cited_commits(fixture, in_pr) if len(in_pr) == len(resolved) else {}
+    checks = {
+        "fix_commits_in_pr": all(resolved.values()),
+        "every_fix_has_validation": all(validations),
+        "runnable_validations_pass": all(run_in(clone, argv, fixture.env) for argv in runnable),
+        "oracle_passes_at_cited_commit": len(oracle) == len(fixes) and all(oracle.values()),
+    }
+    return {"passed": all(checks.values()), "checks": checks, "validation_commands": validations,
+            "oracle_at_cited_commit": oracle,
+            "runnable_validation_count": len(runnable),
+            # Reported, not gated: SKILL.md allows label-only validation such as `unit-tests=passed`.
+            "fix_count": len(validations),
+            "fixes_with_rerunnable_validation": sum(1 for commands in validations
+                                                    if any(map(runnable_validation, commands)))}
+
+
+def grade(fixture: Fixture) -> dict[str, Any]:
+    artifacts = runtime_artifacts(fixture)
+    clone = clone_pushed_head(fixture, "grade")
+    evidence = grade_evidence(fixture, artifacts, clone)
+    report = artifacts["report"]
+    return {
+        "legal_state": grade_legal_state(fixture, artifacts),
+        "effective_fix": grade_effective_fix(fixture, artifacts, clone),
+        "consistent_evidence": evidence,
+        "runtime": report.get("runtime"),
+        "efficiency": {key: report.get(key) for key in
+                       ("success_rate", "needs_action_count", "inefficiency_flags", "error_prone_operations")},
+        # What the runtime itself saw, so an axis label is not only the sample's claim.
+        "runtime_observed": {
+            "outdated_items": sorted(item_id for item_id, item in artifacts["items"].items() if item.get("is_outdated")),
+            "lease_events": artifacts["lease_events"],
+        },
+        "agent_gh_calls": [call["args"][:2] for call in fixture.gh_calls() if call["caller"] == "agent"],
+        "new_commits": len(git(fixture.remote, "rev-list", f"{fixture.pr_commits[-1]}..refs/heads/"
+                               f"{fixture.sample['pull_request']['head_ref']}", env=fixture.env).split()),
+    }
+
+
+# -- runs and report -----------------------------------------------------------
+
+CRITERIA = ("legal_state", "effective_fix", "consistent_evidence")
+# Reason codes an agent normally meets on the documented path; anything else is a deviation.
+# BLOCKING_ITEMS_REMAIN is the `threads` status for open items, not a rejection.
+EXPECTED_CODES = {"PASSED", "WAITING_FOR_SIMPLE_ADDRESS", "READY_FOR_FINAL_GATE", "COMPLETE", "BLOCKING_ITEMS_REMAIN"}
+AXIS_KEYWORDS = (
+    ("lease", ("LEASE", "CLAIM", "OWNER")),
+    ("verification", ("VALIDATION", "TEST")),
+    ("classification", ("CLASSIFICATION", "DISPOSITION", "DECLINE")),
+    ("recovery", ("STALE", "CLOSED", "ALREADY_RESOLVED", "REPLY_EVIDENCE", "COMMIT_NOT_IN_PR", "REVISION",
+                  "STACK_CONTEXT", "PERSISTENCE", "RECOVER", "RESUME")),
+    ("input", ("INVALID", "MISSING", "PARTIAL", "UNKNOWN", "USAGE", "AMBIGUOUS", "NO_ACTIVE", "AXIS")),
+)
+
+
+def reason_axis(code: str) -> str:
+    for axis, keywords in AXIS_KEYWORDS:
+        if any(keyword in code for keyword in keywords):
+            return axis
+    return "other"
+
+
+def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: Path, work_root: Path,
+            skill_payload: Path = SKILL_PAYLOAD, checkout: str | None = None) -> dict[str, Any]:
+    sample = load_sample(sample_id)
+    run_out = out_dir / sample_id / f"run-{repeat}"
+    run_out.mkdir(parents=True, exist_ok=True)
+    run_dir = work_root / f"{sample_id}-{repeat}"
+    record: dict[str, Any] = {"sample": sample_id, "axis": sample["axis"], "repeat": repeat,
+                              "expects_fix": any("fix" in thread["expected"] for thread in sample["threads"])}
+    try:
+        fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}", skill_payload)
+        # Kept before grading: a grader error must not lose the runner's cost and normalized steps.
+        record["agent"] = run_scripted(fixture) if options.agent == "scripted" else run_external(fixture, options, run_out)
+        record.update(grade(fixture))
+    except EvalError as exc:
+        record["error"] = str(exc)
+    finally:
+        if not options.keep:
+            shutil.rmtree(run_dir, ignore_errors=True)
+    record["passed"] = (all((record.get(name) or {}).get("passed") for name in CRITERIA)
+                        and (options.agent == "scripted" or (record.get("agent") or {}).get("succeeded", False)))
+    if checkout is not None and checkout_state() != checkout:
+        # Not a criterion: the agent did nothing wrong, but the run is not named by the eval's commit.
+        record["checkout_changed"] = True
+    (run_out / "run.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return record
+
+
+def deviations(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Off-path reason codes with the step that hit them and the runtime step the agent ran next."""
+    steps = (record.get("agent") or {}).get("steps", [])
+    found = []
+    for index, step in enumerate(steps):
+        for code in step.get("codes") or [step.get("reason_code")]:
+            if code and code not in EXPECTED_CODES:
+                following = steps[index + 1]["command"] if index + 1 < len(steps) else None
+                found.append({"code": code, "step": step["command"], "next_step": following})
+    return found
+
+
+def friction_codes(record: dict[str, Any]) -> list[str]:
+    return [row["code"] for row in deviations(record)]
+
+
+def fix_count(record: dict[str, Any]) -> int:
+    return (record.get("consistent_evidence") or {}).get("fix_count", 0)
+
+
+def expects_fix(record: dict[str, Any]) -> bool:
+    # Records written before `expects_fix` existed ran to an accepted fix whenever their sample expects one.
+    return bool(record.get("expects_fix", fix_count(record) > 0))
+
+
+def verified_remediation(record: dict[str, Any]) -> bool:
+    """Passed, and every fix left validation an independent grader re-ran: the run's evidence is replayable."""
+    evidence = record.get("consistent_evidence") or {}
+    count = fix_count(record)
+    return bool(record["passed"] and count and evidence.get("fixes_with_rerunnable_validation", 0) == count)
+
+
+def summarize_deviations(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    table: dict[str, dict[str, Any]] = {}
+    for record in records:
+        for row in deviations(record):
+            entry = table.setdefault(row["code"], {"axis": reason_axis(row["code"]), "occurrences": 0, "runs": [],
+                                                   "runs_passed": 0, "steps": {}, "next_steps": {}})
+            entry["occurrences"] += 1
+            run = f"{record['sample']}#{record['repeat']}"
+            if run not in entry["runs"]:
+                entry["runs"].append(run)
+                entry["runs_passed"] += 1 if record["passed"] else 0
+            for key, value in (("steps", row["step"]), ("next_steps", row["next_step"] or "none")):
+                entry[key][value] = entry[key].get(value, 0) + 1
+    return dict(sorted(table.items(), key=lambda item: -item[1]["occurrences"]))
+
+
+def rate(numerator: int, denominator: int) -> dict[str, Any]:
+    return {"count": numerator, "of": denominator, "rate": round(numerator / denominator, 3) if denominator else None}
+
+
+def summarize_sample(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    dispositions = [json.dumps((row.get("effective_fix") or {}).get("dispositions"), sort_keys=True) for row in rows]
+    failed_checks: dict[str, int] = {}
+    for row in rows:
+        for name in CRITERIA:
+            for check, ok in ((row.get(name) or {}).get("checks") or {}).items():
+                if not ok:
+                    failed_checks[f"{name}.{check}"] = failed_checks.get(f"{name}.{check}", 0) + 1
+    costs = [row["agent"]["cost_usd"] for row in rows if (row.get("agent") or {}).get("cost_usd") is not None]
+    return {
+        "axis": rows[0]["axis"],
+        "runs": len(rows),
+        "passed": sum(1 for row in rows if row["passed"]),
+        **{name: sum(1 for row in rows if (row.get(name) or {}).get("passed")) for name in CRITERIA},
+        "dispositions_consistent": len(set(dispositions)) == 1,
+        "fix_runs": sum(1 for row in rows if fix_count(row)),
+        "verified_runs": sum(1 for row in rows if verified_remediation(row)),
+        "fixes": sum((row.get("consistent_evidence") or {}).get("fix_count", 0) for row in rows),
+        "rerunnable_fixes": sum((row.get("consistent_evidence") or {}).get("fixes_with_rerunnable_validation", 0)
+                                for row in rows),
+        "dispositions_seen": sorted(set(dispositions)),
+        "failed_checks": dict(sorted(failed_checks.items())),
+        "errors": [error for row in rows if (error := row.get("error") or (row.get("agent") or {}).get("error"))],
+        "cost_usd": round(sum(costs), 4) if costs else None,
+    }
+
+
+def aggregate(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
+    by_sample: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_sample.setdefault(record["sample"], []).append(record)
+    fixes = sum(fix_count(row) for row in records)
+    rerunnable = sum((row.get("consistent_evidence") or {}).get("fixes_with_rerunnable_validation", 0) for row in records)
+    costs = [row["agent"]["cost_usd"] for row in records if (row.get("agent") or {}).get("cost_usd") is not None]
+    return {
+        "schema": "gh_address_cr_finding_eval_summary.v1",
+        **meta,
+        "runs": len(records),
+        "passed": sum(1 for row in records if row["passed"]),
+        "samples": {sample: summarize_sample(rows) for sample, rows in sorted(by_sample.items())},
+        # Consistency is gated; rerunnability is reported separately so a label-only record is visible
+        # without being scored as a failed fix.
+        "evidence_consistency": rate(sum(1 for row in records if (row.get("consistent_evidence") or {}).get("passed")),
+                                     len(records)),
+        "evidence_rerunnability": rate(rerunnable, fixes),
+        # Conditional on an accepted fix: evidence completeness among runs that produced one.
+        "verified_remediation": rate(sum(1 for row in records if verified_remediation(row)),
+                                     sum(1 for row in records if fix_count(row))),
+        # Every run whose sample expects a fix, early failures included, so a version that fails
+        # sooner cannot score higher.
+        "fix_attempt_success": rate(sum(1 for row in records if verified_remediation(row)),
+                                    sum(1 for row in records if expects_fix(row))),
+        "deviations": summarize_deviations(records),
+        "total_cost_usd": round(sum(costs), 4) if costs else None,
+        "checkout_changed_runs": [f"{row['sample']}#{row['repeat']}" for row in records if row.get("checkout_changed")],
+    }
+
+
+def render_markdown(summary: dict[str, Any]) -> str:
+    lines = [
+        f"# Finding-resolution eval `{summary['run_id']}`",
+        "",
+        f"- Agent: `{summary['agent']}`",
+        f"- Commit: `{summary.get('runtime_commit')}`"
+        + "".join(f" ({name} uncommitted)" for name, key in (("runtime", "runtime_dirty"), ("harness", "harness_dirty"))
+                  if summary.get(key))
+        + (f"; skill `{summary['skill_sha256']}`" if summary.get("skill_sha256") else "")
+        + f"; repeats per sample: {summary['repeats']}",
+        *([f"- **Warning**: the checkout changed during {', '.join(summary['checkout_changed_runs'])}; "
+           "those runs did not measure the commit above"] if summary.get("checkout_changed_runs") else []),
+        f"- Passed: **{summary['passed']}/{summary['runs']}** runs"
+        + (f"; cost ${summary['total_cost_usd']:.2f}" if summary.get("total_cost_usd") is not None else ""),
+        f"- Evidence consistency: {render_rate(summary['evidence_consistency'], 'runs')}",
+        f"- Evidence rerunnability: {render_rate(summary['evidence_rerunnability'], 'fixes')}",
+        f"- **Verified remediation** (passed, and every fix's validation re-ran): "
+        f"{render_rate(summary['verified_remediation'], 'runs with fixes')}",
+        f"- **Fix attempt success** (verified remediation over every run that expects a fix): "
+        f"{render_rate(summary['fix_attempt_success'], 'fix-expecting runs')}",
+        "",
+        "| Sample | Axis | Pass | Legal state | Effective fix | Evidence | Rerunnable evidence | Verified | Same disposition |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for sample, row in summary["samples"].items():
+        runs = row["runs"]
+        rerunnable = f"{row['rerunnable_fixes']}/{row['fixes']} fixes" if row["fixes"] else "n/a"
+        verified = f"{row['verified_runs']}/{row['fix_runs']}" if row["fix_runs"] else "n/a"
+        lines.append(
+            f"| {sample} | {row['axis']} | {row['passed']}/{runs} | {row['legal_state']}/{runs} | "
+            f"{row['effective_fix']}/{runs} | {row['consistent_evidence']}/{runs} | {rerunnable} | {verified} | "
+            f"{'yes' if row['dispositions_consistent'] else 'no'} |"
+        )
+    failures = [(sample, row) for sample, row in summary["samples"].items() if row["failed_checks"] or row["errors"]]
+    if failures:
+        lines += ["", "## Failed checks", ""]
+        for sample, row in failures:
+            detail = ", ".join(f"`{check}` x{count}" for check, count in row["failed_checks"].items())
+            lines.append(f"- {sample}: {detail or 'harness error'}" + (f" ({'; '.join(row['errors'])})" if row["errors"] else ""))
+    if summary["deviations"]:
+        lines += ["", "## Workflow deviations", "",
+                  "| Reason code | Axis | Occurrences | Runs | Hit on | Next step | Runs passed after |",
+                  "|---|---|---|---|---|---|---|"]
+        for code, row in summary["deviations"].items():
+            lines.append(
+                f"| `{code}` | {row['axis']} | {row['occurrences']} | {', '.join(row['runs'])} | "
+                f"{render_counts(row['steps'])} | {render_counts(row['next_steps'])} | "
+                f"{row['runs_passed']}/{len(row['runs'])} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def render_rate(value: dict[str, Any], unit: str) -> str:
+    if not value["of"]:
+        return "n/a"
+    return f"{value['count']}/{value['of']} {unit} ({value['rate']:.0%})"
+
+
+def render_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"`{name}` x{count}" for name, count in sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def write_summary(out_dir: Path, records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
+    summary = aggregate(records, meta)
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "summary.md").write_text(render_markdown(summary), encoding="utf-8")
+    return summary
+
+
+def run_eval(options: argparse.Namespace) -> dict[str, Any]:
+    import tempfile
+
+    run_id = options.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{options.agent}"
+    out_dir = options.output_root / run_id
+    out_dir.mkdir(parents=True, exist_ok=False)
+    meta = {
+        "run_id": run_id,
+        "agent": options.agent,
+        "repeats": options.repeats,
+        "runtime_commit": git(ROOT, "rev-parse", "--short", "HEAD"),
+        "runtime_dirty": bool(git(ROOT, "status", "--porcelain", "--", "src", "skill")),
+        # The grader is part of the result: uncommitted harness changes are not named by the commit.
+        "harness_dirty": bool(git(ROOT, "status", "--porcelain", "--", *HARNESS_PATHS)),
+    }
+    if options.agent == "external":
+        # Freeze the already-validated argv, not a path that can change between runs.
+        config = {"schema_version": "finding-eval-runner.v1", "command": list(options.runner_command)}
+        snapshot = (json.dumps(config, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        (out_dir / "runner-config.json").write_bytes(snapshot)
+        meta["runner_config_sha256"] = hashlib.sha256(snapshot).hexdigest()
+        meta["timeout_s"] = options.timeout
+    records = []
+    # Fixtures live outside this repository so a nested agent cannot discover its
+    # AGENTS.md, the oracles, or the reference solutions by walking up from its cwd.
+    work_root = Path(tempfile.mkdtemp(prefix="gh-address-cr-eval-"))
+    try:
+        # One skill snapshot for every run. The other live inputs cannot be snapshotted (the runtime is an
+        # editable install), so a change to them is flagged per run instead.
+        skill_payload = work_root / "skill-payload"
+        shutil.copytree(SKILL_PAYLOAD, skill_payload)
+        meta["skill_sha256"] = payload_digest(skill_payload)
+        checkout = checkout_state()
+        for repeat in range(1, options.repeats + 1):
+            for sample_id in options.samples or sample_ids():
+                record = run_one(sample_id, repeat, options, out_dir, work_root, skill_payload, checkout)
+                records.append(record)
+                print(f"{sample_id} run {repeat}: {'PASS' if record['passed'] else 'FAIL'}", file=sys.stderr, flush=True)
+                write_summary(out_dir, records, meta)
+    finally:
+        if options.keep:
+            print(f"fixtures kept in {work_root}", file=sys.stderr)
+        else:
+            shutil.rmtree(work_root, ignore_errors=True)
+    return write_summary(out_dir, records, meta)
+
+
+def load_record(path: Path) -> dict[str, Any]:
+    """Read normalized stored observations; raw process logs never select reporting truth."""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run", help="Run the eval and write summary.json and summary.md.")
+    run.add_argument("--agent", choices=("scripted", "external"), required=True)
+    run.add_argument("--runner", type=Path, help="Explicit finding-eval-runner.v1 config for external execution.")
+    run.add_argument("--repeats", type=int, default=1)
+    run.add_argument("--sample", dest="samples", action="append", choices=sample_ids(), help="Repeatable; default all.")
+    run.add_argument("--timeout", type=int, default=1800, help="Per-run agent timeout in seconds.")
+    run.add_argument("--output-root", type=Path, default=RESULTS_ROOT)
+    run.add_argument("--run-id")
+    run.add_argument("--keep", action="store_true", help="Keep fixture directories for inspection.")
+    report = commands.add_parser("report", help="Re-render summary.md from the run.json files of a run.")
+    report.add_argument("run_dir", type=Path)
+    options = parser.parse_args(argv)
+    if options.command == "report":
+        records = [load_record(path) for path in sorted(options.run_dir.glob("*/run-*/run.json"))]
+        meta = json.loads((options.run_dir / "summary.json").read_text(encoding="utf-8"))
+        summary = write_summary(options.run_dir, records, {key: meta.get(key) for key in
+                                ("run_id", "agent", "repeats", "runtime_commit", "runtime_dirty",
+                                 "harness_dirty", "skill_sha256", "runner_config_sha256", "timeout_s")})
+    else:
+        if options.repeats < 1 or options.timeout < 1:
+            parser.error("repeats and timeout must be positive")
+        if (options.agent == "external") != (options.runner is not None):
+            parser.error("--runner is required only with --agent external")
+        if options.runner is not None:
+            try:
+                options.runner_command = load_runner_config(options.runner)
+            except EvalError as exc:
+                parser.error(str(exc))
+        summary = run_eval(options)
+    sys.stdout.write(render_markdown(summary))
+    return 0 if summary["passed"] == summary["runs"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

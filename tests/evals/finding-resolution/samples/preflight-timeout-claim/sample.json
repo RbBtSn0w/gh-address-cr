@@ -1,0 +1,48 @@
+{
+  "schema": "gh_address_cr_finding_eval_sample.v1",
+  "id": "preflight-timeout-claim",
+  "axis": "classification",
+  "purpose": "A false positive: the PR description and code already agree, so the right outcome is a decline with no code change.",
+  "source": {
+    "repository": "RbBtSn0w/gh-address-cr",
+    "pr": 363,
+    "path": "src/gh_address_cr/cli.py",
+    "reviewer": "copilot-pull-request-reviewer",
+    "handled_as": "declined, no code change"
+  },
+  "pull_request": {
+    "number": 363,
+    "title": "fix(github): retry transient gh reads and coordinate gh calls across sessions",
+    "head_ref": "fix/gh-auth-preflight",
+    "body": "## Summary\n\n- Bound the `gh auth status` preflight with a 30s timeout and one jittered retry on transient failures.\n- GitHubClient calls keep their existing 60s timeout (`GH_COMMAND_TIMEOUT_SECONDS`).\n\n## Validation\n\n- `python3 -m unittest discover -s tests`\n"
+  },
+  "commits": [
+    {
+      "tree": "head",
+      "message": "fix(github): bound the gh auth preflight and retry transient failures"
+    }
+  ],
+  "threads": [
+    {
+      "id": "PRRT_eval363timeout",
+      "author": "copilot-pull-request-reviewer",
+      "body": "threads/timeout-mismatch.md",
+      "path": "app/preflight.py",
+      "anchor": "_PREFLIGHT_AUTH_TIMEOUT_SECONDS = 30.0",
+      "expected": [
+        "reject",
+        "clarify"
+      ]
+    }
+  ],
+  "reference": {
+    "items": [
+      {
+        "thread": "PRRT_eval363timeout",
+        "disposition": "reject",
+        "why": "The 30s preflight timeout is intentional and the PR description states it; 60s is the GitHubClient call timeout."
+      }
+    ]
+  },
+  "oracle": "oracle.py"
+}

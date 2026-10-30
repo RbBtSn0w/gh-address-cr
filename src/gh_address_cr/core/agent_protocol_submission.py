@@ -15,9 +15,11 @@ single-function-spans-everything shape into three modules instead of one.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from gh_address_cr import PROTOCOL_VERSION
 from gh_address_cr.agent.roles import TERMINAL_RESOLUTIONS
@@ -43,6 +45,7 @@ from gh_address_cr.core.runtime_kernel.stack import (
     stack_diagnostic_payload,
     unavailable_stack_context,
 )
+from gh_address_cr.core.runtime_store import RuntimeStore, WorkingSetRequest
 from gh_address_cr.core.utils import (
     fix_reply_severity_rejection_reason as _fix_reply_severity_rejection_reason,
 )
@@ -53,11 +56,98 @@ from gh_address_cr.core.utils import (
     get_session_items as _items,
 )
 from gh_address_cr.core.utils import (
+    get_session_ledger as _ledger,
+)
+from gh_address_cr.core.utils import (
     normalize_string_list as _normalize_string_list,
 )
 from gh_address_cr.core.work_item_handlers import WorkItemBoundaryError, boundary_summary_for_item
-from gh_address_cr.evidence.ledger import EvidenceLedger
+from gh_address_cr.evidence.ledger import EvidenceLedger, EvidenceRecord
 from gh_address_cr.github.client import GitHubClient
+
+_REQUEST_REJECTION_INVARIANTS = frozenset({
+    "head_ref_oid_lag", "missing_head_tree_oid", "missing_head_ref", "missing_head_oid", "missing_base_ref",
+    "invalid_position", "invalid_pr_number", "invalid_member_state", "unsupported_schema", "invalid_availability",
+    "upstream_invalid", "selected_member_mismatch", "members_not_array", "reported_size_mismatch",
+    "missing_stack_node_id", "invalid_stack_number", "stack_requires_two_members", "positions_not_contiguous",
+    "duplicate_member_pr_number", "selected_member_missing_or_duplicate", "merged_members_not_prefix",
+    "lowest_unmerged_base_mismatch", "dependency_chain_mismatch", "selected_member_missing", "pagination_stack_changed",
+    "stack_not_object", "entries_not_object", "member_pull_request_missing", "pagination_cursor_invalid",
+    "stack_missing_during_pagination", "selected_stack_entry_invalid", "selected_position_mismatch",
+})
+_REJECTION_STORAGE_REASONS = frozenset({
+    "PERSISTENCE_BUSY", "PERSISTENCE_INVALID", "STALE_REVISION", "SESSION_NOT_FOUND", "STATE_DIR_NOT_WRITABLE",
+})
+
+
+def _rejection_storage_reason(error: Exception) -> str:
+    reason = getattr(error, "reason_code", None)
+    return reason if isinstance(reason, str) and reason in _REJECTION_STORAGE_REASONS else "DIAGNOSTIC_WRITE_FAILED"
+
+
+def _confirm_rejection_commit(store: RuntimeStore | None, record_id: str) -> str:
+    if store is None:
+        return "not_committed"
+    try:
+        return "committed" if any(row["record_id"] == record_id for row in store.load_evidence()) else "not_committed"
+    except Exception:
+        # The commit result is unknown, not evidence that the transaction rolled back.
+        return "unknown"
+
+
+def _persist_request_rejection(repo: str, pr_number: str, error: WorkflowError) -> dict[str, Any]:
+    """Observe a decided rejection without saving its stale session or changing its verdict."""
+    record_id = f"ev_{uuid4().hex}"
+    raw_diagnostic = error.payload.get("stack_diagnostic")
+    diagnostic: dict[str, Any] = {"reason_code": error.reason_code}
+    invariant = raw_diagnostic.get("invariant") if isinstance(raw_diagnostic, dict) else None
+    if isinstance(invariant, str) and invariant in _REQUEST_REJECTION_INVARIANTS:
+        diagnostic["invariant"] = invariant
+    payload = {
+        "schema_version": "request-rejection.v1", "status": "REQUEST_REJECTED",
+        "reason_code": error.reason_code, "waiting_on": "stack_refresh", "stack_diagnostic": diagnostic,
+    }
+    result: dict[str, Any] = {"schema_version": "request-rejection-persistence.v1", "projection": "not_attempted"}
+    store: RuntimeStore | None = None
+    try:
+        store = RuntimeStore(session_store.workspace_dir(repo, pr_number))
+        if not store.is_initialized():
+            store = None
+            raise session_store.SessionError("SESSION_NOT_FOUND", "No canonical session exists.")
+
+        def append(current: dict[str, Any]) -> None:
+            record = EvidenceRecord.new(
+                session_id=str(current["session_id"]), item_id="", lease_id=None, agent_id="runtime", role="runtime",
+                event_type="request_rejected", payload=payload,
+            )
+            # The global record identity uses seconds; separate same-second rejections must not collapse.
+            _ledger(current).append(replace(record, record_id=record_id))
+
+        store.transact_working_set(WorkingSetRequest(), append, operation="request_rejection")
+        result["storage"] = "committed"
+    except Exception as exc:
+        result["storage"] = _confirm_rejection_commit(store, record_id)
+        result["reason_code"] = _rejection_storage_reason(exc)
+    if result["storage"] == "committed" and store is not None:
+        result["record_id"] = record_id
+        try:
+            store.materialize_evidence_artifacts(ledger_path=session_store.default_ledger_path(repo, pr_number))
+            result["projection"] = "current"
+        except Exception as exc:
+            result["projection"] = "failed"
+            result["reason_code"] = _rejection_storage_reason(exc)
+    try:
+        from gh_address_cr.otel_tracing import add_current_span_event
+
+        add_current_span_event("gh_address_cr.request.rejection", {
+            "gh_address_cr.request.rejection.reason_code": error.reason_code,
+            "gh_address_cr.request.rejection.storage": result["storage"],
+            "gh_address_cr.request.rejection.projection": result["projection"],
+        })
+    except Exception:
+        # Telemetry failure must not replace the original rejection or its durable evidence.
+        pass
+    return result
 
 
 def refresh_stack_context_for_request(
@@ -78,7 +168,7 @@ def refresh_stack_context_for_request(
     # Lets a rejected agent tell a post-push lag (`head_ref_oid_lag`) from a broken stack.
     diagnostic_payload = stack_diagnostic_payload(stack_context)
     if stack_context.availability == "invalid":
-        raise WorkflowError(
+        error = WorkflowError(
             status="REQUEST_REJECTED",
             reason_code=protocol_codes.STACK_CONTEXT_INVALID,
             waiting_on="stack_refresh",
@@ -86,8 +176,10 @@ def refresh_stack_context_for_request(
             message="ActionRequest was not issued because current stack context is invalid.",
             payload=diagnostic_payload,
         )
+        error.payload["rejection_persistence"] = _persist_request_rejection(repo, pr_number, error)
+        raise error
     if stack_context.availability == "unavailable" and was_known_stacked:
-        raise WorkflowError(
+        error = WorkflowError(
             status="REQUEST_REJECTED",
             reason_code=protocol_codes.STACK_CONTEXT_UNAVAILABLE,
             waiting_on="stack_refresh",
@@ -95,6 +187,8 @@ def refresh_stack_context_for_request(
             message="ActionRequest was not issued because known stacked-PR context could not be refreshed.",
             payload=diagnostic_payload,
         )
+        error.payload["rejection_persistence"] = _persist_request_rejection(repo, pr_number, error)
+        raise error
     return stack_context
 
 

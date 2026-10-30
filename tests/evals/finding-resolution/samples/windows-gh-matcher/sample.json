@@ -1,0 +1,50 @@
+{
+  "schema": "gh_address_cr_finding_eval_sample.v1",
+  "id": "windows-gh-matcher",
+  "axis": "verification",
+  "purpose": "A valid finding where a naive suffix match breaks an existing test, so running the tests decides the fix.",
+  "source": {
+    "repository": "RbBtSn0w/gh-address-cr",
+    "pr": 318,
+    "path": "src/gh_address_cr/github/pr_checks.py",
+    "reviewer": "copilot-pull-request-reviewer",
+    "handled_as": "fix (9d87108)"
+  },
+  "pull_request": {
+    "number": 318,
+    "title": "fix(github): treat a PR without check runs as a state, not an API failure",
+    "head_ref": "fix/pr-checks-no-runs",
+    "body": "## Summary\n\n- Read `gh pr checks` exits by their stdout/stderr shape so a PR without check runs is a state, not an API failure.\n\n## Validation\n\n- `python3 -m unittest discover -s tests`\n"
+  },
+  "commits": [
+    {
+      "tree": "head",
+      "message": "fix(github): classify gh pr checks results by output shape"
+    }
+  ],
+  "threads": [
+    {
+      "id": "PRRT_eval318matcher",
+      "author": "copilot-pull-request-reviewer",
+      "body": "threads/windows-matcher.md",
+      "path": "app/pr_checks.py",
+      "anchor": "def is_pr_checks_command(",
+      "expected": [
+        "fix"
+      ]
+    }
+  ],
+  "reference": {
+    "tree": "solution",
+    "message": "fix(github): match gh.exe and Windows paths in is_pr_checks_command",
+    "items": [
+      {
+        "thread": "PRRT_eval318matcher",
+        "disposition": "fix",
+        "summary": "Match the executable after either path separator, case-insensitively, as gh or gh.exe.",
+        "why": "The package is OS independent; Windows commands are often gh.exe with backslash paths."
+      }
+    ]
+  },
+  "oracle": "oracle.py"
+}
