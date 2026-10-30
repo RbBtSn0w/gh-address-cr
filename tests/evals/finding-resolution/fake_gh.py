@@ -10,6 +10,7 @@ every other call goes to the journey fake, which fails loudly on calls it does
 not model.
 """
 
+import fcntl
 import json
 import os
 import runpy
@@ -106,7 +107,7 @@ def dispatch(args):
     runpy.run_path(DELEGATE, run_name="__main__")
 
 
-def main():
+def dispatch_call():
     args = sys.argv[1:]
     record = {"caller": caller(), "args": args}
     before = unhandled_size()
@@ -117,6 +118,13 @@ def main():
         record["handled"] = unhandled_size() == before
         with open(CALLERS_PATH, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
+
+
+def main():
+    # Even reads refresh shared state; keep parallel runtime reads out of a partial JSON write.
+    with open(STATE_PATH + ".lock", "a", encoding="utf-8") as state_lock:
+        fcntl.flock(state_lock, fcntl.LOCK_EX)
+        dispatch_call()
 
 
 if __name__ == "__main__":

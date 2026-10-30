@@ -740,6 +740,12 @@ python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
 
+Repository-only finding-resolution evaluations use an offline scripted control
+or an explicitly configured external command. The harness selects no agent,
+provider or model; see
+[`tests/evals/finding-resolution/README.md`](tests/evals/finding-resolution/README.md)
+for the versioned runner contract and before/after comparison requirements.
+
 An authorized disposable GitHub stack can be provisioned, exercised, verified,
 and explicitly cleaned with the manifest-scoped E2E harness:
 

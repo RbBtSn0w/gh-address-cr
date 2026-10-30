@@ -38,17 +38,92 @@ that does not use `gh-address-cr`.
 
 ```bash
 .venv/bin/python scripts/eval_finding_resolution.py run --agent scripted
-.venv/bin/python scripts/eval_finding_resolution.py run --agent claude --model claude-sonnet-5-5 --repeats 5
+.venv/bin/python scripts/eval_finding_resolution.py run --agent external --runner runner.json --repeats 5 --keep
 ```
 
 - `--agent scripted` follows the reference solution. It must pass 5/5 and runs offline in `tests/test_finding_resolution_eval.py`.
-- `--agent claude` launches headless Claude Code. It is configured as follows:
-  - It runs with project settings only, so no user `CLAUDE.md`, plugins or MCP servers load.
-  - The skill is installed into the fixture from one snapshot of `skill/`, taken when the eval starts. The summary names it with a content hash (`skill_sha256`).
-  - The runtime is the interpreter's `gh-address-cr`.
-  - GitHub credentials are scrubbed and telemetry export is off.
-  - Runs are serial.
-  - Results go to `build/evals/finding-resolution/<run-id>/`: `summary.md`, `summary.json`, and per-run `run.json` and `transcript.jsonl`.
+- `--agent external` executes the command explicitly configured in `runner.json`.
+  The harness chooses no vendor, host, model, account, tool permissions or API budget.
+- Both modes snapshot `skill/` once per eval and install it at `.eval/skill`
+  inside each fixture. `skill_sha256` identifies the actual snapshot. The runtime
+  is the interpreter's `gh-address-cr`; GitHub credentials are scrubbed and
+  fixture telemetry export is off. Runs are serial.
+- Results go to `build/evals/finding-resolution/<run-id>/`: `summary.md`,
+  `summary.json` and per-run `run.json`. External runs also retain `request.json`,
+  normalized `result.json` when valid, and local `runner.stdout` / `runner.stderr`.
+  Raw process output may contain sensitive diagnostics and is not copied into
+  public summaries or telemetry.
+- External evaluations load config once, save the normalized `runner-config.json`
+  snapshot and record its full `runner_config_sha256` in the summary. Reports
+  preserve this hash and the actual `timeout_s`; they do not reload a changed
+  config file. Both values must match across comparison groups.
+
+### External runner contract
+
+Provide an executable that handles one fixture, with an explicit argv config:
+
+```json
+{
+  "schema_version": "finding-eval-runner.v1",
+  "command": ["your-eval-runner", "--your-option"]
+}
+```
+
+This command runs directly, without shell expansion, in the fixture checkout.
+It receives one JSON request on stdin:
+
+```json
+{
+  "schema_version": "finding-eval-request.v1",
+  "repo": "eval-fixture/nonfinite-shutdown-wait",
+  "pr": "351",
+  "task": "address",
+  "skill_path": ".eval/skill"
+}
+```
+
+The runner supplies its chosen execution environment, reads the indicated skill
+snapshot and handles the requested PR through the runtime. Any host-specific
+skill exposure or transcript normalization belongs to that runner. It inherits
+the fixture's fake GitHub, writable state directory and runtime executable;
+do not replace those with real GitHub credentials or another runtime.
+
+Write exactly one result object to stdout; other logs belong on stderr:
+
+```json
+{
+  "schema_version": "finding-eval-result.v1",
+  "identity": "eval-worker",
+  "steps": [
+    {"command": "address", "codes": ["WAITING_FOR_SIMPLE_ADDRESS"], "exit_code": 5},
+    {"command": "final-gate", "codes": ["PASSED"], "exit_code": 0}
+  ],
+  "cost_usd": 0
+}
+```
+
+Identity, steps and optional cost are self-reported observations. Independent
+graders still check the real fixture state; a result saying `PASSED` cannot
+make unfinished handling pass. A nonzero runner exit or invalid result fails
+the attempt even if the fixture was otherwise completed. Failures and timeouts
+remain in the results, and the runner's process group stops before grading.
+
+Config objects have exactly `schema_version` and `command`; the config size
+limit is 64 KiB, with 1–64 nonempty, NUL-free argv strings of at most 8192
+characters each. Results require `schema_version`, `identity` and `steps`,
+with only optional `cost_usd`; result size is limited to 1 MiB. Identity is a
+1–64 character label using letters, digits, dot, underscore or hyphen, starting
+with a letter or digit. Keep credentials out of config arguments and labels.
+
+There are at most 1000 steps. Each has exactly `command`, `codes` and
+`exit_code`: a command label from the harness's public command vocabulary,
+up to 16 uppercase reason-code labels of at most 64 characters, and an integer
+exit code from -255 to 255. Cost must be finite and nonnegative. Unsupported
+versions, duplicate JSON keys, extra fields and malformed output fail explicitly.
+
+The previous provider-specific mode and model, turns, API-budget and tool-list
+flags are removed; they fail rather than selecting a hidden compatibility path.
+Executor-specific settings belong outside this harness.
 
 Do not switch branches or edit this checkout while an eval runs. Only the skill
 is snapshotted. The runtime is an editable install of `src/`, and the samples,
@@ -93,13 +168,15 @@ A label-only record is visible in these numbers without being scored as a failed
 every code it shows the runs where the code appeared, the step that hit it, the
 step the agent ran next, and how many of those runs still passed. A code that
 repeats across runs points at guidance or a state contract, not at a missing
-recovery branch. `report` re-derives steps from each `transcript.jsonl`, so a
-reporting change never needs a new agent run.
+recovery branch. `report` aggregates the normalized steps already saved in
+`run.json`; it never parses a vendor transcript or changes stored observations.
 
 The **Rerunnable evidence** column is reported but does not gate a run. It counts
 fixes whose recorded validation names a command the grader can re-run. A
 `unittest X` entry counts as `python -m unittest X`. A label-only entry such as
-`unit-tests=passed` is allowed by `SKILL.md`, but it cannot be re-verified.
+`unit-tests=passed` is still accepted by the runtime, but the candidate skill
+guidance in PR #374 requires the command actually run. Label-only evidence cannot be
+re-verified.
 
 `agent_gh_calls` lists every `gh` call that did not come from the runtime. That
 includes reads made by the agent host itself, such as a PR lookup at startup.
@@ -119,8 +196,16 @@ decide which layer to improve. Do not add an abstraction first.
 
 ## Re-reporting versus re-grading
 
-`report` re-derives steps, deviations, and summary numbers from each run's
-`run.json` and `transcript.jsonl`. It does not rebuild git state or rerun
+`report` re-derives deviations and summary numbers from each run's normalized
+`run.json`. It does not rebuild git state, reinterpret raw logs, or rerun
 oracles. Fixtures are deleted after grading unless the run used `--keep`. A
 grader change therefore needs kept fixtures or a fresh run of the affected
 samples; results graded before the change stay a baseline of the older grader.
+
+For a before/after comparison, fix the same runtime, grader, external runner
+configuration and execution settings for both groups, and change only the
+skill snapshot. Keep fixtures and compare the actual recorded hashes. An
+unavailable executor means measurement is pending; it is not a prerequisite
+for unrelated runtime work, nor a reason to choose a fixed replacement vendor.
+Scripted reference results validate the harness and do not demonstrate a
+real-agent improvement for PR #374.

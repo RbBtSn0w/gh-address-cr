@@ -16,13 +16,14 @@ skill and this checkout's runtime, then deterministic graders score the run:
   evidence; recorded validation commands that are runnable pass on the pushed head.
 
     .venv/bin/python scripts/eval_finding_resolution.py run --agent scripted
-    .venv/bin/python scripts/eval_finding_resolution.py run --agent claude --model claude-sonnet-5-5 --repeats 5
+    .venv/bin/python scripts/eval_finding_resolution.py run --agent external --runner runner.json --repeats 5
     .venv/bin/python scripts/eval_finding_resolution.py report build/evals/finding-resolution/<run-id>
 
 `--agent scripted` follows each sample's reference solution through the CLI and
 must score 100%; it is the offline control in tests/test_finding_resolution_eval.py.
-`--agent claude` launches headless Claude Code and spends API budget. Runs are
-serial, telemetry export is disabled, and results land in build/ (git-ignored).
+`--agent external` launches an explicitly configured argv command using a versioned
+JSON request/result contract. Runs are serial, fixture telemetry export is disabled,
+and results land in build/ (git-ignored).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -42,6 +44,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+from gh_address_cr.core.command_names import AGENT_SUBCOMMANDS, PUBLIC_COMMANDS
+from gh_address_cr.telemetry import add_current_span_event, start_child_span
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "tests" / "evals" / "finding-resolution"
@@ -61,7 +68,6 @@ SCRUBBED_ENV = re.compile(r"^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_AGENT_SDK_|CLAUDE_P
                           r"AI_AGENT$|GH_|GITHUB|OTEL_|PYTHONPATH$|VIRTUAL_ENV$|"
                           r"GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|"
                           r"NAMESPACE)$)|_PAT$|_TOKEN$")
-CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Skill"
 SUBPROCESS_TIMEOUT_S = 300
 HARNESS_PATHS = ("scripts/eval_finding_resolution.py", "tests/evals/finding-resolution", "tests/test_finding_resolution_eval.py")
 # Read from the checkout by every run: the runtime under test (an editable install of src/), the
@@ -253,9 +259,9 @@ def build_fixture(sample: dict[str, Any], run_dir: Path, conversation_id: str,
     git(checkout, "remote", "add", "origin", str(remote), env=env)
     git(checkout, "push", "-q", "-u", "origin", "main", head_ref, env=env)
     # The skill is installed per project; keep it out of what the agent commits.
-    shutil.copytree(skill_payload, checkout / ".claude" / "skills" / "gh-address-cr")
+    shutil.copytree(skill_payload, checkout / ".eval" / "skill")
     with (checkout / ".git" / "info" / "exclude").open("a", encoding="utf-8") as handle:
-        handle.write(".claude/\n")
+        handle.write(".eval/\n")
     repo = f"{REPO_OWNER}/{sample['id']}"
     pr = str(sample["pull_request"]["number"])
     state = {
@@ -317,7 +323,7 @@ def run_runtime(fixture: Fixture, *args: str) -> dict[str, Any]:
 
 
 def step_label(args: list[str]) -> str:
-    """The same `agent resolve`-style label the Claude trace records, without operands."""
+    """A bounded runtime step label, without operands."""
     return " ".join(args[:2]) if args[0] in ("agent", "telemetry") else args[0]
 
 
@@ -361,70 +367,101 @@ def run_scripted(fixture: Fixture) -> dict[str, Any]:
     return {"agent": "scripted", "exit_code": 0, "steps": steps}
 
 
-CLAUDE_PROMPT = "/gh-address-cr address {repo} {pr}"
-RUNTIME_STATUS_RE = re.compile(r'"(status|reason_code)":\s*"([A-Z0-9_]+)"')
-GATE_REASON_RE = re.compile(r"reason_code=([A-Z0-9_]+)")
+RUNNER_CONFIG_LIMIT = 64 * 1024
+RUNNER_RESULT_LIMIT = 1024 * 1024
+STEP_COMMANDS = (PUBLIC_COMMANDS - {"agent"}) | frozenset(f"agent {name}" for name in AGENT_SUBCOMMANDS)
 
 
-def claude_trace(transcript: Path) -> dict[str, Any]:
-    """Runtime commands the agent ran, their outcomes, and the run's result event."""
-    commands: dict[str, dict[str, Any]] = {}
+def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
-    for line in transcript.read_text(encoding="utf-8").splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if event.get("type") == "result":
-            result = event
-        for block in (event.get("message") or {}).get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use" and block.get("name") == "Bash":
-                command = str((block.get("input") or {}).get("command") or "")
-                subcommand = runtime_subcommand(command)
-                if subcommand:
-                    commands[block["id"]] = {"command": subcommand, "codes": []}
-            if block.get("type") == "tool_result" and block.get("tool_use_id") in commands:
-                text = tool_result_text(block.get("content"))
-                codes = [value for key, value in RUNTIME_STATUS_RE.findall(text) if key == "reason_code"]
-                codes += GATE_REASON_RE.findall(text)
-                commands[block["tool_use_id"]]["codes"] = sorted(set(codes))
-    return {"commands": list(commands.values()), "result": result}
+    for key, value in pairs:
+        if key in result:
+            raise EvalError("runner_duplicate_field")
+        result[key] = value
+    return result
 
 
-def tool_result_text(content: Any) -> str:
-    """A tool result is a string or a list of content blocks; only their text matters."""
-    if isinstance(content, list):
-        return "\n".join(str(block.get("text") or "") for block in content if isinstance(block, dict))
-    return str(content or "")
+def bounded_json(path: Path, limit: int) -> Any:
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit:
+            raise EvalError("runner_output_too_large")
+        return json.loads(raw, object_pairs_hook=strict_object)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        raise EvalError("runner_invalid_json") from exc
 
 
-def runtime_subcommand(command: str) -> str | None:
-    """`agent resolve`-style label without arguments, so traces stay free of paths and text.
+def load_runner_config(path: Path) -> list[str]:
+    value = bounded_json(path, RUNNER_CONFIG_LIMIT)
+    if not isinstance(value, dict) or set(value) != {"schema_version", "command"}:
+        raise EvalError("runner_invalid_config")
+    command = value["command"]
+    if value["schema_version"] != "finding-eval-runner.v1":
+        raise EvalError("runner_unsupported_config_version")
+    if (not isinstance(command, list) or not 1 <= len(command) <= 64
+            or any(not isinstance(arg, str) or not arg or len(arg) > 8192 or "\0" in arg for arg in command)):
+        raise EvalError("runner_invalid_command")
+    return command
 
-    None when the command only mentions the runtime, e.g. `cat` of a path under a skill directory.
-    """
-    match = re.search(r"(?:gh-address-cr|gh_address_cr)\s+((?:agent|telemetry)\s+[a-z-]+|[a-z-]+)", command)
-    return match.group(1) if match else None
+
+def validate_runner_result(value: Any) -> dict[str, Any]:
+    required = {"schema_version", "identity", "steps"}
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"cost_usd"}:
+        raise EvalError("runner_invalid_result_fields")
+    if value["schema_version"] != "finding-eval-result.v1":
+        raise EvalError("runner_unsupported_result_version")
+    if not isinstance(value["identity"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value["identity"]):
+        raise EvalError("runner_invalid_identity")
+    steps = value["steps"]
+    if not isinstance(steps, list) or len(steps) > 1000:
+        raise EvalError("runner_invalid_steps")
+    for step in steps:
+        if not isinstance(step, dict) or set(step) != {"command", "codes", "exit_code"}:
+            raise EvalError("runner_invalid_step_fields")
+        if not isinstance(step["command"], str) or step["command"] not in STEP_COMMANDS:
+            raise EvalError("runner_invalid_step_command")
+        codes = step["codes"]
+        if (not isinstance(codes, list) or len(codes) > 16
+                or any(not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code) for code in codes)):
+            raise EvalError("runner_invalid_step_codes")
+        if type(step["exit_code"]) is not int or not -255 <= step["exit_code"] <= 255:
+            raise EvalError("runner_invalid_step_exit_code")
+    if "cost_usd" in value:
+        cost = value["cost_usd"]
+        if type(cost) not in (int, float) or cost < 0 or cost > sys.float_info.max or not math.isfinite(cost):
+            raise EvalError("runner_invalid_cost")
+    return value
 
 
 def run_process_group(command: list[str], *, cwd: Path, env: dict[str, str], stdout: Any,
-                      timeout: float) -> tuple[int, str]:
-    """Run the agent as its own process group and stop the whole group before returning.
-
-    Tool processes the agent started can outlive it, on timeout or in the background;
-    grading and fixture cleanup must not race them.
-    """
-    process = subprocess.Popen(command, cwd=cwd, env=env, stdout=stdout, stderr=subprocess.PIPE, text=True,
-                               start_new_session=True)
-    try:
-        _, stderr = process.communicate(timeout=timeout)
-        exit_code = process.returncode
-    except subprocess.TimeoutExpired:
-        exit_code, stderr = 124, "timed out"
-    stop_process_group(process)
-    return exit_code, stderr or ""
+                      stderr: Any, request: str, timeout: float) -> int:
+    """Stop the agent and its tools before any grader reads the fixture."""
+    name = Path(command[0]).name
+    with start_child_span(name, kind=SpanKind.CLIENT) as span:
+        span.set_attribute("process.executable.name", name)
+        try:
+            process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=stdout,
+                                       stderr=stderr, text=True, start_new_session=True)
+        except OSError as exc:
+            span.set_attribute("error.type", "runner_launch_failed")
+            span.set_status(Status(StatusCode.ERROR))
+            raise EvalError("runner_launch_failed") from exc
+        span.set_attribute("process.pid", process.pid)
+        try:
+            process.communicate(input=request, timeout=timeout)
+            exit_code = process.returncode
+        except subprocess.TimeoutExpired:
+            exit_code = 124
+        finally:
+            stop_process_group(process)
+            if process.stdin is not None:
+                process.stdin.close()
+        span.set_attribute("process.exit.code", exit_code)
+        if exit_code:
+            span.set_attribute("error.type", "runner_timeout" if exit_code == 124 else "runner_nonzero_exit")
+            span.set_status(Status(StatusCode.ERROR))
+        return exit_code
 
 
 def stop_process_group(process: subprocess.Popen[str]) -> None:
@@ -441,42 +478,38 @@ def stop_process_group(process: subprocess.Popen[str]) -> None:
             return
 
 
-def run_claude(fixture: Fixture, options: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
-    claude = shutil.which("claude", path=fixture.env["PATH"])
-    if not claude:
-        raise EvalError("claude CLI not found on PATH")
-    transcript = out_dir / "transcript.jsonl"
-    command = [
-        claude, "-p", CLAUDE_PROMPT.format(repo=fixture.repo, pr=fixture.pr),
-        "--model", options.model,
-        "--output-format", "stream-json", "--verbose",
-        # Project settings only: no user CLAUDE.md, user skills, plugins, or MCP servers.
-        "--setting-sources", "project", "--strict-mcp-config",
-        "--no-session-persistence",
-        "--allowedTools", options.allowed_tools,
-        "--max-turns", str(options.max_turns),
-        "--max-budget-usd", str(options.max_budget_usd),
-    ]
+def run_external(fixture: Fixture, options: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
+    request = {"schema_version": "finding-eval-request.v1", "repo": fixture.repo, "pr": fixture.pr,
+               "task": "address", "skill_path": ".eval/skill"}
+    request_text = json.dumps(request) + "\n"
+    (out_dir / "request.json").write_text(request_text, encoding="utf-8")
     started = time.monotonic()
-    with transcript.open("w", encoding="utf-8") as handle:
-        exit_code, stderr = run_process_group(command, cwd=fixture.checkout, env=fixture.env, stdout=handle,
-                                              timeout=options.timeout)
-    trace = claude_trace(transcript)
-    result = trace["result"]
-    return {
-        "agent": "claude",
-        "model": options.model,
-        "exit_code": exit_code,
-        "stderr_tail": stderr[-400:],
-        "duration_s": round(time.monotonic() - started, 1),
-        "result_subtype": result.get("subtype"),
-        "is_error": result.get("is_error"),
-        "num_turns": result.get("num_turns"),
-        "permission_denials": len(result.get("permission_denials") or []),
-        "cost_usd": result.get("total_cost_usd"),
-        "steps": trace["commands"],
-        "final_message": str(result.get("result") or "")[-1500:],
-    }
+    result: dict[str, Any] = {"agent": "external", "steps": [], "succeeded": False}
+    try:
+        with (out_dir / "runner.stdout").open("w", encoding="utf-8") as stdout, \
+                (out_dir / "runner.stderr").open("w", encoding="utf-8") as stderr:
+            exit_code = run_process_group(options.runner_command, cwd=fixture.checkout, env=fixture.env,
+                                          stdout=stdout, stderr=stderr, request=request_text, timeout=options.timeout)
+        result["exit_code"] = exit_code
+        # A valid result can retain cost/steps even when the process failed. It cannot vouch for success.
+        try:
+            value = validate_runner_result(bounded_json(out_dir / "runner.stdout", RUNNER_RESULT_LIMIT))
+        except EvalError:
+            if exit_code:
+                raise EvalError("runner_timeout" if exit_code == 124 else "runner_nonzero_exit") from None
+            raise
+        (out_dir / "result.json").write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        result.update({key: value[key] for key in ("identity", "steps", "cost_usd") if key in value})
+        if exit_code:
+            raise EvalError("runner_timeout" if exit_code == 124 else "runner_nonzero_exit")
+        result["succeeded"] = True
+    except EvalError as exc:
+        result["error"] = str(exc)
+    result["duration_s"] = round(time.monotonic() - started, 1)
+    add_current_span_event("finding_eval.runner_result", attributes={
+        "succeeded": result["succeeded"], "outcome": result.get("error", "runner_completed"),
+    })
+    return result
 
 
 # -- graders -------------------------------------------------------------------
@@ -721,15 +754,16 @@ def run_one(sample_id: str, repeat: int, options: argparse.Namespace, out_dir: P
                               "expects_fix": any("fix" in thread["expected"] for thread in sample["threads"])}
     try:
         fixture = build_fixture(sample, run_dir, f"eval-{out_dir.name}-{sample_id}-{repeat}", skill_payload)
-        # Kept before grading: a grader error must not lose the agent's cost, steps, or transcript link.
-        record["agent"] = run_scripted(fixture) if options.agent == "scripted" else run_claude(fixture, options, run_out)
+        # Kept before grading: a grader error must not lose the runner's cost and normalized steps.
+        record["agent"] = run_scripted(fixture) if options.agent == "scripted" else run_external(fixture, options, run_out)
         record.update(grade(fixture))
     except EvalError as exc:
         record["error"] = str(exc)
     finally:
         if not options.keep:
             shutil.rmtree(run_dir, ignore_errors=True)
-    record["passed"] = all((record.get(name) or {}).get("passed") for name in CRITERIA)
+    record["passed"] = (all((record.get(name) or {}).get("passed") for name in CRITERIA)
+                        and (options.agent == "scripted" or (record.get("agent") or {}).get("succeeded", False)))
     if checkout is not None and checkout_state() != checkout:
         # Not a criterion: the agent did nothing wrong, but the run is not named by the eval's commit.
         record["checkout_changed"] = True
@@ -811,7 +845,7 @@ def summarize_sample(rows: list[dict[str, Any]]) -> dict[str, Any]:
                                 for row in rows),
         "dispositions_seen": sorted(set(dispositions)),
         "failed_checks": dict(sorted(failed_checks.items())),
-        "errors": [row["error"] for row in rows if row.get("error")],
+        "errors": [error for row in rows if (error := row.get("error") or (row.get("agent") or {}).get("error"))],
         "cost_usd": round(sum(costs), 4) if costs else None,
     }
 
@@ -851,7 +885,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     lines = [
         f"# Finding-resolution eval `{summary['run_id']}`",
         "",
-        f"- Agent: `{summary['agent']}`" + (f" (`{summary['model']}`)" if summary.get("model") else ""),
+        f"- Agent: `{summary['agent']}`",
         f"- Commit: `{summary.get('runtime_commit')}`"
         + "".join(f" ({name} uncommitted)" for name, key in (("runtime", "runtime_dirty"), ("harness", "harness_dirty"))
                   if summary.get(key))
@@ -925,13 +959,19 @@ def run_eval(options: argparse.Namespace) -> dict[str, Any]:
     meta = {
         "run_id": run_id,
         "agent": options.agent,
-        "model": options.model if options.agent == "claude" else None,
         "repeats": options.repeats,
         "runtime_commit": git(ROOT, "rev-parse", "--short", "HEAD"),
         "runtime_dirty": bool(git(ROOT, "status", "--porcelain", "--", "src", "skill")),
         # The grader is part of the result: uncommitted harness changes are not named by the commit.
         "harness_dirty": bool(git(ROOT, "status", "--porcelain", "--", *HARNESS_PATHS)),
     }
+    if options.agent == "external":
+        # Freeze the already-validated argv, not a path that can change between runs.
+        config = {"schema_version": "finding-eval-runner.v1", "command": list(options.runner_command)}
+        snapshot = (json.dumps(config, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        (out_dir / "runner-config.json").write_bytes(snapshot)
+        meta["runner_config_sha256"] = hashlib.sha256(snapshot).hexdigest()
+        meta["timeout_s"] = options.timeout
     records = []
     # Fixtures live outside this repository so a nested agent cannot discover its
     # AGENTS.md, the oracles, or the reference solutions by walking up from its cwd.
@@ -958,26 +998,18 @@ def run_eval(options: argparse.Namespace) -> dict[str, Any]:
 
 
 def load_record(path: Path) -> dict[str, Any]:
-    """A graded run. Steps are re-derived from the raw transcript, so a reporting change never needs a re-run."""
-    record = json.loads(path.read_text(encoding="utf-8"))
-    transcript = path.parent / "transcript.jsonl"
-    if transcript.is_file() and (record.get("agent") or {}).get("agent", "claude") == "claude":
-        record.setdefault("agent", {"agent": "claude"})["steps"] = claude_trace(transcript)["commands"]
-    return record
+    """Read normalized stored observations; raw process logs never select reporting truth."""
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Run the eval and write summary.json and summary.md.")
-    run.add_argument("--agent", choices=("scripted", "claude"), required=True)
-    run.add_argument("--model", default="claude-sonnet-5-5", help="Model for --agent claude.")
+    run.add_argument("--agent", choices=("scripted", "external"), required=True)
+    run.add_argument("--runner", type=Path, help="Explicit finding-eval-runner.v1 config for external execution.")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--sample", dest="samples", action="append", choices=sample_ids(), help="Repeatable; default all.")
-    run.add_argument("--max-turns", type=int, default=80)
-    run.add_argument("--max-budget-usd", type=float, default=5.0, help="Per-run budget for --agent claude.")
-    run.add_argument("--allowed-tools", default=CLAUDE_TOOLS,
-                     help="--allowedTools for --agent claude; narrow Bash with patterns such as 'Bash(git:*)'.")
     run.add_argument("--timeout", type=int, default=1800, help="Per-run agent timeout in seconds.")
     run.add_argument("--output-root", type=Path, default=RESULTS_ROOT)
     run.add_argument("--run-id")
@@ -989,9 +1021,18 @@ def main(argv: list[str] | None = None) -> int:
         records = [load_record(path) for path in sorted(options.run_dir.glob("*/run-*/run.json"))]
         meta = json.loads((options.run_dir / "summary.json").read_text(encoding="utf-8"))
         summary = write_summary(options.run_dir, records, {key: meta.get(key) for key in
-                                ("run_id", "agent", "model", "repeats", "runtime_commit", "runtime_dirty",
-                                 "harness_dirty", "skill_sha256")})
+                                ("run_id", "agent", "repeats", "runtime_commit", "runtime_dirty",
+                                 "harness_dirty", "skill_sha256", "runner_config_sha256", "timeout_s")})
     else:
+        if options.repeats < 1 or options.timeout < 1:
+            parser.error("repeats and timeout must be positive")
+        if (options.agent == "external") != (options.runner is not None):
+            parser.error("--runner is required only with --agent external")
+        if options.runner is not None:
+            try:
+                options.runner_command = load_runner_config(options.runner)
+            except EvalError as exc:
+                parser.error(str(exc))
         summary = run_eval(options)
     sys.stdout.write(render_markdown(summary))
     return 0 if summary["passed"] == summary["runs"] else 1

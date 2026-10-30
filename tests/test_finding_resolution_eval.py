@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -18,7 +20,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -41,6 +45,52 @@ DECLINES = {"reject", "clarify", "defer"}
 
 
 class FindingResolutionEvalTests(unittest.TestCase):
+    def test_parallel_fake_reads_preserve_a_coherent_pr_head(self):
+        fixture = self.fixture("malformed-report-fields")
+        slow_reader = fixture.run_dir / "slow-reader.py"
+        writing = fixture.run_dir / "writing"
+        # Make an in-progress state write observable without relying on scheduler luck.
+        slow_reader.write_text(
+            "import builtins, os, pathlib, runpy, sys, time\n"
+            "original_open = builtins.open\n"
+            "def slow_open(path, mode='r', *args, **kwargs):\n"
+            "    handle = original_open(path, mode, *args, **kwargs)\n"
+            "    if str(path) == os.environ['FAKE_GH_STATE'] and mode == 'w':\n"
+            f"        marker = pathlib.Path({str(writing)!r})\n"
+            "        if not marker.exists():\n"
+            "            marker.touch()\n"
+            "            time.sleep(1)\n"
+            "    return handle\n"
+            "builtins.open = slow_open\n"
+            "fake = sys.argv.pop(1)\n"
+            "runpy.run_path(fake, run_name='__main__')\n", encoding="utf-8",
+        )
+
+        def read_head(_):
+            return subprocess.run(
+                [sys.executable, str(slow_reader), str(fixture.run_dir / "bin" / "gh"),
+                 "pr", "view", "--json", "headRefOid"], cwd=fixture.checkout, env=fixture.env,
+                capture_output=True, text=True, timeout=30,
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            first = pool.submit(read_head, 0)
+            deadline = time.monotonic() + 5
+            while not writing.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(writing.exists(), "the first writer did not reach the controlled write boundary")
+            following = [pool.submit(read_head, index) for index in range(1, 24)]
+            results = [future.result() for future in [first, *following]]
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["headRefOid"], fixture.pr_commits[-1])
+        self.assertEqual(fixture.gh_state()["head_sha"], fixture.pr_commits[-1])
+
+    def test_external_steps_accept_public_environment_diagnostics(self):
+        value = {"schema_version": "finding-eval-result.v1", "identity": "local-test",
+                 "steps": [{"command": "doctor", "codes": [], "exit_code": 0}]}
+        self.assertEqual(EVAL.validate_runner_result(value), value)
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -48,6 +98,38 @@ class FindingResolutionEvalTests(unittest.TestCase):
 
     def fixture(self, sample_id):
         return EVAL.build_fixture(EVAL.load_sample(sample_id), self.root / sample_id, f"eval-test-{sample_id}")
+
+    def external_options(self, source, *, timeout=5):
+        runner = self.root / "runner.py"
+        runner.write_text(source, encoding="utf-8")
+        return argparse.Namespace(runner_command=[sys.executable, str(runner)], timeout=timeout)
+
+    def test_external_runner_receives_neutral_request_and_cannot_vouch_for_grade(self):
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "private-test-token", "GIT_DIR": "/invalid/override"}):
+            fixture = self.fixture("nonfinite-shutdown-wait")
+        options = self.external_options(
+            "import json, os, pathlib, sys\n"
+            "request = json.load(sys.stdin)\n"
+            "assert request['schema_version'] == 'finding-eval-request.v1'\n"
+            "assert request['repo'] == 'eval-fixture/nonfinite-shutdown-wait'\n"
+            "assert request['pr'] == '351'\n"
+            "assert request['task'] == 'address'\n"
+            "assert request['skill_path'] == '.eval/skill'\n"
+            "assert pathlib.Path(request['skill_path'], 'SKILL.md').is_file()\n"
+            "assert pathlib.Path('.git').is_dir()\n"
+            "assert not pathlib.Path('.claude').exists()\n"
+            "assert os.environ['DISABLE_TELEMETRY'] == '1'\n"
+            "assert 'GH_TOKEN' not in os.environ\n"
+            "print(json.dumps({'schema_version':'finding-eval-result.v1','identity':'local-test',"
+            "'steps':[{'command':'final-gate','codes':['PASSED'],'exit_code':0}],'cost_usd':0.0}))\n"
+        )
+        out = self.root / "output"
+        out.mkdir()
+        result = EVAL.run_external(fixture, options, out)
+        self.assertTrue(result["succeeded"], result)
+        self.assertEqual(EVAL.git(fixture.checkout, "status", "--porcelain", env=fixture.env), "")
+        self.assertEqual(result["steps"], [{"command": "final-gate", "codes": ["PASSED"], "exit_code": 0}])
+        self.assertFalse(EVAL.grade(fixture)["legal_state"]["passed"])
 
     def test_five_samples_cover_the_attribution_axes(self):
         axes = {EVAL.load_sample(sample_id)["axis"] for sample_id in EVAL.sample_ids()}
@@ -196,11 +278,11 @@ class FindingResolutionEvalTests(unittest.TestCase):
 
         def capture(sample, run_dir, conversation_id, skill_payload=EVAL.SKILL_PAYLOAD):
             fixture = build(sample, run_dir, conversation_id, skill_payload)
-            installed.append(EVAL.payload_digest(fixture.checkout / ".claude" / "skills" / "gh-address-cr"))
+            installed.append(EVAL.payload_digest(fixture.checkout / ".eval" / "skill"))
             (live / "SKILL.md").write_text("edited mid-eval\n", encoding="utf-8")
             return fixture
 
-        options = argparse.Namespace(agent="scripted", model=None, repeats=2, samples=["preflight-timeout-claim"],
+        options = argparse.Namespace(agent="scripted", repeats=2, samples=["preflight-timeout-claim"],
                                      output_root=self.root / "results", run_id="snapshot", keep=False)
         with mock.patch.object(EVAL, "SKILL_PAYLOAD", live), \
                 mock.patch.object(EVAL, "build_fixture", side_effect=capture):
@@ -231,7 +313,7 @@ class FindingResolutionEvalTests(unittest.TestCase):
             self.assertNotEqual(EVAL.checkout_state(), edited, "a second edit to an already modified file counts")
 
     def test_runs_after_a_checkout_change_are_flagged(self):
-        options = argparse.Namespace(agent="scripted", model=None, repeats=2, samples=["preflight-timeout-claim"],
+        options = argparse.Namespace(agent="scripted", repeats=2, samples=["preflight-timeout-claim"],
                                      output_root=self.root / "results", run_id="switched", keep=False)
         # Read once when the eval starts, then after each run.
         with mock.patch.object(EVAL, "checkout_state", side_effect=["start", "start", "switched"]):
@@ -282,33 +364,179 @@ class FindingResolutionEvalTests(unittest.TestCase):
         self.assertFalse(checks["no_direct_gh_writes"])
         self.assertFalse(checks["replies_ledger_backed"])
 
-    def test_claude_transcript_yields_runtime_steps_without_arguments(self):
-        events = [
-            {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {
-                "command": "cd /private/work && gh-address-cr agent resolve eval-fixture/x 351 github-thread:PRRT_1"}}]}},
-            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content":
-                '{"status": "REQUEST_REJECTED", "reason_code": "COMMIT_NOT_IN_PR"}'}]}},
-            # Mentions the runtime only in a path; it is not a runtime step.
-            {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t3", "name": "Bash", "input": {
-                "command": "grep -n disposition .claude/skills/gh-address-cr/references/agent-protocol.md"}}]}},
-            {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {
-                "command": "gh-address-cr final-gate eval-fixture/x 351"}}]}},
-            # Tool results arrive either as a string or as a list of text blocks.
-            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content":
-                [{"type": "text", "text": "Final gate passed\nreason_code=PASSED\n"}]}]}},
-            {"type": "result", "subtype": "success", "num_turns": 7, "total_cost_usd": 0.42},
-        ]
-        transcript = self.root / "transcript.jsonl"
-        transcript.write_text("\n".join(map(json.dumps, events)) + "\n", encoding="utf-8")
+    def test_reporting_uses_stored_steps_without_vendor_log_parsing(self):
+        record = {"agent": {"steps": [{"command": "address", "codes": [], "exit_code": 0}]}}
+        path = self.root / "run.json"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        (self.root / "transcript.jsonl").write_text("not a vendor transcript", encoding="utf-8")
+        self.assertEqual(EVAL.load_record(path), record)
 
-        trace = EVAL.claude_trace(transcript)
+    def test_runner_config_rejects_unsupported_and_unsafe_shapes(self):
+        path = self.root / "config.json"
+        good = {"schema_version": "finding-eval-runner.v1", "command": [sys.executable, "runner.py"]}
+        path.write_text(json.dumps(good), encoding="utf-8")
+        self.assertEqual(EVAL.load_runner_config(path), good["command"])
+        for bad in ({**good, "schema_version": "future"}, {**good, "extra": True},
+                    {**good, "command": "echo x"}, {**good, "command": []},
+                    {**good, "command": [True]}, {**good, "command": ["a\0b"]},
+                    {**good, "command": ["x" * 8193]}):
+            with self.subTest(bad=bad):
+                path.write_text(json.dumps(bad), encoding="utf-8")
+                with self.assertRaises(EVAL.EvalError):
+                    EVAL.load_runner_config(path)
+        path.write_text(" " * (EVAL.RUNNER_CONFIG_LIMIT + 1), encoding="utf-8")
+        with self.assertRaisesRegex(EVAL.EvalError, "too_large"):
+            EVAL.load_runner_config(path)
 
-        self.assertEqual(
-            trace["commands"],
-            [{"command": "agent resolve", "codes": ["COMMIT_NOT_IN_PR"]}, {"command": "final-gate", "codes": ["PASSED"]}],
-        )
-        self.assertEqual(trace["result"]["total_cost_usd"], 0.42)
-        self.assertEqual(EVAL.friction_codes({"agent": {"steps": trace["commands"]}}), ["COMMIT_NOT_IN_PR"])
+    def test_external_result_validation_is_strict_and_bounded(self):
+        good = {"schema_version": "finding-eval-result.v1", "identity": "local-test", "steps": []}
+        bad_values = [None, [], {}, {**good, "schema_version": "future"}, {**good, "extra": 1},
+                      {**good, "identity": "a" * 65}, {**good, "identity": "private/path"},
+                      {**good, "steps": "address"}, {**good, "steps": [{}] * 1001}]
+        for cost in (float("nan"), float("inf"), -1, True, "1"):
+            bad_values.append({**good, "cost_usd": cost})
+        step = {"command": "address", "codes": [], "exit_code": 0}
+        for bad_step in ({**step, "extra": 1}, {**step, "command": "address /private/path"},
+                         {**step, "command": []}, {**step, "codes": ["private/path"]},
+                         {**step, "codes": ["X"] * 17}, {**step, "exit_code": True},
+                         {**step, "exit_code": 256}):
+            bad_values.append({**good, "steps": [bad_step]})
+        self.assertEqual(EVAL.validate_runner_result(good), good)
+        for bad in bad_values:
+            with self.subTest(bad=bad), self.assertRaises(EVAL.EvalError):
+                EVAL.validate_runner_result(bad)
+
+    def test_external_failures_keep_local_output_without_leaking_it(self):
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        cases = [("print('secret-token-not-json')", "runner_invalid_json"),
+                 ("print('x' * 1048577)", "runner_output_too_large"),
+                 ("import sys; print('secret-token'); sys.exit(7)", "runner_nonzero_exit"),
+                 ("pass", "runner_invalid_json")]
+        for number, (source, error) in enumerate(cases):
+            with self.subTest(error=error):
+                options = self.external_options(source)
+                out = self.root / f"out-{number}"
+                out.mkdir()
+                result = EVAL.run_external(fixture, options, out)
+                self.assertFalse(result["succeeded"])
+                self.assertEqual(result["error"], error)
+                self.assertNotIn("secret-token", json.dumps(result))
+                self.assertTrue((out / "runner.stdout").is_file())
+                self.assertTrue((out / "runner.stderr").is_file())
+        raw = self.root / "duplicate.json"
+        raw.write_text('{"x":1,"x":2}', encoding="utf-8")
+        with self.assertRaisesRegex(EVAL.EvalError, "duplicate"):
+            EVAL.bounded_json(raw, 100)
+
+    def test_external_process_spans_are_observed_and_public_safe(self):
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.trace import SpanKind
+
+        from gh_address_cr import otel_tracing
+
+        provider = TracerProvider()
+        exporter = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("external-eval-test")
+        fixture = self.fixture("nonfinite-shutdown-wait")
+        with mock.patch.object(otel_tracing, "_tracer", tracer), tracer.start_as_current_span("test-parent"):
+            for code in (0, 7):
+                source = ("import json, sys\n"
+                          "print(json.dumps({'schema_version':'finding-eval-result.v1',"
+                          "'identity':'private-identity','steps':[]}))\n"
+                          f"sys.exit({code})\n")
+                options = self.external_options(source)
+                out = self.root / f"spans-{code}"
+                out.mkdir()
+                result = EVAL.run_external(fixture, options, out)
+                self.assertEqual(result["succeeded"], code == 0)
+        spans = [span for span in exporter.get_finished_spans() if span.kind == SpanKind.CLIENT]
+        self.assertEqual(len(spans), 2)
+        for span, code in zip(spans, (0, 7), strict=True):
+            self.assertEqual(span.name, Path(sys.executable).name)
+            self.assertEqual(span.attributes["process.executable.name"], Path(sys.executable).name)
+            self.assertGreater(span.attributes["process.pid"], 0)
+            self.assertEqual(span.attributes["process.exit.code"], code)
+            self.assertNotIn("private-identity", str(span.attributes))
+            self.assertNotIn(str(self.root), str(span.attributes))
+            self.assertNotIn("process.command_args", span.attributes)
+        self.assertEqual(spans[1].attributes["error.type"], "runner_nonzero_exit")
+        parent = next(span for span in exporter.get_finished_spans() if span.name == "test-parent")
+        self.assertEqual([dict(event.attributes)["succeeded"] for event in parent.events], [True, False])
+        provider.shutdown()
+
+    def test_failed_external_process_cannot_pass_even_when_grader_passes(self):
+        options = self.external_options(
+            "import json, sys\n"
+            "print(json.dumps({'schema_version':'finding-eval-result.v1','identity':'local-test',"
+            "'steps':[],'cost_usd':0.25}))\n"
+            "sys.exit(7)\n")
+        options.agent = "external"
+        options.keep = False
+        grade = {criterion: {"passed": True, "checks": {}} for criterion in EVAL.CRITERIA}
+        with mock.patch.object(EVAL, "grade", return_value=grade):
+            record = EVAL.run_one("nonfinite-shutdown-wait", 1, options, self.root / "out", self.root)
+        self.assertFalse(record["passed"])
+        self.assertEqual(record["agent"]["error"], "runner_nonzero_exit")
+        self.assertEqual(record["agent"]["cost_usd"], 0.25)
+        summary = EVAL.aggregate([record], {"agent": "external"})
+        self.assertEqual(summary["fix_attempt_success"]["of"], 1)
+        self.assertEqual(summary["total_cost_usd"], 0.25)
+        self.assertEqual(summary["samples"]["nonfinite-shutdown-wait"]["errors"], ["runner_nonzero_exit"])
+
+    def test_external_cli_and_report_preserve_normalized_stored_observations(self):
+        options = self.external_options(
+            "import json\n"
+            "print(json.dumps({'schema_version':'finding-eval-result.v1','identity':'local-test',"
+            "'steps':[{'command':'address','codes':['NO_ACTIVE_SESSION'],'exit_code':5}]}))\n")
+        config = self.root / "runner.json"
+        config.write_text(json.dumps({"schema_version": "finding-eval-runner.v1",
+                                      "command": options.runner_command}), encoding="utf-8")
+        output = self.root / "results"
+        load_config = EVAL.load_runner_config
+
+        def load_then_change(path):
+            command = load_config(path)
+            path.write_text("config changed after load", encoding="utf-8")
+            return command
+
+        with mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch.object(EVAL, "load_runner_config", side_effect=load_then_change) as loaded:
+            code = EVAL.main(["run", "--agent", "external", "--runner", str(config),
+                              "--sample", "preflight-timeout-claim", "--output-root", str(output),
+                              "--run-id", "external-local", "--repeats", "2", "--timeout", "37"])
+        self.assertEqual(code, 1, "a self-reported step cannot complete an untouched fixture")
+        loaded.assert_called_once_with(config)
+        run_dir = output / "external-local"
+        snapshot = run_dir / "runner-config.json"
+        self.assertEqual(json.loads(snapshot.read_text(encoding="utf-8"))["command"], options.runner_command)
+        expected_digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        path = run_dir / "preflight-timeout-claim" / "run-1" / "run.json"
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["agent"]["steps"][0]["codes"], ["NO_ACTIVE_SESSION"])
+        (path.parent / "runner.stdout").write_text("invalid replacement raw log", encoding="utf-8")
+        (path.parent / "transcript.jsonl").write_text("invalid vendor log", encoding="utf-8")
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(EVAL.main(["report", str(run_dir)]), 1)
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        self.assertIn("NO_ACTIVE_SESSION", summary["deviations"])
+        self.assertNotIn("model", summary)
+        self.assertEqual(summary["runner_config_sha256"], expected_digest)
+        self.assertEqual(summary["timeout_s"], 37)
+        self.assertNotIn("local-test", json.dumps(summary))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), stored)
+
+    def test_cli_rejects_old_vendor_options_and_missing_runner(self):
+        cases = [["--agent", "claude"], ["--agent", "external"],
+                 ["--agent", "scripted", "--runner", "config.json"]]
+        for option in ("--model", "--max-turns", "--max-budget-usd", "--allowed-tools"):
+            cases.append(["--agent", "scripted", option, "x"])
+        for args in cases:
+            with self.subTest(args=args), mock.patch("sys.stderr"), self.assertRaises(SystemExit) as result:
+                EVAL.main(["run", *args])
+            self.assertEqual(result.exception.code, 2)
 
     def test_recorded_validation_is_rerunnable_only_when_it_names_a_command(self):
         python = sys.executable
@@ -336,7 +564,7 @@ class FindingResolutionEvalTests(unittest.TestCase):
                 record("a", 2, 1, 0, []),
                 record("b", 1, 0, 0, conflict),
             ],
-            {"run_id": "t", "agent": "scripted", "model": None, "repeats": 2},
+            {"run_id": "t", "agent": "scripted", "repeats": 2},
         )
 
         self.assertEqual(summary["evidence_consistency"], {"count": 3, "of": 3, "rate": 1.0})
@@ -355,7 +583,7 @@ class FindingResolutionEvalTests(unittest.TestCase):
                     "agent": {"steps": []}, "consistent_evidence": evidence}
 
         summary = EVAL.aggregate([record(1, 1, True)] + [record(n, 0, False) for n in range(2, 6)],
-                                 {"run_id": "t", "agent": "scripted", "model": None, "repeats": 5})
+                                 {"run_id": "t", "agent": "scripted", "repeats": 5})
 
         self.assertEqual(summary["verified_remediation"], {"count": 1, "of": 1, "rate": 1.0})
         self.assertEqual(summary["fix_attempt_success"], {"count": 1, "of": 5, "rate": 0.2})
@@ -368,7 +596,7 @@ class FindingResolutionEvalTests(unittest.TestCase):
         steps[-1]["reason_code"] = "FINAL_GATE_MISSING_REPLY_EVIDENCE"
         record = {"sample": "s", "axis": "baseline", "repeat": 1, "passed": False, "agent": {"steps": steps}}
 
-        summary = EVAL.aggregate([record], {"run_id": "t", "agent": "scripted", "model": None, "repeats": 1})
+        summary = EVAL.aggregate([record], {"run_id": "t", "agent": "scripted", "repeats": 1})
 
         row = summary["deviations"]["FINAL_GATE_MISSING_REPLY_EVIDENCE"]
         self.assertEqual((row["steps"], row["next_steps"], row["runs_passed"]), ({"final-gate": 1}, {"none": 1}, 0))
@@ -398,20 +626,20 @@ class FindingResolutionEvalTests(unittest.TestCase):
     def test_agent_timeout_stops_tool_processes_before_grading(self):
         fixture = self.fixture("nonfinite-shutdown-wait")
         pid_file = self.root / "tool.pid"
-        fake_claude = fixture.run_dir / "bin" / "claude"
-        # The agent starts a tool process that would outlive it and keep touching the fixture.
-        fake_claude.write_text(f'#!/bin/sh\nsleep 30 &\necho $! > "{pid_file}"\nsleep 30\n', encoding="utf-8")
-        fake_claude.chmod(0o755)
-        options = argparse.Namespace(model="m", max_turns=1, max_budget_usd=0.01,
-                                     allowed_tools=EVAL.CLAUDE_TOOLS, timeout=0.5)
+        options = self.external_options(
+            "import pathlib, subprocess, time\n"
+            "tool = subprocess.Popen(['sleep', '30'])\n"
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(tool.pid))\n"
+            "time.sleep(30)\n", timeout=0.5)
         out_dir = self.root / "agent-out"
         out_dir.mkdir()
 
-        agent = EVAL.run_claude(fixture, options, out_dir)
+        agent = EVAL.run_external(fixture, options, out_dir)
 
         tool_pid = int(pid_file.read_text(encoding="utf-8"))
         self.addCleanup(self.kill_quietly, tool_pid)
         self.assertEqual(agent["exit_code"], 124)
+        self.assertEqual(agent["error"], "runner_timeout")
         self.assertFalse(self.alive(tool_pid), "a tool process outlived the timed-out agent into grading")
 
     @staticmethod
