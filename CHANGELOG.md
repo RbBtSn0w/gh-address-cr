@@ -1,3 +1,25 @@
+## [3.21.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.1...v3.21.2) (2026-10-30)
+
+### Bug Fixes
+
+* **ci:** preserve release notes and closing reference forms ([941c16b](https://github.com/RbBtSn0w/gh-address-cr/commit/941c16b1f645c380ba9aab777aeb544b57b930fa))
+* **ci:** require reviewed release promotion and sync ([f27ebfd](https://github.com/RbBtSn0w/gh-address-cr/commit/f27ebfdcb3a90468c746065c98635d964da36571))
+* **eval:** bind evidence to each finding and one completion unit ([978dc65](https://github.com/RbBtSn0w/gh-address-cr/commit/978dc6580f5358b6543623447665840d0096ac28)), closes [#373](https://github.com/RbBtSn0w/gh-address-cr/issues/373)
+* **eval:** check dict-valued flags in the malformed-report-fields oracle ([71294a5](https://github.com/RbBtSn0w/gh-address-cr/commit/71294a51979cd5f789681dbdf0837a6cc53b2f81)), closes [#373](https://github.com/RbBtSn0w/gh-address-cr/issues/373)
+* **eval:** grade the handling session and pin the skill per eval ([bc32104](https://github.com/RbBtSn0w/gh-address-cr/commit/bc321048507abd60396e68ecc2afa6281c81a688))
+* **eval:** name the real source repository in sample provenance ([7800e5b](https://github.com/RbBtSn0w/gh-address-cr/commit/7800e5bd40556b83ed87dacabcdadd44f716b8d8)), closes [#373](https://github.com/RbBtSn0w/gh-address-cr/issues/373)
+* **eval:** record uncommitted harness changes in run metadata ([0401737](https://github.com/RbBtSn0w/gh-address-cr/commit/04017374b44954d2b627bccdb57a129493534102))
+* **eval:** scrub git location overrides from every git call ([0ad7eef](https://github.com/RbBtSn0w/gh-address-cr/commit/0ad7eefe8b6f5c3b088791170d02ba0a8a394727))
+* **eval:** string step labels, bounded subprocesses, binary numstat ([4613f27](https://github.com/RbBtSn0w/gh-address-cr/commit/4613f272d949f0155b7c426ed6d119a612c8b6a0)), closes [#373](https://github.com/RbBtSn0w/gh-address-cr/issues/373)
+* **runtime:** persist request-time stack rejection diagnostics ([86db2e1](https://github.com/RbBtSn0w/gh-address-cr/commit/86db2e1cd4475834e123c7ef34d5565f1a85d9a2))
+* **runtime:** retain bounded stack reader rejection causes ([76a4679](https://github.com/RbBtSn0w/gh-address-cr/commit/76a4679125c7a835b9bd309c4208518c9c96ef6e))
+
+## [3.21.1](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.0...v3.21.1) (2026-10-19)
+
+### Bug Fixes
+
+* **skill:** close stack review propagation handoff ([#371](https://github.com/RbBtSn0w/gh-address-cr/issues/371)) ([2982f90](https://github.com/RbBtSn0w/gh-address-cr/commit/2982f90c6a3bd8bee19aa654cb5638d2878763f1))
+
 ## [3.21.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.20.1...v3.21.0) (2026-10-15)
 
 ### Features
