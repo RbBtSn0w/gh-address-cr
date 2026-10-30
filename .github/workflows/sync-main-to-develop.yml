@@ -4,13 +4,23 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+
+concurrency:
+  group: reviewed-main-develop-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
-    name: Sync main back to develop
+    name: Propose reviewed main-to-develop sync
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pull-requests: write
     steps:
       - name: Mint bot token
         id: bot
@@ -19,18 +29,36 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          permission-contents: write
+          permission-contents: read
+          permission-pull-requests: write
 
       - uses: actions/checkout@v4
         with:
-          ref: develop
+          ref: main
           fetch-depth: 0
           token: ${{ steps.bot.outputs.token || github.token }}
 
-      - name: Merge main into develop
+      - name: Propose reviewed sync
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git merge origin/main --no-edit -m "chore(repo): sync main to develop [skip ci]"
-          git push origin develop
+          set -euo pipefail
+          refs="$(git ls-remote --heads origin refs/heads/develop)"
+          if [ -z "$refs" ]; then
+            echo "::error::develop is missing. No recovery is authorized without a durable cycle and verified provenance."
+            exit 1
+          fi
+          git fetch --quiet origin main develop
+          behind="$(git rev-list --count origin/develop..origin/main)"
+          if [ "$behind" -eq 0 ]; then
+            echo "develop already includes main; no sync required."
+            exit 0
+          fi
+          pr="$(gh pr list --base develop --head main --state open --json number --jq '.[0].number')"
+          if [ -n "$pr" ]; then
+            echo "Sync proposal #${pr} already exists."
+            exit 0
+          fi
+          body="$RUNNER_TEMP/sync-proposal.md"
+          printf '%s\n' 'Review main -> develop synchronization, preserve unpromoted work, and verify checks before merging. No automatic merge or missing-ref recreation is authorized. If GITHUB_TOKEN suppresses CI, explicitly arrange fresh checks.' > "$body"
+          gh pr create --base develop --head main --title "chore(repo): sync main to develop" --body-file "$body"
