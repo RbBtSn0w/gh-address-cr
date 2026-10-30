@@ -82,6 +82,15 @@ class RequestRejectionEvidenceContractTests(unittest.TestCase):
         self.assertEqual(self.store.load_outbox(), [])
         self.assertEqual(project_cr_lifecycle(self.events(), repo=REPO, pr_number=PR)["items"], [])
 
+    def test_reader_invariants_survive_request_rejection_persistence(self):
+        for invariant in (
+            "stack_not_object", "entries_not_object", "member_pull_request_missing", "pagination_cursor_invalid",
+            "stack_missing_during_pagination", "selected_stack_entry_invalid", "selected_position_mismatch",
+        ):
+            with self.subTest(invariant=invariant):
+                summary = self.reject(context(invariant=invariant))
+                self.assertEqual(self.events()[-1]["payload"]["stack_diagnostic"], summary["stack_diagnostic"])
+
     def test_known_stacked_unavailable_is_recorded_but_unstacked_unavailable_is_not(self):
         observation = context("unavailable")
         refresh_stack_context_for_request(

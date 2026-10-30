@@ -131,3 +131,15 @@ diagnostic subsystem, and executable evidence for the outcome table above.
 Read-only design review identified the post-commit ambiguity, same-second ID
 collision, unsafe invariant copying and stale-session risks reflected here;
 implementation review remains required after the tests and code exist.
+
+## Review correction: bounded reader diagnostics
+
+The persistence privacy allowlist also includes the existing stack-reader causes
+for malformed objects, missing member pull requests, invalid pagination and
+selected-entry mismatches. Regression coverage checks that all seven reader
+causes survive persistence with the same diagnostic as the rejection output;
+unsafe input remains excluded. This repairs the existing observation contract
+without changing state ownership, gate policy, event shape or side effects.
+The allowlist stays at the persistence privacy boundary. Sharing reader constants
+is deferred to avoid expanding this corrective patch into a reader refactor;
+this change introduces no new diagnostic names or runtime state.

@@ -72,6 +72,8 @@ _REQUEST_REJECTION_INVARIANTS = frozenset({
     "missing_stack_node_id", "invalid_stack_number", "stack_requires_two_members", "positions_not_contiguous",
     "duplicate_member_pr_number", "selected_member_missing_or_duplicate", "merged_members_not_prefix",
     "lowest_unmerged_base_mismatch", "dependency_chain_mismatch", "selected_member_missing", "pagination_stack_changed",
+    "stack_not_object", "entries_not_object", "member_pull_request_missing", "pagination_cursor_invalid",
+    "stack_missing_during_pagination", "selected_stack_entry_invalid", "selected_position_mismatch",
 })
 _REJECTION_STORAGE_REASONS = frozenset({
     "PERSISTENCE_BUSY", "PERSISTENCE_INVALID", "STALE_REVISION", "SESSION_NOT_FOUND", "STATE_DIR_NOT_WRITABLE",
