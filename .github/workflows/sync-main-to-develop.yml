@@ -1,9 +1,6 @@
 name: Sync main to develop
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
   workflow_run:
     workflows: [release]
@@ -16,10 +13,10 @@ concurrency:
 jobs:
   sync:
     name: Propose reviewed main-to-develop sync
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     steps:
       - name: Mint bot token
@@ -29,18 +26,20 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          permission-contents: read
+          permission-contents: write
           permission-pull-requests: write
 
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.bot.outputs.token || github.token }}
+          token: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
 
       - name: Propose reviewed sync
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}
+          GH_TOKEN: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
+          HAS_CUSTOM_TOKEN: ${{ steps.bot.outputs.token != '' || secrets.SYNC_TOKEN != '' }}
+          GH_PROMPT_DISABLED: '1'
         run: |
           set -euo pipefail
           refs="$(git ls-remote --heads origin refs/heads/develop)"
@@ -54,11 +53,49 @@ jobs:
             echo "develop already includes main; no sync required."
             exit 0
           fi
-          pr="$(gh pr list --base develop --head main --state open --json number --jq '.[0].number')"
+          if [ "$HAS_CUSTOM_TOKEN" != "true" ]; then
+            echo "::error::A release-bot App or SYNC_TOKEN is required to trigger PR CI; refusing GITHUB_TOKEN-only proposal creation."
+            exit 1
+          fi
+          stable_sha="$(git rev-parse origin/main)"
+          stable_tree="$(git rev-parse 'origin/main^{tree}')"
+          if [[ ! "$stable_sha" =~ ^[0-9a-f]{40}$ || ! "$stable_tree" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid main commit/tree identity."
+            exit 1
+          fi
+          snapshot_branch="sync/main-to-develop/${stable_sha}"
+          snapshot_message="chore(repo): validate main ${stable_sha} sync"
+          gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/heads/${snapshot_branch}" > "$RUNNER_TEMP/sync-refs.json"
+          snapshot_sha="$(jq -r --arg ref "refs/heads/${snapshot_branch}" '
+            [.[] | select(.ref == $ref)] |
+            if length == 0 then "" elif length == 1 then .[0].object.sha else error("Ambiguous snapshot ref") end
+          ' "$RUNNER_TEMP/sync-refs.json")"
+          if [ -z "$snapshot_sha" ]; then
+            # One empty, non-skip commit preserves the published tree and allows real PR CI.
+            jq -n --arg tree "$stable_tree" --arg parent "$stable_sha" --arg message "$snapshot_message" \
+              '{tree:$tree, parents:[$parent], message:$message}' > "$RUNNER_TEMP/sync-commit.json"
+            snapshot_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits" --method POST --input "$RUNNER_TEMP/sync-commit.json" --jq .sha)"
+            [[ "$snapshot_sha" =~ ^[0-9a-f]{40}$ ]]
+            jq -n --arg ref "refs/heads/${snapshot_branch}" --arg sha "$snapshot_sha" \
+              '{ref:$ref, sha:$sha}' > "$RUNNER_TEMP/sync-ref.json"
+            # Create-only API: a racing or manually changed ref is never advanced or overwritten.
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" --method POST --input "$RUNNER_TEMP/sync-ref.json" > /dev/null
+          fi
+          [[ "$snapshot_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/git/commits/${snapshot_sha}" > "$RUNNER_TEMP/sync-snapshot.json"
+          jq -e --arg tree "$stable_tree" --arg parent "$stable_sha" --arg message "$snapshot_message" \
+            '.tree.sha == $tree and [.parents[].sha] == [$parent] and .message == $message' \
+            "$RUNNER_TEMP/sync-snapshot.json" > /dev/null
+          live_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "$live_main" != "$stable_sha" ]; then
+            echo "::error::main advanced during sync preparation; preserve the snapshot and rerun after release settlement."
+            exit 1
+          fi
+          pr="$(gh pr list --base develop --head "$snapshot_branch" --state open --json number --jq '.[0].number')"
           if [ -n "$pr" ]; then
-            echo "Sync proposal #${pr} already exists."
+            echo "Verified sync proposal #${pr} already exists."
             exit 0
           fi
           body="$RUNNER_TEMP/sync-proposal.md"
-          printf '%s\n' 'Review main -> develop synchronization, preserve unpromoted work, and verify checks before merging. No automatic merge or missing-ref recreation is authorized. If GITHUB_TOKEN suppresses CI, explicitly arrange fresh checks.' > "$body"
-          gh pr create --base develop --head main --title "chore(repo): sync main to develop" --body-file "$body"
+          printf 'Synchronize published main %s into develop. The snapshot has exactly the published tree plus one empty validation commit, so version-commit skip instructions cannot suppress PR CI.\n\nRequire fresh CI, review and final-gate before merge. No automatic merge, trunk write or missing-ref recovery is authorized.\n' "$stable_sha" > "$body"
+          gh pr create --base develop --head "$snapshot_branch" --title "chore(repo): sync main to develop" --body-file "$body"

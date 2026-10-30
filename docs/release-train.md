@@ -42,12 +42,28 @@ stop without overwriting the body. Closing keywords accept an optional colon;
 breaking-note detection follows configured whitespace/list-prefix formatting.
 API errors stop proposal creation.
 
-Sync checks out main and probes develop before use. It creates a reviewed
-`main -> develop` sync PR when necessary; it neither writes trunk refs nor
-recreates a missing branch. Missing develop requires a provenance-based recovery
-plan. A successful release workflow also triggers a fresh proposal check, after its
-version writer has settled; explicit dispatch covers suppressed/lost push events. Proposal success
-means only that a proposal exists, not that integration is synchronized.
+Sync checks out main and probes develop before use. After a successful main
+release, or explicit dispatch, it creates a reviewed snapshot PR to develop.
+It does not run on the initial main push, before the version writer has settled.
+
+Each source main SHA selects `sync/main-to-develop/<full-main-sha>`. A single
+empty validation commit has exactly main's tree, main as its sole parent, and a
+fixed message without skip instructions. This prevents release-version
+`[skip ci]` messages from suppressing the PR's Python CI, as observed in #379
+and manually recovered through #380. Repeated runs verify and reuse the existing
+snapshot/PR. Commit/ref creation requires an App or SYNC_TOKEN; GITHUB_TOKEN-only
+creation stops because it can suppress downstream CI even with a clean message.
+The App/token needs Contents and Pull requests write permissions, used only for
+the snapshot and proposal; no new repository permissions are configured here.
+
+Refs are created with the create-only API, never pushed or force-updated.
+Existing snapshots with a different tree, parent or message are rejected; moving
+main and API failures stop without a new proposal. A failed run may leave an
+unreferenced commit or a valid snapshot; rerunning verifies live state and reuses
+it. After an operator-approved merge, ordinary branch cleanup may remove the
+snapshot head. The workflow neither writes trunk refs nor recreates develop.
+Missing develop still requires a separately approved provenance-based recovery.
+Proposal existence is not proof that CI passed or integration was synchronized.
 
 These repairs reduce automation authority. They do not install the latest
 release-train controller or qualify a lifecycle as Remote Verified. Workflow
