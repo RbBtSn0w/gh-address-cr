@@ -328,6 +328,12 @@ class HeadRefLagTests(unittest.TestCase):
 class HeadRefLagRequestBindingTests(unittest.TestCase):
     """The first request after a push must not be rejected for a lag the runtime can outwait."""
 
+    def setUp(self):
+        # These tests isolate stack observations; persistence has real-store contract coverage.
+        persistence = patch("gh_address_cr.core.agent_protocol_submission._persist_request_rejection", return_value={})
+        persistence.start()
+        self.addCleanup(persistence.stop)
+
     def test_request_after_push_is_issued_once_head_ref_converges(self, sleep):
         from gh_address_cr.core.agent_protocol_submission import refresh_stack_context_for_request
 

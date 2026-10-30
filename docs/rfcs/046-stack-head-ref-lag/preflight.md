@@ -79,6 +79,9 @@ observes the stack twice (request issue and submit) can pay that twice.
   change. The JSON summary of `agent resolve` already carries `reason_code`
   through `output_workflow_error` (now with `stack_diagnostic`), and the root span
   records it since 3.20.1.
+  Follow-up: RFC 047 models and implements this observation through the
+  existing canonical evidence store, with separate commit/projection outcomes;
+  this paragraph records the original deferral, not current absence of support.
 
 ## Alternatives rejected
 
