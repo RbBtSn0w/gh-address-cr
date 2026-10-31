@@ -90,7 +90,7 @@ jobs:
       - name: Test official release analysis adapter
         if: matrix.python-version == '3.14'
         run: |
-          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@10.4.1
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@9.0.0
           node --test tests/branch_release_analysis.test.mjs
 
       - name: Ruff

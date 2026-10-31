@@ -55,7 +55,7 @@ class BranchControlWorkflowTests(unittest.TestCase):
             with self.subTest(file=file):
                 text = (ROOT / file).read_text()
                 self.assertIn('@semantic-release/commit-analyzer@13.0.1', text)
-                self.assertIn('conventional-changelog-conventionalcommits@10.4.1', text)
+                self.assertIn('conventional-changelog-conventionalcommits@9.0.0', text)
 
     def test_checks_completions_do_not_create_sync_proposals(self):
         sync = job(self.text, "sync").split("    steps:", 1)[0]
