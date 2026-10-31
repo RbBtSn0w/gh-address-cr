@@ -1,8 +1,10 @@
-name: Homebrew development preview
+name: Preview / Homebrew
+run-name: >-
+  Preview / Homebrew / CI run ${{ github.event.workflow_run.run_number }}
 
 on:
   workflow_run:
-    workflows: [ci]
+    workflows: ["Checks / Python"]
     types: [completed]
 
 permissions:

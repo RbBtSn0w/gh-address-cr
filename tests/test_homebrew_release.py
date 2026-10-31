@@ -449,6 +449,17 @@ class ReleaseTelemetryTests(unittest.TestCase):
 
 
 class WorkflowTrustTests(unittest.TestCase):
+    def test_workflow_run_routes_follow_producer_display_names(self):
+        for producer, consumer in (("ci.yml", "homebrew-preview.yml"),
+                                   ("release.yml", "sync-main-to-develop.yml")):
+            with self.subTest(consumer=consumer):
+                root = ROOT / ".github/workflows"
+                name = (root / producer).read_text().splitlines()[0].removeprefix("name: ").strip('"\'')
+                text = (root / consumer).read_text()
+                triggers = text.split("    workflows: [", 1)[1].split("]", 1)[0]
+                names = [value.strip().strip('"\'') for value in triggers.split(",")]
+                self.assertEqual(names, [name])
+
     def test_pr_build_cannot_write_releases_or_mint_tap_credentials(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         preview = ci.split("  pr-dev-preview:", 1)[1]
