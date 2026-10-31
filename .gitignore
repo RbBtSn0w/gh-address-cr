@@ -26,3 +26,6 @@ coverage/
 .idea/
 test_output.log
 test_full.log
+
+# Official release analyzer dependencies (installed without a tracked lockfile).
+node_modules/

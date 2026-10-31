@@ -1,0 +1,13 @@
+name: Setup trusted branch control
+description: Install trusted Python helpers and the official release analyzer.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-homebrew-helper
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+    - shell: bash
+      run: >-
+        npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund
+        @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@10.4.1

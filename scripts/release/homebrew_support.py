@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -182,12 +183,17 @@ def validate_preview(run: dict, pr: dict, metadata: dict, *, run_id: int) -> Non
 
 
 def command(argv: list[str], *, cwd: Path | None = None, check: bool = True,
-            env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+            env: dict[str, str] | None = None, trusted_runtime: bool = False,
+            timeout: float = 3600) -> subprocess.CompletedProcess[str]:
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("Command timeout must be finite and positive")
+    if trusted_runtime and not (argv[0] == sys.executable and argv[1:4] == ["-m", "gh_address_cr", "final-gate"]):
+        raise ValueError("Credential forwarding is restricted to the trusted final-gate runtime")
     executable = Path(argv[0]).name
     child_env = (os.environ if env is None else env).copy()
-    if executable not in {"gh", "git"}:
+    if executable not in {"gh", "git"} and not trusted_runtime:
         for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-                    "RELEASE_BOT_PRIVATE_KEY"):
+                    "RELEASE_BOT_PRIVATE_KEY", "GH_TRUNK_READ_TOKEN", "BRANCH_GATE_TOKEN"):
             child_env.pop(key, None)
     started = time.monotonic()
     process = None
@@ -198,10 +204,10 @@ def command(argv: list[str], *, cwd: Path | None = None, check: bool = True,
                                   stderr=subprocess.PIPE) as process:
                 span.set_attribute("process.pid", process.pid)
                 try:
-                    stdout, stderr = process.communicate(timeout=3600)
+                    stdout, stderr = process.communicate(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.communicate()
+                    process.communicate(timeout=5)
                     raise
                 result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
         except (OSError, subprocess.SubprocessError):
