@@ -16,10 +16,35 @@ on:
         options:
           - propose-release
           - propose-sync
+          - readiness
+          - merge
+      pr_number:
+        description: PR number for readiness or guarded merge
+        type: string
+      expected_head:
+        description: Full approved PR head SHA (merge only)
+        type: string
+      expected_base:
+        description: Full approved target SHA (merge only)
+        type: string
+      approval:
+        description: Explicit consequence confirmation; release can publish production
+        type: choice
+        default: none
+        options:
+          - none
+          - confirm-release
+          - confirm-sync
+      writers_pause_until_utc:
+        description: Confirm coordinated writer pause until this UTC instant, within two hours
+        type: string
   workflow_run:
     # Keep the former publish name during the workflow rename transition.
-    workflows: ["Release / 2 Publish", "Release"]
+    workflows: ["Release / 2 Publish", "Release", "ci", "Checks / Python"]
     types: [completed]
+  pull_request_target:
+    branches: [main, develop]
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
 
 permissions:
   contents: read
@@ -144,7 +169,7 @@ jobs:
 
   sync:
     name: Propose reviewed main-to-develop sync
-    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-sync') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-sync') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && (github.event.workflow_run.name == 'Release' || github.event.workflow_run.name == 'Release / 2 Publish'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -233,3 +258,127 @@ jobs:
           body="$RUNNER_TEMP/sync-proposal.md"
           printf 'Synchronize published main %s into develop. The snapshot has exactly the published tree plus one empty validation commit, so version-commit skip instructions cannot suppress PR CI.\n\nRequire fresh CI, review and final-gate before merge. No automatic merge, trunk write or missing-ref recovery is authorized.\n' "$stable_sha" > "$body"
           gh pr create --base develop --head "$snapshot_branch" --title "chore(repo): sync main to develop" --body-file "$body"
+
+  readiness:
+    name: Summarize trunk readiness
+    needs: [create-release-pr, sync]
+    if: >-
+      always() && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation != 'merge') ||
+        github.event_name == 'schedule' || github.event_name == 'workflow_run' ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository &&
+          ((github.base_ref == 'main' && github.head_ref == 'develop') ||
+           (github.base_ref == 'develop' && startsWith(github.head_ref, 'sync/main-to-develop/'))))
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: write
+    concurrency:
+      group: branch-readiness-${{ github.event.pull_request.number || inputs.pr_number || github.event.workflow_run.head_branch || github.run_id }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-branch-control
+      - name: Refresh observed readiness without merge authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [ "$OPERATION" = "readiness" ]; then
+            test -n "$PR_NUMBER" || { echo "::error::readiness requires pr_number"; exit 1; }
+            python -m scripts.release.branch_control readiness --repo "$GITHUB_REPOSITORY" \
+              --pr "$PR_NUMBER" --output-dir branch-report --publish-summary
+          else
+            python -m scripts.release.branch_control readiness --repo "$GITHUB_REPOSITORY" \
+              --event-name "$GITHUB_EVENT_NAME" --event-file "$GITHUB_EVENT_PATH" \
+              --output-dir branch-report --publish-summary
+          fi
+      - name: Show readiness and report artifacts
+        if: always()
+        shell: bash
+        run: |
+          if [ -d branch-report ]; then
+            find branch-report -name '*.md' -type f -exec cat {} + >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: branch-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: branch-report/
+          if-no-files-found: ignore
+
+  guarded-merge:
+    name: Merge explicitly approved trunk candidate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    concurrency:
+      group: guarded-trunk-merge
+      cancel-in-progress: false
+    steps:
+      - name: Reserve time for merge reconciliation and reports
+        run: echo "GH_TRUNK_MERGE_DEADLINE_EPOCH=$(( $(date +%s) + 480 ))" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-branch-control
+      - name: Mint existing event-capable merge credential
+        id: merge-bot
+        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: read
+          permission-statuses: read
+      - name: Require event-capable credential
+        env:
+          HAS_CREDENTIAL: ${{ steps.merge-bot.outputs.token != '' || secrets.SYNC_TOKEN != '' }}
+        run: |
+          test "$HAS_CREDENTIAL" = "true" || { echo "::error::Existing App or SYNC_TOKEN is required; no GITHUB_TOKEN fallback."; exit 1; }
+      - name: Revalidate approval and execute ordinary merge
+        env:
+          GH_TOKEN: ${{ steps.merge-bot.outputs.token || secrets.SYNC_TOKEN }}
+          GH_TRUNK_MERGE_CREDENTIAL: event-capable
+          GH_TRUNK_READ_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          APPROVAL: ${{ inputs.approval }}
+          WRITERS_PAUSE_UNTIL_UTC: ${{ inputs.writers_pause_until_utc }}
+        run: |
+          python -m scripts.release.branch_control merge --repo "$GITHUB_REPOSITORY" \
+            --pr "$PR_NUMBER" --expected-head "$EXPECTED_HEAD" --expected-base "$EXPECTED_BASE" \
+            --approval "$APPROVAL" --writers-pause-until-utc "$WRITERS_PAUSE_UNTIL_UTC" \
+            --actor "$GITHUB_ACTOR" --output-dir branch-report
+      - name: Show actual merge outcome
+        if: always()
+        run: |
+          if [ -f branch-report/merge.md ]; then
+            cat branch-report/merge.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guarded-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: branch-report/
+          if-no-files-found: ignore

@@ -60,6 +60,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -71,6 +74,24 @@ jobs:
 
       - name: Install project
         run: python -m pip install -e .
+
+      - name: Capture tested PR revision
+        if: github.event_name == 'pull_request'
+        run: >-
+          python -m scripts.release.branch_validation capture
+          --source lint-and-test-${{ matrix.python-version }}
+          --output branch-validation/context.json
+
+      - name: Setup release analyzer test runtime
+        if: matrix.python-version == '3.14'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test official release analysis adapter
+        if: matrix.python-version == '3.14'
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund @semantic-release/commit-analyzer conventional-changelog-conventionalcommits
+          node --test tests/branch_release_analysis.test.mjs
 
       - name: Ruff
         run: ruff check src tests scripts/build_plugin_payload.py scripts/release
@@ -152,6 +173,15 @@ jobs:
           PY
           python -m unittest tests.contract.test_agent_journey_contract
 
+      - name: Upload tested PR revision
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-validation-source-${{ github.run_id }}-${{ github.run_attempt }}-lint-and-test-${{ matrix.python-version }}
+          path: branch-validation/context.json
+          if-no-files-found: error
+          retention-days: 14
+
   otel-minimum-versions:
     if: github.event_name != 'pull_request_target'
     # lint-and-test resolves the newest OpenTelemetry release, so it can never notice that
@@ -163,6 +193,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -181,6 +214,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -c otel-min-constraints.txt -e .
 
+      - name: Capture tested PR revision
+        if: github.event_name == 'pull_request'
+        run: >-
+          python -m scripts.release.branch_validation capture
+          --source otel-minimum-versions --output branch-validation/context.json
+
       - name: Verify the installed OpenTelemetry versions are the declared floors
         run: python scripts/otel_min_constraints.py --check-installed
 
@@ -188,6 +227,58 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests
+
+      - name: Upload tested PR revision
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-validation-source-${{ github.run_id }}-${{ github.run_attempt }}-otel-minimum-versions
+          path: branch-validation/context.json
+          if-no-files-found: error
+          retention-days: 14
+
+  record-pr-validation-context:
+    name: Record PR validation context
+    needs: [validate-base, lint-and-test, otel-minimum-versions]
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validation helper without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation helper
+        run: |
+          python -m venv .venv-validation
+          .venv-validation/bin/python -m pip install -e .
+
+      - name: Download tested revision receipts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: branch-validation-source-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: branch-validation-sources
+
+      - name: Verify every mandatory job tested the same event merge
+        run: >-
+          .venv-validation/bin/python -m scripts.release.branch_validation aggregate
+          --directory branch-validation-sources --output branch-validation/context.json
+
+      - name: Upload immutable validation context
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: branch-validation/context.json
+          if-no-files-found: error
+          retention-days: 90
 
   pr-dev-preview:
     name: Build PR Dev Preview

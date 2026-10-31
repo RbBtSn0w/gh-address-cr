@@ -1,5 +1,87 @@
 # Release Train Status and Safe Operation
 
+## Current guarded manual operations
+
+The guarded entry is implemented in `Branches` and becomes available only after
+its reviewed main deployment. This is an operator-invoked merge boundary, not an
+unattended controller or a new persistent lifecycle store. For the two supported
+trunk directions it supersedes the older requirement below to install a separate
+persistent controller. Historical records and the PR #383 exception remain
+historical evidence; they grant no authorization to future operations.
+
+1. Run `Branches` on **main**, operation **readiness**, with the trunk PR number.
+   Read the owned readiness block and Actions summary. A summary never approves a
+   merge. Ordinary feature PRs are deliberately outside this entry.
+2. Confirm current full head/base SHAs, fresh source CI, review completion and
+   the intended direction. Develop -> main may automatically publish production;
+   a verified sync snapshot -> develop does not initiate a stable release.
+3. Coordinate other trunk writers and affected PR edits. The operator must
+   attest a real cooperative pause using `writers_pause_until_utc`, a UTC instant
+   within the next two hours. Do not invent acknowledgments or assume a
+   server-side lock. This input does not change protections or stop other users.
+4. Run `Branches` on **main**, operation **merge**, supplying `pr_number`, full
+   `expected_head`, full `expected_base`, matching `approval` (`confirm-release`
+   or `confirm-sync`), and `writers_pause_until_utc`. Only an actor with live
+   admin/maintain permission is accepted. Dispatch inputs, not PR text/comments,
+   are the approval record. Drift or expiry invalidates the request.
+5. The entry rechecks source evidence and the unchanged runtime final-gate with
+   all checks required, generates a clean merge message, and uses ordinary merge
+   with an expected-head guard. It never copies a PR body into the merge message,
+   requests squash/rebase, bypasses rules or falls back to an event-suppressing
+   GITHUB_TOKEN for merging. Existing App/SYNC credentials must be available. Evidence and gate reads use
+   the job read-only token; actual merge uses the event-capable Bot. No additional
+   Actions permission is required on the App.
+6. Inspect the actual merge result and post-merge Checks/Release links. The
+   entry verifies both retained trunks and ancestry, tolerating automatic cleanup
+   of the snapshot head and legitimate descendant version commits. Wait for
+   production and sync verification before explicitly resuming paused writers.
+
+GitHub's merge endpoint has no atomic expected-base guard. Pre-request ref checks,
+cooperative pause and post-request parent/ancestry verification reduce and detect
+risk but cannot make arbitrary concurrent writes impossible. Web UI squash/rebase
+remain enabled repository-wide; the guard cannot protect merges that bypass it.
+Do not squash/rebase either trunk direction or merge a superseded snapshot.
+
+### Evidence, identity and retry boundaries
+
+CI uploads `branch-validation-<run_id>-<attempt>` only after the required ordinary
+PR jobs succeed. `context.json` uses `branch-validation.v1` and records repository,
+PR, head/base, actual tested merge and ordered parents, run and attempt. Every
+matrix job and the OTel minimum job captures its actual checkout before testing;
+aggregation requires four equal contexts. Metadata-only runs cannot produce this
+evidence. The record is observed CI evidence, not approval or a runtime store.
+
+Missing, expired (14-day artifact retention), malformed or stale evidence blocks
+merging. Trigger fresh ordinary PR validation for the current head/base; rerunning
+an old event may retain its old base, so synchronize the candidate or reopen the
+PR if necessary. Existing pre-deployment PRs receive no hidden evidence waiver.
+
+The official commit analyzer reports the current version and expected release
+type only; final publication still decides the version. Candidate changes to
+release analyzer policy, or unavailable analysis, block a release-direction merge
+for separate policy review; no candidate configuration is executed by a privileged
+job. Not-yet-built bottles do not block promotion, and a successful dry-run is
+not production publication evidence.
+
+Identity is obtained from GitHub GraphQL `viewer { login }` for user and App
+credentials. The dispatch actor is not substituted for the authenticated gate
+actor. The runtime's existing review/attribution and final-gate rules remain
+unchanged. Telemetry failure is visible and fail-open; authorization, evidence and
+GitHub failures are fail-closed.
+
+A ten-minute merge job establishes an eight-minute operation deadline before
+setup, reserves reporting time, bounds API/merge timeouts and rereads the PR after
+an uncertain write. Never blindly repeat a merge PUT. A later repeat is successful
+only if the existing merge's approved parents/head and retained ancestry match;
+an observed anomalous merge stops without rollback or history rewriting.
+
+Readiness auto-refreshes from supported PR/proposal and trusted Checks/Release
+completion events. Only its owned PR-body block changes; human text stays intact.
+Equivalent content suppresses writes. Its advisory review gate omits checks to
+avoid waiting on its own check, while source jobs/evidence are validated
+separately. Actual merge retains the full checks requirement.
+
+
 ## Inspection checkpoint (2026-10-30)
 
 This Python repository uses semantic-release as a Node-based release helper,
@@ -73,8 +155,8 @@ Until then the old default-branch workflows remain active.
 ## Promotion and publication gates
 
 1. Review and land the safety repair on develop; preserve current trunk history.
-2. Before promoting to main, approve the lifecycle policy. Except for the scoped
-   manual retained-trunk release below, require trusted controller deployment.
+2. Before promoting to main, approve the lifecycle policy. For supported guarded manual operations use the current policy above once
+   deployed. Other autonomous lifecycle operations require trusted controller deployment.
    Use the supplied `repo-release-train` controller on one persistent
    POSIX host with an approved durable store outside PR-controlled content.
    Hosted ephemeral checkouts/caches are not that store. Do not invent freeze

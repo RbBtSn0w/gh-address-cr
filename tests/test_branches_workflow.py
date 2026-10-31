@@ -14,13 +14,14 @@ def job_block(content, job):
     return content.split(f"\n  {job}:\n", 1)[1].split("\n  sync:\n", 1)[0]
 
 
-def accepts(block, *, event, operation="", conclusion="", branch=""):
+def accepts(block, *, event, operation="", conclusion="", branch="", workflow="Release"):
     expression = re.search(r"^    if: (.+)$", block, re.MULTILINE).group(1)
     inputs = {
         "github.event_name": event,
         "inputs.operation": operation,
         "github.event.workflow_run.conclusion": conclusion,
         "github.event.workflow_run.head_branch": branch,
+        "github.event.workflow_run.name": workflow,
     }
     for key, value in inputs.items():
         expression = expression.replace(key, repr(value))
@@ -55,13 +56,13 @@ class BranchesWorkflowTests(unittest.TestCase):
         triggers = self.content.split("\npermissions:", 1)[0]
         self.assertIn("name: Branches\n", triggers)
         self.assertIn("cron: '0 7 * * 5'", triggers)
-        self.assertIn('workflows: ["Release / 2 Publish", "Release"]', triggers)
+        self.assertIn('workflows: ["Release / 2 Publish", "Release", "ci", "Checks / Python"]', triggers)
         self.assertIn("types: [completed]", triggers)
         dispatch = triggers.split("  workflow_dispatch:\n", 1)[1].split("  workflow_run:\n", 1)[0]
         self.assertIn("type: choice", dispatch)
         self.assertIn("required: true", dispatch)
         self.assertIn("default: propose-release", dispatch)
-        self.assertEqual(re.findall(r"^          - (.+)$", dispatch, re.MULTILINE), ["propose-release", "propose-sync"])
+        self.assertEqual(re.findall(r"^          - (.+)$", dispatch.split("      pr_number:", 1)[0], re.MULTILINE), ["propose-release", "propose-sync", "readiness", "merge"])
         for retired in ("scheduled-release-pr.yml", "sync-main-to-develop.yml"):
             self.assertFalse((WORKFLOWS / retired).exists())
 

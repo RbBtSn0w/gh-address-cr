@@ -12,7 +12,7 @@ phases. GitHub-managed CodeQL, Copilot and Dependency Graph remain separate.
 | Preview | `homebrew-preview.yml` | Successful eligible Checks run. Validate provenance, test source installation, publish dev preview assets/formula and instructions. |
 | Release | `release.yml` | Main push or manual. Analyze version, publish GitHub/PyPI and call Homebrew when a new version is released. |
 | Homebrew | `homebrew.yml` | Called by Release or manual recovery. Build and verify four platform bottles; update stable tap only after all four pass. |
-| Branches | `branches.yml` | Friday schedule proposes develop -> main; successful main Release completion proposes main -> develop. Manual operation selects one proposal. Neither job merges PRs. |
+| Branches | `branches.yml` | Friday schedule proposes develop -> main; successful main Release completion proposes main -> develop. Manual operation selects a proposal, readiness refresh, or explicitly approved guarded merge. Proposal jobs never merge PRs. |
 
 PR target validation remains `Validate base branch`: only develop may target
 main. Moving it into Checks retains its opened/edited/synchronize/reopened
@@ -53,6 +53,27 @@ See [Homebrew distribution](homebrew-distribution.md) for bottle acceptance and
 same-version recovery. Promotion and sync require normal merge, not squash or
 rebase. Separate proposal jobs retain their own permissions and concurrency
 locks; unrelated proposal operations do not share a global queue.
+
+## Guarded manual merge
+
+Use `Branches` on **main** with `operation=readiness` and `pr_number` to inspect a
+supported trunk proposal. To approve that exact candidate, select `operation=merge`
+and enter its full `expected_head`, full `expected_base`, matching `approval`
+(`confirm-release` or `confirm-sync`), and real coordinated pause expiry
+`writers_pause_until_utc` in UTC within two hours. Admin/maintain permission is
+required. Release approval can publish production automatically after main moves.
+
+The entry fixes merge method/message and rereads facts; PR bodies and reports are
+not approval. Existing repository UI merge choices are unchanged, so bypassing
+this entry remains possible. Unsupported feature PRs keep their existing workflow.
+See [current release policy](release-train.md#current-guarded-manual-operations).
+
+The summary separates merge readiness, current version/expected bump, CI/review
+state and observed production results. A green dry-run is never a completed
+release. Source CI validation receipts bind the current head/base and actual
+checkout; metadata-only successes cannot replace them. Missing/expired receipts
+require fresh validation. Actual guarded merge acceptance requires later approved
+main deployment; a develop PR does not establish production activation.
 
 ## Trust and rollout
 
