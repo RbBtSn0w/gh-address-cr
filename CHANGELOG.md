@@ -1,3 +1,10 @@
+## [3.21.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.2...v3.21.3) (2026-10-31)
+
+### Bug Fixes
+
+* **ci:** stage workflow rename and trust generated formulas ([84c59a1](https://github.com/RbBtSn0w/gh-address-cr/commit/84c59a18dc951f38a04f110550206ea2ce953411))
+* **release:** make Homebrew distribution deterministic and bottle-backed ([#382](https://github.com/RbBtSn0w/gh-address-cr/issues/382)) ([0056494](https://github.com/RbBtSn0w/gh-address-cr/commit/00564948f799893577f83e7a09748414a9d510cd))
+
 ## [3.21.2](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.1...v3.21.2) (2026-10-30)
 
 ### Bug Fixes
