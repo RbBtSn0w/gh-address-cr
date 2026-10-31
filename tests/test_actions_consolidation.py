@@ -17,9 +17,10 @@ class ActionsConsolidationTests(unittest.TestCase):
 
     def test_target_guard_runs_for_base_edits_and_rejects_other_main_sources(self):
         content = (WORKFLOWS / "ci.yml").read_text()
-        self.assertIn("types: [opened, edited, synchronize, reopened]", content)
+        self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened]", content)
+        self.assertIn("  pull_request_target:\n    types: [edited]", content)
         block = content.split("  validate-base:\n", 1)[1]
-        self.assertIn("github.event_name == 'pull_request'", block)
+        self.assertIn("github.event_name == 'pull_request_target'", block)
         guard = block.split("        run: |\n", 1)[1]
         # The guard is a real executable step, rather than a duplicated policy.
         import textwrap
@@ -37,7 +38,6 @@ class ActionsConsolidationTests(unittest.TestCase):
         preview = (WORKFLOWS / "homebrew-preview.yml").read_text()
         self.assertTrue(ci.startswith("name: Checks / Python\n"))
         self.assertIn('workflows: ["ci", "Checks / Python"]', preview)
-        self.assertNotIn("pull_request_target:", ci)
         self.assertIn("path", (ROOT / "scripts/release/homebrew_preview.py").read_text())
         self.assertIn('".github/workflows/ci.yml"', (ROOT / "scripts/release/homebrew_support.py").read_text())
 
@@ -51,3 +51,17 @@ class ActionsConsolidationTests(unittest.TestCase):
         self.assertIn("needs: [publish-bottles, verify-bottles]", brew)
         for target in ("macos-15", "macos-15-intel", "macos-26", "macos-26-intel"):
             self.assertIn(target, brew)
+
+    def test_metadata_event_never_executes_source_or_produces_preview(self):
+        ci = (WORKFLOWS / "ci.yml").read_text()
+        target = ci.split("  validate-base:\n", 1)[1].split("  lint-and-test:\n", 1)[0]
+        self.assertIn("permissions: {}", target)
+        self.assertNotIn("uses:", target)
+        self.assertNotIn("secrets.", target)
+        for job in ("lint-and-test", "otel-minimum-versions"):
+            block = ci.split(f"  {job}:\n", 1)[1].split("    steps:", 1)[0]
+            self.assertIn("if: github.event_name != 'pull_request_target'", block)
+        preview = ci.split("  pr-dev-preview:\n", 1)[1].split("    steps:", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", preview)
+        consumer = (WORKFLOWS / "homebrew-preview.yml").read_text()
+        self.assertIn("github.event.workflow_run.event == 'pull_request'", consumer)

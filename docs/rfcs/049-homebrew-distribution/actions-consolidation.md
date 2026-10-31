@@ -43,3 +43,16 @@ job names describe phases. Existing check identifiers stay stable. This pass doe
 not restructure the Python matrix or reduce installed-package acceptance coverage.
 No new orchestration framework or telemetry protocol is introduced; live release
 helper instrumentation remains attached to its existing operations.
+
+## Review refinement: metadata edits
+
+PR edits use pull_request_target (edited only) exclusively for validate-base,
+which has permissions {}, no checkout, no actions or secrets, and reads head/base
+names through environment variables. Every source-executing job rejects this
+event; the Preview consumer already rejects non-pull_request producer events.
+This avoids extra preview completions displacing unrelated pending previews in
+the existing global single-pending concurrency group. Ordinary PR events remain
+read-only pull_request builds. No privileged PR-code execution or GitHub write
+surface is added. Tests fail if metadata events can enter a source job or if the
+metadata guard acquires checkout/secret access. Default/base workflow deployment
+must be verified before claiming metadata-event activation.

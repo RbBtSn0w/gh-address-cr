@@ -8,7 +8,7 @@ phases. GitHub-managed CodeQL, Copilot and Dependency Graph remain separate.
 
 | Sidebar entry | File | Trigger and result |
 | --- | --- | --- |
-| Checks / Python | `ci.yml` | PR opened/edited/updated/reopened, trunk push, weekly schedule. Validate PR target, lint, type-check, test Python 3.12–3.14 and installed packages; eligible PRs produce preview artifacts. |
+| Checks / Python | `ci.yml` | PR opened/updated/reopened, metadata edits, trunk push, weekly schedule. Validate PR target, lint, type-check, test Python 3.12–3.14 and installed packages; eligible PRs produce preview artifacts. |
 | Preview | `homebrew-preview.yml` | Successful eligible Checks run. Validate provenance, test source installation, publish dev preview assets/formula and instructions. |
 | Release | `release.yml` | Main push or manual. Analyze version, publish GitHub/PyPI and call Homebrew when a new version is released. |
 | Homebrew | `homebrew.yml` | Called by Release or manual recovery. Build and verify four platform bottles; update stable tap only after all four pass. |
@@ -18,8 +18,12 @@ PR target validation remains `Validate base branch`: only develop may target
 main. Moving it into Checks retains its opened/edited/synchronize/reopened
 coverage and uses no checkout or write permission. This consolidation preserves
 the full Python matrix, lower-bound OTel tests and installed wheel journey.
-PR edits currently run the full Checks workflow; selective test execution is a
-separate optimization, not part of this migration.
+PR edits run only the metadata guard via `pull_request_target: edited`. That
+job has no checkout, actions, secrets or token permissions. All source-executing
+jobs reject this event, and Preview accepts only ordinary `pull_request` runs.
+Consequently editing a PR does not rerun the matrix or enqueue a new preview that
+could replace an unrelated pending run. Verify base/default-branch deployment
+before claiming remote metadata routing is active.
 
 ## Manual operations
 

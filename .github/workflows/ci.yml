@@ -4,7 +4,10 @@ run-name: >-
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, synchronize, reopened]
+  # Metadata only: never check out PR code or grant credentials for this event.
+  pull_request_target:
+    types: [edited]
   push:
     branches:
       - main
@@ -24,7 +27,7 @@ env:
 
 jobs:
   validate-base:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
     permissions: {}
     name: Validate base branch
     runs-on: ubuntu-latest
@@ -45,6 +48,7 @@ jobs:
           echo "Base branch '${BASE_REF}' is allowed."
 
   lint-and-test:
+    if: github.event_name != 'pull_request_target'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -149,6 +153,7 @@ jobs:
           python -m unittest tests.contract.test_agent_journey_contract
 
   otel-minimum-versions:
+    if: github.event_name != 'pull_request_target'
     # lint-and-test resolves the newest OpenTelemetry release, so it can never notice that
     # pyproject.toml allows versions lacking a semantic-conventions constant the code
     # imports. This job installs the declared lower bounds and runs the tests against them.
