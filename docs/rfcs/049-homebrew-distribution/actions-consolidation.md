@@ -49,7 +49,11 @@ helper instrumentation remains attached to its existing operations.
 PR edits use pull_request_target (edited only) exclusively for validate-base,
 which has permissions {}, no checkout, no actions or secrets, and reads head/base
 names through environment variables. Every source-executing job rejects this
-event; the Preview consumer already rejects non-pull_request producer events.
+event; the Preview consumer already rejects non-pull_request producer events at its job
+guard. Its workflow concurrency additionally applies that exact eligibility
+predicate: ineligible events get run-specific groups, eligible previews retain
+the existing global publication group. Queue admission precedes job guards, so
+this consumer-side boundary is required even for metadata-only source jobs.
 This avoids extra preview completions displacing unrelated pending previews in
 the existing global single-pending concurrency group. Ordinary PR events remain
 read-only pull_request builds. No privileged PR-code execution or GitHub write

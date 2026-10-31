@@ -21,8 +21,11 @@ the full Python matrix, lower-bound OTel tests and installed wheel journey.
 PR edits run only the metadata guard via `pull_request_target: edited`. That
 job has no checkout, actions, secrets or token permissions. All source-executing
 jobs reject this event, and Preview accepts only ordinary `pull_request` runs.
-Consequently editing a PR does not rerun the matrix or enqueue a new preview that
-could replace an unrelated pending run. Verify base/default-branch deployment
+The Preview workflow also isolates ineligible completions in run-specific
+concurrency groups, because workflow-level queue admission precedes job guards.
+Consequently editing a PR does not rerun the matrix or displace a pending preview
+in the publication group. Eligible PR previews retain the existing global
+publication lock and default single-pending queue semantics. Verify base/default-branch deployment
 before claiming remote metadata routing is active.
 
 ## Manual operations

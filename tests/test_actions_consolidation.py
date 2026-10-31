@@ -65,3 +65,13 @@ class ActionsConsolidationTests(unittest.TestCase):
         self.assertIn("github.event_name == 'pull_request'", preview)
         consumer = (WORKFLOWS / "homebrew-preview.yml").read_text()
         self.assertIn("github.event.workflow_run.event == 'pull_request'", consumer)
+
+    def test_ineligible_completions_cannot_displace_pending_preview_publication(self):
+        preview = (WORKFLOWS / "homebrew-preview.yml").read_text()
+        group = preview.split("  group: ", 1)[1].splitlines()[0]
+        # Queue admission happens before inspect.if, so both must use the same predicate.
+        predicate = preview.split("    if: >-\n", 1)[1].split("    runs-on:", 1)[0]
+        predicate = " ".join(predicate.split())
+        self.assertIn(predicate, group)
+        self.assertIn("'publication' || github.run_id", group)
+        self.assertTrue(group.startswith("homebrew-preview-${{"))

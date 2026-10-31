@@ -13,7 +13,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: homebrew-preview-publication
+  # Workflow concurrency is evaluated before inspect.if; isolate non-preview events.
+  group: homebrew-preview-${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_branch != 'develop' && github.event.workflow_run.head_repository.full_name == github.repository && 'publication' || github.run_id }}
   cancel-in-progress: false
 
 env:
