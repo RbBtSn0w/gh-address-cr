@@ -1,4 +1,4 @@
-name: Release / 3 Homebrew
+name: Homebrew
 run-name: >-
   Homebrew / ${{ inputs.version }} / rebuild ${{ inputs.rebuild || '0' }}
 
