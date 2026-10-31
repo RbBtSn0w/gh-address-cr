@@ -391,9 +391,11 @@ change neither publication authority nor the retained/recovery policy.
 
 Trusted analysis, its CI tests and production release installs use
 `@semantic-release/commit-analyzer@13.0.1` and
-`conventional-changelog-conventionalcommits@10.4.1` on Node 24. Exact direct
-versions are reviewed together; upgrades must rerun the official analyzer tests.
-This pin does not claim a complete transitive-dependency lock or sandbox.
+`conventional-changelog-conventionalcommits@9.0.0` on Node 24. The compatible
+Preset 9 line avoids the incompatible nested writer installed by the current
+semantic-release 25 plugin stack. Exact direct versions are reviewed together;
+upgrades must rerun the official analyzer tests. This pin does not claim a
+complete transitive-dependency lock or sandbox.
 
 Successful Release completion can prepare a history-sync proposal even when the
 run was dry-run/TestPyPI or selected no new version. This preserves the existing
