@@ -10,4 +10,4 @@ runs:
     - shell: bash
       run: >-
         npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund
-        @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@10.4.1
+        @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@9.0.0

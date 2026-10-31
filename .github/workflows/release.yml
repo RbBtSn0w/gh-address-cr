@@ -76,7 +76,7 @@ jobs:
             @semantic-release/git \
             @semantic-release/github \
             @semantic-release/release-notes-generator \
-            conventional-changelog-conventionalcommits@10.4.1
+            conventional-changelog-conventionalcommits@9.0.0
 
       - name: Run semantic-release
         if: steps.publish-target.outputs.target == 'pypi'
