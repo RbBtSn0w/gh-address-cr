@@ -72,6 +72,7 @@ jobs:
             semantic-release \
             @semantic-release/changelog \
             @semantic-release/commit-analyzer@13.0.1 \
+            conventional-changelog-writer@9.3.0 \
             @semantic-release/exec \
             @semantic-release/git \
             @semantic-release/github \
