@@ -174,8 +174,8 @@ recovery branch. `report` aggregates the normalized steps already saved in
 The **Rerunnable evidence** column is reported but does not gate a run. It counts
 fixes whose recorded validation names a command the grader can re-run. A
 `unittest X` entry counts as `python -m unittest X`. A label-only entry such as
-`unit-tests=passed` is still accepted by the runtime, but the candidate skill
-guidance in PR #374 requires the command actually run. Label-only evidence cannot be
+`unit-tests=passed` is still accepted by the runtime, but current [`skill/SKILL.md`](../../../skill/SKILL.md)
+guidance requires the command actually run. Label-only evidence cannot be
 re-verified.
 
 `agent_gh_calls` lists every `gh` call that did not come from the runtime. That

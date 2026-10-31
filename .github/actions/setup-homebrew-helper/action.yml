@@ -1,0 +1,13 @@
+name: Setup Homebrew release helper
+description: Install trusted release tooling in its own Python environment.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - shell: bash
+      run: |
+        python -m venv .release-venv
+        .release-venv/bin/python -m pip install .
+        echo "$PWD/.release-venv/bin" >> "$GITHUB_PATH"

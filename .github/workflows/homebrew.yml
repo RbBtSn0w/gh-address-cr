@@ -1,0 +1,227 @@
+name: Homebrew stable distribution
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      rebuild:
+        type: string
+        default: "0"
+    secrets:
+      RELEASE_BOT_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Already published stable version, without v
+        type: string
+        required: true
+      rebuild:
+        description: Explicit bottle rebuild; keep 0 when retrying an unchanged build
+        type: string
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-stable-publication
+  cancel-in-progress: false
+
+env:
+  PACKAGE_VERSION: ${{ inputs.version }}
+  BOTTLE_REBUILD: ${{ inputs.rebuild }}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
+jobs:
+  prepare:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - name: Restore or prepare the immutable resource snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.release.homebrew_release prepare --version "$PACKAGE_VERSION" --directory snapshot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-source
+          path: snapshot/
+
+  preserve-snapshot:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-source
+          path: snapshot
+      - name: Preserve snapshot before building bottles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.release.homebrew_release preserve-snapshot --version "$PACKAGE_VERSION" --directory snapshot
+
+  build-bottles:
+    needs: preserve-snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-source
+          path: snapshot
+      - name: Build or restore this target bottle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOTTLE_TARGET: ${{ matrix.runner }}
+        run: >-
+          python -m scripts.release.homebrew_release build
+          --directory bottles --snapshot snapshot --target "$BOTTLE_TARGET" --rebuild "$BOTTLE_REBUILD"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-build-${{ matrix.runner }}
+          path: bottles/
+
+  merge-bottles:
+    needs: build-bottles
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-source
+          path: snapshot
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: homebrew-build-*
+          path: builds
+      - name: Merge four standard bottle metadata files
+        run: >-
+          python -m scripts.release.homebrew_release merge
+          --directory publication --snapshot snapshot --builds builds --rebuild "$BOTTLE_REBUILD"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-publication
+          path: publication/
+
+  publish-bottles:
+    needs: merge-bottles
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-publication
+          path: publication
+      - name: Upload checksummed immutable bottle assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.release.homebrew_release publish-bottles --directory publication
+
+  verify-bottles:
+    needs: publish-bottles
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-publication
+          path: publication
+      - name: Verify normal bottle installation and upgrade
+        env:
+          BOTTLE_TARGET: ${{ matrix.runner }}
+        run: >-
+          python -m scripts.release.homebrew_release verify
+          --directory verification --snapshot publication --target "$BOTTLE_TARGET"
+      - name: Preserve verification and timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-verify-${{ matrix.runner }}
+          path: verification/
+          if-no-files-found: warn
+      - name: Report installation timing
+        if: always()
+        run: |
+          if [ -f verification/summary.md ]; then
+            cat verification/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  publish-tap:
+    needs: [publish-bottles, verify-bottles]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-publication
+          path: publication
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: homebrew-verify-*
+          path: verification
+      - name: Mint tap-only publication credentials
+        id: homebrew-tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: RbBtSn0w
+          repositories: homebrew-tap
+          permission-contents: write
+      - uses: actions/checkout@v4
+        with:
+          repository: RbBtSn0w/homebrew-tap
+          token: ${{ steps.homebrew-tap-token.outputs.token }}
+          path: homebrew-tap
+      - name: Publish only after all four verification results pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m scripts.release.homebrew_release publish-tap
+          --directory publication --evidence verification --checkout homebrew-tap

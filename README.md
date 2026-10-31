@@ -685,6 +685,20 @@ Install with Homebrew:
 - `brew upgrade gh-address-cr`
 - `brew test gh-address-cr`
 
+Stable Homebrew releases target macOS 15 and 26 on Apple Silicon and Intel.
+Matching bottles contain the prepared Python environment: application installation
+does not resolve Python dependencies or build packages. Homebrew may still update
+Python, OpenSSL or other system dependencies separately. Unsupported targets can
+fall back to source installation, which can download build dependencies and take
+several minutes.
+
+The rolling `gh-address-cr-dev` formula uses fixed dependency resources and source
+installation. Unlink the stable formula before installing it; both expose the
+same CLI. Stable tap publication waits for all four bottle targets to pass.
+PyPI can therefore contain a newer version while Homebrew retains the last
+verified release. See [Homebrew distribution](docs/homebrew-distribution.md)
+for the support matrix, recovery procedure and diagnostic evidence.
+
 GitHub-direct runtime validation install:
 
 - `pipx install git+https://github.com/RbBtSn0w/gh-address-cr.git`

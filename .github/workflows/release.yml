@@ -242,82 +242,13 @@ jobs:
 
   publish-homebrew:
     needs: [build-release-package, publish-pypi]
-    runs-on: macos-latest
     if: >-
       needs.build-release-package.outputs.released == 'true' &&
       needs.build-release-package.outputs.publish_target == 'pypi'
-    env:
-      HOMEBREW_NO_INSTALL_FROM_API: "1"
+    uses: ./.github/workflows/homebrew.yml
     permissions:
-      contents: read
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install release helper dependencies
-        run: python -m pip install --upgrade packaging
-
-      - name: Generate Homebrew tap token
-        id: homebrew-tap-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          owner: RbBtSn0w
-          repositories: homebrew-tap
-          permission-contents: write
-
-      - name: Checkout Homebrew tap
-        uses: actions/checkout@v4
-        with:
-          repository: RbBtSn0w/homebrew-tap
-          token: ${{ steps.homebrew-tap-token.outputs.token }}
-          path: homebrew-tap
-
-      - name: Render Homebrew formula from PyPI
-        env:
-          PACKAGE_VERSION: ${{ needs.build-release-package.outputs.package_version }}
-        run: |
-          python scripts/release/render_homebrew_formula.py \
-            --version "$PACKAGE_VERSION" \
-            --output homebrew-tap/Formula/gh-address-cr.rb \
-            --retries 12 \
-            --retry-delay 10
-
-      - name: Tap local formula
-        run: brew tap RbBtSn0w/tap "$PWD/homebrew-tap"
-
-      - name: Sync rendered Homebrew formula into tapped clone
-        run: |
-          tap_path="$(brew --repository RbBtSn0w/tap)"
-          mkdir -p "$tap_path/Formula"
-          cp homebrew-tap/Formula/gh-address-cr.rb "$tap_path/Formula/gh-address-cr.rb"
-
-      - name: Audit Homebrew formula
-        run: brew audit --formula --strict RbBtSn0w/tap/gh-address-cr
-
-      - name: Install Homebrew formula from source
-        run: brew install --build-from-source RbBtSn0w/tap/gh-address-cr
-
-      - name: Test Homebrew formula
-        run: brew test RbBtSn0w/tap/gh-address-cr
-
-      - name: Commit Homebrew tap update
-        working-directory: homebrew-tap
-        env:
-          PACKAGE_VERSION: ${{ needs.build-release-package.outputs.package_version }}
-        run: |
-          if [ -z "$(git status --short -- Formula/gh-address-cr.rb)" ]; then
-            echo "Homebrew formula already matches gh-address-cr ${PACKAGE_VERSION}."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/gh-address-cr.rb
-          git commit -m "gh-address-cr ${PACKAGE_VERSION}"
-          git push
+      contents: write
+    with:
+      version: ${{ needs.build-release-package.outputs.package_version }}
+      rebuild: "0"
+    secrets: inherit
