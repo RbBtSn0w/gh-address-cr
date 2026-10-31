@@ -143,6 +143,11 @@ brew link gh-address-cr
 
 ## Acceptance and diagnostics
 
+Upgrade baselines must execute the CLI inside the installed Homebrew prefix.
+The release helper has its own CLI on PATH, so an unqualified `gh-address-cr`
+cannot establish the previous installed version or choose upgrade versus
+reinstall. All four targets must record the actual installed-keg baseline.
+
 Build jobs run source installation, formula tests and linkage checks.
 Independent jobs install/upgrade through the final public bottle URLs and
 require `poured_from_bottle` in the installation receipt. They check version,

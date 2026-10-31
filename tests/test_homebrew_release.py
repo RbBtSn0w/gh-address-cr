@@ -276,6 +276,44 @@ class BottleMergeTests(unittest.TestCase):
             self.exercise_merge(change_source=True)
 
 
+class InstalledUpgradeTests(unittest.TestCase):
+    def test_upgrade_uses_installed_keg_version_even_when_helper_shadows_path(self):
+        for old_version, expected_verb in (("1.2.2", "upgrade"), ("1.2.3", "reinstall")):
+            with self.subTest(old_version=old_version), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                candidate = root / "candidate"
+                candidate.mkdir()
+                formula = candidate / "gh-address-cr.rb"
+                formula.write_text(source_formula())
+                support.write_json(candidate / "publication.json", {"formula_sha256": support.digest(formula)})
+                installed_prefix = root / "installed-keg"
+                selected = []
+
+                def command(argv, *, version=old_version, prefix=installed_prefix, decisions=selected, **kwargs):
+                    if argv[0] == "brew" and argv[1] in {"upgrade", "reinstall"}:
+                        decisions.append(argv[1])
+                        raise RuntimeError("stop before candidate installation")
+                    if argv[:2] == ["brew", "--prefix"]:
+                        output = str(prefix)
+                    elif argv == [str(prefix / "bin/gh-address-cr"), "--version"]:
+                        output = f"gh-address-cr {version}"
+                    elif argv == ["gh-address-cr", "--version"]:
+                        # setup-homebrew-helper puts its newer CLI first on PATH.
+                        output = "gh-address-cr 1.2.3"
+                    elif argv[:2] == ["brew", "--cache"]:
+                        output = str(prefix / "unused-cache")
+                    else:
+                        output = ""
+                    return subprocess.CompletedProcess(argv, 0, output, "")
+
+                with mock.patch.object(release, "load_snapshot", return_value=(snapshot(), formula)), \
+                     mock.patch.object(release, "stage_formula"), \
+                     mock.patch.object(support, "command", side_effect=command), \
+                     self.assertRaisesRegex(RuntimeError, "stop before candidate installation"):
+                    release.verify(root / "verification", candidate, "macos-15-intel")
+                self.assertEqual(selected, [expected_verb])
+
+
 class FormulaStagingTests(unittest.TestCase):
     def test_staged_formula_is_trusted_individually_after_writing(self):
         for name in ("gh-address-cr", "gh-address-cr-dev"):
