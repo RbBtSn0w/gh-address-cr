@@ -73,8 +73,9 @@ Until then the old default-branch workflows remain active.
 ## Promotion and publication gates
 
 1. Review and land the safety repair on develop; preserve current trunk history.
-2. Before promoting to main, approve the lifecycle policy and trusted controller
-   deployment. Use the supplied `repo-release-train` controller on one persistent
+2. Before promoting to main, approve the lifecycle policy. Except for the scoped
+   manual retained-trunk release below, require trusted controller deployment.
+   Use the supplied `repo-release-train` controller on one persistent
    POSIX host with an approved durable store outside PR-controlled content.
    Hosted ephemeral checkouts/caches are not that store. Do not invent freeze
    acknowledgements or install an unattended auto-merge substitute.
@@ -83,14 +84,16 @@ Until then the old default-branch workflows remain active.
    accounted for. Enabling cleanup or changing protections needs owner approval;
    do not toggle cleanup as a lifecycle workaround.
 4. Coordinate integration/main writers and PR edits, record exact head/base and
-   checkpoints, and inventory affected PRs. Prepare/promote/merge/reconcile with
-   the supplied controller and explicit human approval; drift invalidates prior
+   checkpoints, and inventory affected PRs. Use the approved manual procedure
+   below for PR #383; otherwise prepare/promote/merge/reconcile with the supplied
+   controller. Explicit human approval is required; drift invalidates prior
    approval. Require real green checks, even when proposal creation used
    GITHUB_TOKEN and did not trigger CI.
 5. Merge the approved promotion with a merge commit so the existing analyzer can
    see feature/fix history. Main triggers `release.yml`: semantic version/changelog,
    package build and validation, plugin artifact, PyPI OIDC publication, then
-   Homebrew rendering/audit/install/test and tap update. GitHub Release creation
+   Homebrew resource snapshot, four bottle builds, immutable upload, independent
+   installation verification and gated stable tap update. GitHub Release creation
    alone is not evidence that downstream jobs completed.
 6. Verify the exact version/tag, PyPI wheel/sdist, plugin artifact and Homebrew
    formula against the successful release run. Review and validate sync-back,
@@ -99,6 +102,111 @@ Until then the old default-branch workflows remain active.
 The local repair may be described as inspected and locally verified only.
 Controller deployment, production lifecycle rehearsal, promotion and publication
 remain separate gates; never claim them from fixture tests or dispatch alone.
+
+## One-time manual release with retained trunks: PR #383
+
+Policy approved for documentation on 2026-10-31. This exception applies only to
+the next normal stable release proposed by PR #383 (`develop -> main`) and its
+reviewed sync-back. Approval to document this procedure is not approval to merge,
+pause writers, dispatch workflows, publish, or delete anything. The exception
+ends when that release and sync-back are verified, or the operator aborts it;
+future trains require their own policy decision. A changed release head/base
+requires fresh checks and explicit approval, even while the proposal stays #383.
+
+### Eligibility and unchanged controls
+
+- Both `main` and `develop` must exist. Keep `main` as default/stable and use
+  protected-retained `develop`; retain `delete_branch_on_merge=true` for ordinary
+  PR heads. Do not disable cleanup, weaken rules, force-push or use a bypass.
+- Re-read the effective deletion rules before promotion and before sync merge.
+  At this checkpoint, active `trunk-retention` ruleset `26205878` covers exactly
+  `refs/heads/main` and `refs/heads/develop`, has no bypass actors and reports
+  `current_user_can_bypass=never`. Stop if equivalent protection is no longer
+  effective. The older inspection table above is historical, not live policy.
+- Keep the existing PR/thread rules. The current server-side required-check list
+  is empty, so require successful named checks manually: `Validate base branch`,
+  `lint-and-test (3.12)`, `(3.13)`, `(3.14)`, `otel-minimum-versions`, and every
+  other non-skipped check applicable to the current candidate. Missing checks
+  are not green. An intentionally skipped develop-head preview is not a failure.
+- The controller deployment/rehearsal gate is replaced only for this bounded,
+  human-driven, retained-trunk path. It is not satisfied or marked Remote
+  Verified. Automated promotion, recreatable/snapshot topology and missing-ref
+  recovery remain outside this exception and retain the controller requirement.
+
+### Release record and writer pause
+
+Keep the operator record in PR #383 with links to live GitHub facts and CI/release
+artifacts. The record documents human decisions; it does not replace GitHub
+refs, installed artifact evidence or runtime-owned review completion truth.
+
+1. Name the release operator, recovery owner, integration/main writers and bots,
+   and all open PRs targeting either trunk. Record full live head/base SHAs, the
+   intended merge method, relevant check run URLs, current retention/cleanup
+   evidence and the expected release side effects. The preparation checkpoint
+   is not an approved release checkpoint.
+2. Obtain explicit acknowledgments from the affected humans and automation
+   owners that integration/main writes and affected PR admission/head/base edits
+   are paused. Record an absolute start/expiry in UTC and Beijing time (UTC+8),
+   plus who may resume them. Do not infer a pause from an empty PR queue, Actions
+   concurrency, a green check or this policy approval. The pause is cooperative,
+   not a server-side lock; inability to coordinate any writer blocks promotion.
+3. Account explicitly for the main release/version writer. Other main and
+   integration writers stay paused. After the authorized merge, the designated
+   release workflow may write its accepted version/changelog descendant on main;
+   wait for that writer and all downstream publishing jobs to settle before
+   approving sync-back. An unexpected write, expired pause or uncertain outcome
+   puts the process on HOLD; refresh the record and approval rather than claiming
+   a previous pause still applies.
+
+### Exact approval and authorized promotion
+
+1. After the governance PR lands on develop, re-read both refs and PR #383's
+   current candidate. Run its fresh CI and
+   `gh-address-cr final-gate <owner/repo> 383 --require-checks`; require zero
+   unresolved threads, pending reviews and blocking items. Current checks must
+   correspond to the candidate being approved, not a prior integration run.
+2. Obtain a separate owner approval naming PR #383, both full SHAs, the pause
+   window, `merge` method and production consequences: main push triggers
+   semantic-release, GitHub Release, PyPI and Homebrew publication. Approval of
+   this document or a generic draft proposal is insufficient.
+3. Immediately before the authorized merge, recheck refs, protection, writer
+   acknowledgments, checks and reviews. Use a merge commit with an expected-head
+   guard; never squash/rebase this promotion. The expected-head API does not
+   atomically guard main's base: the acknowledged main-writer pause remains
+   necessary. Drift or inability to establish the pause stops the operation.
+
+### Publication settlement and reviewed sync-back
+
+1. Record the merge SHA and verify that both trunks still exist. Wait for the
+   complete release run, including the main version writer, PyPI, all four
+   Homebrew builds/install verifications and the gated tap update. Follow the
+   first-bottle acceptance checklist in PR #383 and `docs/homebrew-distribution.md`.
+   A tag or a successful package build alone does not complete publication.
+2. Once the main writer settles, capture the accepted published main SHA. Review
+   the sync snapshot PR created by `.github/workflows/sync-main-to-develop.yml`:
+   its snapshot must have the published main tree, main as its sole parent and
+   the validation message without CI-skip instructions. A stale or conflicting
+   snapshot is a HOLD, not permission to reset develop or force-push.
+3. Keep integration and affected PR edits paused. Require the sync PR's fresh CI,
+   review completion, exact snapshot/develop SHAs and separate operator approval
+   before merging it. Do not squash or rebase the sync: retain main as an
+   ancestor via a normal merge commit, then verify the accepted published main
+   SHA is an ancestor of develop and that both refs still exist.
+4. Re-inventory affected PRs, verify their intended bases/heads and fresh checks
+   against the synchronized integration state, and record any changes. Only
+   then may the named operator close the release record and explicitly resume
+   integration/queue writers. A later main hotfix is a new sync decision.
+
+### Failure boundary
+
+Missing either trunk, protection drift, an unknown write outcome or unpromoted
+concurrent work stops this procedure. Preserve observed SHAs and run evidence;
+do not reconstruct refs, delete journals/checkpoints, overwrite artifacts or
+invent controller state. If PyPI succeeds while Homebrew fails, keep the prior
+stable tap and follow the documented same-version recovery only after separate
+approval. Credential/protection changes, additional dispatches and retries that
+can publish are not authorized by this document. No unattended recovery or
+automatic merge is introduced.
 
 ## Local verification
 
