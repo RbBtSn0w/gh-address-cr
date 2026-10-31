@@ -382,7 +382,10 @@ class ReleaseHistoryTests(unittest.TestCase):
                 self.assertEqual(bc.release_analysis(REPO, pr)['release_type'], 'minor')
             self.assertEqual(captured['baseline_tag'], 'v1.2.3')
             self.assertEqual(captured['current_version'], '1.2.4')
-            self.assertEqual(captured['commits'], [{'hash': head, 'message': 'feat: real capability\n'}])
+            self.assertEqual(captured['commits'], [
+                {'hash': head, 'message': 'chore: candidate files\n'},
+                {'hash': base, 'message': 'feat: real capability\n'},
+            ])
 
 
 class PublicationRoutingTests(unittest.TestCase):
