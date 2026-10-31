@@ -32,7 +32,7 @@ class NativeGitHubClientTests(unittest.TestCase):
             [
                 lambda cmd: completed(cmd, {"head": {"sha": "abc"}}),
                 lambda cmd: completed(cmd, [{"id": 7, "state": "APPROVED", "submitted_at": "2099-01-01T00:00:00Z", "user": {"login": "reviewer"}}]),
-                lambda cmd: completed(cmd, {"login": "agent"}),
+                lambda cmd: completed(cmd, {"data": {"viewer": {"login": "agent"}}}),
                 lambda cmd: completed(cmd, {"data": {"repository": {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [{"id": "THREAD_1", "isResolved": True, "comments": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}, "firstComment": {"nodes": [{"author": {"login": "reviewer"}}]}, "latestComment": {"nodes": []}}]}}}}}),
             ]
         )
@@ -64,7 +64,7 @@ class NativeGitHubClientTests(unittest.TestCase):
 
         runner = RecordingRunner(
             [
-                lambda cmd: completed(cmd, {"login": "octocat"}),
+                lambda cmd: completed(cmd, {"data": {"viewer": {"login": "octocat"}}}),
                 lambda cmd: completed(
                     cmd,
                     {
@@ -202,7 +202,7 @@ class NativeGitHubClientTests(unittest.TestCase):
         with patch("gh_address_cr.github.client.time.sleep"), self.assertRaises(GitHubTransientError):
             # Reads are retried a bounded number of times before the transient error surfaces.
             GitHubClient(
-                runner=RecordingRunner([completed(["gh"], {"login": "octocat"}), transient, transient, transient])
+                runner=RecordingRunner([completed(["gh"], {"data": {"viewer": {"login": "octocat"}}}), transient, transient, transient])
             ).list_threads("owner/repo", "123")
 
     def test_list_pr_checks_raises_when_lookup_fails_without_json(self):

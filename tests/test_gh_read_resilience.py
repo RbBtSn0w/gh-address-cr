@@ -61,7 +61,7 @@ class ReadRetryTests(unittest.TestCase):
         runner = ScriptedRunner(
             _result(1, "", "HTTP 502: Bad Gateway"),
             _result(1, "", "HTTP 504: Gateway Timeout"),
-            _result(0, json.dumps({"login": "octo"})),
+            _result(0, json.dumps({"data": {"viewer": {"login": "octo"}}})),
         )
         self.assertEqual(GitHubClient(runner=runner).viewer_login(), "octo")
         self.assertEqual(len(runner.calls), 3)
@@ -69,7 +69,7 @@ class ReadRetryTests(unittest.TestCase):
 
     def test_exit_zero_graphql_transient_errors_are_retried(self, sleep) -> None:
         errors = json.dumps({"errors": [{"message": "GraphQL error: something went wrong"}]})
-        runner = ScriptedRunner(_result(0, errors), _result(0, json.dumps({"login": "octo"})))
+        runner = ScriptedRunner(_result(0, errors), _result(0, json.dumps({"data": {"viewer": {"login": "octo"}}})))
         self.assertEqual(GitHubClient(runner=runner).viewer_login(), "octo")
         self.assertEqual(len(runner.calls), 2)
         sleep.assert_called_once()
@@ -97,7 +97,7 @@ class ReadRetryTests(unittest.TestCase):
         sleep.assert_not_called()
 
     def test_retry_emits_bounded_span_event(self, sleep) -> None:
-        runner = ScriptedRunner(_result(1, "", "HTTP 502: Bad Gateway"), _result(0, json.dumps({"login": "octo"})))
+        runner = ScriptedRunner(_result(1, "", "HTTP 502: Bad Gateway"), _result(0, json.dumps({"data": {"viewer": {"login": "octo"}}})))
         with patch("gh_address_cr.otel_tracing.add_current_span_event") as event:
             GitHubClient(runner=runner).viewer_login()
         event.assert_called_once_with(

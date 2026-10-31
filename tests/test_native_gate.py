@@ -35,6 +35,12 @@ class FakeGitHubClient:
 
 
 class NativeGateTests(unittest.TestCase):
+    def setUp(self):
+        from gh_address_cr.github.client import GitHubClient
+
+        GitHubClient.reset_process_cache()
+        self.addCleanup(GitHubClient.reset_process_cache)
+
     def test_gatekeeper_records_new_github_thread_observation_exactly_once(self):
         from gh_address_cr.core.gate import Gatekeeper
         from gh_address_cr.evidence.ledger import EvidenceLedger
@@ -426,7 +432,9 @@ import json
 import sys
 
 args = sys.argv[1:]
-if args[:2] == ['api', 'user']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(args):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'user']:
     print(json.dumps({'login': 'agent-login'}))
 elif args[:2] == ['api', 'repos/owner/repo/pulls/123/reviews?per_page=100&page=1']:
     print('[]')
@@ -490,7 +498,9 @@ import json
 import sys
 
 args = sys.argv[1:]
-if args[:2] == ['api', 'user']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(args):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'user']:
     print(json.dumps({'login': 'agent-login'}))
 elif args[:2] == ['api', 'repos/owner/repo/pulls/123/reviews?per_page=100&page=1']:
     print('[]')

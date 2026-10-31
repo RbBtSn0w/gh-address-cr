@@ -64,6 +64,9 @@ class PythonWrapperCLITest(PythonScriptTestCase):
                     "args = sys.argv[1:]",
                     "if args[:2] == ['auth', 'status']:",
                     "    raise SystemExit(0)",
+                    "if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(args):",
+                    "    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))",
+                    "    raise SystemExit(0)",
                     "if args[:2] == ['api', 'graphql']:",
                     f"    print(json.dumps({payload!r}))",
                     "    raise SystemExit(0)",
@@ -308,7 +311,9 @@ class PythonWrapperCLITest(PythonScriptTestCase):
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -405,7 +410,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -516,7 +523,9 @@ raise SystemExit(1)
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1138,7 +1147,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1185,7 +1196,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1350,7 +1363,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1403,7 +1418,9 @@ body: Potential null dereference.
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1568,7 +1585,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1613,7 +1632,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1658,7 +1679,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1775,7 +1798,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1842,7 +1867,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2015,7 +2042,9 @@ import sys
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2143,7 +2172,9 @@ import sys
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2203,7 +2234,9 @@ import sys
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2357,7 +2390,9 @@ import sys
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2412,7 +2447,9 @@ node = {{
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({{
         'data': {{
             'repository': {{
@@ -2449,7 +2486,9 @@ import sys
 
 if sys.argv[1:3] == ['auth', 'status']:
     raise SystemExit(0)
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2518,7 +2557,9 @@ import sys
 
 args = sys.argv[1:]
 
-if args[:2] == ['api', 'graphql']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2603,7 +2644,9 @@ import sys
 
 args = sys.argv[1:]
 
-if args[:2] == ['api', 'graphql']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2652,7 +2695,9 @@ import sys
 
 args = sys.argv[1:]
 
-if args[:2] == ['api', 'graphql']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2691,7 +2736,9 @@ import json
 import sys
 
 args = sys.argv[1:]
-if args[:2] == ['api', 'graphql']:
+if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif args[:2] == ['api', 'graphql']:
     print(json.dumps({{
         'data': {{
             'repository': {{
@@ -2761,7 +2808,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2813,7 +2862,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2848,7 +2899,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -2936,7 +2989,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+if sys.argv[1:3] == ['api', 'graphql'] and 'viewer' in ' '.join(sys.argv):
+    print(json.dumps(dict(data=dict(viewer=dict(login='agent-login')))))
+elif sys.argv[1:3] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {

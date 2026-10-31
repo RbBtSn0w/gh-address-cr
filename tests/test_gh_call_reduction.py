@@ -50,7 +50,7 @@ class FakeGh:
 
     def kind(self, cmd):
         joined = " ".join(cmd)
-        if cmd[1:3] == ["api", "user"]:
+        if "query=query { viewer { login } }" in cmd:
             return "user"
         if "stackEntry" in joined:
             return "stack"
@@ -74,7 +74,7 @@ class FakeGh:
         if kind in self.fail_on:
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=self.fail_on[kind])
         payload = {
-            "user": {"login": "me"},
+            "user": {"data": {"viewer": {"login": "me"}}},
             "stack": STACK_PAYLOAD,
             "threads": THREADS_PAYLOAD,
         }.get(kind, [])
@@ -84,6 +84,57 @@ class FakeGh:
         barrier = threading.Barrier(len(kinds))
         for kind in kinds:
             self._barriers[kind] = barrier
+
+
+class InstallationViewerLoginTests(unittest.TestCase):
+    def test_installation_and_human_tokens_use_the_same_graphql_identity(self):
+        for login in ("merge-app[bot]", "octocat"):
+            with self.subTest(login=login):
+                calls = []
+
+                def runner(cmd, calls=calls, login=login):
+                    calls.append(cmd)
+                    if cmd[1:3] == ["api", "user"]:
+                        return subprocess.CompletedProcess(cmd, 1, "", "HTTP 403: Resource not accessible by integration")
+                    self.assertEqual(cmd[1:], ["api", "graphql", "-f", "query=query { viewer { login } }"])
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps({"data": {"viewer": {"login": login}}}), "")
+
+                client = GitHubClient(runner=runner)
+                self.assertEqual(client.viewer_login(), login)
+                self.assertEqual(client.viewer_login(), login)
+                self.assertEqual(len(calls), 1)
+
+    def test_malformed_graphql_identity_is_not_cached(self):
+        for payload in (None, [], {}, {"data": []}, {"data": {"viewer": []}},
+                        {"data": {"viewer": {"login": " "}}},
+                        {"data": {"viewer": {"login": 123}}},
+                        {"login": "rest-only"}):
+            with self.subTest(payload=payload):
+                responses = [payload, {"data": {"viewer": {"login": "merge-app[bot]"}}}]
+
+                def runner(cmd, responses=responses):
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps(responses.pop(0)), "")
+
+                client = GitHubClient(runner=runner)
+                with self.assertRaises(GitHubError) as caught:
+                    client.viewer_login()
+                self.assertEqual(caught.exception.reason_code, "GITHUB_INCOMPLETE_RESPONSE")
+                self.assertEqual(client.viewer_login(), "merge-app[bot]")
+
+    def test_graphql_errors_with_partial_identity_fail_closed_and_are_not_cached(self):
+        responses = [
+            {"data": {"viewer": {"login": "untrusted"}},
+             "errors": [{"message": "Resource not accessible by integration"}]},
+            {"data": {"viewer": {"login": "merge-app[bot]"}}},
+        ]
+
+        def runner(cmd):
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(responses.pop(0)), "")
+
+        client = GitHubClient(runner=runner)
+        with self.assertRaises(GitHubError):
+            client.viewer_login()
+        self.assertEqual(client.viewer_login(), "merge-app[bot]")
 
 
 class ViewerLoginMemoTests(unittest.TestCase):
@@ -121,7 +172,7 @@ class ProcessViewerLoginTests(unittest.TestCase):
 
         def fake_run_cmd(cmd, **kwargs):
             calls.append(cmd)
-            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"login": "me"}), stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"data": {"viewer": {"login": "me"}}}), stderr="")
 
         with (
             tempfile.TemporaryDirectory() as state,
@@ -171,7 +222,7 @@ class FinalGateCallTests(unittest.TestCase):
 
         self.run_gate(gh, require_checks=True)
 
-        # Before #347: 6 calls with `api user` issued twice.
+        # Before #347: 6 calls with viewer query issued twice.
         self.assertEqual(len(gh.calls), 5)
         self.assertEqual(gh.calls.count("user"), 1)
 
