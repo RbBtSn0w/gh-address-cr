@@ -209,6 +209,26 @@ class AssetTests(unittest.TestCase):
             assets.upload(self.file)
 
 
+class FormulaStagingTests(unittest.TestCase):
+    def test_staged_formula_is_trusted_individually_after_writing(self):
+        for name in ("gh-address-cr", "gh-address-cr-dev"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                trusted = []
+
+                def brew(argv, *, formula_name=name, tap_root=root, trusted_entries=trusted, **kwargs):
+                    if argv[:2] == ["brew", "trust"]:
+                        self.assertEqual(argv, ["brew", "trust", "--formula", f"{support.TAP}/{formula_name}"])
+                        self.assertEqual((tap_root / "Formula" / f"{formula_name}.rb").read_text(), source_formula())
+                        trusted_entries.append(argv[-1])
+                    return subprocess.CompletedProcess(argv, 0, str(tap_root), "")
+
+                with mock.patch.object(support, "command", side_effect=brew):
+                    path = release.stage_formula(source_formula(), name)
+                self.assertEqual(path.read_text(), source_formula())
+                self.assertEqual(trusted, [f"{support.TAP}/{name}"])
+
+
 class RecoveryTests(unittest.TestCase):
     def test_first_build_and_rebuild_use_supported_bottle_arguments(self):
         for rebuild in (0, 1):
@@ -449,6 +469,14 @@ class ReleaseTelemetryTests(unittest.TestCase):
 
 
 class WorkflowTrustTests(unittest.TestCase):
+    def test_preview_rename_stages_consumer_before_changing_producer(self):
+        root = ROOT / ".github/workflows"
+        self.assertEqual((root / "ci.yml").read_text().splitlines()[0], "name: ci")
+        preview = (root / "homebrew-preview.yml").read_text()
+        names = preview.split("    workflows: [", 1)[1].split("]", 1)[0]
+        self.assertEqual([value.strip().strip('"\'') for value in names.split(",")],
+                         ["ci", "Checks / Python"])
+
     def test_workflow_run_routes_follow_producer_display_names(self):
         for producer, consumer in (("ci.yml", "homebrew-preview.yml"),
                                    ("release.yml", "sync-main-to-develop.yml")):
@@ -458,7 +486,7 @@ class WorkflowTrustTests(unittest.TestCase):
                 text = (root / consumer).read_text()
                 triggers = text.split("    workflows: [", 1)[1].split("]", 1)[0]
                 names = [value.strip().strip('"\'') for value in triggers.split(",")]
-                self.assertEqual(names, [name])
+                self.assertIn(name, names)
 
     def test_pr_build_cannot_write_releases_or_mint_tap_credentials(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()

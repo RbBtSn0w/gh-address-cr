@@ -4,7 +4,7 @@ run-name: >-
 
 on:
   workflow_run:
-    workflows: ["Checks / Python"]
+    workflows: ["ci", "Checks / Python"]
     types: [completed]
 
 permissions:

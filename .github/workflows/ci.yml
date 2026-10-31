@@ -1,4 +1,5 @@
-name: Checks / Python
+name: ci
+# Rename only after the dual-name preview consumer is verified on main.
 run-name: >-
   Checks / Python / ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || github.ref_name }} / ${{ github.event_name }}
 
