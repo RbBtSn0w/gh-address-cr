@@ -1,4 +1,4 @@
-name: Release / 2 Publish
+name: Release
 run-name: >-
   Release / ${{ inputs.publish_target || 'pypi' }} / ${{ github.ref_name }}
 

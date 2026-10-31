@@ -122,7 +122,7 @@ else:
             return result, calls
 
     def promotion(self, **kwargs):
-        return self.execute("scheduled-release-pr.yml", "Create or Update Promotion PR", **kwargs)
+        return self.execute("branches.yml", "Create or Update Promotion PR", **kwargs)
 
     def test_promotion_never_merges_and_preserves_issue_references(self):
         result, calls = self.promotion()
@@ -160,7 +160,7 @@ else:
     def test_sync_only_proposes_and_missing_ref_is_not_recreated(self):
         for refs in ("present", "missing", "error"):
             with self.subTest(refs=refs):
-                result, calls = self.execute("sync-main-to-develop.yml", "Propose reviewed sync", refs=refs)
+                result, calls = self.execute("branches.yml", "Propose reviewed sync", refs=refs)
                 self.assertEqual(result.returncode == 0, refs == "present", result.stderr)
                 self.assertFalse(any(row[:2] in (["git", "push"], ["git", "merge"]) for row in calls))
                 if refs != "present":
@@ -169,7 +169,7 @@ else:
     def test_sync_no_op_and_existing_proposal_do_not_duplicate(self):
         for args in ({"ahead": "0"}, {"existing": "42"}):
             with self.subTest(args=args):
-                result, calls = self.execute("sync-main-to-develop.yml", "Propose reviewed sync", **args)
+                result, calls = self.execute("branches.yml", "Propose reviewed sync", **args)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(row[:3] == ["gh", "pr", "create"] for row in calls))
 
@@ -215,7 +215,7 @@ else:
                 self.assertFalse(any(row[:3] == ["gh", "pr", "edit"] for row in calls))
 
     def sync(self, **kwargs):
-        return self.execute("sync-main-to-develop.yml", "Propose reviewed sync", **kwargs)
+        return self.execute("branches.yml", "Propose reviewed sync", **kwargs)
 
     def test_sync_skip_ci_source_gets_non_skip_same_tree_snapshot(self):
         result, calls = self.sync(commits="chore(release): 3.21.2 [skip ci]")

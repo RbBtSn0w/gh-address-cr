@@ -1,102 +1,90 @@
 # GitHub Actions navigation
 
-Choose a workflow by intent. Repository-owned sidebar names share a category
-prefix; release numbers show the operational order, not independent approvals.
-Run titles identify the PR, branch, target or package version. Workflow filenames
-and job/check identifiers remain stable for scripts and branch rules.
+Five repository-owned workflows describe operator intents. Run titles identify
+PRs, branches, versions or proposal operations; job names identify execution
+phases. GitHub-managed CodeQL, Copilot and Dependency Graph remain separate.
 
 ## Workflow map
 
-| Sidebar entry | Trigger | Result and side effects |
+| Sidebar entry | File | Trigger and result |
 | --- | --- | --- |
-| ci (planned: Checks / Python) | PR, trunk push, weekly schedule | Lint, type checks, tests and package validation; eligible same-repository PRs also produce preview artifacts. Run titles already use Checks / Python. |
-| Checks / PR target | PR opened, edited or updated | Validate target branch; only develop may target main. |
-| Preview / Homebrew | Successful ci or Checks / Python PR run | Validate provenance, test source installation, publish dev preview assets/formula and installation instructions. This writes preview distribution, not stable distribution. |
-| Release / 1 Propose PR | Friday schedule or manual | Create/update a develop -> main proposal only; no merge or package publication. Equal trees or no releasable commits produce a successful no-op. |
-| Release / 2 Publish | Main push or manual | Analyze version, publish GitHub/PyPI releases and invoke stable Homebrew distribution when a version is released. Manual dry-run and TestPyPI modes have different side effects below. |
-| Release / 3 Homebrew | Called by Publish, or manual recovery | Prepare fixed resources, build four bottles, publish immutable assets, verify four bottles, then update the stable tap only after all targets pass. |
-| Release / 4 Propose sync | Successful Publish run on main, or manual | Propose a reviewed main -> develop sync PR; does not merge it. |
+| Checks / Python | `ci.yml` | PR opened/updated/reopened, metadata edits, trunk push, weekly schedule. Validate PR target, lint, type-check, test Python 3.12–3.14 and installed packages; eligible PRs produce preview artifacts. |
+| Preview | `homebrew-preview.yml` | Successful eligible Checks run. Validate provenance, test source installation, publish dev preview assets/formula and instructions. |
+| Release | `release.yml` | Main push or manual. Analyze version, publish GitHub/PyPI and call Homebrew when a new version is released. |
+| Homebrew | `homebrew.yml` | Called by Release or manual recovery. Build and verify four platform bottles; update stable tap only after all four pass. |
+| Branches | `branches.yml` | Friday schedule proposes develop -> main; successful main Release completion proposes main -> develop. Manual operation selects one proposal. Neither job merges PRs. |
 
-The two `workflow_run` consumers match producer **display names**, not filenames:
-ci (later Checks / Python) -> Preview / Homebrew, and Release / 2 Publish -> Release / 4
-Propose sync. Stage producer/consumer renames as described below. The preview
-publisher separately verifies the trusted producer path `.github/workflows/ci.yml`.
-GitHub documents these separate surfaces in
-[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
-and [workflow_run events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
+PR target validation remains `Validate base branch`: only develop may target
+main. Moving it into Checks retains its opened/edited/synchronize/reopened
+coverage and uses no checkout or write permission. This consolidation preserves
+the full Python matrix, lower-bound OTel tests and installed wheel journey.
+PR edits run only the metadata guard via `pull_request_target: edited`. That
+job has no checkout, actions, secrets or token permissions. All source-executing
+jobs reject this event, and Preview accepts only ordinary `pull_request` runs.
+The Preview workflow also isolates ineligible completions in run-specific
+concurrency groups, because workflow-level queue admission precedes job guards.
+Consequently editing a PR does not rerun the matrix or displace a pending preview
+in the publication group. Eligible PR previews retain the existing global
+publication lock and default single-pending queue semantics. Verify base/default-branch deployment
+before claiming remote metadata routing is active.
 
-## Pick the correct manual entry
+## Manual operations
 
-| Intent | Entry | Boundary |
+| Intent | Workflow and inputs | Side effects |
 | --- | --- | --- |
-| Prepare a stable-release proposal | Release / 1 Propose PR | Does not release software. Review fresh refs/checks and follow the release policy before any merge. |
-| Validate packaging without publication | Release / 2 Publish, target `dry-run` | No production Release assets, PyPI or tap writes. |
-| Exercise staging package upload | Release / 2 Publish, target `testpypi` | Writes TestPyPI; does not publish production artifacts or update the tap. |
-| Publish stable packages | Release / 2 Publish, target `pypi` | Production side effects; requires separate explicit release approval. Main pushes select this target automatically. |
-| Retry Homebrew after PyPI already succeeded | Release / 3 Homebrew | Use the already published version and original rebuild number. This can upload production bottles and change the stable tap. |
-| Prepare post-release synchronization | Release / 4 Propose sync | Wait for publication/version-writer settlement; merging the resulting PR needs separate approval. |
+| Propose release | Branches, `operation=propose-release` | Create/update a reviewed develop -> main PR; no publication or automatic merge. |
+| Propose sync | Branches, `operation=propose-sync` | Create/reuse an immutable main snapshot and propose its merge into develop; no trunk write or automatic merge. |
+| Validate packaging | Release, `publish_target=dry-run` | No production Release, PyPI or tap writes. |
+| Test staging upload | Release, `publish_target=testpypi` | Writes TestPyPI only. |
+| Publish stable packages | Release, `publish_target=pypi` | Production publication; requires explicit release approval. Main pushes select this target automatically. |
+| Recover Homebrew | Homebrew, `version`, `rebuild` | Restore the published version's snapshot/bottles; can upload production assets and update the tap. Keep rebuild unchanged for an unchanged retry. |
 
-Use filenames for CLI dispatch and run lookup so display-name changes do not
-break operator commands. For example, `gh run list --workflow release.yml` reads
-the publishing workflow, while `gh run list --workflow scheduled-release-pr.yml`
-reads proposal runs. A green proposal is not evidence of a published package.
+Use filenames for CLI lookup and dispatch. For example:
 
-See [release governance](release-train.md) for exact-SHA approval, writer pauses,
-normal merge requirements and reviewed sync-back. See
-[Homebrew distribution](homebrew-distribution.md) for bottle acceptance and
-same-version recovery. Never use squash/rebase for promotion or sync.
+```bash
+gh workflow run branches.yml -f operation=propose-release
+gh workflow run branches.yml -f operation=propose-sync
+gh run list --workflow release.yml
+```
 
-## Sidebar ownership and historical entries
+Dispatch is an operation, not an approval mechanism. Review exact refs/checks
+and follow [release governance](release-train.md) before any merge/publication.
+See [Homebrew distribution](homebrew-distribution.md) for bottle acceptance and
+same-version recovery. Promotion and sync require normal merge, not squash or
+rebase. Separate proposal jobs retain their own permissions and concurrency
+locks; unrelated proposal operations do not share a global queue.
 
-CodeQL, Copilot and Dependency Graph entries are GitHub-managed workflows. They
-are outside this repository's YAML naming scheme. Their labels and visibility
-must be managed through the corresponding GitHub feature settings.
+## Trust and rollout
 
-The 2026-10-31 Actions inventory also lists `.github/workflows/pr-dev-preview.yml`
-and `.github/workflows/pr-dev-release.yml`, although neither file exists in the
-current source. They are historical registrations, not additional preview
-implementations. The current preview path is ci -> Preview /
-Homebrew. Retain historical run evidence during release recovery; do not recreate
-obsolete YAML files just to rename the entries or delete runs to tidy the sidebar.
-Any remote disabling or historical-run cleanup is a separate administrative
-operation and is not performed by this source change.
+Checks executes PR code with read-only credentials. Preview consumes the exact
+triggering run's artifact using trusted default-branch tooling; source execution
+never receives tap-write credentials. Release and Homebrew retain their existing
+production boundaries and immutable recovery artifacts.
 
-Names and run titles become visible when the corresponding GitHub workflow
-revision is loaded. Default-branch consumers and retained historical entries may
-continue to show older labels during rollout; local lint does not establish that
-the remote sidebar has changed.
+The published main preview consumer already accepts both `ci` and
+`Checks / Python`, so the Checks producer can now use the staged new name without
+an event gap. Keep both names until old PR branches/runs no longer use `ci`.
+The trusted producer path stays `.github/workflows/ci.yml`.
 
-The CI rename uses a two-phase rollout to keep PR previews working:
+Branches accepts both `Release / 2 Publish` and `Release` completions during the
+publish-name transition. Only successful main runs select its sync job; schedules
+select only release proposals and dispatch selects only its explicit operation.
+The new default-branch workflow must be deployed before claiming remote Branches
+activation. Local tests and develop PR CI do not establish schedule activation.
+GitHub matches `workflow_run` producers by display name, not filename; see the
+[official event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
 
-1. This change retains the producer name `ci` and stages the preview consumer
-   with both `ci` and `Checks / Python` filters. CI run titles already use the
-   grouped label; the sidebar retains `ci` during this transition. The trusted
-   producer path and provenance checks remain unchanged.
-2. After a separately approved main promotion, inspect the live default-branch
-   consumer and verify both names are accepted. Only then may a follow-up PR
-   rename the producer to `Checks / Python` and update the phase-one test.
-3. Verify a fresh eligible PR preview after that rename. Keep the old `ci`
-   filter while older PR branches/runs still use it; remove it in a reviewed
-   follow-up only after that inventory is clear. Missed runs are not replayed
-   automatically, so do not introduce a deliberate gap or dispatch production
-   merely to refresh sidebar labels.
+The retired source workflows are `pr-target.yml`, `scheduled-release-pr.yml`
+and `sync-main-to-develop.yml`. Their responsibilities move into Checks and
+Branches. Historical GitHub workflow registrations (including older
+`pr-dev-preview.yml` and `pr-dev-release.yml`) may remain visible after source
+removal. Do not recreate obsolete YAML or delete run evidence to tidy the sidebar.
+Remote disabling/history cleanup is a separate administrative operation.
 
-The publish/sync rename reaches main together; verify its trigger during the
-approved release settlement. A failed bottle verification may leave immutable
-assets on the release, while the stable tap still retains its prior formula.
+## Presentation
 
-## Design rationale
-
-The previous sidebar mixed file paths, generic `ci`/`release` labels, product
-names and scheduled tasks at the same level. File paths drew disproportionate
-attention, while "Scheduled Release PR" obscured the difference between proposing
-and publishing a release. Consistent category prefixes support scanning; numbered
-release verbs make the lifecycle visible without merging workflows across their
-different execution and credential boundaries.
-
-Keep GitHub's native typography, contrast, focus states and target sizes. The
-source change addresses text hierarchy and operational clarity; screenshot
-inspection alone does not establish contrast ratios or keyboard accessibility.
-Text prefixes carry meaning without color or emoji. Existing distinct preview
-and stable labels remain explicit because those paths have different costs and
-publication consequences.
+Use short sidebar names for intents, descriptive run titles for objects/actions,
+and job names for phases. Release stage order belongs in the execution graph,
+not four numbered sidebar entries. Text carries meaning without reliance on
+color or emoji; keep GitHub's native typography and keyboard/focus behavior.
+A green branch proposal means a proposal was prepared, not software published.

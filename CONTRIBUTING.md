@@ -35,7 +35,7 @@ We welcome contributions! Please follow these guidelines:
 -   `workflow_dispatch` `dry-run` and `testpypi` targets validate package build and Homebrew formula rendering, but they do not push tap changes.
 -   Production Homebrew publishing uses the shared release-bot GitHub App installed on `RbBtSn0w/homebrew-tap` with `Contents: Read and write`; the organization or account must expose `RELEASE_BOT_APP_ID` as an Actions variable and `RELEASE_BOT_PRIVATE_KEY` as an Actions secret to this repository.
 -   If `semantic-release` generates no new version, both PyPI and Homebrew publishing must skip explicitly instead of pretending to publish.
--   Homebrew-only retries use the `Release / 3 Homebrew` workflow with the
+-   Homebrew-only retries use the `Homebrew` workflow with the
     already published version and the original rebuild number. They restore the
     immutable formula snapshot rather than selecting dependencies again. Changed
     bottle bytes require an explicit larger rebuild number.
