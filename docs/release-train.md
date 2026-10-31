@@ -183,7 +183,7 @@ refs, installed artifact evidence or runtime-owned review completion truth.
    first-bottle acceptance checklist in PR #383 and `docs/homebrew-distribution.md`.
    A tag or a successful package build alone does not complete publication.
 2. Once the main writer settles, capture the accepted published main SHA. Review
-   the sync snapshot PR created by `.github/workflows/sync-main-to-develop.yml`:
+   the sync snapshot PR created by `Branches` (`.github/workflows/branches.yml`, `propose-sync`):
    its snapshot must have the published main tree, main as its sole parent and
    the validation message without CI-skip instructions. A stale or conflicting
    snapshot is a HOLD, not permission to reset develop or force-push.

@@ -574,9 +574,9 @@ class ReleaseTelemetryTests(unittest.TestCase):
 
 
 class WorkflowTrustTests(unittest.TestCase):
-    def test_preview_rename_stages_consumer_before_changing_producer(self):
+    def test_preview_rename_consumes_current_and_historical_producers(self):
         root = ROOT / ".github/workflows"
-        self.assertEqual((root / "ci.yml").read_text().splitlines()[0], "name: ci")
+        self.assertEqual((root / "ci.yml").read_text().splitlines()[0], "name: Checks / Python")
         preview = (root / "homebrew-preview.yml").read_text()
         names = preview.split("    workflows: [", 1)[1].split("]", 1)[0]
         self.assertEqual([value.strip().strip('"\'') for value in names.split(",")],
@@ -584,7 +584,7 @@ class WorkflowTrustTests(unittest.TestCase):
 
     def test_workflow_run_routes_follow_producer_display_names(self):
         for producer, consumer in (("ci.yml", "homebrew-preview.yml"),
-                                   ("release.yml", "sync-main-to-develop.yml")):
+                                   ("release.yml", "branches.yml")):
             with self.subTest(consumer=consumer):
                 root = ROOT / ".github/workflows"
                 name = (root / producer).read_text().splitlines()[0].removeprefix("name: ").strip('"\'')

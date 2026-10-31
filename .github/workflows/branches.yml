@@ -1,0 +1,235 @@
+name: Branches
+run-name: >-
+  Branch proposal / ${{ github.event_name }} / ${{ inputs.operation || (github.event_name == 'schedule' && 'propose-release') || 'propose-sync' }}
+
+on:
+  schedule:
+    # Every Friday at 15:00 Beijing time (UTC+8) -> 07:00 UTC
+    - cron: '0 7 * * 5'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Branch proposal to prepare for human review
+        required: true
+        default: propose-release
+        type: choice
+        options:
+          - propose-release
+          - propose-sync
+  workflow_run:
+    # Keep the former publish name during the workflow rename transition.
+    workflows: ["Release / 2 Publish", "Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  create-release-pr:
+    name: Propose release for human approval
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-release')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: scheduled-release-pr
+      cancel-in-progress: false
+    steps:
+      - name: Mint release-bot token
+        id: bot
+        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-checks: read
+          permission-contents: read
+          permission-pull-requests: write
+          permission-statuses: read
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
+
+      - name: Create or Update Promotion PR
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
+          HAS_CUSTOM_TOKEN: ${{ steps.bot.outputs.token != '' || secrets.SYNC_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_CUSTOM_TOKEN}" != "true" ]; then
+            echo "::warning::GITHUB_TOKEN proposals may not trigger CI. Human approval requires actual checks on the current head/base."
+          fi
+          refs="$(git ls-remote --heads origin refs/heads/main refs/heads/develop)"
+          for branch in main develop; do
+            if ! printf '%s\n' "$refs" | grep -q "refs/heads/${branch}$"; then
+              echo "::error::Missing ${branch}; lifecycle recovery requires verified provenance and owner approval."
+              exit 1
+            fi
+          done
+          git fetch --quiet origin main develop
+          ahead="$(git rev-list --count origin/main..origin/develop)"
+          diff_rc=0
+          git diff --quiet origin/main origin/develop || diff_rc=$?
+          if [ "$diff_rc" -gt 1 ]; then
+            echo "::error::Unable to compare release content."
+            exit "$diff_rc"
+          fi
+          if [ "$ahead" -eq 0 ] || [ "$diff_rc" -eq 0 ]; then
+            echo "No new release content; no proposal."
+            exit 0
+          fi
+          # Python package: match release.config.cjs, including its refactor patch rule.
+          git log --format=%B origin/main..origin/develop > "$RUNNER_TEMP/release-commits.txt"
+          if ! grep -Eq '^(feat|fix|perf|refactor)(\([^)]*\))?!?: |^[[:alnum:]_-]+(\([^)]*\))?!: ' "$RUNNER_TEMP/release-commits.txt" &&
+             ! grep -Eiq '^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]+[^[:space:]]' "$RUNNER_TEMP/release-commits.txt"; then
+            echo "No releasable Conventional Commits; no proposal."
+            exit 0
+          fi
+          head="$(git rev-parse origin/develop)"
+          base="$(git rev-parse origin/main)"
+          body="$RUNNER_TEMP/release-proposal.md"
+          printf '<!-- release-train-proposal -->\n### Release proposal\n\nHuman approval required for exact head %s and base %s.\nNo automatic merge is enabled. This proposal does not prepare or authorize a lifecycle cycle.\n\nBefore merging, follow docs/release-train.md and verify current checks, writer coordination and lifecycle policy.\n\n' "$head" "$base" > "$body"
+          # Carry closure references from merged PRs in the promoted commit range.
+          git rev-list origin/main..origin/develop > "$RUNNER_TEMP/release-shas.txt"
+          : > "$RUNNER_TEMP/release-issues.txt"
+          while read -r sha; do
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls" > "$RUNNER_TEMP/release-prs.json"
+            python3 - "$RUNNER_TEMP/release-prs.json" >> "$RUNNER_TEMP/release-issues.txt" <<'PYREFS'
+          import json
+          import re
+          import sys
+          pages = json.load(open(sys.argv[1]))
+          for page in pages:
+              for pr in page:
+                  if not pr.get("merged_at"):
+                      continue
+                  for number in re.findall(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?[ \t]+#([0-9]+)\b", pr.get("body") or ""):
+                      print("Closes #" + number)
+          PYREFS
+          done < "$RUNNER_TEMP/release-shas.txt"
+          sort -u "$RUNNER_TEMP/release-issues.txt" >> "$body"
+          printf '%s\n' '<!-- /release-train-proposal -->' >> "$body"
+          pr="$(gh pr list --base main --head develop --state open --json number --jq '.[0].number')"
+          if [ -z "$pr" ]; then
+            gh pr create --base main --head develop --title "chore(release): promote develop to stable" --body-file "$body"
+          else
+            # Preserve maintainer notes while attaching fresh proposal/closure evidence.
+            gh pr view "$pr" --json body > "$RUNNER_TEMP/existing-release.json"
+            python3 - "$RUNNER_TEMP/existing-release.json" "$body" <<'PYBODY'
+          import json
+          import sys
+          from pathlib import Path
+          existing = json.load(open(sys.argv[1]))["body"] or ""
+          marker = "<!-- release-train-proposal -->"
+          end_marker = "<!-- /release-train-proposal -->"
+          path = Path(sys.argv[2])
+          generated = path.read_text()
+          if marker not in existing and end_marker not in existing:
+              updated = existing.rstrip() + "\n\n" + generated
+          elif existing.count(marker) == existing.count(end_marker) == 1 and existing.index(marker) < existing.index(end_marker):
+              start = existing.index(marker)
+              end = existing.index(end_marker) + len(end_marker)
+              updated = existing[:start] + generated.rstrip() + existing[end:]
+          else:
+              raise SystemExit("Ambiguous proposal markers; preserve the body for human repair.")
+          path.write_text(updated)
+          PYBODY
+            gh pr edit "$pr" --body-file "$body"
+          fi
+
+  sync:
+    name: Propose reviewed main-to-develop sync
+    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-sync') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: reviewed-main-develop-sync
+      cancel-in-progress: false
+    steps:
+      - name: Mint bot token
+        id: bot
+        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
+
+      - name: Propose reviewed sync
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token || secrets.SYNC_TOKEN || github.token }}
+          HAS_CUSTOM_TOKEN: ${{ steps.bot.outputs.token != '' || secrets.SYNC_TOKEN != '' }}
+          GH_PROMPT_DISABLED: '1'
+        run: |
+          set -euo pipefail
+          refs="$(git ls-remote --heads origin refs/heads/develop)"
+          if [ -z "$refs" ]; then
+            echo "::error::develop is missing. No recovery is authorized without a durable cycle and verified provenance."
+            exit 1
+          fi
+          git fetch --quiet origin main develop
+          behind="$(git rev-list --count origin/develop..origin/main)"
+          if [ "$behind" -eq 0 ]; then
+            echo "develop already includes main; no sync required."
+            exit 0
+          fi
+          if [ "$HAS_CUSTOM_TOKEN" != "true" ]; then
+            echo "::error::A release-bot App or SYNC_TOKEN is required to trigger PR CI; refusing GITHUB_TOKEN-only proposal creation."
+            exit 1
+          fi
+          stable_sha="$(git rev-parse origin/main)"
+          stable_tree="$(git rev-parse 'origin/main^{tree}')"
+          if [[ ! "$stable_sha" =~ ^[0-9a-f]{40}$ || ! "$stable_tree" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid main commit/tree identity."
+            exit 1
+          fi
+          snapshot_branch="sync/main-to-develop/${stable_sha}"
+          snapshot_message="chore(repo): validate main ${stable_sha} sync"
+          gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/heads/${snapshot_branch}" > "$RUNNER_TEMP/sync-refs.json"
+          snapshot_sha="$(jq -r --arg ref "refs/heads/${snapshot_branch}" '
+            [.[] | select(.ref == $ref)] |
+            if length == 0 then "" elif length == 1 then .[0].object.sha else error("Ambiguous snapshot ref") end
+          ' "$RUNNER_TEMP/sync-refs.json")"
+          if [ -z "$snapshot_sha" ]; then
+            # One empty, non-skip commit preserves the published tree and allows real PR CI.
+            jq -n --arg tree "$stable_tree" --arg parent "$stable_sha" --arg message "$snapshot_message" \
+              '{tree:$tree, parents:[$parent], message:$message}' > "$RUNNER_TEMP/sync-commit.json"
+            snapshot_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits" --method POST --input "$RUNNER_TEMP/sync-commit.json" --jq .sha)"
+            [[ "$snapshot_sha" =~ ^[0-9a-f]{40}$ ]]
+            jq -n --arg ref "refs/heads/${snapshot_branch}" --arg sha "$snapshot_sha" \
+              '{ref:$ref, sha:$sha}' > "$RUNNER_TEMP/sync-ref.json"
+            # Create-only API: a racing or manually changed ref is never advanced or overwritten.
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" --method POST --input "$RUNNER_TEMP/sync-ref.json" > /dev/null
+          fi
+          [[ "$snapshot_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/git/commits/${snapshot_sha}" > "$RUNNER_TEMP/sync-snapshot.json"
+          jq -e --arg tree "$stable_tree" --arg parent "$stable_sha" --arg message "$snapshot_message" \
+            '.tree.sha == $tree and [.parents[].sha] == [$parent] and .message == $message' \
+            "$RUNNER_TEMP/sync-snapshot.json" > /dev/null
+          live_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "$live_main" != "$stable_sha" ]; then
+            echo "::error::main advanced during sync preparation; preserve the snapshot and rerun after release settlement."
+            exit 1
+          fi
+          pr="$(gh pr list --base develop --head "$snapshot_branch" --state open --json number --jq '.[0].number')"
+          if [ -n "$pr" ]; then
+            echo "Verified sync proposal #${pr} already exists."
+            exit 0
+          fi
+          body="$RUNNER_TEMP/sync-proposal.md"
+          printf 'Synchronize published main %s into develop. The snapshot has exactly the published tree plus one empty validation commit, so version-commit skip instructions cannot suppress PR CI.\n\nRequire fresh CI, review and final-gate before merge. No automatic merge, trunk write or missing-ref recovery is authorized.\n' "$stable_sha" > "$body"
+          gh pr create --base develop --head "$snapshot_branch" --title "chore(repo): sync main to develop" --body-file "$body"

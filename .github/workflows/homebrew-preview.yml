@@ -1,4 +1,4 @@
-name: Preview / Homebrew
+name: Preview
 run-name: >-
   Preview / Homebrew / CI run ${{ github.event.workflow_run.run_number }}
 

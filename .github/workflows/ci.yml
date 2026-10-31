@@ -1,10 +1,10 @@
-name: ci
-# Rename only after the dual-name preview consumer is verified on main.
+name: Checks / Python
 run-name: >-
   Checks / Python / ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || github.ref_name }} / ${{ github.event_name }}
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
     branches:
       - main
@@ -23,6 +23,27 @@ env:
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
 
 jobs:
+  validate-base:
+    if: github.event_name == 'pull_request'
+    permissions: {}
+    name: Validate base branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check target branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [ "${BASE_REF}" = "main" ]; then
+            if [ "${HEAD_REF}" = "develop" ]; then
+              echo "Allowing release PR: develop -> main"
+              exit 0
+            fi
+            echo "::error::PRs directly targeting 'main' are not allowed. Please change the base branch to 'develop'."
+            exit 1
+          fi
+          echo "Base branch '${BASE_REF}' is allowed."
+
   lint-and-test:
     permissions:
       contents: read
