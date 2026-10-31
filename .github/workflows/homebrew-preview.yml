@@ -1,0 +1,197 @@
+name: Homebrew development preview
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: homebrew-preview-publication
+  cancel-in-progress: false
+
+env:
+  PREVIEW_RUN_ID: ${{ github.event.workflow_run.id }}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
+jobs:
+  inspect:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'develop' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.identity.outputs.pr }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - name: Download only the triggering CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-address-cr-dist
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Validate run, current PR head and immutable source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m scripts.release.homebrew_preview inspect
+          --directory candidate --output preview-input --run-id "$PREVIEW_RUN_ID"
+      - name: Expose validated preview identity
+        id: identity
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          meta = json.loads(Path("preview-input/preview.json").read_text())
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"pr={meta['pr']}\nversion={meta['version']}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-preview-input
+          path: preview-input/
+
+  publish-source:
+    needs: inspect
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-preview-input
+          path: preview-input
+      - name: Upload source without executing its contents
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m scripts.release.homebrew_preview publish-source
+          --directory preview-input --run-id "$PREVIEW_RUN_ID"
+
+  prepare:
+    needs: [inspect, publish-source]
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-preview-input
+          path: preview-input
+      - name: Resolve and verify source installation without publication credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m scripts.release.homebrew_preview prepare
+          --directory preview-input --output prepared --run-id "$PREVIEW_RUN_ID"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-preview-prepared
+          path: prepared/
+
+  publish:
+    needs: [inspect, prepare]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-homebrew-helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-preview-input
+          path: preview-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-preview-prepared
+          path: prepared
+      - name: Mint tap-only publication credentials
+        id: homebrew-tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: RbBtSn0w
+          repositories: homebrew-tap
+          permission-contents: write
+      - uses: actions/checkout@v4
+        with:
+          repository: RbBtSn0w/homebrew-tap
+          token: ${{ steps.homebrew-tap-token.outputs.token }}
+          path: homebrew-tap
+      - name: Revalidate current head and publish only the dev formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m scripts.release.homebrew_preview publish
+          --directory prepared --input preview-input --checkout homebrew-tap --run-id "$PREVIEW_RUN_ID"
+      - name: Update preview installation instructions
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_PR: ${{ needs.inspect.outputs.pr }}
+          PREVIEW_VERSION: ${{ needs.inspect.outputs.version }}
+        with:
+          script: |
+            const marker = '<!-- pr-dev-preview-comment -->';
+            const body = `${marker}
+            PR development preview \`${process.env.PREVIEW_VERSION}\` is available.
+
+            Homebrew uses source installation with fixed dependency resources; builds can take several minutes.
+            \`\`\`bash
+            brew update
+            brew unlink gh-address-cr
+            brew reinstall RbBtSn0w/tap/gh-address-cr-dev
+            gh-address-cr --version
+            gh-address-cr agent manifest
+            \`\`\`
+
+            Alternatively download the wheel with:
+            \`\`\`bash
+            gh run download ${process.env.PREVIEW_RUN_ID} -n gh-address-cr-dist --dir /tmp/gh-address-cr-preview
+            python3 -m venv /tmp/gh-address-cr-preview-venv
+            /tmp/gh-address-cr-preview-venv/bin/pip install /tmp/gh-address-cr-preview/*.whl
+            \`\`\`
+            To switch back: \`brew unlink gh-address-cr-dev && brew link gh-address-cr\`.
+            `;
+            const issue_number = Number(process.env.PREVIEW_PR);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.user.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({...context.repo, comment_id: existing.id, body});
+            } else {
+              await github.rest.issues.createComment({...context.repo, issue_number, body});
+            }

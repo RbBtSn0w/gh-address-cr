@@ -651,24 +651,18 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("publish-homebrew:", text)
         self.assertIn("needs: [build-release-package, publish-pypi]", text)
         self.assertIn("needs.build-release-package.outputs.publish_target == 'pypi'", text)
-        self.assertIn("actions/create-github-app-token@v3", text)
-        self.assertIn("app-id: ${{ vars.RELEASE_BOT_APP_ID }}", text)
-        self.assertIn("private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}", text)
-        self.assertIn("token: ${{ steps.homebrew-tap-token.outputs.token }}", text)
-        self.assertIn("repositories: homebrew-tap", text)
-        self.assertNotIn("HOMEBREW_TAP_TOKEN", text)
-        self.assertNotIn("HOMEBREW_APP_PRIVATE_KEY", text)
-        self.assertIn("RbBtSn0w/homebrew-tap", text)
-        self.assertIn("Formula/gh-address-cr.rb", text)
-        self.assertIn('HOMEBREW_NO_INSTALL_FROM_API: "1"', text)
-        self.assertIn("Sync rendered Homebrew formula into tapped clone", text)
-        self.assertNotIn("brew update-python-resources", text)
-        self.assertIn("Install release helper dependencies", text)
-        self.assertIn("python -m pip install --upgrade packaging", text)
-        self.assertIn("brew audit --formula --strict RbBtSn0w/tap/gh-address-cr", text)
-        self.assertIn("brew install --build-from-source RbBtSn0w/tap/gh-address-cr", text)
-        self.assertIn("brew test RbBtSn0w/tap/gh-address-cr", text)
-        self.assertIn("git status --short -- Formula/gh-address-cr.rb", text)
+        self.assertIn("uses: ./.github/workflows/homebrew.yml", text)
+        self.assertIn("version: ${{ needs.build-release-package.outputs.package_version }}", text)
+        homebrew = (ROOT / ".github/workflows/homebrew.yml").read_text()
+        self.assertIn("workflow_dispatch:", homebrew)
+        self.assertIn("workflow_call:", homebrew)
+        self.assertNotIn("semantic-release", homebrew)
+        self.assertNotIn("--force-bottle", homebrew)
+        for runner in ("macos-15", "macos-15-intel", "macos-26", "macos-26-intel"):
+            self.assertIn(runner, homebrew)
+        self.assertIn("needs: [publish-bottles, verify-bottles]", homebrew)
+        self.assertIn("preserve-snapshot", homebrew)
+        self.assertIn("publish-tap", homebrew)
 
     def test_homebrew_formula_renderer_uses_pypi_sdist_contract(self):
         output = Path(self.temp_dir.name) / "gh-address-cr.rb"
@@ -699,18 +693,14 @@ class RuntimePackagingTest(PythonScriptTestCase):
 
         formula = output.read_text(encoding="utf-8")
         self.assertIn("class GhAddressCr < Formula", formula)
-        self.assertNotIn("include Language::Python::Virtualenv", formula)
+        self.assertIn("include Language::Python::Virtualenv", formula)
         self.assertIn('url "https://files.pythonhosted.org/packages/source/g/gh-address-cr/gh_address_cr-1.2.3.tar.gz"', formula)
         self.assertIn('sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
-        self.assertIn('depends_on "uv"', formula)
-        self.assertIn('python = formula_opt_bin("python@3.14")/"python3.14"', formula)
-        self.assertIn('system "uv", "venv", "--python", python, libexec', formula)
-        self.assertIn('system "uv", "pip", "install", "--python", libexec/"bin/python", "."', formula)
-        self.assertIn('bin.install_symlink libexec/"bin/gh-address-cr"', formula)
+        self.assertNotIn('depends_on "uv"', formula)
+        self.assertIn('virtualenv_install_with_resources using: "python3.14"', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr --version")', formula)
         self.assertIn('shell_output("#{bin}/gh-address-cr agent manifest")', formula)
-        self.assertNotIn("virtualenv_install_with_resources", formula)
         self.assertNotIn('resource "', formula)
         self.assertNotIn("whl", formula)
 
@@ -766,27 +756,6 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertTrue(payload["url"].endswith(".tar.gz"))
         self.assertEqual(payload["sha256"], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
-    def test_homebrew_formula_renderer_prefers_versions_with_sdists(self):
-        renderer = load_homebrew_formula_renderer()
-
-        selected = renderer.select_dependency_version(
-            "example-package",
-            ">=1.0",
-            {
-                "info": {"version": "2.0"},
-                "releases": {
-                    "1.0": [
-                        {"packagetype": "sdist", "url": "https://example.test/example-package-1.0.tar.gz"},
-                    ],
-                    "2.0": [
-                        {"packagetype": "bdist_wheel", "url": "https://example.test/example-package-2.0.whl"},
-                    ],
-                },
-            },
-        )
-
-        self.assertEqual(selected, "1.0")
-
     def test_homebrew_formula_renderer_fetches_root_metadata_for_network_mode(self):
         renderer = load_homebrew_formula_renderer()
         output = Path(self.temp_dir.name) / "gh-address-cr.rb"
@@ -826,7 +795,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertEqual(result, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["status"], "RENDERED")
-        self.assertIn('depends_on "uv"', output.read_text(encoding="utf-8"))
+        self.assertIn("virtualenv_install_with_resources", output.read_text(encoding="utf-8"))
 
     def test_homebrew_formula_renderer_supports_custom_formula_name_and_conflicts(self):
         output = Path(self.temp_dir.name) / "gh-address-cr-pr42.rb"
