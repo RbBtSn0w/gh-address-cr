@@ -27,7 +27,7 @@ from gh_address_cr.otel_tracing import (
     shutdown_telemetry,
     start_child_span,
 )
-from scripts.release.render_homebrew_formula import formula_class_name, render_formula
+from scripts.release.render_homebrew_formula import formula_class_name, render_formula, source_version
 
 REPOSITORY = "RbBtSn0w/gh-address-cr"
 TAP_REPOSITORY = "RbBtSn0w/homebrew-tap"
@@ -112,7 +112,8 @@ def make_snapshot(text: str, *, version: str, commit: str) -> dict:
     sha = _field(text, "sha256")
     if not re.fullmatch(r"[a-f0-9]{64}", sha):
         raise ValueError("invalid source checksum")
-    if _field(text, "version") != version:
+    versions = re.findall(r'^  version "([^"\n]+)"$', text, re.MULTILINE)
+    if len(versions) > 1 or (versions[0] if versions else source_version(url)) != version:
         raise ValueError("formula version differs from release")
     try:
         Version(version)
@@ -337,9 +338,10 @@ def _write_and_push(work: Path, relative: str, content: bytes, name: str, versio
         return None
     if target.exists() and name == "gh-address-cr":
         old = re.search(r'^  version "([^"]+)"$', target.read_text(), re.MULTILINE)
-        if old and Version(old[1]) > Version(version):
+        old_version = old[1] if old else source_version(_field(target.read_text(), "url"))
+        if old_version and Version(old_version) > Version(version):
             raise ValueError("refusing to replace a newer tap version")
-        if old and Version(old[1]) == Version(version):
+        if old_version and Version(old_version) == Version(version):
             before = re.search(r"^    rebuild (\d+)$", target.read_text(), re.MULTILINE)
             after = re.search(rb"^    rebuild (\d+)$", content, re.MULTILINE)
             if int(before[1] if before else 0) > int(after[1] if after else 0):

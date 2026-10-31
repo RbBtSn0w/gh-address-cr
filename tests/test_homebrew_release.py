@@ -43,6 +43,19 @@ def snapshot():
 
 
 class ResourceSnapshotTests(unittest.TestCase):
+    def test_stable_version_is_inferred_and_preview_version_is_explicit(self):
+        stable = source_formula()
+        self.assertNotIn('  version "', stable)
+        self.assertEqual(snapshot()["version"], "1.2.3")
+        preview = render_formula(class_name="GhAddressCrDev", url="https://github.com/example/source.tar.gz",
+                                 sha256=SOURCE_HASH, python_dependency="python@3.14", resources=RESOURCES,
+                                 conflicts_with=("gh-address-cr",), version="1.2.3.dev7+abcdef0")
+        self.assertLess(preview.index('  version "'), preview.index('  sha256 "'))
+        self.assertEqual(support.make_snapshot(preview, version="1.2.3.dev7+abcdef0", commit=COMMIT)["version"],
+                         "1.2.3.dev7+abcdef0")
+        with self.assertRaises(ValueError):
+            support.make_snapshot(stable, version="1.2.4", commit=COMMIT)
+
     def test_installed_data_probe_uses_current_packaged_data(self):
         installed.verify_data_and_platform()
 
@@ -284,6 +297,16 @@ class RecoveryTests(unittest.TestCase):
 
 
 class TapUpdateTests(unittest.TestCase):
+    def test_inferred_stable_version_cannot_be_downgraded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            target = work / "Formula/gh-address-cr.rb"
+            target.parent.mkdir()
+            target.write_text(source_formula().replace("1.2.3", "1.2.4"))
+            with self.assertRaisesRegex(ValueError, "newer tap version"):
+                support._write_and_push(work, "Formula/gh-address-cr.rb", source_formula().encode(),
+                                        "gh-address-cr", "1.2.3")
+
     def test_real_git_preserves_concurrent_other_formula_and_is_idempotent(self):
         def git(*args):
             return subprocess.run(["git", *map(str, args)], check=True, capture_output=True, text=True)

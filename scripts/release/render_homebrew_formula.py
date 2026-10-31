@@ -8,13 +8,22 @@ import re
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 from urllib.request import urlopen
+
+from packaging.utils import InvalidSdistFilename, parse_sdist_filename
 
 DEFAULT_PACKAGE_NAME = "gh-address-cr"
 DEFAULT_PYPI_BASE_URL = "https://pypi.org/pypi/"
 DEFAULT_PYTHON_DEPENDENCY = "python@3.14"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def source_version(url: str) -> str | None:
+    try:
+        return str(parse_sdist_filename(unquote(Path(urlsplit(url).path).name))[1])
+    except InvalidSdistFilename:
+        return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -153,7 +162,9 @@ def render_formula(
     if any(token in url for token in ('"', "\\", "\n", "\r", "#{")):
         raise SystemExit("unsafe source URL")
     python_for_venv = python_dependency.replace("@", "")
-    version_line = f'\n  version "{validate_version(version)}"' if version is not None else ""
+    validated_version = validate_version(version) if version is not None else None
+    version_line = (f'\n  version "{validated_version}"'
+                    if validated_version is not None and source_version(url) != validated_version else "")
     resource_blocks = render_resources(resources)
     sections = "\n\n".join(block for block in (bottle_block, resource_blocks) if block)
     sections = "\n" + sections + "\n" if sections else ""
@@ -173,8 +184,8 @@ def render_formula(
 
   desc "Deterministic PR review-resolution control plane runtime"
   homepage "https://github.com/RbBtSn0w/gh-address-cr"
-  url "{url}"
-  sha256 "{sha256}"{version_line}
+  url "{url}"{version_line}
+  sha256 "{sha256}"
   license "MIT"
 
   depends_on "{python_dependency}"{conflict_lines}

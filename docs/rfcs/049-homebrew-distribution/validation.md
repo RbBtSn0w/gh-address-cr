@@ -30,6 +30,14 @@ to accommodate these failures.
 
 ## Tested publication boundaries
 
+PR review follow-up on 2026-10-31 removed redundant stable-formula versions
+while preserving explicit preview versions and inferred-version downgrade
+protection. The regression first failed on the redundant version, then passed.
+The follow-up validation passed 68 focused tests and full discovery of 1,724
+tests in 204.824 seconds (one skipped), plus Ruff, mypy, CLI smokes, actionlint
+and plugin payload checks. Preview retention remains explicitly deferred pending
+a coordinated retention/recovery policy; no historical source assets were deleted.
+
 The reviewed P1 used `--no-all-checks` during bottle construction although
 Homebrew requires that option to accompany `--merge`. The new regression test
 failed for both first-build and explicit-rebuild cases before the fix, then

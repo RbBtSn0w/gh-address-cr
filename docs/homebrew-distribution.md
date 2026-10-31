@@ -25,10 +25,15 @@ release. They are not a new cross-platform Python lockfile. Source installations
 use normal build isolation and can download build dependencies. Neither source
 builds nor bottles promise byte-for-byte reproducibility.
 
+Stable formulas infer their version from the sdist filename to satisfy Homebrew
+audit. Identity-based preview URLs retain an explicit version before the checksum.
+Snapshot validation checks the inferred or explicit version against the requested
+package version; stable downgrade protection handles both forms.
+
 ## Publication and ownership
 
-`release.yml` builds and publishes Python distributions before invoking
-`homebrew.yml`. The latter prepares/preserves a source formula, builds four
+`.github/workflows/release.yml` builds and publishes Python distributions before invoking
+`.github/workflows/homebrew.yml`. The latter prepares/preserves a source formula, builds four
 bottles, merges official bottle JSON, uploads immutable assets, verifies ordinary
 installation in four fresh jobs, then updates only the stable tap formula.
 `dry-run` and `testpypi` render scaffolds but never invoke production Homebrew
@@ -100,6 +105,14 @@ External build processes do not inherit publication-token environment variables.
 Preview and stable formulae conflict because both install `gh-address-cr`.
 Previews remain source builds; fixed resources remove open-ended runtime
 dependency selection but do not remove compilation or build-isolation costs.
+
+Preview asset retention is a deferred operational requirement: immutable names
+accumulate on the shared release and can eventually reach GitHub's asset limit.
+Automatic deletion needs an explicit retention/recovery policy, coordination with
+in-flight builds and protection for sources referenced by retained formulas.
+This workflow does not delete historical preview sources. Until that policy is
+implemented, capacity exhaustion can block new previews without affecting stable
+publication.
 
 ```bash
 brew unlink gh-address-cr
