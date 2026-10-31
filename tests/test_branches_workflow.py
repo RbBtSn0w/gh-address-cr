@@ -14,13 +14,18 @@ def job_block(content, job):
     return content.split(f"\n  {job}:\n", 1)[1].split("\n  sync:\n", 1)[0]
 
 
-def accepts(block, *, event, operation="", conclusion="", branch=""):
+def accepts(block, *, event, operation="", conclusion="", branch="", workflow="Release", workflow_path=".github/workflows/release.yml", source_event="push"):
     expression = re.search(r"^    if: (.+)$", block, re.MULTILINE).group(1)
     inputs = {
         "github.event_name": event,
         "inputs.operation": operation,
         "github.event.workflow_run.conclusion": conclusion,
         "github.event.workflow_run.head_branch": branch,
+        "github.event.workflow_run.name": workflow,
+        "github.event.workflow_run.path": workflow_path,
+        "github.event.workflow_run.head_repository.full_name": "owner/repo",
+        "github.repository": "owner/repo",
+        "github.event.workflow_run.event": source_event,
     }
     for key, value in inputs.items():
         expression = expression.replace(key, repr(value))
@@ -51,17 +56,27 @@ class BranchesWorkflowTests(unittest.TestCase):
                 self.assertEqual(sync, (event == "workflow_dispatch" and operation == "propose-sync") or (event == "workflow_run" and conclusion == "success" and branch == "main"))
                 self.assertFalse(release and sync)
 
+    def test_only_trusted_release_completion_can_propose_sync(self):
+        sync = job_block(self.content, 'sync')
+        for path, source_event, expected in (
+            ('.github/workflows/release.yml', 'workflow_dispatch', True),
+            ('.github/workflows/release.yml', 'pull_request', False),
+            ('.github/workflows/ci.yml', 'push', False),
+        ):
+            self.assertEqual(accepts(sync, event='workflow_run', conclusion='success', branch='main',
+                                     workflow_path=path, source_event=source_event), expected)
+
     def test_triggers_preserve_weekly_proposal_and_both_publish_names(self):
         triggers = self.content.split("\npermissions:", 1)[0]
         self.assertIn("name: Branches\n", triggers)
         self.assertIn("cron: '0 7 * * 5'", triggers)
-        self.assertIn('workflows: ["Release / 2 Publish", "Release"]', triggers)
+        self.assertIn('workflows: ["Release / 2 Publish", "Release", "ci", "Checks / Python"]', triggers)
         self.assertIn("types: [completed]", triggers)
         dispatch = triggers.split("  workflow_dispatch:\n", 1)[1].split("  workflow_run:\n", 1)[0]
         self.assertIn("type: choice", dispatch)
         self.assertIn("required: true", dispatch)
         self.assertIn("default: propose-release", dispatch)
-        self.assertEqual(re.findall(r"^          - (.+)$", dispatch, re.MULTILINE), ["propose-release", "propose-sync"])
+        self.assertEqual(re.findall(r"^          - (.+)$", dispatch.split("      pr_number:", 1)[0], re.MULTILINE), ["propose-release", "propose-sync", "readiness", "merge"])
         for retired in ("scheduled-release-pr.yml", "sync-main-to-develop.yml"):
             self.assertFalse((WORKFLOWS / retired).exists())
 
