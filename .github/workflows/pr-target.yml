@@ -1,4 +1,6 @@
-name: PR Target Branch
+name: Checks / PR target
+run-name: >-
+  Checks / PR target / PR #${{ github.event.pull_request.number }} / ${{ github.head_ref }} -> ${{ github.base_ref }}
 
 on:
   pull_request:

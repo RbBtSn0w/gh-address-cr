@@ -1,4 +1,6 @@
-name: release
+name: Release / 2 Publish
+run-name: >-
+  Release / ${{ inputs.publish_target || 'pypi' }} / ${{ github.ref_name }}
 
 on:
   push:
@@ -7,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_target:
-        description: "Validation or publish target"
+        description: "dry-run: validate only; testpypi: staging upload; pypi: production release"
         type: choice
         required: true
         default: dry-run

@@ -1,9 +1,11 @@
-name: Sync main to develop
+name: Release / 4 Propose sync
+run-name: >-
+  Sync proposal / main -> develop / ${{ github.event_name }}
 
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [release]
+    workflows: ["Release / 2 Publish"]
     types: [completed]
 
 concurrency:

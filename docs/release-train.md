@@ -208,6 +208,48 @@ approval. Credential/protection changes, additional dispatches and retries that
 can publish are not authorized by this document. No unattended recovery or
 automatic merge is introduced.
 
+### Squash-promotion recovery preparation: PR #383
+
+PR #383 was squash-merged as `d9bf402ced72b5e4fda53e23eb903a84ef54d9ee`.
+Release run `41157884982` stopped at the squash-promotion guard: the analyzer
+saw only the promotion's `chore(release)` subject and selected no release.
+PyPI and Homebrew publishing were skipped. The subsequent Scheduled Release PR
+run `41183001479` found equal trunk trees and correctly proposed nothing.
+
+Prepare recovery without rewriting either trunk:
+
+1. Branch from the retained develop candidate
+   `2020026fdf2f3b7715c7fa0262d5a9ff6bb6bbf9` and merge the observed main
+   `d9bf402ced72b5e4fda53e23eb903a84ef54d9ee` with a normal merge commit.
+   Confirm the merge alone changes no files and both original tips are ancestors.
+2. Open the recovery PR against develop, following the existing target-branch
+   rule. Review its exact head/base and require a normal merge commit when
+   separately authorized; never squash/rebase away the recorded main ancestry.
+3. After that approved merge, open a fresh develop -> main promotion. Analyze
+   every commit reachable from the candidate but not from `v3.21.2` using the
+   configured official commit analyzer. The preserved Homebrew `fix(release)`
+   commit must yield `patch` (expected next stable version `3.21.3` while the
+   latest stable tag remains `v3.21.2`). Do not run semantic-release lifecycle
+   hooks merely to validate the analyzer.
+4. Refresh all checks, reviews, refs and first-bottle acceptance evidence for
+   the replacement promotion. The prior #383 preparation/approval record does
+   not authorize the new PR or new SHAs. Obtain a new bounded manual-policy
+   decision, genuine writer-pause acknowledgments and exact production approval
+   before merging the replacement promotion with a normal merge commit.
+
+This recovery preparation authorizes no main merge, workflow dispatch, package
+publication, protection change or history rewrite. Preserve the failed-run
+evidence; do not retry production while main still exposes only the squash
+promotion to the analyzer.
+
+Local preparation evidence (2026-10-31): recovery merge `2f3d5db` has both
+observed trunk tips as ancestors and the same tree as each tip. With the
+repository parser options and release rules, official
+`@semantic-release/commit-analyzer` 13.0.1 on Node 25.8.2 selected no release for
+`v3.21.2..d9bf402` (one commit), and `patch` for `v3.21.2..2f3d5db` (seven
+commits). No lifecycle hooks ran. All 16 release-train workflow tests passed.
+These are preparation checks, not production or four-platform bottle evidence.
+
 ## Local verification
 
 `python3 -m unittest tests.test_release_train_workflows` executes the actual
