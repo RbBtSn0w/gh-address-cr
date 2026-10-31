@@ -747,6 +747,7 @@ handled. Prefer `agent resolve --stale`.
 
 ## Additional Repository Files
 
+- [GitHub Actions navigation](docs/github-actions.md)
 - [Privacy](PRIVACY.md)
 - [Security](SECURITY.md)
 - [Terms](TERMS.md)

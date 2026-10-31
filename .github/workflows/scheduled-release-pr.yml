@@ -1,4 +1,6 @@
-name: Scheduled Release PR
+name: Release / 1 Propose PR
+run-name: >-
+  Release proposal / develop -> main / ${{ github.event_name }}
 
 on:
   schedule:

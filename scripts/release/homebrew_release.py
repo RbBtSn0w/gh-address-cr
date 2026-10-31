@@ -49,6 +49,8 @@ def stage_formula(text: str, name: str = "gh-address-cr") -> Path:
     path = Path(result.stdout.strip()) / "Formula" / f"{name}.rb"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    # Trust only this locally staged formula, not every formula in the tap.
+    shared.command(["brew", "trust", "--formula", f"{shared.TAP}/{name}"])
     return path
 
 

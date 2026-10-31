@@ -1,4 +1,6 @@
-name: Homebrew stable distribution
+name: Release / 3 Homebrew
+run-name: >-
+  Homebrew / ${{ inputs.version }} / rebuild ${{ inputs.rebuild || '0' }}
 
 on:
   workflow_call:
@@ -15,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Already published stable version, without v
+        description: "PRODUCTION: existing PyPI version without v; uploads bottles and updates stable tap"
         type: string
         required: true
       rebuild:

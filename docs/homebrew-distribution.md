@@ -32,6 +32,12 @@ package version; stable downgrade protection handles both forms.
 
 ## Publication and ownership
 
+Release helper jobs explicitly register `brew trust --formula` for the single
+locally staged stable or dev formula before Homebrew loads it. They do not
+trust the entire tap or bypass resource/provenance validation. The trust entry
+belongs to the job's Homebrew configuration; helper subprocess credentials and
+telemetry continue through the existing command wrapper.
+
 `.github/workflows/release.yml` builds and publishes Python distributions before invoking
 `.github/workflows/homebrew.yml`. The latter prepares/preserves a source formula, builds four
 bottles, merges official bottle JSON, uploads immutable assets, verifies ordinary
