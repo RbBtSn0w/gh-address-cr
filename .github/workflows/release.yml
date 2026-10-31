@@ -63,7 +63,7 @@ jobs:
         if: steps.publish-target.outputs.target == 'pypi'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Install release dependencies
         if: steps.publish-target.outputs.target == 'pypi'
@@ -71,12 +71,12 @@ jobs:
           npm install --no-save --no-audit --no-fund \
             semantic-release \
             @semantic-release/changelog \
-            @semantic-release/commit-analyzer \
+            @semantic-release/commit-analyzer@13.0.1 \
             @semantic-release/exec \
             @semantic-release/git \
             @semantic-release/github \
             @semantic-release/release-notes-generator \
-            conventional-changelog-conventionalcommits
+            conventional-changelog-conventionalcommits@10.4.1
 
       - name: Run semantic-release
         if: steps.publish-target.outputs.target == 'pypi'

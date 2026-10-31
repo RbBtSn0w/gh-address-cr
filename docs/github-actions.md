@@ -12,7 +12,7 @@ phases. GitHub-managed CodeQL, Copilot and Dependency Graph remain separate.
 | Preview | `homebrew-preview.yml` | Successful eligible Checks run. Validate provenance, test source installation, publish dev preview assets/formula and instructions. |
 | Release | `release.yml` | Main push or manual. Analyze version, publish GitHub/PyPI and call Homebrew when a new version is released. |
 | Homebrew | `homebrew.yml` | Called by Release or manual recovery. Build and verify four platform bottles; update stable tap only after all four pass. |
-| Branches | `branches.yml` | Friday schedule proposes develop -> main; successful main Release completion proposes main -> develop. Manual operation selects a proposal, readiness refresh, or explicitly approved guarded merge. Proposal jobs never merge PRs. |
+| Branches | `branches.yml` | Friday schedule proposes develop -> main; successful main Release completion proposes main -> develop (including validation-only/no-release runs); this is history synchronization, not publication evidence. Manual operation selects a proposal, readiness refresh, or explicitly approved guarded merge. Proposal jobs never merge PRs. |
 
 PR target validation remains `Validate base branch`: only develop may target
 main. Moving it into Checks retains its opened/edited/synchronize/reopened
@@ -61,7 +61,9 @@ supported trunk proposal. To approve that exact candidate, select `operation=mer
 and enter its full `expected_head`, full `expected_base`, matching `approval`
 (`confirm-release` or `confirm-sync`), and real coordinated pause expiry
 `writers_pause_until_utc` in UTC within two hours. Admin/maintain permission is
-required. Release approval can publish production automatically after main moves.
+required. Configure `BRANCH_GATE_TOKEN` for the account providing runtime reply
+evidence before activation; its absence blocks the entry. CI facts use the job
+read token and actual merge uses the existing App, independently of that account. Release approval can publish production automatically after main moves.
 
 The entry fixes merge method/message and rereads facts; PR bodies and reports are
 not approval. Existing repository UI merge choices are unchanged, so bypassing

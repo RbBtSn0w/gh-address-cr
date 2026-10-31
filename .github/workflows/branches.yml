@@ -169,7 +169,7 @@ jobs:
 
   sync:
     name: Propose reviewed main-to-develop sync
-    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-sync') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && (github.event.workflow_run.name == 'Release' || github.event.workflow_run.name == 'Release / 2 Publish'))
+    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'propose-sync') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.path == '.github/workflows/release.yml' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -256,7 +256,7 @@ jobs:
             exit 0
           fi
           body="$RUNNER_TEMP/sync-proposal.md"
-          printf 'Synchronize published main %s into develop. The snapshot has exactly the published tree plus one empty validation commit, so version-commit skip instructions cannot suppress PR CI.\n\nRequire fresh CI, review and final-gate before merge. No automatic merge, trunk write or missing-ref recovery is authorized.\n' "$stable_sha" > "$body"
+          printf 'Synchronize main %s into develop. This is a history proposal, not proof of production publication. The snapshot has exactly the main tree plus one empty validation commit, so version-commit skip instructions cannot suppress PR CI.\n\nRequire fresh CI, review and final-gate before merge. No automatic merge, trunk write or missing-ref recovery is authorized.\n' "$stable_sha" > "$body"
           gh pr create --base develop --head "$snapshot_branch" --title "chore(repo): sync main to develop" --body-file "$body"
 
   readiness:
@@ -290,6 +290,8 @@ jobs:
       - name: Refresh observed readiness without merge authority
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH_GATE_TOKEN: ${{ secrets.BRANCH_GATE_TOKEN }}
+          GH_TRUNK_GATE_REQUIRED: "true"
           OPERATION: ${{ inputs.operation }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
@@ -360,6 +362,8 @@ jobs:
           GH_TOKEN: ${{ steps.merge-bot.outputs.token || secrets.SYNC_TOKEN }}
           GH_TRUNK_MERGE_CREDENTIAL: event-capable
           GH_TRUNK_READ_TOKEN: ${{ github.token }}
+          BRANCH_GATE_TOKEN: ${{ secrets.BRANCH_GATE_TOKEN }}
+          GH_TRUNK_GATE_REQUIRED: "true"
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           EXPECTED_BASE: ${{ inputs.expected_base }}

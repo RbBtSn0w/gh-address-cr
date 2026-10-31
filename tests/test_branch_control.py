@@ -88,7 +88,7 @@ class PolicyTests(unittest.TestCase):
         response = type('Result', (), {'returncode': 0, 'stdout': json.dumps({
             'status': 'PASSED', 'gate_scope': 'final', 'exit_code': 0, 'counts': {},
         })})()
-        with patch.dict('os.environ', {'GH_TOKEN': 'merge-bot', 'GH_TRUNK_READ_TOKEN': 'read-only',
+        with patch.dict('os.environ', {'GH_TOKEN': 'merge-bot', 'GH_TRUNK_READ_TOKEN': 'read-only', 'BRANCH_GATE_TOKEN': 'reply-user',
                                                'GH_TRUNK_MERGE_DEADLINE_EPOCH': str(dt.datetime.now(dt.UTC).timestamp() + 400)}), \
              patch.object(bc.shared, 'command', return_value=response) as execute:
             bc.api(f'repos/{REPO}/actions/runs/10')
@@ -96,7 +96,27 @@ class PolicyTests(unittest.TestCase):
             bc.api(f'repos/{REPO}/pulls/7/merge', method='PUT', payload={'sha': B})
             self.assertEqual(execute.call_args.kwargs.get('env', {}).get('GH_TOKEN', 'merge-bot'), 'merge-bot')
             bc.final_gate(REPO, 7, require_checks=True)
-            self.assertEqual(execute.call_args.kwargs.get('env', {}).get('GH_TOKEN'), 'read-only')
+            self.assertEqual(execute.call_args.kwargs.get('env', {}).get('GH_TOKEN'), 'reply-user')
+
+    def test_ci_gate_requires_designated_reply_identity_without_fallback(self):
+        with patch.dict('os.environ', {'GH_TRUNK_GATE_REQUIRED': 'true', 'BRANCH_GATE_TOKEN': '',
+                                       'GH_TOKEN': 'merge-bot', 'GH_TRUNK_READ_TOKEN': 'read-only'}), \
+             patch.object(bc.shared, 'command', return_value=type('Result', (), {
+                 'returncode': 0, 'stdout': '{"status":"PASSED","gate_scope":"final","exit_code":0}'})()) as execute:
+            report = bc.final_gate(REPO, 7, require_checks=True)
+            self.assertFalse(report['passed'])
+            self.assertEqual(report['result']['reason_code'], 'BRANCH_GATE_TOKEN_MISSING')
+            execute.assert_not_called()
+
+    def test_gate_token_is_independent_of_fact_and_merge_credentials(self):
+        result = type('Result', (), {'returncode': 0, 'stdout': json.dumps({
+            'status': 'PASSED', 'gate_scope': 'final', 'exit_code': 0, 'counts': {},
+        })})()
+        with patch.dict('os.environ', {'BRANCH_GATE_TOKEN': 'reply-user', 'GH_TOKEN': 'merge-bot',
+                                       'GH_TRUNK_READ_TOKEN': 'read-only', 'GH_TRUNK_GATE_REQUIRED': 'true'}), \
+             patch.object(bc.shared, 'command', return_value=result) as execute:
+            self.assertTrue(bc.final_gate(REPO, 7, require_checks=True)['passed'])
+            self.assertEqual(execute.call_args.kwargs.get('env', {}).get('GH_TOKEN'), 'reply-user')
 
     def test_pause_requires_timezone_and_bounded_future(self):
         now = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
@@ -123,7 +143,7 @@ class PolicyTests(unittest.TestCase):
 class MergeTests(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict('os.environ', {'GITHUB_REPOSITORY': REPO, 'GH_TOKEN': 'secret',
-                                            'GH_TRUNK_MERGE_CREDENTIAL': 'event-capable', 'GITHUB_REF': 'refs/heads/main',
+                                            'GH_TRUNK_MERGE_CREDENTIAL': 'event-capable', 'BRANCH_GATE_TOKEN': 'reply-user', 'GITHUB_REF': 'refs/heads/main',
                                             'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_ACTOR': 'admin',
                                             'GH_TRUNK_MERGE_DEADLINE_EPOCH': str(__import__('time').time() + 480)})
         self.env.start()
@@ -217,9 +237,25 @@ class ProvenanceTests(unittest.TestCase):
         with patch.object(bc, 'rows', return_value=[run]), self.assertRaises(bc.PolicyBlock):
             bc.source_validation(REPO, pull())
 
+    def test_workflow_display_title_is_not_its_canonical_identity(self):
+        run = {'id': 10, 'workflow_id': 11, 'name': 'Release / dry-run / main',
+               'path': '.github/workflows/release.yml', 'event': 'workflow_dispatch',
+               'head_sha': C, 'head_branch': 'main', 'head_repository': {'full_name': REPO},
+               'pull_requests': []}
+        merged = {**pull(), 'merged_at': '2026-10-31T12:00:00Z', 'merge_commit_sha': C}
+        event = {'repository': {'full_name': REPO}, 'action': 'completed', 'workflow_run': {'id': 10}}
+        def github(endpoint):
+            return {'id': 11, 'path': run['path']} if '/actions/workflows/' in endpoint else run
+        responses = [type('Result', (), {'stdout': json.dumps(rows)})() for rows in ([], [merged])]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'event.json'
+            path.write_text(json.dumps(event))
+            with patch.object(bc, 'api', side_effect=github), patch.object(bc.shared, 'command', side_effect=responses):
+                self.assertEqual(bc.event_prs(REPO, 'workflow_run', str(path)), [7])
+
     def test_event_without_pull_links_locates_only_current_supported_pr(self):
         event = {'repository': {'full_name': REPO}, 'action': 'completed', 'workflow_run': {
-            'id': 10, 'name': 'Checks / Python', 'path': '.github/workflows/ci.yml', 'head_sha': B,
+            'id': 10, 'workflow_id': 11, 'event': 'pull_request', 'name': 'Checks / Python', 'path': '.github/workflows/ci.yml', 'head_sha': B,
             'head_branch': 'develop', 'head_repository': {'full_name': REPO}, 'pull_requests': []}}
         wrong = pull()
         wrong['head']['sha'] = A
@@ -228,11 +264,15 @@ class ProvenanceTests(unittest.TestCase):
             path = Path(directory) / 'event.json'
             path.write_text(json.dumps(event))
             with patch.object(bc.shared, 'command', return_value=response), \
-                    patch.object(bc, 'api', return_value=event['workflow_run']):
+                    patch.object(bc, 'api', side_effect=lambda endpoint: (
+                        {'id': 11, 'path': event['workflow_run']['path']}
+                        if '/actions/workflows/' in endpoint else event['workflow_run'])):
                 self.assertEqual(bc.event_prs(REPO, 'workflow_run', str(path)), [7])
             event['workflow_run']['path'] = '.github/workflows/evil.yml'
             path.write_text(json.dumps(event))
-            with patch.object(bc, 'api', return_value=event['workflow_run']):
+            with patch.object(bc, 'api', side_effect=lambda endpoint: (
+                        {'id': 11, 'path': event['workflow_run']['path']}
+                        if '/actions/workflows/' in endpoint else event['workflow_run'])):
                 self.assertEqual(bc.event_prs(REPO, 'workflow_run', str(path)), [])
 
 
@@ -271,6 +311,14 @@ class RecoveryTests(MergeTests):
             self.assertEqual(self.invoke(directory), 0)
             self.assertFalse(any(endpoint.endswith('/merge') for endpoint, _ in self.calls))
 
+    def test_missing_gate_configuration_has_named_diagnostic_before_merge(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {'BRANCH_GATE_TOKEN': ''}), \
+             patch.object(bc, 'api') as github:
+            self.assertEqual(self.invoke(directory), 2)
+            report = json.loads((Path(directory) / 'merge.json').read_text())
+            self.assertIn('BRANCH_GATE_TOKEN_MISSING', report['reason'])
+            github.assert_not_called()
+
     def test_base_change_during_gate_blocks_write(self):
         def gate(*args, **kwargs):
             self.pr['base']['sha'] = C
@@ -289,10 +337,10 @@ class CredentialTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             bc.shared.command([sys.executable, '-c', 'print(1)'], trusted_runtime=True)
-        with patch.dict('os.environ', {'GH_TOKEN': 'secret', 'GH_TRUNK_READ_TOKEN': 'read-secret'}):
+        with patch.dict('os.environ', {'GH_TOKEN': 'secret', 'GH_TRUNK_READ_TOKEN': 'read-secret', 'BRANCH_GATE_TOKEN': 'reply-secret'}):
             result = bc.shared.command([sys.executable, '-c',
-                                       'import os; print(os.environ.get("GH_TOKEN", "absent"), os.environ.get("GH_TRUNK_READ_TOKEN", "absent"))'])
-            self.assertEqual(result.stdout.strip(), 'absent absent')
+                                       'import os; print(os.environ.get("GH_TOKEN", "absent"), os.environ.get("GH_TRUNK_READ_TOKEN", "absent"), os.environ.get("BRANCH_GATE_TOKEN", "absent"))'])
+            self.assertEqual(result.stdout.strip(), 'absent absent absent')
 
 
 class ReleaseHistoryTests(unittest.TestCase):
@@ -302,7 +350,7 @@ class ReleaseHistoryTests(unittest.TestCase):
 
         def command(argv, **kwargs):
             if argv[0] == bc.GH:
-                return type('Result', (), {'stdout': '[]'})()
+                return type('Result', (), {'stdout': json.dumps([{'filename': f'file-{index}'} for index in range(102)])})()
             if argv[0] == 'node':
                 captured.update(json.loads(Path(argv[-1]).read_text()))
                 self.assertNotIn('secret', argv[3])
@@ -319,7 +367,10 @@ class ReleaseHistoryTests(unittest.TestCase):
             original([bc.GIT, '-C', directory, 'add', 'source'])
             original([bc.GIT, '-C', directory, 'commit', '--quiet', '-m', 'chore: initial'])
             original([bc.GIT, '-C', directory, 'tag', 'v1.2.3'])
-            original([bc.GIT, '-C', directory, 'commit', '--quiet', '--allow-empty', '-m', 'feat: real capability'])
+            for index in range(102):
+                (root / f'file-{index}').write_text('candidate change')
+            original([bc.GIT, '-C', directory, 'add', '.'])
+            original([bc.GIT, '-C', directory, 'commit', '--quiet', '-m', 'feat: real capability'])
             head = original([bc.GIT, '-C', directory, 'rev-parse', 'HEAD']).stdout.strip()
             pr = pull()
             pr['head']['sha'] = head
@@ -337,7 +388,7 @@ class PublicationRoutingTests(unittest.TestCase):
         merged = pull()
         merged.update(merged=True, merged_at='2026-10-31T00:00:00Z', state='closed', merge_commit_sha=C)
         event = {'repository': {'full_name': REPO}, 'action': 'completed', 'workflow_run': {
-            'id': 10, 'name': 'Release', 'path': '.github/workflows/release.yml', 'head_sha': C,
+            'id': 10, 'workflow_id': 11, 'event': 'push', 'name': 'Release', 'path': '.github/workflows/release.yml', 'head_sha': C,
             'head_branch': 'main', 'head_repository': {'full_name': REPO}, 'pull_requests': []}}
         responses = [type('Result', (), {'stdout': '[]'})(),
                      type('Result', (), {'stdout': json.dumps([merged])})()]
@@ -345,7 +396,9 @@ class PublicationRoutingTests(unittest.TestCase):
             path = Path(directory) / 'event.json'
             path.write_text(json.dumps(event))
             with patch.object(bc.shared, 'command', side_effect=responses), \
-                    patch.object(bc, 'api', return_value=event['workflow_run']):
+                    patch.object(bc, 'api', side_effect=lambda endpoint: (
+                        {'id': 11, 'path': event['workflow_run']['path']}
+                        if '/actions/workflows/' in endpoint else event['workflow_run'])):
                 self.assertEqual(bc.event_prs(REPO, 'workflow_run', str(path)), [7])
 
 

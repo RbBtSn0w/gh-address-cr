@@ -193,7 +193,7 @@ def command(argv: list[str], *, cwd: Path | None = None, check: bool = True,
     child_env = (os.environ if env is None else env).copy()
     if executable not in {"gh", "git"} and not trusted_runtime:
         for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-                    "RELEASE_BOT_PRIVATE_KEY", "GH_TRUNK_READ_TOKEN"):
+                    "RELEASE_BOT_PRIVATE_KEY", "GH_TRUNK_READ_TOKEN", "BRANCH_GATE_TOKEN"):
             child_env.pop(key, None)
     started = time.monotonic()
     process = None

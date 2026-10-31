@@ -72,7 +72,11 @@ def branch_command(argv: list[str], *, timeout: float = 30, **kwargs) -> subproc
     if argv[:2] == [GH, 'api']:
         is_read = (argv[argv.index('--method') + 1] == 'GET' if '--method' in argv
                    else not any(flag in argv for flag in ('--input', '-f', '-F', '--field', '--raw-field')))
-    if read_token and (is_read or kwargs.get('trusted_runtime')):
+    gate_token = os.environ.get('BRANCH_GATE_TOKEN')
+    if kwargs.get('trusted_runtime'):
+        if gate_token:
+            kwargs['env'] = {**os.environ, **kwargs.get('env', {}), 'GH_TOKEN': gate_token}
+    elif read_token and is_read:
         kwargs['env'] = {**os.environ, **kwargs.get('env', {}), 'GH_TOKEN': read_token}
     return shared.command(argv, timeout=timeout, **kwargs)
 
@@ -139,6 +143,9 @@ def validate_snapshot(repo: str, pr: dict) -> None:
 
 
 def final_gate(repo: str, number: int, *, require_checks: bool) -> dict:
+    if os.environ.get('GH_TRUNK_GATE_REQUIRED') == 'true' and not os.environ.get('BRANCH_GATE_TOKEN'):
+        return {'passed': False, 'result': {'status': 'BLOCKED', 'reason_code': 'BRANCH_GATE_TOKEN_MISSING',
+                'counts': {}}, 'diagnostic': 'Configure BRANCH_GATE_TOKEN for the actual reply-evidence account.'}
     argv = [sys.executable, '-m', 'gh_address_cr', 'final-gate', repo, str(number), '--machine']
     if require_checks:
         argv.append('--require-checks')
@@ -208,14 +215,10 @@ def source_validation(repo: str, pr: dict) -> dict:
 
 def release_analysis(repo: str, pr: dict) -> dict:
     # Changed policy is reviewed separately; never execute candidate configuration.
-    response = branch_command([GH, 'api', '--hostname', 'github.com',
-                               f'repos/{repo}/pulls/{pr["number"]}/files?per_page=100']).stdout
-    if len(response.encode()) > 4_000_000:
-        raise ValueError('Changed file payload too large')
-    files = json.loads(response)
-    if not isinstance(files, list) or len(files) >= 100:
-        raise PolicyBlock('Changed file set is truncated')
-    if any(item['filename'] in {'release.config.cjs', 'package.json'} for item in files):
+    changed = branch_command([GIT, 'diff', '--name-only',
+                              f'{pr["base"]["sha"]}...{pr["head"]["sha"]}', '--',
+                              'release.config.cjs', 'package.json'], cwd=ROOT).stdout
+    if changed.strip():
         return {'release_type': 'unknown', 'reason': 'Candidate changes release analyzer policy'}
     tags = branch_command([GIT, 'for-each-ref', '--merged', pr['base']['sha'],
                            '--sort=-version:refname', '--format=%(refname:short)', 'refs/tags'], cwd=ROOT).stdout
@@ -318,7 +321,7 @@ def collect_readiness(repo: str, pr: dict) -> dict:
             result['blockers'].append(str(exc))
         result['review_gate'] = final_gate(repo, pr['number'], require_checks=False)
         if not result['review_gate']['passed']:
-            result['blockers'].append('Review final-gate is not passed')
+            result['blockers'].append(result['review_gate'].get('diagnostic', 'Review final-gate is not passed'))
         if kind == 'release':
             result['release'] = release_analysis(repo, pr)
             if result['release']['release_type'] == 'unknown':
@@ -409,6 +412,8 @@ def validate_pause(value: str, now: dt.datetime | None = None) -> None:
 
 
 def validate_authorization(args: argparse.Namespace, repo: str) -> None:
+    if not os.environ.get('BRANCH_GATE_TOKEN'):
+        raise PolicyBlock('BRANCH_GATE_TOKEN_MISSING: configure the actual reply-evidence account token')
     if (not os.environ.get('GH_TOKEN') or os.environ.get('GH_TRUNK_MERGE_CREDENTIAL') != 'event-capable'
             or os.environ.get('GITHUB_REF') != 'refs/heads/main'
             or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
@@ -506,7 +511,7 @@ def run_pr_candidates(repo: str, run: dict) -> list[dict]:
         candidates = [api(f'repos/{repo}/pulls/{item["number"]}') for item in linked]
     else:
         endpoints = [f'repos/{repo}/pulls?state=open&per_page=100']
-        if run['name'] in {'Release', 'Release / 2 Publish'}:
+        if run['path'] == '.github/workflows/release.yml':
             endpoints.append(f'repos/{repo}/commits/{sha}/pulls?per_page=100')
         candidates = []
         for endpoint in endpoints:
@@ -519,7 +524,7 @@ def run_pr_candidates(repo: str, run: dict) -> list[dict]:
             candidates.extend(values)
     return [pr for pr in candidates if (
         pr['head']['sha'] == sha and pr['head']['ref'] == run['head_branch']
-    ) or (run['name'] == 'Release' and pr.get('merged_at') is not None
+    ) or (run['path'] == '.github/workflows/release.yml' and pr.get('merged_at') is not None
           and pr.get('merge_commit_sha') == sha and pr['base']['ref'] == run['head_branch'])]
 
 
@@ -567,11 +572,17 @@ def event_prs(repo: str, name: str, path: str) -> list[int]:
         run = api(f'repos/{repo}/actions/runs/{trigger["id"]}')
         if run.get('id') != trigger['id']:
             raise ValueError('Workflow run identity differs')
-        paths = {'ci': '.github/workflows/ci.yml', 'Checks / Python': '.github/workflows/ci.yml',
-                 'Release / 2 Publish': '.github/workflows/release.yml', 'Release': '.github/workflows/release.yml'}
-        if (event.get('action') != 'completed' or run.get('name') not in paths
-                or run.get('path') != paths[run['name']]
+        supported_paths = {'.github/workflows/ci.yml', '.github/workflows/release.yml'}
+        if (event.get('action') != 'completed' or run.get('path') not in supported_paths
                 or run.get('head_repository', {}).get('full_name') != repo):
+            return []
+        workflow_id = run.get('workflow_id')
+        if type(workflow_id) is not int or workflow_id < 1:
+            raise ValueError('Workflow run lacks its canonical workflow identity')
+        workflow = api(f'repos/{repo}/actions/workflows/{workflow_id}')
+        if workflow.get('id') != workflow_id or workflow.get('path') != run['path']:
+            raise ValueError('Canonical workflow identity differs from the run')
+        if run['path'] == '.github/workflows/release.yml' and run.get('event') not in {'push', 'workflow_dispatch'}:
             return []
         candidates = run_pr_candidates(repo, run)
     else:

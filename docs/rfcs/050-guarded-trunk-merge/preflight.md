@@ -53,16 +53,14 @@ inspection of #396 is allowed; no writes/merges/dispatches for #396 or publicati
 are part of implementation. Five top-level workflows remain. Default-main
 activation and actual guarded merge acceptance require separate future approval.
 
-## Authenticated identity compatibility discovered during review
+## Authenticated reply identity
 
-The existing REST GET /user lookup cannot identify an installation credential,
-so it cannot support the approved existing-App path. Replace that internal
-lookup with GitHub's documented GraphQL viewer { login } for user and App
-credentials alike. GitHub remains the source of authenticated identity; no
-operator/env login is substituted. Public CLI, runtime state and final-gate
-truth/attribution rules are unchanged. Regression fixtures cover actual bot/user
-viewer responses, errors, malformed identity and caching. Reference:
-https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation
+The existing runtime requires durable reply evidence from its authenticated
+account. Retain that contract and its original GitHub adapter unchanged. A
+separately configured read-only BRANCH_GATE_TOKEN selects the actual user that
+provided replies; task read credentials and the merge App serve other roles.
+No dispatch actor/environment login is substituted for authentication. Missing
+credentials block both summary readiness and merge with a named diagnostic.
 
 ## Bounded merge IO
 
@@ -75,8 +73,41 @@ timeout is tested, not merely an immediate synthetic exception.
 ## Existing App permission inventory
 
 The live release App exposes checks/statuses read and contents/PR write, but no
-Actions permission. Retain these grants: read CI/run/artifact facts and the
-review gate using the job read-only token; use the event-capable App token only
-for the merge mutation. Neither token is replaced by an operator name. The
-source subprocess credential filter also strips the read token. Regression
+Actions permission. Retain these grants: read CI/run/artifact facts using the
+job read-only token, evaluate the unchanged runtime gate using BRANCH_GATE_TOKEN,
+and use the event-capable App only for the merge mutation. None of these
+credentials is replaced by an operator name. The source subprocess credential
+filter strips read and gate tokens. Regression
 coverage checks reads and mutation requests use their respective credentials.
+
+## Live workflow identity contract
+
+The live run API returns dynamic run-name text in name as well as display_title.
+Never use either as workflow identity. Automatic consumers reread the run and
+its canonical workflow ID/path; sync proposals additionally accept only same-repo
+Release push/dispatch completions on main. Display-name lists remain subscription
+filters only. This removes display-title variants from the authorization policy.
+
+## Reply-evidence identity refinement approved during implementation
+
+The existing runtime deliberately requires durable replies by its authenticated
+viewer. Installation identity alone does not provide another account's reply
+authorization. The owner explicitly chose a new BRANCH_GATE_TOKEN configuration
+entry rather than changing final-gate truth: GitHub job token reads CI facts,
+read-only user gate token evaluates replies/checks, existing App merges. Missing
+gate credentials block named workflow paths without identity fallback. No token
+is provisioned or repository setting changed by this implementation. The gate
+account must actually provide required reply evidence; actor names never stand
+in for authentication. All three credential classes are stripped from source
+subprocesses, except the exact trusted runtime invocation receives its gate token.
+
+Official analyzer/preset direct dependencies are fixed at the locally and CI
+verified 13.0.1/10.4.1 on Node 24, consistently across analysis/tests/publication.
+Policy-change detection uses local git diff limited to trusted policy paths,
+removing the prior first-page file-count limit without a new resolver or store.
+
+History synchronization remains proposal-only after successful Release runs,
+including validation-only/no-version runs. Main code changes still need their
+history synchronized; proposal text must not label those runs as published.
+The projection separately observes publication, and operator approval is required
+before every merge. No new production-only auto-sync policy is introduced.

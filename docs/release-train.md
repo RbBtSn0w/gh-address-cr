@@ -28,8 +28,9 @@ historical evidence; they grant no authorization to future operations.
    all checks required, generates a clean merge message, and uses ordinary merge
    with an expected-head guard. It never copies a PR body into the merge message,
    requests squash/rebase, bypasses rules or falls back to an event-suppressing
-   GITHUB_TOKEN for merging. Existing App/SYNC credentials must be available. Evidence and gate reads use
-   the job read-only token; actual merge uses the event-capable Bot. No additional
+   GITHUB_TOKEN for merging. Existing App/SYNC credentials must be available. CI evidence reads use
+   the job read-only token; review gates use `BRANCH_GATE_TOKEN`; actual merge
+   uses the event-capable Bot. No additional
    Actions permission is required on the App.
 6. Inspect the actual merge result and post-merge Checks/Release links. The
    entry verifies both retained trunks and ancestry, tolerating automatic cleanup
@@ -43,6 +44,22 @@ remain enabled repository-wide; the guard cannot protect merges that bypass it.
 Do not squash/rebase either trunk direction or merge a superseded snapshot.
 
 ### Evidence, identity and retry boundaries
+
+Before enabling the entry on main, the owner must configure repository secret
+`BRANCH_GATE_TOKEN` with a fine-grained, read-only user token for this repository
+(contents, pull requests, checks, commit statuses, Actions and metadata read).
+Use the same GitHub account that supplies the runtime's durable reply evidence;
+token strings can differ, authenticated account identity cannot. Creating this
+configuration entry does not provision a credential. Set it through GitHub's
+secret UI or the interactive `gh secret set BRANCH_GATE_TOKEN`, never a workflow
+input, PR body or command-line token argument.
+
+Readiness and merge fail closed with a named configuration diagnostic when this
+secret is absent. No fallback to github-actions, the merge App or dispatch actor
+is allowed for reply evidence. A thread answered only by a different account can
+still correctly block final-gate; resolve it through the designated account's
+normal gh-address-cr workflow. The operator's role/approval and the gate account
+serve different purposes and are never substituted for each other.
 
 CI uploads `branch-validation-<run_id>-<attempt>` only after the required ordinary
 PR jobs succeed. `context.json` uses `branch-validation.v1` and records repository,
@@ -63,9 +80,9 @@ for separate policy review; no candidate configuration is executed by a privileg
 job. Not-yet-built bottles do not block promotion, and a successful dry-run is
 not production publication evidence.
 
-Identity is obtained from GitHub GraphQL `viewer { login }` for user and App
-credentials. The dispatch actor is not substituted for the authenticated gate
-actor. The runtime's existing review/attribution and final-gate rules remain
+Identity is obtained from GitHub by the unchanged runtime using its actual
+authenticated gate account. The dispatch actor and CI/App identities are not
+substituted for that account. The runtime's existing review/attribution and final-gate rules remain
 unchanged. Telemetry failure is visible and fail-open; authorization, evidence and
 GitHub failures are fail-closed.
 
@@ -369,3 +386,17 @@ an explicitly bounded generated block. Malformed or ambiguous block markers
 stop the update without writing the PR body. Twelve workflow tests pass after
 seven initially failing regression subcases reproduced these gaps. These fixes
 change neither publication authority nor the retained/recovery policy.
+
+### Reviewed release analyzer dependencies
+
+Trusted analysis, its CI tests and production release installs use
+`@semantic-release/commit-analyzer@13.0.1` and
+`conventional-changelog-conventionalcommits@10.4.1` on Node 24. Exact direct
+versions are reviewed together; upgrades must rerun the official analyzer tests.
+This pin does not claim a complete transitive-dependency lock or sandbox.
+
+Successful Release completion can prepare a history-sync proposal even when the
+run was dry-run/TestPyPI or selected no new version. This preserves the existing
+proposal-only behavior: a main CI/configuration change still needs history sync.
+Such a proposal never proves publication, authorizes merge or resumes writers;
+production observations and explicit sync approval remain independent.
