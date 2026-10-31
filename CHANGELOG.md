@@ -1,3 +1,14 @@
+## [3.22.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.3...v3.22.0) (2026-10-31)
+
+### Features
+
+* **ci:** add guarded trunk merge and release readiness ([#397](https://github.com/RbBtSn0w/gh-address-cr/issues/397)) ([f780891](https://github.com/RbBtSn0w/gh-address-cr/commit/f780891956ed2a999e390cfa20e4195e253e4c03))
+
+### Bug Fixes
+
+* **release:** pin compatible changelog writer ([85ab898](https://github.com/RbBtSn0w/gh-address-cr/commit/85ab898390696f428b2364df77d2a025f867a6a6))
+* **release:** use compatible changelog preset ([aa25ceb](https://github.com/RbBtSn0w/gh-address-cr/commit/aa25cebb6f6c61dba37f3c876e1f6ed84547909e))
+
 ## [3.21.3](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.21.2...v3.21.3) (2026-10-31)
 
 ### Bug Fixes
