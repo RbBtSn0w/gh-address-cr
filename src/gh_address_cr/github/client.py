@@ -39,7 +39,7 @@ _NON_RETRYABLE_CATEGORIES = frozenset({"auth", "not_found", "rate_limit", "envir
 
 class GitHubClient:
     # Clients on the real `gh` runner share the authenticated login within one process, so the several
-    # clients one invocation builds issue a single GraphQL viewer query. Injected runners never touch it.
+    # clients one invocation builds issue a single `gh api user`. Injected runners (tests) never touch it.
     _process_viewer_login: str | None = None
 
     def __init__(self, *, runner: Runner | None = None):
@@ -507,12 +507,10 @@ class GitHubClient:
         if self._uses_default_runner and GitHubClient._process_viewer_login is not None:
             self._viewer_login = GitHubClient._process_viewer_login
             return self._viewer_login
-        payload = self._read_json(["api", "graphql", "-f", "query=query { viewer { login } }"])
-        data = payload.get("data") if isinstance(payload, dict) else None
-        viewer = data.get("viewer") if isinstance(data, dict) else None
-        login = viewer.get("login") if isinstance(viewer, dict) else None
+        payload = self._read_json(["api", "user"])
+        login = payload.get("login")
         if not isinstance(login, str) or not login.strip():
-            raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub viewer response did not include login.")
+            raise GitHubError(protocol_codes.GITHUB_INCOMPLETE_RESPONSE, "GitHub user response did not include login.")
         self._viewer_login = login
         if self._uses_default_runner:
             GitHubClient._process_viewer_login = login

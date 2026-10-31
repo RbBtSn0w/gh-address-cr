@@ -14,10 +14,6 @@ from gh_address_cr import cli
 
 class NativeRuntimeBoundaryTest(unittest.TestCase):
     def setUp(self):
-        from gh_address_cr.github.client import GitHubClient
-
-        GitHubClient.reset_process_cache()
-        self.addCleanup(GitHubClient.reset_process_cache)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.state_dir = self.root / "state"
@@ -60,9 +56,6 @@ class NativeRuntimeBoundaryTest(unittest.TestCase):
                     "    raise SystemExit(0)",
                     "if args[:2] == ['api', 'user']:",
                     "    print(json.dumps({'login': 'codex'}))",
-                    "    raise SystemExit(0)",
-                    "if args[:2] == ['api', 'graphql'] and 'viewer' in ' '.join(args):",
-                    "    print(json.dumps(dict(data=dict(viewer=dict(login='codex')))))",
                     "    raise SystemExit(0)",
                     "if args[:2] == ['api', 'graphql']:",
                     "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': [], 'pageInfo': {'hasNextPage': False}}}}}}))",

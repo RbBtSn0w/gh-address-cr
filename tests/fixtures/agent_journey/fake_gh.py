@@ -90,8 +90,6 @@ def pull_request_summary(state):
 
 def graphql(args, state):
     query = flag_values(args, "-f").get("query", "")
-    if query == "query { viewer { login } }":
-        emit({"data": {"viewer": {"login": VIEWER}}})
     variables = flag_values(args, "-F")
     threads = {thread["id"]: thread for thread in state["threads"]}
     if "addPullRequestReviewThreadReply" in query:

@@ -125,7 +125,7 @@ class NativeFoundationTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason_code, "GITHUB_NETWORK_FAILED")
         self.assertTrue(caught.exception.retryable)
         self.assertEqual(caught.exception.diagnostics["stderr_category"], "network")
-        self.assertEqual(caught.exception.diagnostics["command"], ["gh", "api", "graphql", "-f", "query=query { viewer { login } }"])
+        self.assertEqual(caught.exception.diagnostics["command"], ["gh", "api", "user"])
         self.assertIn("api.github.com", caught.exception.diagnostics["stderr_excerpt"])
 
     def test_github_api_urls_do_not_make_http_errors_network_failures(self):
@@ -183,7 +183,7 @@ class NativeFoundationTests(unittest.TestCase):
 
         diagnostics = caught.exception.diagnostics
         self.assertEqual(caught.exception.reason_code, "GITHUB_INVALID_JSON")
-        self.assertEqual(diagnostics["command"], ["gh", "api", "graphql", "-f", "query=query { viewer { login } }"])
+        self.assertEqual(diagnostics["command"], ["gh", "api", "user"])
         self.assertEqual(diagnostics["returncode"], 0)
         self.assertIn("[redacted-token]", diagnostics["stderr_excerpt"])
         self.assertIn("[redacted]", diagnostics["stderr_excerpt"])
