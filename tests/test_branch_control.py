@@ -367,14 +367,16 @@ class ReleaseHistoryTests(unittest.TestCase):
             original([bc.GIT, '-C', directory, 'add', 'source'])
             original([bc.GIT, '-C', directory, 'commit', '--quiet', '-m', 'chore: initial'])
             original([bc.GIT, '-C', directory, 'tag', 'v1.2.3'])
+            original([bc.GIT, '-C', directory, 'commit', '--quiet', '--allow-empty', '-m', 'feat: real capability'])
+            base = original([bc.GIT, '-C', directory, 'rev-parse', 'HEAD']).stdout.strip()
             for index in range(102):
                 (root / f'file-{index}').write_text('candidate change')
             original([bc.GIT, '-C', directory, 'add', '.'])
-            original([bc.GIT, '-C', directory, 'commit', '--quiet', '-m', 'feat: real capability'])
+            original([bc.GIT, '-C', directory, 'commit', '--quiet', '-m', 'chore: candidate files'])
             head = original([bc.GIT, '-C', directory, 'rev-parse', 'HEAD']).stdout.strip()
             pr = pull()
             pr['head']['sha'] = head
-            pr['base']['sha'] = head
+            pr['base']['sha'] = base
             pr['title'] = 'fix: misleading title'
             with patch.object(bc, 'ROOT', root), patch.object(bc.shared, 'command', side_effect=command):
                 self.assertEqual(bc.release_analysis(REPO, pr)['release_type'], 'minor')
