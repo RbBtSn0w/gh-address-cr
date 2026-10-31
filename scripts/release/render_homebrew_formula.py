@@ -166,8 +166,8 @@ def render_formula(
     version_line = (f'\n  version "{validated_version}"'
                     if validated_version is not None and source_version(url) != validated_version else "")
     resource_blocks = render_resources(resources)
-    sections = "\n\n".join(block for block in (bottle_block, resource_blocks) if block)
-    sections = "\n" + sections + "\n" if sections else ""
+    sections = "\n" + resource_blocks + "\n" if resource_blocks else ""
+    bottle_section = bottle_block + "\n\n" if bottle_block else ""
     conflict_lines = ""
     if conflicts_with:
         rendered_conflicts = []
@@ -188,7 +188,7 @@ def render_formula(
   sha256 "{sha256}"
   license "MIT"
 
-  depends_on "{python_dependency}"{conflict_lines}
+{bottle_section}  depends_on "{python_dependency}"{conflict_lines}
 {sections}
   def install
     virtualenv_install_with_resources using: "{python_for_venv}"
