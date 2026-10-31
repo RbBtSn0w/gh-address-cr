@@ -73,6 +73,13 @@ Release snapshots and evidence do not own application session state or alter
 
 ## Recovery
 
+The generated bottle stanza follows Homebrew's standard position before
+dependency declarations. Merge validation still rejects any other source
+content change; adding bottle metadata must not alter the saved resource
+snapshot. If a merge helper fails after successful builds, repair the trusted
+helper on main and rerun the original failed jobs while their upstream artifacts
+remain available. This reuses those exact bottles without republishing PyPI.
+
 When PyPI succeeds but Homebrew fails, keep the existing stable formula. Inspect
 the failed job and its artifacts, fix the infrastructure/helper failure, and
 dispatch the Homebrew workflow for the same version:

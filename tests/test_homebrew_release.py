@@ -209,6 +209,73 @@ class AssetTests(unittest.TestCase):
             assets.upload(self.file)
 
 
+class BottleMergeTests(unittest.TestCase):
+    def exercise_merge(self, *, change_source=False):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "gh-address-cr-1.2.3.homebrew-source.rb"
+            source.write_text(source_formula())
+            support.write_json(source.with_suffix(".json"), snapshot())
+            builds = root / "builds"
+            builds.mkdir()
+            expected = {}
+            for target, tag in support.TARGETS.items():
+                filename = f"gh-address-cr-1.2.3.{tag}.bottle.tar.gz"
+                bottle = builds / filename
+                bottle.write_bytes(target.encode())
+                checksum = support.digest(bottle)
+                expected[tag] = {"sha256": checksum, "url": f"{release.bottle_root('1.2.3')}/{filename}"}
+                support.write_json(builds / release.build_record_name("1.2.3", target, 0), {
+                    "target": target, "formula_sha256": snapshot()["formula_sha256"],
+                    "metadata": {support.FORMULA: {
+                        "formula": {"pkg_version": "1.2.3"},
+                        "bottle": {"root_url": release.bottle_root("1.2.3"), "rebuild": 0,
+                                   "tags": {tag: {"filename": filename, "local_filename": filename,
+                                                  "sha256": checksum}}},
+                    }},
+                })
+            formula = root / "Formula" / "gh-address-cr.rb"
+            formula.parent.mkdir()
+            formula.write_text(source_formula())
+            block = '  bottle do\n    root_url "' + release.bottle_root("1.2.3") + '"\n'
+            block += "\n".join(f'    sha256 {tag}: "{row["sha256"]}"' for tag, row in expected.items())
+            block += "\n  end"
+
+            def brew(argv, **kwargs):
+                if argv == ["brew", "--repository"]:
+                    output = str(root)
+                elif argv[:3] == ["brew", "bottle", "--merge"]:
+                    # Homebrew FormulaAST inserts bottle before dependencies.
+                    text = formula.read_text().replace('\n  depends_on', f'\n{block}\n\n  depends_on', 1)
+                    if change_source:
+                        text = text.replace('license "MIT"', 'license "Apache-2.0"')
+                    formula.write_text(text)
+                    output = ""
+                elif argv[:2] == ["brew", "info"]:
+                    output = json.dumps({"formulae": [{"bottle": {"stable": {
+                        "root_url": release.bottle_root("1.2.3"), "rebuild": 0, "files": expected,
+                    }}}]})
+                else:
+                    raise AssertionError(argv)
+                return subprocess.CompletedProcess(argv, 0, output, "")
+
+            with mock.patch.object(release, "stage_formula", return_value=formula), \
+                 mock.patch.object(support, "command", side_effect=brew):
+                release.merge(root / "publication", root, builds, 0)
+            publication = json.loads((root / "publication/publication.json").read_text())
+            self.assertEqual(publication["source_formula_sha256"], snapshot()["formula_sha256"])
+            self.assertEqual(set(publication["targets"]), set(support.TARGETS))
+            final = (root / "publication/gh-address-cr.rb").read_text()
+            self.assertLess(final.index("  bottle do"), final.index("  depends_on"))
+
+    def test_standard_homebrew_merge_preserves_snapshot_and_publishes_formula(self):
+        self.exercise_merge()
+
+    def test_merge_still_rejects_changes_outside_the_bottle_block(self):
+        with self.assertRaisesRegex(ValueError, "changed source formula"):
+            self.exercise_merge(change_source=True)
+
+
 class FormulaStagingTests(unittest.TestCase):
     def test_staged_formula_is_trusted_individually_after_writing(self):
         for name in ("gh-address-cr", "gh-address-cr-dev"):
