@@ -30,3 +30,11 @@ is no production `marketplace` branch creation or historical release overwrite
 in local tests. First real GitHub installation, macOS desktop/new-session skill
 loading and same-version production recovery remain next-release acceptance
 checks. A later real release is needed for live cross-version update evidence.
+
+## Post-integration checks
+
+Upstream `develop` synchronization changed only CHANGELOG and version metadata
+to 3.22.0. After a normal merge and development-environment refresh, 81 focused
+packaging/runtime/workflow/distribution tests passed (10.804 seconds), together
+with Ruff, the zero-error mypy ratchet, actionlint, CLI/agent manifest smoke,
+portable archive generation and the builder's non-mutating check.
