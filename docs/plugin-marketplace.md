@@ -38,13 +38,23 @@ To fetch a newer catalog snapshot:
 codex plugin marketplace upgrade gh-address-cr-community
 ```
 
-Catalog upgrade and installed-plugin replacement are separate actions. Preserve
-an existing installation while checking its version; do not assume background
-updates or an unsupported `codex plugin update` command. The two-version smoke
-must establish the supported refresh procedure before rollout. The plugin
-contains only the skill adapter; it neither bundles nor upgrades the Python
-runtime. Install it with `pipx install gh-address-cr`, or update an existing
-installation with `pipx upgrade gh-address-cr`.
+Verify the active installation after refreshing:
+
+```bash
+codex plugin list --marketplace gh-address-cr-community --json
+```
+
+In the pinned Codex 0.166.0 CI test, explicit Marketplace upgrade advanced the
+active installed version from 1.0.0 to 1.0.1. Repeating `codex plugin add gh-address-cr@gh-address-cr-community` also succeeded and preserved the new
+version. Check the `installed` record and its enabled/version fields; available
+catalog entries or a newer cached directory alone do not prove replacement.
+This observation does not establish background updates, existing-session hot
+reload, or the behavior of other client versions. Start a new session after
+updating. There is no `codex plugin update` command in the tested CLI.
+
+The plugin contains only the skill adapter; it neither bundles nor upgrades the
+Python runtime. Install it with `pipx install gh-address-cr`, or update an
+existing installation with `pipx upgrade gh-address-cr`.
 
 ## Release boundary
 

@@ -24,9 +24,8 @@ synchronization; post-integration targeted checks and PR CI are recorded below.
 
 ## Remaining rollout evidence
 
-The pinned real Codex two-version test executes on a disposable Actions runner;
-its result must be read before client compatibility is declared proven. There
-is no production `marketplace` branch creation or historical release overwrite
+The pinned real Codex two-version test passed on a disposable Actions runner
+(see the CI evidence below). There is no production `marketplace` branch creation or historical release overwrite
 in local tests. First real GitHub installation, macOS desktop/new-session skill
 loading and same-version production recovery remain next-release acceptance
 checks. A later real release is needed for live cross-version update evidence.
@@ -38,3 +37,14 @@ to 3.22.0. After a normal merge and development-environment refresh, 81 focused
 packaging/runtime/workflow/distribution tests passed (10.804 seconds), together
 with Ruff, the zero-error mypy ratchet, actionlint, CLI/agent manifest smoke,
 portable archive generation and the builder's non-mutating check.
+
+
+## Real Codex CI evidence
+
+[CI run 41421757542, Codex marketplace compatibility](https://github.com/RbBtSn0w/gh-address-cr/actions/runs/41421757542/job/125198700208)
+passed using official codex-cli 0.166.0 on a disposable Linux runner. The
+structured result reports initial active version 1.0.0, active version 1.0.1
+immediately after catalog refresh, and installed version 1.0.1 after re-adding
+the plugin. The check also compares active cached skill bytes against source.
+This proves the temporary Git transport/install/update path; it does not claim
+that production assets or the future Marketplace branch already exist.
