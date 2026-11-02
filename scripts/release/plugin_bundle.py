@@ -152,7 +152,7 @@ def verify_source(bundle: Bundle, source: Path) -> None:
     commit = shared.command(['git', 'rev-parse', receipt['source_tag'] + '^{commit}'], cwd=source).stdout.strip()
     if commit != receipt['source_commit']:
         raise ValueError('source tag changed or bundle source mismatch')
-    source_files = git_files(source, commit, ['skill', 'LICENSE', 'pyproject.toml', CATALOG, 'scripts/build_plugin_payload.py'])
+    source_files = git_files(source, commit, ['skill', 'LICENSE', 'pyproject.toml', CATALOG, 'scripts/build_plugin_payload.py', 'assets/plugin'])
     expected = {'skills/gh-address-cr/' + path.removeprefix('skill/'): data for path, data in source_files.items()
                 if path.startswith('skill/') and not builder.should_exclude(Path(path).relative_to('skill'))}
     actual = {name: data for name, data in bundle.payload.items() if name.startswith('skills/')}

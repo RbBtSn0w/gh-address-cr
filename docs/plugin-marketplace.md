@@ -7,11 +7,15 @@ for this repository.
 
 ## Sources and installation
 
-`skill/` owns the adapter content. The repository-root
+`skill/` owns the adapter content; `assets/plugin/` owns the unchanged PNG
+bytes, which are copied without compression-library-dependent regeneration.
+The repository-root
 `.agents/plugins/marketplace.json` is a developer catalog whose local source is
 `dist/plugin/gh-address-cr`. Build that payload before registering the catalog:
 
 ```bash
+scripts/dev_setup.sh
+source .venv/bin/activate
 python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 codex plugin marketplace add .agents/plugins/marketplace.json
 codex plugin add gh-address-cr@gh-address-cr-community

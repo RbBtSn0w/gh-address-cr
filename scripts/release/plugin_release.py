@@ -50,7 +50,7 @@ def prepare(directory: Path, version: str, *, source: Path = ROOT, run_url: str 
     archive_name, checksum_name, _ = asset_names(version)
     with tempfile.TemporaryDirectory() as temporary:
         payload = Path(temporary) / 'gh-address-cr'
-        builder.build_payload(payload, source_root=source / "skill", pyproject_path=source / "pyproject.toml")
+        builder.build_payload(payload, source_root=source / "skill", pyproject_path=source / "pyproject.toml", assets_root=source / "assets/plugin")
         builder.validate_payload(payload, pyproject_path=source / "pyproject.toml")
         builder.write_archive(payload, directory / archive_name, pyproject_path=source / "pyproject.toml")
         files = {path.relative_to(payload).as_posix(): sha(path.read_bytes()) for path in sorted(payload.rglob('*')) if path.is_file()}

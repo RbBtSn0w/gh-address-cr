@@ -122,6 +122,7 @@ class PluginPackagingTest(unittest.TestCase):
             "bad.yaml": "interface: [broken",
             "metadata.yaml": "path: /private/tmp/private-key",
             "credentials.json": '{"api_key": "private-value"}',
+            "duplicate.json": '{"path": "../secret", "path": "ok"}',
             "alias.yaml": "loop: &loop [*loop]",
             "windows.yaml": 'path: "C:\\\\Users\\\\private"',
             "traversal.yaml": "path: ../private-key",
@@ -169,7 +170,8 @@ class PluginPackagingTest(unittest.TestCase):
             builder.validate_payload(payload_root)
 
     def test_builder_refuses_source_overwrite_and_check_archive_combination(self):
-        for args in (("--output", "skill"), ("--check", "--archive", "dist/plugin/check.zip")):
+        for args in (("--output", "skill"), ("--output", "assets/plugin"),
+                     ("--check", "--archive", "dist/plugin/check.zip")):
             with self.subTest(args=args):
                 result = subprocess.run([sys.executable, str(PLUGIN_BUILDER), *args],
                                         capture_output=True, text=True, cwd=ROOT)
@@ -368,3 +370,40 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertIn("dist/plugin/gh-address-cr", readme)
         self.assertNotIn("plugin/gh-address-cr/`", readme)
         self.assertIn("curated Plugin Directory is not a self-service publish target", readme)
+
+
+    def test_duplicate_yaml_keys_cannot_hide_unsafe_values(self):
+        for text in ("path: ../secret\npath: ok\n", "interface:\n  name: first\n  name: second\n"):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "Duplicate YAML"):
+                builder.load_yaml(text)
+
+    def test_plugin_assets_are_source_bytes_independent_of_compression_library(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "assets"
+            with patch("zlib.compress", side_effect=AssertionError("Asset encoding must not run during packaging")):
+                builder.write_assets(output)
+            for name in ("icon.png", "logo.png", "screenshot-1.png"):
+                self.assertEqual((output / name).read_bytes(), (ROOT / "assets" / "plugin" / name).read_bytes())
+
+    def test_explicit_asset_source_is_used_without_default_fallback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "assets"
+            shutil.copytree(ROOT / "assets" / "plugin", source)
+            with patch.object(builder, "ASSETS_ROOT", root / "missing"):
+                builder.build_payload(root / "output", assets_root=source)
+            for asset in source.iterdir():
+                self.assertEqual((root / "output" / "assets" / asset.name).read_bytes(), asset.read_bytes())
+            (source / "unexpected.png").write_bytes(b"unexpected")
+            with self.assertRaises(ValueError):
+                builder.write_assets(root / "rejected", source)
+
+    def test_asset_source_rejects_symlinks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "assets"
+            source.mkdir()
+            for name in ("icon.png", "logo.png", "screenshot-1.png"):
+                (source / name).symlink_to(ROOT / "assets" / "plugin" / name)
+            with self.assertRaises(ValueError):
+                builder.write_assets(root / "rejected", source)

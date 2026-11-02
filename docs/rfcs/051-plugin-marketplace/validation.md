@@ -48,3 +48,14 @@ immediately after catalog refresh, and installed version 1.0.1 after re-adding
 the plugin. The check also compares active cached skill bytes against source.
 This proves the temporary Git transport/install/update path; it does not claim
 that production assets or the future Marketplace branch already exist.
+
+
+## Automated review refinements
+
+Six verified review items were addressed: remove persisted credentials in both
+new writer jobs, document development setup, reject duplicate YAML/JSON keys,
+reject alternate Codex profiles, and replace PNG regeneration with fixed tagged
+source assets. Asset bytes are unchanged from the validated original outputs.
+Post-review focused verification: 86 tests passed in 11.863 seconds; Ruff,
+zero-error mypy, actionlint and payload/archive/check smoke passed. Runtime
+handling evidence and final-gate proof are retained with PR #404's session.

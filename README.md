@@ -42,6 +42,8 @@ codex plugin add gh-address-cr@gh-address-cr-community
 For local development, build the payload and register the checkout's catalog:
 
 ```bash
+scripts/dev_setup.sh
+source .venv/bin/activate
 python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 codex plugin marketplace add .agents/plugins/marketplace.json
 codex plugin add gh-address-cr@gh-address-cr-community

@@ -23,7 +23,7 @@ class PluginReleaseTests(unittest.TestCase):
         git(self.source, 'init', '-q')
         git(self.source, 'config', 'user.name', 'Test')
         git(self.source, 'config', 'user.email', 'test@example.invalid')
-        for name in ['skill', '.agents/plugins']:
+        for name in ['skill', '.agents/plugins', 'assets/plugin']:
             import shutil
             shutil.copytree(ROOT / name, self.source / name)
         for name in ['LICENSE', 'pyproject.toml', 'scripts/build_plugin_payload.py']:

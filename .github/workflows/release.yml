@@ -291,7 +291,7 @@ jobs:
         with:
           ref: ${{ needs.build-release-package.outputs.source_sha }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5

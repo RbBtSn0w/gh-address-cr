@@ -59,3 +59,15 @@ The compatibility smoke reads Codex's installed/enabled selection and verifies
 that version's actual cached manifest and skill files. A newer cached version
 alone cannot satisfy installation acceptance. The smoke refuses an existing
 profile and runs only on a disposable GitHub Actions runner.
+
+## Recovery reproducibility refinement
+
+PNG bytes are fixed source inputs under `assets/plugin/`, preserved from the
+existing validated product assets. The builder copies them without a compression
+library dependency. This removes a source of environment-dependent output and
+keeps whole-payload verification byte-exact. Pixel-decoding exceptions and a
+second asset-validation policy were rejected as unnecessary state space. Both
+source extraction and verification include the tagged asset bytes. Duplicate
+JSON/YAML keys are rejected before interpretation, and the smoke refuses an
+alternate Codex profile. Writer checkouts do not persist credentials: only the
+publish command receives scoped GH_TOKEN authentication.

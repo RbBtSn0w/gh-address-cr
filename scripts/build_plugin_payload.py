@@ -4,21 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import binascii
 import json
 import re
 import shutil
-import struct
 import sys
 import tempfile
 import zipfile
-import zlib
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / "skill"
+ASSETS_ROOT = ROOT / "assets" / "plugin"
 DEFAULT_OUTPUT_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"
 PYPROJECT = ROOT / "pyproject.toml"
 
@@ -72,7 +70,7 @@ def validate_text(path: Path) -> None:
     metadata = None
     try:
         if path.suffix == ".json":
-            metadata = json.loads(text)
+            metadata = json.loads(text, object_pairs_hook=unique_json_mapping)
         elif path.suffix in {".yaml", ".yml"}:
             metadata = load_yaml(text)
         elif path.name == "SKILL.md":
@@ -87,10 +85,32 @@ def validate_text(path: Path) -> None:
         validate_metadata(metadata)
 
 
+def unique_json_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    mapping = {}
+    for key, value in pairs:
+        if key in mapping:
+            raise ValueError("Duplicate JSON metadata key")
+        mapping[key] = value
+    return mapping
+
+
+class UniqueSafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if not isinstance(key, str):
+                raise ValueError("Plugin metadata keys must be strings")
+            if key in mapping:
+                raise ValueError("Duplicate YAML metadata key")
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 def load_yaml(text: str) -> object:
     if any(isinstance(token, yaml.tokens.AliasToken) for token in yaml.scan(text)):
         raise ValueError("YAML aliases are not supported in plugin metadata")
-    return yaml.safe_load(text)
+    return yaml.load(text, Loader=UniqueSafeLoader)
 
 
 def validate_tree(root: Path, *, source: bool) -> None:
@@ -141,27 +161,18 @@ def copy_skill_payload(destination: Path, source_root: Path | None = None) -> No
     shutil.copytree(source_root, destination, ignore=ignore)
 
 
-def png_bytes(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        payload = kind + data
-        return struct.pack(">I", len(data)) + payload + struct.pack(">I", binascii.crc32(payload) & 0xFFFFFFFF)
-
-    row = b"\x00" + bytes(rgb) * width
-    raw = row * height
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(
-        b"IDAT", zlib.compress(raw)
-    ) + chunk(b"IEND", b"")
-
-
-def write_assets(assets_dir: Path) -> None:
+def write_assets(assets_dir: Path, assets_root: Path | None = None) -> None:
+    assets_root = assets_root or ASSETS_ROOT
+    names = {"icon.png", "logo.png", "screenshot-1.png"}
+    if assets_root.is_symlink() or {path.name for path in assets_root.iterdir()} != names:
+        raise ValueError("Plugin assets must contain exactly the source PNG assets")
+    for name in sorted(names):
+        source = assets_root / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("Plugin assets must be regular files, not symlinks")
     assets_dir.mkdir(parents=True, exist_ok=True)
-    assets = {
-        "icon.png": png_bytes(256, 256, (16, 163, 127)),
-        "logo.png": png_bytes(512, 512, (16, 163, 127)),
-        "screenshot-1.png": png_bytes(1280, 720, (24, 35, 47)),
-    }
-    for filename, data in assets.items():
-        (assets_dir / filename).write_bytes(data)
+    for name in sorted(names):
+        shutil.copyfile(assets_root / name, assets_dir / name)
 
 
 def manifest(pyproject_path: Path | None = None) -> dict:
@@ -204,10 +215,13 @@ def manifest(pyproject_path: Path | None = None) -> dict:
     }
 
 
-def build_payload(destination: Path, *, source_root: Path | None = None, pyproject_path: Path | None = None) -> None:
+def build_payload(
+    destination: Path, *, source_root: Path | None = None, pyproject_path: Path | None = None,
+    assets_root: Path | None = None,
+) -> None:
     (destination / ".codex-plugin").mkdir(parents=True, exist_ok=True)
     copy_skill_payload(destination / "skills" / "gh-address-cr", source_root)
-    write_assets(destination / "assets")
+    write_assets(destination / "assets", assets_root)
     root_manifest = manifest(pyproject_path)
     manifest_text = json.dumps(root_manifest, indent=2, ensure_ascii=False) + "\n"
     (destination / "plugin.json").write_text(manifest_text, encoding="utf-8")
@@ -297,7 +311,7 @@ def validate_output_path(path: Path) -> None:
     resolved = path.resolve()
     if path.is_symlink() or ROOT.is_relative_to(resolved):
         raise ValueError("Output must not overwrite repository files or a symlink")
-    protected = [ROOT / name for name in ("skill", "src", "scripts", "tests", "docs", ".git", ".github", ".agents", ".venv")]
+    protected = [ROOT / name for name in ("skill", "src", "scripts", "tests", "docs", "assets", ".git", ".github", ".agents", ".venv")]
     protected.extend(path for path in ROOT.iterdir() if path.is_file())
     if any(resolved.is_relative_to(path) or path.is_relative_to(resolved) for path in protected):
         raise ValueError("Output must not overwrite repository source files")

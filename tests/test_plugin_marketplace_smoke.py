@@ -17,7 +17,7 @@ class MarketplaceSmokeTests(unittest.TestCase):
             (home / '.codex').mkdir()
             config = home / '.codex/config.toml'
             config.write_text('preserved')
-            with patch.dict('os.environ', {'GITHUB_ACTIONS': 'true'}), patch.object(Path, 'home', return_value=home):
+            with patch.dict('os.environ', {'GITHUB_ACTIONS': 'true'}, clear=True), patch.object(Path, 'home', return_value=home):
                 with self.assertRaisesRegex(ValueError, 'already populated'):
                     smoke.require_disposable_profile()
             self.assertEqual(config.read_text(), 'preserved')
@@ -44,3 +44,10 @@ class MarketplaceSmokeTests(unittest.TestCase):
                 (cache / '1.0.0/skills/gh-address-cr/SKILL.md').write_text('corruption')
                 with self.assertRaisesRegex(ValueError, 'active installed skill'):
                     smoke.installed_version('codex')
+
+
+    def test_alternate_profile_override_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(Path, 'home', return_value=Path(directory)), patch.dict('os.environ', {'GITHUB_ACTIONS': 'true', 'CODEX_HOME': directory}):
+                with self.assertRaisesRegex(ValueError, 'override'):
+                    smoke.require_disposable_profile()

@@ -25,6 +25,8 @@ class QuietHandler(SimpleHTTPRequestHandler):
 def require_disposable_profile() -> None:
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise ValueError('Codex install smoke requires a disposable GitHub Actions runner')
+    if os.environ.get('CODEX_HOME'):
+        raise ValueError('Codex install smoke does not allow CODEX_HOME overrides')
     home = Path.home()
     if any(path.exists() for path in [home / '.codex/auth.json', home / '.codex/config.toml',
                                      home / '.codex/plugins', home / '.agents/plugins']):
