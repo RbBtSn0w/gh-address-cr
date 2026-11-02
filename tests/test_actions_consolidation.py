@@ -1,4 +1,4 @@
-"""Contracts for the five operator-facing Actions entry points."""
+"""Contracts for the six operator-facing Actions entry points."""
 
 import os
 import subprocess
@@ -10,9 +10,9 @@ WORKFLOWS = ROOT / ".github/workflows"
 
 
 class ActionsConsolidationTests(unittest.TestCase):
-    def test_five_operational_workflows(self):
+    def test_six_operational_workflows(self):
         self.assertEqual({p.name for p in WORKFLOWS.glob("*.yml")}, {
-            "ci.yml", "homebrew-preview.yml", "homebrew.yml", "release.yml", "branches.yml",
+            "ci.yml", "homebrew-preview.yml", "homebrew.yml", "release.yml", "branches.yml", "plugin-marketplace.yml",
         })
 
     def test_target_guard_runs_for_base_edits_and_rejects_other_main_sources(self):

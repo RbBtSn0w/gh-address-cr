@@ -31,6 +31,7 @@ jobs:
       package_version: ${{ steps.package-version.outputs.version }}
       publish_target: ${{ steps.publish-target.outputs.target }}
       released: ${{ steps.package-version.outputs.released }}
+      source_sha: ${{ steps.plugin-source.outputs.sha }}
 
     steps:
       - name: Mint release-bot token
@@ -106,6 +107,15 @@ jobs:
             echo "version=0.0.0.dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify immutable plugin source
+        id: plugin-source
+        if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "v${PACKAGE_VERSION}^{commit}")"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Guard against squash-merged release promotion
         if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'false'
         run: |
@@ -124,7 +134,7 @@ jobs:
 
       - name: Install release helper dependencies
         if: steps.package-version.outputs.released == 'true'
-        run: python -m pip install --upgrade packaging
+        run: python -m pip install . 'PyYAML>=6'
 
       - name: Install package build dependencies
         if: steps.package-version.outputs.released == 'true'
@@ -173,6 +183,14 @@ jobs:
         if: steps.package-version.outputs.released == 'true'
         run: python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 
+      - name: Prepare immutable plugin bundle
+        if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
+        run: >-
+          python -m scripts.release.plugin_release prepare
+          --directory dist/plugin-release --version "$PACKAGE_VERSION"
+
       - name: Render Homebrew formula from local sdist
         if: steps.package-version.outputs.released == 'true'
         env:
@@ -195,11 +213,12 @@ jobs:
             dist/*.tar.gz
 
       - name: Upload plugin payload artifact
-        if: steps.package-version.outputs.released == 'true'
+        if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gh-address-cr-plugin
-          path: dist/plugin/gh-address-cr
+          path: dist/plugin-release/
+          if-no-files-found: error
 
   publish-testpypi:
     needs: build-release-package
@@ -254,3 +273,44 @@ jobs:
       version: ${{ needs.build-release-package.outputs.package_version }}
       rebuild: "0"
     secrets: inherit
+
+  publish-plugin-marketplace:
+    needs: [build-release-package, publish-pypi]
+    if: >-
+      needs.build-release-package.outputs.released == 'true' &&
+      needs.build-release-package.outputs.publish_target == 'pypi'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: plugin-marketplace-publication
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-release-package.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install release helper
+        run: python -m pip install . 'PyYAML>=6'
+
+      - name: Download immutable plugin bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-address-cr-plugin
+          path: dist/plugin-release
+
+      - name: Publish and read back marketplace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.build-release-package.outputs.package_version }}
+        run: >-
+          python -m scripts.release.plugin_release publish
+          --directory dist/plugin-release --version "$PACKAGE_VERSION"

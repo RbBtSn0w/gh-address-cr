@@ -62,4 +62,4 @@ class BranchControlWorkflowTests(unittest.TestCase):
         self.assertIn("github.event.workflow_run.path == '.github/workflows/release.yml'", sync)
         self.assertIn("github.event.workflow_run.event == 'push'", sync)
         self.assertIn("github.event.workflow_run.head_repository.full_name == github.repository", sync)
-        self.assertEqual(len(list((ROOT / '.github/workflows').glob('*.yml'))), 5)
+        self.assertEqual(len(list((ROOT / '.github/workflows').glob('*.yml'))), 6)

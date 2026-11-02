@@ -630,7 +630,7 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("twine check dist/*", text)
         self.assertIn("Verify package version", text)
         self.assertIn("Install release helper dependencies", text)
-        self.assertIn("python -m pip install --upgrade packaging", text)
+        self.assertIn("python -m pip install . 'PyYAML>=6'", text)
         self.assertIn("Render Homebrew formula from local sdist", text)
         self.assertIn("scripts/release/render_homebrew_formula.py", text)
         self.assertIn("pypa/gh-action-pypi-publish", text)

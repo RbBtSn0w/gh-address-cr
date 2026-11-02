@@ -30,20 +30,32 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr --skill skill
 npx skills check
 ```
 
-Build the Codex community plugin payload:
+The community Marketplace release lane is implemented; the first stable
+publication is still pending. After that rollout gate passes, install from the
+**`marketplace` branch**, which contains the generated payload (not `main`):
 
 ```bash
-python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
-```
-
-Then install from the generated marketplace path when working from a built
-checkout or release artifact:
-
-```bash
-codex plugin marketplace add .agents/plugins/marketplace.json
-codex plugin marketplace upgrade
+codex plugin marketplace add RbBtSn0w/gh-address-cr --ref marketplace
 codex plugin add gh-address-cr@gh-address-cr-community
 ```
+
+For local development, build the payload and register the checkout's catalog:
+
+```bash
+scripts/dev_setup.sh
+source .venv/bin/activate
+python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
+codex plugin marketplace add .agents/plugins/marketplace.json
+codex plugin add gh-address-cr@gh-address-cr-community
+```
+
+Choose one source for the `gh-address-cr-community` catalog. Refreshing a Git
+catalog uses `codex plugin marketplace upgrade gh-address-cr-community`; this
+does not promise to update an already installed plugin. See
+[Marketplace distribution and recovery](docs/plugin-marketplace.md) for the
+installed-plugin refresh procedure, compatibility evidence, and rollout gates.
+The plugin supplies the skill adapter; install/update the Python runtime
+separately.
 
 ## When to use it
 
@@ -477,8 +489,11 @@ python3 scripts/build_plugin_payload.py --check
 ```
 
 The OpenAI curated Plugin Directory is not a self-service publish target in this
-repository. The committed `.agents/plugins/marketplace.json` points at the
-generated community distribution artifact.
+repository. The committed `.agents/plugins/marketplace.json` is a local
+developer catalog pointing at the generated `dist/plugin/gh-address-cr` payload.
+Stable release assets are projected onto the remote `marketplace` branch;
+`main` is source, not an installable remote Marketplace snapshot. See
+[Marketplace distribution](docs/plugin-marketplace.md).
 
 ## Command Topology (ASCII)
 
