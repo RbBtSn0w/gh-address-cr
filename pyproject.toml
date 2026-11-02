@@ -36,6 +36,7 @@ dependencies = [
 dev = [
   "coverage>=7",
   "mypy>=1.8",
+  "PyYAML>=6",
   "ruff>=0.15",
 ]
 

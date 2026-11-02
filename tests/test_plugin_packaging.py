@@ -5,8 +5,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
+from scripts import build_plugin_payload as builder
 from tests.helpers import ROOT
 
 GENERATED_PLUGIN_ROOT = ROOT / "dist" / "plugin" / "gh-address-cr"
@@ -45,7 +48,14 @@ class PluginPackagingTest(unittest.TestCase):
         manifest = json.loads((payload_root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         root_manifest = json.loads((payload_root / "plugin.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(root_manifest, manifest)
+        self.assertEqual(root_manifest["$schema"], "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json")
+        self.assertNotIn("interface", root_manifest)
+        self.assertNotIn("skills", root_manifest)
+        self.assertNotIn("com.openai.interface", root_manifest["extensions"])
+        self.assertEqual(root_manifest["extensions"]["com.openai"]["interface"], manifest["interface"])
+        self.assertEqual(manifest["interface"]["shortDescription"], "Resolve PR reviews safely")
+        for key, value in root_manifest.items():
+            self.assertEqual(manifest[key], value)
 
         self.assertEqual(manifest["name"], "gh-address-cr")
         self.assertEqual(manifest["version"], _pyproject_version())
@@ -72,6 +82,142 @@ class PluginPackagingTest(unittest.TestCase):
             with self.subTest(path=raw_path):
                 self.assertTrue(raw_path.startswith("./"))
                 self.assertTrue((payload_root / raw_path[2:]).exists(), raw_path)
+
+    def test_archive_is_complete_deterministic_and_preserves_skill_bytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archives = [root / "first.zip", root / "second.zip"]
+            for archive in archives:
+                result = subprocess.run(
+                    [sys.executable, str(PLUGIN_BUILDER), "--output", str(root / "payload"),
+                     "--archive", str(archive)], capture_output=True, text=True, cwd=ROOT,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
+            with zipfile.ZipFile(archives[0]) as archive:
+                names = archive.namelist()
+                self.assertEqual(names, sorted(names))
+                self.assertIn("gh-address-cr/.codex-plugin/plugin.json", names)
+                expected = {
+                    "gh-address-cr/" + path.relative_to(root / "payload").as_posix()
+                    for path in (root / "payload").rglob("*") if path.is_file()
+                }
+                self.assertEqual(set(names), expected)
+                for info in archive.infolist():
+                    self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
+                    self.assertEqual(info.external_attr >> 16, 0o100644)
+                for source in (ROOT / "skill").rglob("*"):
+                    if source.is_file() and not builder.should_exclude(source.relative_to(ROOT / "skill")):
+                        self.assertEqual(archive.read("gh-address-cr/skills/gh-address-cr/" +
+                                                     source.relative_to(ROOT / "skill").as_posix()),
+                                         source.read_bytes())
+
+    def test_builder_rejects_unsafe_source_files_and_metadata(self):
+        cases = {
+            "secret.md": "token: ghp_" + "a" * 36,
+            ".env": "API_KEY=secret",
+            "helper.sh": "echo unsafe",
+            "absolute.md": "Private location: /Users/private/project",
+            "bad.json": "{broken",
+            "bad.yaml": "interface: [broken",
+            "metadata.yaml": "path: /private/tmp/private-key",
+            "credentials.json": '{"api_key": "private-value"}',
+            "alias.yaml": "loop: &loop [*loop]",
+            "windows.yaml": 'path: "C:\\\\Users\\\\private"',
+            "traversal.yaml": "path: ../private-key",
+            "windows.json": '{"path": "C:/private/key"}',
+            "..\\escape.md": "unsafe name",
+        }
+        for name, content in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                source = root / "skill"
+                shutil.copytree(ROOT / "skill", source)
+                (source / name).write_text(content)
+                with patch.object(builder, "SKILL_ROOT", source), self.assertRaises(ValueError):
+                    builder.build_payload(root / "output")
+
+    def test_builder_rejects_symlinks_even_under_excluded_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "skill"
+            shutil.copytree(ROOT / "skill", source)
+            (source / "__pycache__").symlink_to(ROOT / "skill", target_is_directory=True)
+            with patch.object(builder, "SKILL_ROOT", source), self.assertRaises(ValueError):
+                builder.build_payload(root / "output")
+
+    def test_builder_excludes_dependency_and_cache_trees(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "skill"
+            shutil.copytree(ROOT / "skill", source)
+            for name in ("node_modules", ".venv", "__pycache__", ".git"):
+                directory = source / name
+                directory.mkdir()
+                (directory / "ignored.txt").write_text("unrelated")
+            with patch.object(builder, "SKILL_ROOT", source):
+                builder.build_payload(root / "output")
+            for name in ("node_modules", ".venv", "__pycache__", ".git"):
+                self.assertFalse((root / "output" / "skills" / "gh-address-cr" / name).exists())
+
+    def test_archive_rejects_unexpected_files_and_output_inside_payload(self):
+        _, payload_root = self.build_generated_payload()
+        with self.assertRaises(ValueError):
+            builder.write_archive(payload_root, payload_root / "payload.zip")
+        (payload_root / "unrelated.md").write_text("unrelated")
+        with self.assertRaises(ValueError):
+            builder.validate_payload(payload_root)
+
+    def test_builder_refuses_source_overwrite_and_check_archive_combination(self):
+        for args in (("--output", "skill"), ("--check", "--archive", "dist/plugin/check.zip")):
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, str(PLUGIN_BUILDER), *args],
+                                        capture_output=True, text=True, cwd=ROOT)
+                self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((ROOT / "skill" / "SKILL.md").is_file())
+
+    def test_builder_accepts_explicit_source_and_version_without_global_mutation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "skill"
+            shutil.copytree(ROOT / "skill", source)
+            version_file = root / "pyproject.toml"
+            version_file.write_text('version = "99.1.0"\n')
+            builder.build_payload(root / "output", source_root=source, pyproject_path=version_file)
+            builder.write_archive(root / "output", root / "payload.zip", pyproject_path=version_file)
+            self.assertEqual(json.loads((root / "output" / "plugin.json").read_text())["version"], "99.1.0")
+
+    def test_output_preserves_arbitrary_repository_relative_directory_support(self):
+        with tempfile.TemporaryDirectory(dir=ROOT, prefix="packaging-test-") as temp_dir:
+            destination = Path(temp_dir) / "plugin"
+            result = subprocess.run([sys.executable, str(PLUGIN_BUILDER), "--output",
+                                     str(destination.relative_to(ROOT))], capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((destination / "plugin.json").is_file())
+
+    def test_archival_validation_uses_explicit_version_and_preserves_historic_metadata(self):
+        _, payload_root = self.build_generated_payload()
+        root_path = payload_root / "plugin.json"
+        root = json.loads(root_path.read_text())
+        root["version"] = "1.2.3"
+        root["description"] = "Previously published description"
+        root["extensions"]["com.openai"]["interface"]["shortDescription"] = "Previous description"
+        root_path.write_text(json.dumps(root))
+        overlay_path = payload_root / ".codex-plugin" / "plugin.json"
+        overlay = {**root, "skills": "./skills/", "interface": root["extensions"]["com.openai"]["interface"]}
+        overlay_path.write_text(json.dumps(overlay))
+        builder.validate_payload(payload_root, expected_version="1.2.3")
+        builder.write_archive(payload_root, payload_root.parent / "historic.zip", expected_version="1.2.3")
+        with self.assertRaises(ValueError):
+            builder.validate_payload(payload_root, expected_version="1.2.4")
+        overlay["interface"] = {**overlay["interface"], "shortDescription": "Diverged"}
+        overlay_path.write_text(json.dumps(overlay))
+        with self.assertRaises(ValueError):
+            builder.validate_payload(payload_root, expected_version="1.2.3")
+        root["extensions"] = {"com.openai.interface": overlay["interface"]}
+        root_path.write_text(json.dumps(root))
+        with self.assertRaises(ValueError):
+            builder.validate_payload(payload_root, expected_version="1.2.3")
 
     def test_plugin_payload_contains_one_skill_and_no_generated_artifacts(self):
         _, payload_root = self.build_generated_payload()
