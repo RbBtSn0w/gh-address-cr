@@ -121,5 +121,19 @@ class EvidenceLedgerTests(unittest.TestCase):
 
         self.assertEqual(terminal_threads_missing_reply_evidence(items), ["github-thread:THREAD_MISSING"])
 
+    def test_reply_audit_covers_all_terminal_states_and_preserves_closed_compatibility(self):
+        from gh_address_cr.evidence.audit import terminal_threads_missing_reply_evidence
+
+        for state in ("closed", "CLOSED", "fixed", "clarified", "deferred", "rejected", "resolved", "verified", "published"):
+            with self.subTest(state=state):
+                item = {"item_id": "thread:X", "item_kind": "github_thread", "state": state}
+                self.assertEqual(terminal_threads_missing_reply_evidence([item]), ["thread:X"])
+                item["reply_evidence"] = {"reply_url": "https://example.test/reply", "author_login": "agent"}
+                self.assertEqual(terminal_threads_missing_reply_evidence([item]), [])
+        for state in ("open", "stale", "unknown"):
+            self.assertEqual(terminal_threads_missing_reply_evidence([
+                {"item_id": "thread:X", "item_kind": "github_thread", "state": state}
+            ]), [])
+
 if __name__ == "__main__":
     unittest.main()

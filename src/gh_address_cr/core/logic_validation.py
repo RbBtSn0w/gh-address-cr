@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
+from gh_address_cr.core.local_item_state import LOCAL_TERMINAL_STATES as TERMINAL_LOCAL_STATES
 from gh_address_cr.core.models import LogicValidationSignal
 from gh_address_cr.core.runtime_kernel.stack import StackContext, stack_context_from_serialized
 from gh_address_cr.core.validation_evidence import revision_evidence_status, validation_evidence_has_success
 
-TERMINAL_LOCAL_STATES = {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 TERMINAL_GITHUB_STATES = GITHUB_THREAD_TERMINAL_STATES
 NON_MUTATING_GITHUB_RESOLUTIONS = {"clarify", "defer", "reject"}
 MUTATING_GITHUB_RESOLUTIONS = {"fix", "fixed"}

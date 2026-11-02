@@ -263,7 +263,9 @@ def _handle_stack_final_gate(parsed: argparse.Namespace, *, machine_requested: b
     if machine_requested:
         write_json_summary(stack_payload)
     else:
-        emit_stack_final_gate_result(stack_result, stack_artifact, stack_telemetry)
+        emit_stack_final_gate_result(
+            stack_result, stack_artifact, stack_telemetry, lifecycle_report=lifecycle_report
+        )
     if not stack_result.passed and not machine_requested:
         blocked_member = (
             f" at PR #{stack_result.first_blocked_pr_number}"
@@ -433,6 +435,8 @@ def emit_stack_final_gate_result(
     result: core_stack_gate.StackGateResult,
     summary_path: Path,
     telemetry_report: EfficiencyReportPayload,
+    *,
+    lifecycle_report: dict[str, Any] | None = None,
 ) -> None:
     projection = _stack_layer_projection(result)
     covered = ", ".join(f"#{number}" for number in result.covered_pr_numbers)
@@ -466,13 +470,16 @@ def emit_stack_final_gate_result(
     else:
         print("telemetry_inefficiency_flags=none")
     print(f"Efficiency report path: {telemetry_report.get('report_artifact') or 'N/A'}")
+    _emit_lifecycle_summary(lifecycle_report)
     print(f"Audit summary path: {summary_path}")
     print(f"Audit summary sha256: {read_file_sha256(summary_path)}")
     if result.reason_code == core_protocol_codes.STACK_CONTEXT_STALE:
         print("\nStack context changed during evaluation. Do not send completion summary.")
     else:
         print("\n== PR Completion Summary Guidance ==")
-        print(build_stack_completion_summary_guidance(result, telemetry_report, summary_path=summary_path))
+        print(build_stack_completion_summary_guidance(
+            result, telemetry_report, summary_path=summary_path, lifecycle_report=lifecycle_report
+        ))
 
 
 def write_stack_final_gate_artifacts(
@@ -1246,18 +1253,7 @@ def emit_final_gate_result(
     else:
         print("telemetry_inefficiency_flags=none")
     print(f"Efficiency report path: {telemetry_report['report_artifact']}")
-    if lifecycle_report is not None:
-        aggregates = lifecycle_report.get("aggregates") or {}
-        diagnostics = lifecycle_report.get("diagnostics")
-        diagnostics = diagnostics if isinstance(diagnostics, list) else []
-        print()
-        print("== CR Lifecycle Summary ==")
-        print(f"cr_metrics_status={lifecycle_report.get('status', 'UNKNOWN')}")
-        print(f"cr_metrics_completeness={lifecycle_report.get('completeness', 'unknown')}")
-        print(f"cr_metrics_eligible_items={aggregates.get('eligible_items', 0)}")
-        print(f"cr_metrics_excluded_items={aggregates.get('excluded_items', 0)}")
-        print(f"cr_metrics_diagnostic_count={len(diagnostics)}")
-        print(f"CR lifecycle report path: {lifecycle_report.get('report_artifact', 'N/A')}")
+    _emit_lifecycle_summary(lifecycle_report)
     if summary_path is not None:
         print(f"Audit summary path: {summary_path}")
         summary_sha256 = read_file_sha256(summary_path)
@@ -1273,6 +1269,22 @@ def emit_final_gate_result(
             lifecycle_report=lifecycle_report,
         )
     )
+
+
+def _emit_lifecycle_summary(lifecycle_report: dict[str, Any] | None) -> None:
+    if lifecycle_report is None:
+        return
+    aggregates = lifecycle_report.get("aggregates") or {}
+    diagnostics = _string_list(lifecycle_report.get("diagnostics"))
+    print()
+    print("== CR Lifecycle Summary ==")
+    print(f"cr_metrics_status={lifecycle_report.get('status', 'UNKNOWN')}")
+    print(f"cr_metrics_completeness={lifecycle_report.get('completeness', 'unknown')}")
+    print(f"cr_metrics_eligible_items={aggregates.get('eligible_items', 0)}")
+    print(f"cr_metrics_excluded_items={aggregates.get('excluded_items', 0)}")
+    print(f"cr_metrics_diagnostic_count={len(diagnostics)}")
+    print(f"cr_metrics_diagnostics={'; '.join(diagnostics) or 'none'}")
+    print(f"CR lifecycle report path: {lifecycle_report.get('report_artifact', 'N/A')}")
 
 
 def write_native_final_gate_artifacts(

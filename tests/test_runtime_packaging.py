@@ -497,6 +497,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn(r"(\\S.*)", text)
 
     def test_ci_workflow_has_build_install_and_installed_smoke_gates(self):
+        import yaml
+
         text = CI_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("Package build", text)
@@ -505,17 +507,23 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("python -m build", text)
         self.assertIn("python -m pip install dist/*.whl", text)
         self.assertIn("PYTHONPATH: src", text)
-        self.assertIn("ModuleNotFoundError", text)
-        self.assertIn("Final gate failed to evaluate", text)
-        self.assertIn("error connecting to api.github.com", text)
+        self.assertNotIn("run_domain_smoke", text)
+        self.assertIn("GH_ADDRESS_CR_TEST_RUNTIME: installed", text)
         for command in (
             "gh-address-cr --help",
             "python -m gh_address_cr --help",
             "gh-address-cr agent manifest",
-            "gh-address-cr agent orchestrate status owner/repo 123",
-            "gh-address-cr final-gate owner/repo 123",
+            "python -m unittest tests.contract.test_installed_runtime_smoke_contract",
+            "python -m unittest tests.contract.test_agent_journey_contract",
         ):
             self.assertIn(command, text)
+
+        steps = yaml.safe_load(text)["jobs"]["lint-and-test"]["steps"]
+        installed_steps = [step for step in steps if step.get("name") in {"Installed CLI smoke", "Installed wheel agent journey"}]
+        self.assertEqual(len(installed_steps), 2)
+        for step in installed_steps:
+            self.assertEqual(step["env"]["GH_ADDRESS_CR_TEST_RUNTIME"], "installed")
+
 
     DEV_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
 

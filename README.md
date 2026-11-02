@@ -772,13 +772,59 @@ handled. Prefer `agent resolve --stale`.
 Run the local verification gate before submitting changes:
 
 ```bash
-ruff check src tests scripts/build_plugin_payload.py
-python3 -m unittest discover -s tests
+scripts/dev_setup.sh
+source .venv/bin/activate
+ruff check src tests scripts/build_plugin_payload.py scripts/release
+python3 scripts/check_mypy_ratchet.py
+GH_ADDRESS_CR_STATE_DIR="$(mktemp -d)" python3 -m unittest discover -s tests
 python3 -m gh_address_cr --help
 python3 -m gh_address_cr agent manifest
 python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
 python3 scripts/build_plugin_payload.py --check
 ```
+
+The test harness defaults to `GH_ADDRESS_CR_TEST_RUNTIME=source`. It uses fast
+in-process CLI calls; set `GH_ADDRESS_CR_TEST_IN_PROCESS=0` to exercise the
+checkout in separate processes instead. This source mode deliberately exposes
+`src/` to child processes and does not prove installed-wheel behavior.
+
+`GH_ADDRESS_CR_TEST_RUNTIME=installed` always starts a new CLI process, removes
+`PYTHONPATH` and `PYTHONHOME` from child environments, and uses Python isolation
+for module invocations. Each test probes the selected interpreter's installation
+directory and rejects editable packages, checkout imports, or a test runner that
+imported a different runtime. Unknown modes fail immediately. There is no source
+fallback. Run the offline smoke and complete agent journey against a fresh wheel
+environment from the repository root:
+
+```bash
+python3 -m pip install build
+wheel_test_root="$(mktemp -d)"
+python3 -m build --wheel --outdir "$wheel_test_root/wheels"
+wheel_test_env="$wheel_test_root/venv"
+python3 -m venv "$wheel_test_env"
+"$wheel_test_env/bin/python" -m pip install "$wheel_test_root"/wheels/*.whl
+env -u PYTHONPATH -u PYTHONHOME PATH="$wheel_test_env/bin:$PATH" \
+  GH_ADDRESS_CR_TEST_RUNTIME=installed \
+  "$wheel_test_env/bin/python" -m unittest \
+  tests.contract.test_installed_runtime_smoke_contract \
+  tests.contract.test_agent_journey_contract
+```
+
+The fresh output directory keeps older wheels in `dist/` out of this installation.
+
+These tests use temporary state and a stateful fake GitHub CLI. Domain smoke
+requires the exact exit code, a complete JSON object, and the expected status and
+reason code; error-message keywords never make an unexpected failure pass. CI
+runs the installed checks on Python 3.12, 3.13, and 3.14. The full source suite
+retains the configured 83% coverage floor.
+
+Stack terminal reports include the same lifecycle evidence as their machine
+completion summary and audit artifact, including unavailable-report diagnostics.
+Lifecycle and telemetry remain advisory and do not change gate verdicts. Local
+terminal vocabulary is shared by validation reconciliation, logic validation,
+and the gate kernel; each consumer retains its existing evidence requirements.
+The reply-audit helper also checks `resolved`, `verified`, and `published`
+GitHub threads for missing durable replies and preserves its `CLOSED` input.
 
 Repository-only finding-resolution evaluations use an offline scripted control
 or an explicitly configured external command. The harness selects no agent,

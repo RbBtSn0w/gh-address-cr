@@ -89,7 +89,11 @@ def stack_observation(
 
 class PythonScriptTestCase(unittest.TestCase):
     def setUp(self):
+        self.runtime_mode = os.environ.get("GH_ADDRESS_CR_TEST_RUNTIME", "source")
+        if self.runtime_mode not in {"source", "installed"}:
+            raise ValueError("GH_ADDRESS_CR_TEST_RUNTIME must be source or installed")
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
         self.state_dir = Path(self.temp_dir.name) / "state"
         self.bin_dir = Path(self.temp_dir.name) / "bin"
         self.bin_dir.mkdir(parents=True, exist_ok=True)
@@ -97,19 +101,67 @@ class PythonScriptTestCase(unittest.TestCase):
         self.repo = "octo/example"
         self.pr = "77"
         self.original_process_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        self._process_state_restored = False
+        self.addCleanup(self._restore_process_state_dir)
         os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env = os.environ.copy()
         self.env["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
         self.env["DISABLE_TELEMETRY"] = "1"
         self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
-        self.env["PYTHONPATH"] = str(SRC_ROOT)
+        if self.runtime_mode == "source":
+            self.env["PYTHONPATH"] = str(SRC_ROOT)
+        else:
+            self.env = self._subprocess_environment()
+            self._verify_installed_runtime()
 
     def tearDown(self):
+        self._restore_process_state_dir()
+        self.temp_dir.cleanup()
+
+    def _restore_process_state_dir(self):
+        if self._process_state_restored:
+            return
         if self.original_process_state_dir is None:
             os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
         else:
             os.environ["GH_ADDRESS_CR_STATE_DIR"] = self.original_process_state_dir
-        self.temp_dir.cleanup()
+        self._process_state_restored = True
+
+    def _subprocess_environment(self):
+        env = self.env.copy()
+        if self.runtime_mode == "installed":
+            env.pop("PYTHONPATH", None)
+            env.pop("PYTHONHOME", None)
+        return env
+
+    def _in_process(self):
+        return self.runtime_mode == "source" and os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+
+    def _verify_installed_runtime(self):
+        probe = """
+import importlib.metadata
+import json
+import sysconfig
+from pathlib import Path
+import gh_address_cr
+
+location = Path(gh_address_cr.__file__).resolve()
+roots = [Path(sysconfig.get_path(key)).resolve() for key in ('purelib', 'platlib')]
+assert any(location.is_relative_to(root) for root in roots), 'checkout import: ' + str(location)
+direct_url = importlib.metadata.distribution('gh-address-cr').read_text('direct_url.json')
+assert not json.loads(direct_url or '{}').get('dir_info', {}).get('editable'), 'editable distribution'
+print(json.dumps(str(location)))
+"""
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", probe], text=True, capture_output=True,
+            cwd=self.temp_dir.name, env=self._subprocess_environment(), timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"installed runtime required; origin probe failed: {result.stderr}")
+        import gh_address_cr
+
+        if json.loads(result.stdout) != str(Path(gh_address_cr.__file__).resolve()):
+            raise RuntimeError("installed runtime required; the test runner imported a different runtime")
 
     def install_fake_pr_commits(self, *shas):
         """Put a `gh` on PATH that lists these SHAs as the PR's commits and fails every other call.
@@ -138,7 +190,7 @@ class PythonScriptTestCase(unittest.TestCase):
 
     def run_cmd(self, cmd, check=False, stdin=None):
         cmd = list(cmd)
-        in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+        in_process = self._in_process()
         if in_process and len(cmd) >= 2 and cmd[0] == sys.executable:
             is_m = cmd[1] == "-m" and len(cmd) >= 3
             target = cmd[2] if is_m else cmd[1]
@@ -168,13 +220,15 @@ class PythonScriptTestCase(unittest.TestCase):
 
 
         cmd = self._normalize_python_module_command(cmd)
+        if self.runtime_mode == "installed" and cmd[0] == sys.executable:
+            cmd.insert(1, "-I")
         return subprocess.run(
             cmd,
             input=stdin,
             text=True,
             capture_output=True,
             cwd=self.cwd,
-            env=self.env,
+            env=self._subprocess_environment(),
             check=check,
         )
 
@@ -183,17 +237,20 @@ class PythonScriptTestCase(unittest.TestCase):
             return cmd
         path = Path(cmd[1]).resolve()
         module_by_path = {
+            CLI_PY: "gh_address_cr",
             IMPLEMENTATIONS_DIR / "review_to_findings.py": "gh_address_cr.commands.review_to_findings",
             IMPLEMENTATIONS_DIR / "submit_action.py": "gh_address_cr.commands.submit_action",
             IMPLEMENTATIONS_DIR / "submit_feedback.py": "gh_address_cr.commands.submit_feedback",
         }
         module = module_by_path.get(path)
         if module is None:
+            if self.runtime_mode == "installed" and path.is_relative_to(RUNTIME_PACKAGE_DIR):
+                raise ValueError("installed runtime tests cannot execute checkout implementation files")
             return cmd
         return [cmd[0], "-m", module, *cmd[2:]]
 
     def run_runtime_module(self, *args, check=False, stdin=None):
-        in_process = os.environ.get("GH_ADDRESS_CR_TEST_IN_PROCESS", "1") == "1"
+        in_process = self._in_process()
         if in_process:
             import contextlib
             import io
@@ -251,11 +308,13 @@ class PythonScriptTestCase(unittest.TestCase):
                 raise subprocess.CalledProcessError(exit_code, ["gh-address-cr", *args], output=res.stdout, stderr=res.stderr)
             return res
         else:
-            env = self.env.copy()
-            existing = env.get("PYTHONPATH")
-            env["PYTHONPATH"] = str(SRC_ROOT) if not existing else f"{SRC_ROOT}:{existing}"
+            env = self._subprocess_environment()
+            if self.runtime_mode == "source":
+                existing = env.get("PYTHONPATH")
+                env["PYTHONPATH"] = str(SRC_ROOT) if not existing else f"{SRC_ROOT}:{existing}"
+            isolation = ["-I"] if self.runtime_mode == "installed" else []
             return subprocess.run(
-                [sys.executable, "-m", "gh_address_cr", *args],
+                [sys.executable, *isolation, "-m", "gh_address_cr", *args],
                 input=stdin,
                 text=True,
                 capture_output=True,
