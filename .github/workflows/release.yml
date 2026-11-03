@@ -1,256 +1,205 @@
 name: Release
-run-name: >-
-  Release / ${{ inputs.publish_target || 'pypi' }} / ${{ github.ref_name }}
-
 on:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: '0 7 * * 5'
   workflow_dispatch:
-    inputs:
-      publish_target:
-        description: "dry-run: validate only; testpypi: staging upload; pypi: production release"
-        type: choice
-        required: true
-        default: dry-run
-        options:
-          - dry-run
-          - testpypi
-          - pypi
-
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  id-token: write
-
+  contents: read
+env:
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 jobs:
-  build-release-package:
+  verify:
+    if: vars.RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
-      package_version: ${{ steps.package-version.outputs.version }}
-      publish_target: ${{ steps.publish-target.outputs.target }}
-      released: ${{ steps.package-version.outputs.released }}
-
+      released: ${{ steps.plan.outputs.released }}
+      version: ${{ steps.plan.outputs.version }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
     steps:
-      - name: Mint release-bot token
-        id: release-bot
-        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
-        uses: actions/create-github-app-token@v3
+      - uses: actions/checkout@v4
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: write
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-          token: ${{ steps.release-bot.outputs.token || github.token }}
-
-      - name: Resolve publish target
-        id: publish-target
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "target=${{ inputs.publish_target }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "target=pypi" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup Node.js
-        if: steps.publish-target.outputs.target == 'pypi'
-        uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@v4
         with:
-          node-version: "24"
-
-      - name: Install release dependencies
-        if: steps.publish-target.outputs.target == 'pypi'
+          node-version: '22.22.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install verification tools
         run: |
-          npm install --no-save --no-audit --no-fund \
-            semantic-release \
-            @semantic-release/changelog \
-            @semantic-release/commit-analyzer@13.0.1 \
-            @semantic-release/exec \
-            @semantic-release/git \
-            @semantic-release/github \
-            @semantic-release/release-notes-generator \
-            conventional-changelog-conventionalcommits@9.0.0
-
-      - name: Run semantic-release
-        if: steps.publish-target.outputs.target == 'pypi'
+          npm ci --ignore-scripts --no-audit --no-fund
+          python -m pip install -e '.[dev]' build twine
+      - name: Check candidate source
         env:
-          GITHUB_TOKEN: ${{ steps.release-bot.outputs.token || github.token }}
-        run: npx --yes semantic-release
-
-      - name: Prepare staging package version
-        if: steps.publish-target.outputs.target != 'pypi'
+          CANDIDATE: ${{ github.sha }}
+        run: bash scripts/release/check-main.sh "$CANDIDATE"
+      - name: Verify product
         run: |
-          python3 scripts/set_package_version.py --version "0.0.0.dev${GITHUB_RUN_NUMBER}"
-
-      - name: Resolve package version
-        id: package-version
+          ruff check src tests scripts/build_plugin_payload.py scripts/release
+          python scripts/check_mypy_ratchet.py
+          python -m unittest discover -s tests
+          python -m gh_address_cr --help
+          python -m gh_address_cr agent manifest
+          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs
+      - name: Analyze exact candidate
+        id: plan
         run: |
-          if [ "${{ steps.publish-target.outputs.target }}" = "pypi" ]; then
-            tag="$(git tag --points-at HEAD | grep '^v' | sort -V | tail -n 1 || true)"
-            if [ -z "$tag" ]; then
-              echo "released=false" >> "$GITHUB_OUTPUT"
-              echo "version=" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "version=0.0.0.dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Guard against squash-merged release promotion
-        if: steps.publish-target.outputs.target == 'pypi' && steps.package-version.outputs.released == 'false'
+          mkdir -p dist
+          node scripts/release/engine.mjs plan dist/plan.json
+      - name: Build final release bytes without publisher authority
+        if: steps.plan.outputs.released == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
+          CANDIDATE: ${{ github.sha }}
         run: |
-          subject="$(git log -1 --format=%s)"
-          parents="$(git log -1 --format=%p | wc -w)"
-          if [ "$parents" -eq 1 ] && printf '%s' "$subject" | grep -q '^chore(release): promote'; then
-            echo "::error::Release promotion was squash-merged, so semantic-release saw only a chore commit and published nothing. Re-promote develop -> main with a merge commit."
-            exit 1
-          fi
-
-      - name: Setup Python
-        if: steps.package-version.outputs.released == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install release helper dependencies
-        if: steps.package-version.outputs.released == 'true'
-        run: python -m pip install --upgrade packaging
-
-      - name: Install package build dependencies
-        if: steps.package-version.outputs.released == 'true'
-        run: python -m pip install --upgrade pip build twine
-
-      - name: Package build
-        if: steps.package-version.outputs.released == 'true'
-        run: |
-          rm -rf dist build
+          python scripts/set_package_version.py --version "$PACKAGE_VERSION"
           python -m build
-
-      - name: Verify package version
-        if: steps.package-version.outputs.released == 'true'
-        env:
-          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
-        run: |
-          python - <<'PY'
-          import email.parser
-          import os
-          import tarfile
-          import zipfile
-          from pathlib import Path
-
-          expected = os.environ["PACKAGE_VERSION"]
-          wheel = next(Path("dist").glob("*.whl"))
-          sdist = next(Path("dist").glob("*.tar.gz"))
-
-          with zipfile.ZipFile(wheel) as archive:
-              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
-              metadata = email.parser.Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
-          if metadata["Version"] != expected:
-              raise SystemExit(f"wheel version {metadata['Version']} does not match {expected}")
-
-          with tarfile.open(sdist) as archive:
-              metadata_member = next(member for member in archive.getmembers() if member.name.endswith("PKG-INFO"))
-              metadata = email.parser.Parser().parsestr(archive.extractfile(metadata_member).read().decode("utf-8"))
-          if metadata["Version"] != expected:
-              raise SystemExit(f"sdist version {metadata['Version']} does not match {expected}")
-          PY
-
-      - name: Check package metadata
-        if: steps.package-version.outputs.released == 'true'
-        run: twine check dist/*
-
-      - name: Generate plugin payload
-        if: steps.package-version.outputs.released == 'true'
-        run: python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr
-
-      - name: Render Homebrew formula from local sdist
-        if: steps.package-version.outputs.released == 'true'
-        env:
-          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
-        run: |
-          sdists=(dist/*.tar.gz)
-          sdist="${sdists[0]}"
-          python scripts/release/render_homebrew_formula.py \
-            --version "$PACKAGE_VERSION" \
-            --sdist-path "$sdist" \
-            --output /tmp/gh-address-cr.rb
-
-      - name: Upload package artifacts
-        if: steps.package-version.outputs.released == 'true'
-        uses: actions/upload-artifact@v4
+          python -m twine check dist/*.whl dist/*.tar.gz
+          python -m scripts.release.plugin_release prepare --directory dist/plugin-release --version "$PACKAGE_VERSION" --candidate "$CANDIDATE"
+          python scripts/release/render_homebrew_formula.py --version "$PACKAGE_VERSION" --sdist-path dist/gh_address_cr-"$PACKAGE_VERSION".tar.gz --output "$RUNNER_TEMP/gh-address-cr.rb"
+          python scripts/release/verify-package.py "$PACKAGE_VERSION"
+          python -m venv "$RUNNER_TEMP/installed-release"
+          "$RUNNER_TEMP/installed-release/bin/pip" install dist/*.whl
+          GH_ADDRESS_CR_TEST_RUNTIME=installed "$RUNNER_TEMP/installed-release/bin/python" -m unittest tests.contract.test_installed_runtime_smoke_contract tests.contract.test_agent_journey_contract
+          python -m scripts.release.handoff record --candidate "$CANDIDATE"
+      - uses: actions/upload-artifact@v4
+        id: artifact
+        if: steps.plan.outputs.released == 'true'
         with:
-          name: gh-address-cr-dist
-          path: |
-            dist/*.whl
-            dist/*.tar.gz
-
-      - name: Upload plugin payload artifact
-        if: steps.package-version.outputs.released == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: gh-address-cr-plugin
-          path: dist/plugin/gh-address-cr
-
-  publish-testpypi:
-    needs: build-release-package
+          name: release-main-verified-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+  publish:
+    needs: verify
+    if: needs.verify.outputs.released == 'true' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    if: needs.build-release-package.outputs.released == 'true' && needs.build-release-package.outputs.publish_target == 'testpypi'
+    timeout-minutes: 15
     permissions:
-      contents: read
-      id-token: write
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: gh-address-cr-dist
+          ref: ${{ needs.verify.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
           path: dist
-
-      - name: Publish package to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          repository-url: https://test.pypi.org/legacy/
-
+      - name: Verify handoff and live main then publish prebuilt bytes
+        env:
+          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -m scripts.release.handoff verify --candidate "$CANDIDATE"
+          bash scripts/release/check-main.sh "$CANDIDATE"
+          node scripts/release/engine.mjs publish dist/plan.json
   publish-pypi:
-    needs: build-release-package
+    needs: [verify, publish]
+    if: vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    if: >-
-      needs.build-release-package.outputs.released == 'true' &&
-      needs.build-release-package.outputs.publish_target == 'pypi'
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: gh-address-cr-dist
-          path: dist
-
-      - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          ref: ${{ needs.verify.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
+          path: verified
+      - name: Verify handoff and stage only missing PyPI files
+        id: stage
+        env:
+          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+        run: |
+          python -m scripts.release.pypi_reconcile stage --directory verified --candidate "$CANDIDATE" --output dist --receipt "$RUNNER_TEMP/pypi-receipt.json"
+          bash scripts/release/check-main.sh "$CANDIDATE"
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.stage.outputs.missing == 'true'
         with:
           packages-dir: dist
-
+      - name: Read back exact per-file publication results
+        if: always() && steps.stage.outcome == 'success'
+        env:
+          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+        run: python -m scripts.release.pypi_reconcile confirm --directory verified --candidate "$CANDIDATE" --receipt "$RUNNER_TEMP/pypi-receipt.json"
+      - name: Preserve per-file PyPI receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-publication-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pypi-receipt.json
+          if-no-files-found: warn
   publish-homebrew:
-    needs: [build-release-package, publish-pypi]
-    if: >-
-      needs.build-release-package.outputs.released == 'true' &&
-      needs.build-release-package.outputs.publish_target == 'pypi'
+    needs: [verify, publish-pypi]
+    if: vars.RELEASE_ENABLED == 'true'
     uses: ./.github/workflows/homebrew.yml
     permissions:
       contents: write
     with:
-      version: ${{ needs.build-release-package.outputs.package_version }}
-      rebuild: "0"
+      version: ${{ needs.verify.outputs.version }}
+      source_sha: ${{ needs.verify.outputs.source_sha }}
+      rebuild: '0'
     secrets: inherit
+  publish-plugin-marketplace:
+    needs: [verify, publish-pypi]
+    if: vars.RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: plugin-marketplace-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install verified runtime without running source build hooks
+        run: |
+          python -m pip install --only-binary=:all: 'PyYAML>=6' packaging
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
+          path: dist
+      - name: Verify and publish immutable plugin bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+          PACKAGE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          python -m scripts.release.handoff verify --candidate "$CANDIDATE"
+          python -m pip install --only-binary=:all: dist/*.whl
+          bash scripts/release/check-main.sh "$CANDIDATE"
+          python -m scripts.release.plugin_release publish --directory dist/plugin-release --version "$PACKAGE_VERSION"

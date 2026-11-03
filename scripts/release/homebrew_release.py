@@ -9,7 +9,6 @@ import re
 import shutil
 import sys
 import time
-import tomllib
 import zipfile
 from pathlib import Path
 from urllib.parse import unquote
@@ -56,12 +55,18 @@ def stage_formula(text: str, name: str = "gh-address-cr") -> Path:
 
 def stable_source(version: str) -> tuple[str, str, str]:
     shared.stable_version(version)
+    expected = os.environ.get('EXPECTED_SOURCE_SHA', '')
+    if not re.fullmatch('[0-9a-f]{40}', expected):
+        raise ValueError('expected source SHA is required')
     shared.command(["git", "fetch", "--no-tags", "origin", f"refs/tags/v{version}:refs/tags/v{version}"])
     commit = shared.command(["git", "rev-parse", f"refs/tags/v{version}^{{commit}}"]).stdout.strip()
-    project = tomllib.loads(shared.command(["git", "show", f"v{version}:pyproject.toml"]).stdout)
-    if project["project"]["version"] != version:
-        raise ValueError("release tag does not describe the requested package version")
+    if commit != expected:
+        raise ValueError('release tag differs from expected source SHA')
+    # The immutable trusted workflow checkout must contain the published source.
+    shared.command(['git', 'merge-base', '--is-ancestor', commit, 'HEAD'])
     metadata = fetch_pypi_json("gh-address-cr", version, DEFAULT_PYPI_BASE_URL, 12, 10)
+    if metadata.get('info', {}).get('version') != version:
+        raise ValueError('PyPI metadata differs from requested release version')
     url, sha = select_sdist_from_pypi(metadata, version)
     return commit, shared.public_url(url, {"files.pythonhosted.org"}), sha
 

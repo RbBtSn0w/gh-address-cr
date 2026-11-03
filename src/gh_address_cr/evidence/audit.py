@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-TERMINAL_ITEM_STATES = {"fixed", "clarified", "deferred", "rejected", "closed", "CLOSED"}
+from gh_address_cr.core.github_thread_state import GITHUB_THREAD_TERMINAL_STATES
+
+TERMINAL_ITEM_STATES = GITHUB_THREAD_TERMINAL_STATES | {"CLOSED"}
 
 
 def has_durable_reply_evidence(item: dict[str, Any] | None) -> bool:

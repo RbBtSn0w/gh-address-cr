@@ -428,12 +428,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
             positions.append(match.start())
         self.assertEqual(positions, sorted(positions), "otel-minimum-versions steps are out of order")
 
-    def test_dev_preview_waits_for_the_minimum_versions_job(self):
-        # The job is not a required status check, so gating the preview build on it is what makes
-        # a floor regression visible before an artifact is published.
-        preview = self._ci_job("pr-dev-preview")
-
-        self.assertRegex(preview, r"(?m)^    needs:\s*\[[^\]]*\blint-and-test\b[^\]]*\botel-minimum-versions\b[^\]]*\]")
+    def test_dev_preview_is_retired(self):
+        self.assertNotIn('pr-dev-preview:', CI_WORKFLOW.read_text())
 
     def test_changelog_is_release_managed_and_not_ahead_of_source_version(self):
         changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -485,11 +481,9 @@ class RuntimePackagingTest(PythonScriptTestCase):
     def test_semantic_release_prepares_python_package_version(self):
         text = RELEASE_CONFIG.read_text(encoding="utf-8")
 
-        self.assertIn("@semantic-release/exec", text)
-        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", text)
-        self.assertIn("@semantic-release/git", text)
-        self.assertIn('"pyproject.toml"', text)
-        self.assertIn('"src/gh_address_cr/__init__.py"', text)
+        self.assertNotIn("@semantic-release/exec", text)
+        self.assertIn("scripts/release/consistency.mjs", text)
+        self.assertNotIn('"@semantic-release/git"', text)
         self.assertIn("@semantic-release/commit-analyzer", text)
         self.assertIn("@semantic-release/release-notes-generator", text)
         self.assertIn('repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git"', text)
@@ -497,6 +491,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn(r"(\\S.*)", text)
 
     def test_ci_workflow_has_build_install_and_installed_smoke_gates(self):
+        import yaml
+
         text = CI_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("Package build", text)
@@ -505,17 +501,23 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertIn("python -m build", text)
         self.assertIn("python -m pip install dist/*.whl", text)
         self.assertIn("PYTHONPATH: src", text)
-        self.assertIn("ModuleNotFoundError", text)
-        self.assertIn("Final gate failed to evaluate", text)
-        self.assertIn("error connecting to api.github.com", text)
+        self.assertNotIn("run_domain_smoke", text)
+        self.assertIn("GH_ADDRESS_CR_TEST_RUNTIME: installed", text)
         for command in (
             "gh-address-cr --help",
             "python -m gh_address_cr --help",
             "gh-address-cr agent manifest",
-            "gh-address-cr agent orchestrate status owner/repo 123",
-            "gh-address-cr final-gate owner/repo 123",
+            "python -m unittest tests.contract.test_installed_runtime_smoke_contract",
+            "python -m unittest tests.contract.test_agent_journey_contract",
         ):
             self.assertIn(command, text)
+
+        steps = yaml.safe_load(text)["jobs"]["lint-and-test"]["steps"]
+        installed_steps = [step for step in steps if step.get("name") in {"Installed CLI smoke", "Installed wheel agent journey"}]
+        self.assertEqual(len(installed_steps), 2)
+        for step in installed_steps:
+            self.assertEqual(step["env"]["GH_ADDRESS_CR_TEST_RUNTIME"], "installed")
+
 
     DEV_TRACES_ENDPOINT = "https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces"
 
@@ -619,40 +621,22 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertLess(install_index, text.index("- name: Mypy (blocking)"))
         self.assertLess(install_index, text.index("- name: Unit tests (with coverage)"))
 
-    def test_release_workflow_has_trusted_publishing_version_and_staging_gates(self):
-        text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertIn("workflow_dispatch:", text)
-        self.assertIn("publish_target", text)
-        self.assertIn("id-token: write", text)
-        self.assertIn("scripts/set_package_version.py", text)
-        self.assertIn("python -m build", text)
-        self.assertIn("twine check dist/*", text)
-        self.assertIn("Verify package version", text)
-        self.assertIn("Install release helper dependencies", text)
-        self.assertIn("python -m pip install --upgrade packaging", text)
-        self.assertIn("Render Homebrew formula from local sdist", text)
-        self.assertIn("scripts/release/render_homebrew_formula.py", text)
-        self.assertIn("pypa/gh-action-pypi-publish", text)
-        self.assertIn("repository-url: https://test.pypi.org/legacy/", text)
-        self.assertNotIn("environment: pypi", text)
-        self.assertNotIn("confirm_pypi_publish", text)
-        self.assertRegex(
-            text,
-            re.compile(
-                r"publish-pypi:.*needs\.build-release-package\.outputs\.publish_target == 'pypi'",
-                re.DOTALL,
-            ),
-        )
+    def test_release_workflow_has_readonly_versioned_verification_and_oidc(self):
+        text = RELEASE_WORKFLOW.read_text()
+        for expected in ('workflow_dispatch:', 'id-token: write', 'scripts/set_package_version.py',
+                         'python -m build', 'twine check', 'verify-package.py',
+                         'pypa/gh-action-pypi-publish', 'artifact-ids:', 'RELEASE_ENABLED'):
+            self.assertIn(expected, text)
+        self.assertNotIn('test.pypi.org', text)
 
     def test_release_workflow_updates_homebrew_tap_after_pypi_publish(self):
         text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("publish-homebrew:", text)
-        self.assertIn("needs: [build-release-package, publish-pypi]", text)
-        self.assertIn("needs.build-release-package.outputs.publish_target == 'pypi'", text)
+        self.assertIn("needs: [verify, publish-pypi]", text)
+        self.assertIn("vars.RELEASE_ENABLED == 'true'", text)
         self.assertIn("uses: ./.github/workflows/homebrew.yml", text)
-        self.assertIn("version: ${{ needs.build-release-package.outputs.package_version }}", text)
+        self.assertIn("version: ${{ needs.verify.outputs.version }}", text)
         homebrew = (ROOT / ".github/workflows/homebrew.yml").read_text()
         self.assertIn("workflow_dispatch:", homebrew)
         self.assertIn("workflow_call:", homebrew)
@@ -877,14 +861,11 @@ class RuntimePackagingTest(PythonScriptTestCase):
     def test_contributing_documents_homebrew_release_policy(self):
         text = CONTRIBUTING.read_text(encoding="utf-8")
 
-        self.assertIn("Homebrew tap update to `RbBtSn0w/homebrew-tap`", text)
-        self.assertIn("after the PyPI sdist is available", text)
-        self.assertIn("RELEASE_BOT_PRIVATE_KEY", text)
-        self.assertIn("RELEASE_BOT_APP_ID", text)
-        self.assertIn("GitHub App", text)
-        self.assertIn("Contents: Read and write", text)
-        self.assertIn("dry-run` and `testpypi` targets validate package build and Homebrew formula rendering", text)
-        self.assertIn("both PyPI and Homebrew publishing must skip explicitly", text)
+        self.assertIn('Main release train', text)
+        self.assertIn('RELEASE_ENABLED', text)
+        self.assertIn('four-platform verification', text)
+        self.assertIn('Trusted Publishing', text)
+        self.assertIn('No version/changelog commit or PR preview', text)
 
 
 if __name__ == "__main__":

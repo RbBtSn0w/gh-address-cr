@@ -1,0 +1,50 @@
+name: Recover Plugin Marketplace
+run-name: Recover plugin marketplace / ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing stable GitHub Release version (X.Y.Z); never rebuilds assets"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  recover-plugin-marketplace:
+    if: vars.RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: plugin-marketplace-publication
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted recovery implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install published runtime without source build hooks
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python -m pip install --only-binary=:all: "gh-address-cr==$VERSION" 'PyYAML>=6'
+
+      - name: Recover existing assets and read back marketplace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          python -m scripts.release.plugin_release recover
+          --directory dist/plugin-release --version "$VERSION"

@@ -12,6 +12,7 @@ from gh_address_cr.core.github_thread_state import (
     is_resolved_github_thread,
     is_terminal_github_thread,
 )
+from gh_address_cr.core.local_item_state import LOCAL_TERMINAL_STATES
 from gh_address_cr.core.validation_evidence import validation_evidence_has_success
 
 JsonDict = dict[str, Any]
@@ -43,15 +44,6 @@ FINAL_GATE_REQUIRED_CHECKS_MISSING = "FINAL_GATE_REQUIRED_CHECKS_MISSING"
 FINAL_GATE_LOGIC_VALIDATION_BLOCKING = "FINAL_GATE_LOGIC_VALIDATION_BLOCKING"
 
 GITHUB_TERMINAL_STATES = GITHUB_THREAD_TERMINAL_STATES
-LOCAL_TERMINAL_STATES = {
-    "closed",
-    "fixed",
-    "clarified",
-    "deferred",
-    "rejected",
-    "verified",
-    "published",
-}
 
 COUNT_KEYS = (
     "unresolved_github_threads_count",
