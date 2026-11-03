@@ -175,8 +175,9 @@ Completion means the latest final gate reports:
   `python3 scripts/compare_telemetry_by_runtime.py` (add `--baseline` and
   `--candidate` runtime labels to fail on a success-rate drop or new flag kinds)
 - an advisory `cr-lifecycle.v1` report at `cr-metrics.json`; exact lead-time
-  aggregates exclude inferred observation times, and report failures never
-  change the gate verdict or exit code
+  aggregates exclude inferred observation times. An unreadable evidence ledger
+  replaces any stale report with the current failure diagnostics; report failures
+  never change the gate verdict or exit code
 - an audit summary path with a sha256 hash
 
 A zero unresolved-thread count alone is not sufficient.

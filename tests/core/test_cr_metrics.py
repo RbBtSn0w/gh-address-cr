@@ -9,6 +9,26 @@ from gh_address_cr.core.cr_metrics import _median, _percentile, _read_ledger, bu
 
 
 class CRMetricsTest(unittest.TestCase):
+    def test_unreadable_ledger_persists_failure_and_replaces_stale_success(self):
+        for stale_success in (False, True):
+            with self.subTest(stale_success=stale_success), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger = root / "evidence.jsonl"
+                ledger.mkdir()
+                artifact = root / "cr-metrics.json"
+                if stale_success:
+                    artifact.write_text(json.dumps({"status": "SUCCESS"}), encoding="utf-8")
+                with (
+                    patch("gh_address_cr.core.cr_metrics.core_paths.evidence_ledger_file", return_value=ledger),
+                    patch("gh_address_cr.core.cr_metrics.core_paths.workspace_dir", return_value=root),
+                ):
+                    report = build_cr_summary("octo/example", "77")
+
+                self.assertEqual(report["status"], "FAILED")
+                self.assertEqual(report["completeness"], "unavailable")
+                self.assertIn("evidence ledger unreadable", report["diagnostics"])
+                self.assertEqual(json.loads(artifact.read_text(encoding="utf-8")), report)
+
     def test_ledger_reader_retains_only_latest_session_rows(self):
         rows = [
             {

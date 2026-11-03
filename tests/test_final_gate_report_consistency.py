@@ -23,7 +23,7 @@ from tests.helpers import stack_observation
 class FinalGateReportConsistencyTests(unittest.TestCase):
     def test_lifecycle_survives_output_and_archive_boundaries(self):
         for stack, machine, archive, lifecycle_kind in itertools.product(
-            (False, True), (False, True), (False, True), ("eligible", "empty", "unavailable", "failure")
+            (False, True), (False, True), (False, True), ("eligible", "empty", "unavailable", "failure", "unreadable")
         ):
             with self.subTest(stack=stack, machine=machine, archive=archive, lifecycle=lifecycle_kind):
                 self.check_report(stack, machine, archive, lifecycle_kind)
@@ -36,8 +36,13 @@ class FinalGateReportConsistencyTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "octo__example" / "pr-102"
+            build_cr_summary = final_gate.core_cr_metrics.build_cr_summary
 
             def build_lifecycle(*args, **kwargs):
+                if lifecycle_kind == "unreadable":
+                    write_json_atomic(workspace / "cr-metrics.json", {"status": "SUCCESS"})
+                    with patch.object(final_gate.core_cr_metrics, "_scan_ledger", side_effect=PermissionError):
+                        return build_cr_summary(*args, **kwargs)
                 if lifecycle_kind == "failure":
                     raise OSError("injected lifecycle failure")
                 report = {
@@ -78,7 +83,10 @@ class FinalGateReportConsistencyTests(unittest.TestCase):
             artifact = next(Path(tmp).rglob(artifact_name))
             summary = artifact.read_text()
             lifecycle = json.loads((artifact.parent / "cr-metrics.json").read_text())
-            expected_status = "UNAVAILABLE" if lifecycle_kind in {"failure", "unavailable"} else "SUCCESS"
+            expected_status = (
+                "FAILED" if lifecycle_kind == "unreadable"
+                else "UNAVAILABLE" if lifecycle_kind in {"failure", "unavailable"} else "SUCCESS"
+            )
             self.assertEqual(lifecycle["status"], expected_status)
             self.assertIn(f"cr_metrics_status: {expected_status}", summary)
             marker = "lifecycle: 2 eligible/1 excluded"
@@ -95,7 +103,7 @@ class FinalGateReportConsistencyTests(unittest.TestCase):
                 self.assertIn(f"cr_metrics_status={expected_status}", output)
             self.assertIn(str(artifact.parent / "cr-metrics.json"), guidance)
             self.assertIn(hashlib.sha256(artifact.read_bytes()).hexdigest(), guidance)
-            if lifecycle_kind in {"failure", "unavailable"}:
+            if lifecycle_kind in {"failure", "unavailable", "unreadable"}:
                 self.assertTrue(lifecycle["diagnostics"])
                 self.assertIn(lifecycle["diagnostics"][0], summary)
                 if not machine:
