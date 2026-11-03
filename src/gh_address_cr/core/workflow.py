@@ -39,6 +39,7 @@ from gh_address_cr.core.github_thread_state import (
     returned_claimable_state,
 )
 from gh_address_cr.core.io import write_json_atomic
+from gh_address_cr.core.local_item_state import LOCAL_TERMINAL_STATES as TERMINAL_LOCAL_VALIDATION_STATES
 from gh_address_cr.core.severity import (
     review_priority_evidence,
 )
@@ -125,9 +126,6 @@ TRIVIAL_SENSITIVE_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])("
     + "|".join(re.escape(marker).replace(r"\ ", r"\s+") for marker in TRIVIAL_SENSITIVE_MARKERS)
     + r")(?![A-Za-z0-9])"
-)
-TERMINAL_LOCAL_VALIDATION_STATES = frozenset(
-    {"closed", "fixed", "clarified", "deferred", "rejected", "verified", "published"}
 )
 RUNTIME_PACKAGE = "gh-address-cr"
 RUNTIME_ENTRYPOINTS = ("gh-address-cr", "python3 -m gh_address_cr")

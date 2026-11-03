@@ -461,6 +461,7 @@ def build_cr_summary(repo: str, pr_number: str, *, gate_completed_at: str | None
             "diagnostics": ["evidence ledger unreadable"],
             "report_artifact": str(artifact),
         }
+        _write_artifact(artifact, report)
         _emit_projection_event(report, started_at=started_at)
         return report
 
