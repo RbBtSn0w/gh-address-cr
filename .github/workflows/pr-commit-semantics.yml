@@ -1,0 +1,43 @@
+name: PR Commit Semantics
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  commit-message:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # No checkout: untrusted PR metadata is input, never executable code.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - name: Install isolated commitlint
+        env:
+          RELEASE_TOOLS: ${{ runner.temp }}/commit-tools
+        run: npm install --prefix "$RELEASE_TOOLS" --ignore-scripts --no-audit --no-fund --save-exact @commitlint/lint@19.8.1 @commitlint/config-conventional@19.8.1 conventional-changelog-conventionalcommits@9.0.0
+      - name: Validate intended squash message
+        env:
+          RELEASE_TOOLS: ${{ runner.temp }}/commit-tools
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node --input-type=module <<'JS'
+          import {createRequire} from 'node:module';
+          import {join} from 'node:path';
+          import {pathToFileURL} from 'node:url';
+          const require = createRequire(join(process.env.RELEASE_TOOLS, 'package.json'));
+          const load = async name => (await import(pathToFileURL(require.resolve(name)).href)).default;
+          const [lint, config, preset] = await Promise.all(['@commitlint/lint', '@commitlint/config-conventional', 'conventional-changelog-conventionalcommits'].map(load));
+          const parserOpts = {...(await preset()).parser,
+            notesPattern: keywords => new RegExp(`^[\\s|*]*(${keywords})[:\\s]+(\\S.*)`, 'i')};
+          const rules = {...config.rules, 'body-max-line-length': [0], 'footer-max-line-length': [0]};
+          const result = await lint(`${process.env.PR_TITLE}\n\n${process.env.PR_BODY || ''}`, rules, {parserOpts, defaultIgnores: false});
+          for (const problem of [...result.errors, ...result.warnings]) console.error(problem.message);
+          if (!result.valid || result.warnings.length) process.exit(1);
+          JS

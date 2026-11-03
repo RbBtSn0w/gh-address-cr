@@ -180,3 +180,22 @@ class PluginReleaseTests(unittest.TestCase):
         bundle.receipt['files']['assets/icon.png'] = release.sha(b'altered image')
         with self.assertRaisesRegex(ValueError, 'generated'):
             release.verify_source(bundle, self.source)
+
+    def test_publication_and_recovery_never_execute_a_source_builder(self):
+        original = release.shared.command
+        def command(argv, **kwargs):
+            if Path(argv[0]).name.startswith('python') and any('build_plugin_payload.py' in str(part) for part in argv):
+                raise AssertionError('source builder executed under publisher authority')
+            return original(argv, **kwargs)
+        with patch.object(release.shared, 'command', side_effect=command), patch.object(release, 'require_release'), patch.object(release.PluginAssets, 'upload_verified'), patch.object(release, 'publish_git', return_value={'status': 'published'}):
+            release.publish(self.bundle, '1.0.0', source=self.source)
+            def download(name, directory):
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / name).write_bytes((self.bundle / name).read_bytes())
+            with patch.object(release.PluginAssets, 'names', return_value=set(release.asset_names('1.0.0'))), patch.object(release.PluginAssets, 'download', side_effect=download):
+                release.recover(self.root / 'recovery', '1.0.0', source=self.source)
+
+    def test_generation_comparison_is_required_in_readonly_preparation(self):
+        with patch('scripts.release.plugin_bundle.verify_generated', side_effect=ValueError('readonly generation comparison')):
+            with self.assertRaisesRegex(ValueError, 'readonly generation'):
+                release.prepare(self.root / 'another-bundle', '1.0.0', source=self.source, run_url='https://github.com/RbBtSn0w/gh-address-cr/actions/runs/1')

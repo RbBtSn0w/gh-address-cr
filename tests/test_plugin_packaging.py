@@ -347,20 +347,20 @@ class PluginPackagingTest(unittest.TestCase):
         self.assertIn("Generate plugin payload", ci_text)
         self.assertIn("python scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr", ci_text)
         self.assertNotIn("sync_scripts.py", ci_text)
-        self.assertIn("Generate plugin payload", release_text)
-        self.assertIn("python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr", release_text)
-        self.assertIn("Upload plugin payload artifact", release_text)
+        self.assertIn("plugin_release prepare", release_text)
+        self.assertIn("--candidate", release_text)
+        self.assertIn("name: release-main-verified", release_text)
         self.assertNotIn("sync_scripts.py", release_text)
 
     def test_release_version_prepare_regenerates_plugin_payload(self):
         release_config = RELEASE_CONFIG.read_text(encoding="utf-8")
         release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn("scripts/set_package_version.py ${nextRelease.version}", release_config)
+        self.assertNotIn("@semantic-release/exec", release_config)
         self.assertNotIn("scripts/build_plugin_payload.py", release_config)
         self.assertNotIn("plugin/gh-address-cr/.codex-plugin/plugin.json", release_config)
         self.assertNotIn("plugin/gh-address-cr/plugin.json", release_config)
-        self.assertIn("python3 scripts/build_plugin_payload.py --output dist/plugin/gh-address-cr", release_workflow)
+        self.assertIn("python -m scripts.release.plugin_release prepare", release_workflow)
 
     def test_readme_documents_codex_marketplace_install_path(self):
         readme = README.read_text(encoding="utf-8")

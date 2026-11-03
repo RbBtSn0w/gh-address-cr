@@ -8,17 +8,11 @@ const releaseParserOpts = {
 };
 
 module.exports = {
-  branches: [
-    "main",
-    {
-      name: "develop",
-      channel: "beta",
-      prerelease: "beta",
-    },
-  ],
+  branches: ["main"],
   repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git",
   tagFormat: "v${version}",
   plugins: [
+    "./scripts/commit-semantics.mjs",
     [
       "@semantic-release/commit-analyzer",
       {
@@ -36,29 +30,12 @@ module.exports = {
         parserOpts: releaseParserOpts,
       },
     ],
-    [
-      "@semantic-release/changelog",
-      {
-        changelogFile: "CHANGELOG.md",
-      },
-    ],
-    [
-      "@semantic-release/exec",
-      {
-        prepareCmd: "python3 scripts/set_package_version.py ${nextRelease.version}",
-      },
-    ],
-    [
-      "@semantic-release/git",
-      {
-        assets: [
-          "CHANGELOG.md",
-          "pyproject.toml",
-          "src/gh_address_cr/__init__.py",
-        ],
-        message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
-      },
-    ],
-    "@semantic-release/github",
+    "./scripts/release/consistency.mjs",
+    ["@semantic-release/github", {
+      assets: ["dist/*.whl", "dist/*.tar.gz"],
+      successComment: false,
+      failComment: false,
+      releasedLabels: false,
+    }],
   ],
 };

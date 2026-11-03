@@ -15,28 +15,16 @@ def job(text, name):
 
 class PluginMarketplaceWorkflowTests(unittest.TestCase):
     def test_stable_publication_waits_for_pypi_and_uses_exact_source(self):
-        release = (WORKFLOWS / "release.yml").read_text()
-        publish = job(release, "publish-plugin-marketplace")
-        self.assertIn("needs: [build-release-package, publish-pypi]", publish)
-        self.assertIn("outputs.publish_target == 'pypi'", publish)
-        self.assertIn("outputs.released == 'true'", publish)
-        self.assertIn("ref: ${{ needs.build-release-package.outputs.source_sha }}", publish)
-        self.assertIn("fetch-depth: 0", publish)
-        self.assertIn("persist-credentials: false", publish)
-        self.assertIn("permissions:\n      contents: write", publish)
-        self.assertNotIn("id-token:", publish)
-        self.assertNotIn("secrets.", publish)
-        self.assertIn("python -m scripts.release.plugin_release publish", publish)
-        self.assertIn("GH_TOKEN: ${{ github.token }}", publish)
-        self.assertIn("python -m pip install .", publish)
-        build = job(release, "build-release-package")
-        self.assertIn("source_sha: ${{ steps.plugin-source.outputs.sha }}", build)
-        self.assertIn('test "$(git rev-parse HEAD)" = "$(git rev-parse "v${PACKAGE_VERSION}^{commit}")"', build)
-        self.assertIn("python -m scripts.release.plugin_release prepare", build)
-        artifact = build.split("- name: Upload plugin payload artifact", 1)[1]
-        self.assertIn("dist/plugin-release/", artifact)
-        self.assertIn("if-no-files-found: error", artifact)
-        self.assertNotIn("path: dist/plugin/gh-address-cr", artifact)
+        release = (WORKFLOWS / 'release.yml').read_text()
+        publish = job(release, 'publish-plugin-marketplace')
+        for expected in ('needs: [verify, publish-pypi]', "vars.RELEASE_ENABLED == 'true'",
+                         'ref: ${{ needs.verify.outputs.source_sha }}', 'fetch-depth: 0',
+                         'persist-credentials: false', 'contents: write', 'artifact-ids:',
+                         'python -m scripts.release.plugin_release publish', 'handoff verify'):
+            self.assertIn(expected, publish)
+        self.assertNotIn('id-token:', publish)
+        self.assertNotIn('python -m build', publish)
+        self.assertIn('plugin_release prepare', job(release, 'verify'))
 
     def test_recovery_is_version_only_trusted_and_serialized_with_release(self):
         recovery = (WORKFLOWS / "plugin-marketplace.yml").read_text()
@@ -46,8 +34,8 @@ class PluginMarketplaceWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", triggers)
         self.assertIn("version:", triggers)
         self.assertNotIn("push:", triggers)
-        self.assertIn("if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)", recover)
-        self.assertIn("ref: ${{ github.event.repository.default_branch }}", recover)
+        self.assertIn("if: vars.RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main'", recover)
+        self.assertIn("ref: ${{ github.sha }}", recover)
         self.assertIn("persist-credentials: false", recover)
         self.assertIn("permissions:\n      contents: write", recover)
         self.assertIn("python -m scripts.release.plugin_release recover", recover)
@@ -70,17 +58,7 @@ class PluginMarketplaceWorkflowTests(unittest.TestCase):
         self.assertIn("python -m scripts.release.plugin_marketplace_smoke --codex", smoke)
         self.assertIn("actions/setup-node@v4", smoke)
 
-    def test_builder_and_release_jobs_install_yaml_and_runtime_dependencies(self):
-        release = (WORKFLOWS / "release.yml").read_text()
-        recovery = (WORKFLOWS / "plugin-marketplace.yml").read_text()
-        ci = (WORKFLOWS / "ci.yml").read_text()
-        for content, name in (
-            (release, "build-release-package"),
-            (release, "publish-plugin-marketplace"),
-            (recovery, "recover-plugin-marketplace"),
-            (ci, "plugin-marketplace-smoke"),
-        ):
-            with self.subTest(job=name):
-                self.assertIn("python -m pip install . 'PyYAML>=6'", job(content, name))
-        self.assertIn("mypy 'PyYAML>=6'", job(ci, "lint-and-test"))
-        self.assertIn("-e . 'PyYAML>=6'", job(ci, "otel-minimum-versions"))
+    def test_readonly_builder_has_runtime_dependencies(self):
+        release = (WORKFLOWS / 'release.yml').read_text()
+        self.assertIn("python -m pip install -e '.[dev]' build twine", job(release, 'verify'))
+        self.assertNotIn('pip install .', job(release, 'publish'))

@@ -1,0 +1,93 @@
+"""Main-only release authority and immutable candidate handoff contracts."""
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class ScheduledReleaseContract(unittest.TestCase):
+    def test_legacy_preview_producer_is_absent(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('pr-dev-preview:', ci)
+        self.assertNotIn('name: gh-address-cr-dist', ci)
+
+    def test_freshness_fails_closed(self):
+        script = ROOT / 'scripts/release/check-main.sh'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = root / 'git'
+            for response, code, accepted in [('a' * 40 + '\trefs/heads/main', 0, True), ('', 0, False), ('b' * 40 + '\trefs/heads/main', 0, False), ('', 1, False)]:
+                fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "{response}"\nexit {code}\n')
+                fake.chmod(0o755)
+                import os
+                result = subprocess.run(['bash', str(script), 'a' * 40], env={**os.environ, 'PATH': str(root) + ':' + os.environ['PATH']}, capture_output=True)
+                self.assertEqual(result.returncode == 0, accepted)
+
+    def test_handoff_rejects_tamper_extra_files_and_wrong_sha(self):
+        import hashlib
+        import json
+
+        from scripts.release.handoff import inventory, verify
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = 'a' * 40
+            (root / 'product.whl').write_bytes(b'wheel')
+            (root / 'product.tar.gz').write_bytes(b'sdist')
+            (root / 'plan.json').write_text(json.dumps({'completed': True, 'candidate': candidate, 'version': '1.2.3'}))
+            (root / 'handoff.json').write_text(json.dumps({'candidate': candidate, 'files': inventory(root)}))
+            self.assertEqual(verify(root, candidate)['version'], '1.2.3')
+            with self.assertRaises(ValueError):
+                verify(root, 'b' * 40)
+            (root / 'extra').write_bytes(b'unexpected')
+            with self.assertRaises(ValueError):
+                verify(root, candidate)
+            (root / 'extra').unlink()
+            (root / 'product.whl').write_bytes(hashlib.sha256(b'changed').digest())
+            with self.assertRaises(ValueError):
+                verify(root, candidate)
+
+    def test_event_matrix_permissions_and_publisher_never_builds(self):
+        import itertools
+
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        expression = workflow['jobs']['verify']['if']
+        for enabled, ref, event in itertools.product(('true', '', 'false'), ('refs/heads/main', 'refs/heads/develop'), ('schedule', 'workflow_dispatch', 'push', 'pull_request', 'workflow_run')):
+            value = expression.replace('vars.RELEASE_ENABLED', repr(enabled)).replace('github.ref', repr(ref)).replace('github.event_name', repr(event)).replace('&&', ' and ').replace('||', ' or ')
+            self.assertEqual(eval(value, {'__builtins__': {}}), enabled == 'true' and ref == 'refs/heads/main' and event in ('schedule', 'workflow_dispatch'))
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        self.assertEqual(workflow['concurrency'], {'group': 'release-main', 'cancel-in-progress': False})
+        self.assertEqual(workflow['jobs']['publish']['needs'], 'verify')
+        for name in ('publish', 'publish-pypi', 'publish-plugin-marketplace'):
+            text = str(workflow['jobs'][name])
+            self.assertNotIn('python -m build', text)
+            self.assertNotIn('set_package_version', text)
+            self.assertNotIn('artifact-name:', text)
+
+    def test_immutable_id_downloads_restore_directly_to_the_checked_path(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        restored = []
+        for name in ('publish', 'publish-pypi', 'publish-plugin-marketplace'):
+            step, = [step for step in workflow['jobs'][name]['steps'] if step.get('uses') == 'actions/download-artifact@v4']
+            self.assertTrue(step['with'].get('merge-multiple'), name)
+            restored.append(step['with']['path'])
+        self.assertEqual(restored, ['dist', 'verified', 'dist'])
+
+    def test_pypi_retry_validates_before_staging_and_reads_back_even_after_upload_failure(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        steps = workflow['jobs']['publish-pypi']['steps']
+        stage, = [step for step in steps if step.get('id') == 'stage']
+        self.assertIn('pypi_reconcile stage --directory verified', stage['run'])
+        self.assertIn('check-main.sh', stage['run'])
+        upload, = [step for step in steps if step.get('uses', '').startswith('pypa/')]
+        self.assertEqual(upload['if'], "steps.stage.outputs.missing == 'true'")
+        self.assertNotIn('skip-existing', upload.get('with', {}))
+        confirm, = [step for step in steps if 'pypi_reconcile confirm' in step.get('run', '')]
+        self.assertEqual(confirm['if'], "always() && steps.stage.outcome == 'success'")
+        receipt, = [step for step in steps if step.get('uses') == 'actions/upload-artifact@v4']
+        self.assertIn('github.run_attempt', receipt['with']['name'])
+        self.assertEqual(receipt['if'], 'always()')

@@ -886,7 +886,7 @@ its own venv and prints the exports that select it, so the runtime stays fixed
 while you check out the PR branch:
 
 ```bash
-eval "$(scripts/dogfood_env.sh --ref develop)"
+eval "$(scripts/dogfood_env.sh --ref main)"
 ```
 
 The pinned commit is printed on stderr and in the first export line. Then run

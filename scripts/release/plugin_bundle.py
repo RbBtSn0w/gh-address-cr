@@ -147,9 +147,9 @@ def _load_bundle(directory: Path, version: str) -> Bundle:
     return Bundle(directory, receipt, payload)
 
 
-def verify_source(bundle: Bundle, source: Path) -> None:
+def verify_source(bundle: Bundle, source: Path, *, candidate: str | None = None, verify_generated_payload: bool = False) -> None:
     receipt = bundle.receipt
-    commit = shared.command(['git', 'rev-parse', receipt['source_tag'] + '^{commit}'], cwd=source).stdout.strip()
+    commit = candidate or shared.command(['git', 'rev-parse', receipt['source_tag'] + '^{commit}'], cwd=source).stdout.strip()
     if commit != receipt['source_commit']:
         raise ValueError('source tag changed or bundle source mismatch')
     source_files = git_files(source, commit, ['skill', 'LICENSE', 'pyproject.toml', CATALOG, 'scripts/build_plugin_payload.py', 'assets/plugin'])
@@ -161,20 +161,31 @@ def verify_source(bundle: Bundle, source: Path) -> None:
     if (source_files['LICENSE'].decode() != receipt['snapshot']['license']
             or json.loads(source_files[CATALOG]) != receipt['snapshot']['catalog']):
         raise ValueError('snapshot differs from source tag')
-    import tomllib
-    if tomllib.loads(source_files['pyproject.toml'].decode())['project']['version'] != receipt['version']:
-        raise ValueError('source version mismatch')
-    verify_generated(bundle, source_files)
+    expected_assets = {name.removeprefix('assets/plugin/'): data for name, data in source_files.items()
+                       if name.startswith('assets/plugin/')}
+    actual_assets = {name.removeprefix('assets/'): data for name, data in bundle.payload.items()
+                     if name.startswith('assets/')}
+    if expected_assets != actual_assets:
+        raise ValueError('generated assets differ from source tag')
+    if receipt['snapshot']['readme'] != readme(receipt['version']):
+        raise ValueError('distribution README differs from its sealed contract')
+    if verify_generated_payload:
+        verify_generated(bundle, source_files)
 
 
 def verify_generated(bundle: Bundle, source_files: dict[str, bytes]) -> None:
-    # Validate with the generator belonging to this tag, not today's template.
-    # These temporary outputs are never used to repair or replace Release assets.
+    # Read-only preparation only: never execute source generators in publish/recover.
+    # The resulting bytes are sealed by the receipt and immutable CI artifact.
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for name, data in source_files.items():
             target = root / 'source' / name
             target.parent.mkdir(parents=True, exist_ok=True)
+            if name == 'pyproject.toml':
+                import re
+                data, count = re.subn(rb'^version = "[^"]+"$', ('version = "' + bundle.receipt['version'] + '"').encode(), data, count=1, flags=re.MULTILINE)
+                if count != 1:
+                    raise ValueError('missing source package version metadata')
             target.write_bytes(data)
         output = root / 'expected'
         shared.command([sys.executable, '-I', str(root / 'source/scripts/build_plugin_payload.py'),

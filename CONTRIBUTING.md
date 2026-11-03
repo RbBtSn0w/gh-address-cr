@@ -20,32 +20,14 @@ We welcome contributions! Please follow these guidelines:
 
 ## Release Process
 
--   CI runs `semantic-release` on pushes to `main`.
--   Releases are inferred from commit history:
-    -   `fix:` => patch
-    -   `feat:` => minor
-    -   `BREAKING CHANGE:` or `feat!:` / `fix!:` => major
--   The workflow publishes:
-    -   Git tag (`vX.Y.Z`)
-    -   GitHub Release
-    -   `CHANGELOG.md` update committed back to `main`
-    -   Python runtime package to PyPI through Trusted Publishing
-    -   Homebrew resource snapshot and four platform bottles after the PyPI sdist is available
-    -   Homebrew tap update to `RbBtSn0w/homebrew-tap` only after all four independent installation checks pass
--   `workflow_dispatch` `dry-run` and `testpypi` targets validate package build and Homebrew formula rendering, but they do not push tap changes.
--   Production Homebrew publishing uses the shared release-bot GitHub App installed on `RbBtSn0w/homebrew-tap` with `Contents: Read and write`; the organization or account must expose `RELEASE_BOT_APP_ID` as an Actions variable and `RELEASE_BOT_PRIVATE_KEY` as an Actions secret to this repository.
--   If `semantic-release` generates no new version, both PyPI and Homebrew publishing must skip explicitly instead of pretending to publish.
--   Homebrew-only retries use the `Homebrew` workflow with the
-    already published version and the original rebuild number. They restore the
-    immutable formula snapshot rather than selecting dependencies again. Changed
-    bottle bytes require an explicit larger rebuild number.
--   PR source builds have read-only permissions. Trusted default-branch workflows
-    validate their provenance, prepare resources and verify source installation;
-    a separate publisher receives the tap-only credential.
--   See [Homebrew distribution](docs/homebrew-distribution.md) for acceptance,
-    recovery, performance evidence and first-release limitations.
--   See [Actions navigation](docs/github-actions.md) to choose the correct
-    validation, preview, proposal or publication workflow.
+Task PRs target `main`. Friday 07:00 UTC and manual dispatch share read-only
+verification and dependent publishers; `RELEASE_ENABLED` defaults off. See
+[Main release train](docs/release/main-train.md) for version selection, immutable
+artifact handoff, publication authority, activation and partial recovery.
+
+PyPI uses Trusted Publishing. Homebrew preserves its four-platform verification
+and existing tap App credentials. Marketplace retains version-only recovery from
+verified release assets. No version/changelog commit or PR preview is produced.
 
 ## Security
 

@@ -105,41 +105,12 @@ filenames. It does not republish the Python package. Changed dependency resource
 require a subsequent normal package release. Do not delete assets to bypass
 identity checks.
 
-## Development previews and credentials
+## Retired development previews
 
-CI builds PR packages without publication credentials. Source asset names contain
-the PR number, full head SHA, run ID and run attempt. A trusted `workflow_run`
-consumer checks workflow/repository/run provenance and the current open PR head.
-It uploads source bytes without executing them. A separate read-only macOS job
-prepares resources and verifies source installation. Only the final trusted job
-receives a tap-only GitHub App token and updates `gh-address-cr-dev`.
-
-External build processes do not inherit publication-token environment variables.
-Preview and stable formulae conflict because both install `gh-address-cr`.
-Previews remain source builds; fixed resources remove open-ended runtime
-dependency selection but do not remove compilation or build-isolation costs.
-
-Preview asset retention is a deferred operational requirement: immutable names
-accumulate on the shared release and can eventually reach GitHub's asset limit.
-Automatic deletion needs an explicit retention/recovery policy, coordination with
-in-flight builds and protection for sources referenced by retained formulas.
-This workflow does not delete historical preview sources. Until that policy is
-implemented, capacity exhaustion can block new previews without affecting stable
-publication.
-
-```bash
-brew unlink gh-address-cr
-brew install rbbtsn0w/tap/gh-address-cr-dev
-gh-address-cr --version
-gh-address-cr agent manifest
-```
-
-To return to an already installed stable formula:
-
-```bash
-brew unlink gh-address-cr-dev
-brew link gh-address-cr
-```
+PR preview publication is retired. The migration removes the producer and its
+consumer workflow, and ordinary CI emits no legacy preview artifact. Existing
+published preview assets are historical evidence; this change does not delete
+them. Stable publication and explicit same-version recovery remain supported.
 
 ## Acceptance and diagnostics
 

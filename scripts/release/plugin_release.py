@@ -38,14 +38,21 @@ def phase(name: str) -> None:
     shared.add_current_span_event('release.plugin.phase', {'release.phase': name})
 
 
-def prepare(directory: Path, version: str, *, source: Path = ROOT, run_url: str | None = None) -> None:
+def prepare(directory: Path, version: str, *, source: Path = ROOT, run_url: str | None = None, candidate: str | None = None) -> None:
     shared.stable_version(version)
     phase('prepare')
     commit = shared.command(['git', 'rev-parse', 'HEAD'], cwd=source).stdout.strip()
-    if shared.command(['git', 'rev-parse', f'v{version}^{{commit}}'], cwd=source).stdout.strip() != commit:
-        raise ValueError('plugin build must run at the exact stable source tag')
-    if shared.command(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=source).stdout.strip():
-        raise ValueError('plugin build requires clean tracked source')
+    if candidate is not None:
+        if candidate != commit:
+            raise ValueError('plugin candidate mismatch')
+        changed = shared.command(['git', 'diff', '--name-only', 'HEAD'], cwd=source).stdout.splitlines()
+        if set(changed) - {'pyproject.toml', 'src/gh_address_cr/__init__.py'}:
+            raise ValueError('candidate build has unexpected source changes')
+    else:
+        if shared.command(['git', 'rev-parse', f'v{version}^{{commit}}'], cwd=source).stdout.strip() != commit:
+            raise ValueError('plugin build must run at the exact stable source tag')
+        if shared.command(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=source).stdout.strip():
+            raise ValueError('plugin build requires clean tracked source')
     directory.mkdir(parents=True, exist_ok=True)
     archive_name, checksum_name, _ = asset_names(version)
     with tempfile.TemporaryDirectory() as temporary:
@@ -62,7 +69,7 @@ def prepare(directory: Path, version: str, *, source: Path = ROOT, run_url: str 
     validate_receipt(receipt)
     (directory / checksum_name).write_text(f'{archive_hash}  {archive_name}\n')
     (directory / 'publication.json').write_bytes(encoded(receipt))
-    verify_source(load_bundle(directory, version), source)
+    verify_source(load_bundle(directory, version), source, candidate=candidate, verify_generated_payload=True)
     phase('validated')
 
 
@@ -219,7 +226,7 @@ def publish(directory: Path, version: str, *, source: Path = ROOT) -> dict:
     return result
 
 
-def recover(directory: Path, version: str) -> dict:
+def recover(directory: Path, version: str, *, source: Path = ROOT) -> dict:
     require_release(version)
     phase('recover')
     assets = PluginAssets(version)
@@ -228,7 +235,7 @@ def recover(directory: Path, version: str) -> dict:
         raise ValueError('missing immutable plugin assets; recovery never rebuilds source')
     for name in names:
         assets.download(name, directory)
-    return publish(directory, version)
+    return publish(directory, version, source=source)
 
 
 def main() -> int:
@@ -236,10 +243,13 @@ def main() -> int:
     parser.add_argument('operation', choices=['prepare', 'publish', 'recover'])
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--version', required=True)
+    parser.add_argument('--candidate', help='Exact verified SHA for pre-tag read-only preparation only')
     args = parser.parse_args()
+    if args.candidate and args.operation != 'prepare':
+        parser.error('--candidate is only valid for read-only preparation')
     try:
         if args.operation == 'prepare':
-            prepare(args.directory, args.version)
+            prepare(args.directory, args.version, candidate=args.candidate)
             result = {'status': 'prepared', 'version': args.version}
         elif args.operation == 'recover':
             result = recover(args.directory, args.version)

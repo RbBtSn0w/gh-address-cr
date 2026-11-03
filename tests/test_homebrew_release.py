@@ -574,43 +574,10 @@ class ReleaseTelemetryTests(unittest.TestCase):
 
 
 class WorkflowTrustTests(unittest.TestCase):
-    def test_preview_rename_consumes_current_and_historical_producers(self):
-        root = ROOT / ".github/workflows"
-        self.assertEqual((root / "ci.yml").read_text().splitlines()[0], "name: Checks / Python")
-        preview = (root / "homebrew-preview.yml").read_text()
-        names = preview.split("    workflows: [", 1)[1].split("]", 1)[0]
-        self.assertEqual([value.strip().strip('"\'') for value in names.split(",")],
-                         ["ci", "Checks / Python"])
-
-    def test_workflow_run_routes_follow_producer_display_names(self):
-        for producer, consumer in (("ci.yml", "homebrew-preview.yml"),
-                                   ("release.yml", "branches.yml")):
-            with self.subTest(consumer=consumer):
-                root = ROOT / ".github/workflows"
-                name = (root / producer).read_text().splitlines()[0].removeprefix("name: ").strip('"\'')
-                text = (root / consumer).read_text()
-                triggers = text.split("    workflows: [", 1)[1].split("]", 1)[0]
-                names = [value.strip().strip('"\'') for value in triggers.split(",")]
-                self.assertIn(name, names)
-
-    def test_pr_build_cannot_write_releases_or_mint_tap_credentials(self):
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        preview = ci.split("  pr-dev-preview:", 1)[1]
-        self.assertNotIn("contents: write", preview)
-        self.assertNotIn("RELEASE_BOT_PRIVATE_KEY", preview)
-        self.assertNotIn("gh release upload", preview)
-        self.assertNotIn("--clobber", preview)
-        self.assertIn("preview.json", preview)
-
-    def test_preview_publisher_uses_default_branch_and_triggering_run_artifact(self):
-        workflow = (ROOT / ".github/workflows/homebrew-preview.yml").read_text()
-        self.assertIn("workflow_run:", workflow)
-        self.assertIn("ref: ${{ github.event.repository.default_branch }}", workflow)
-        self.assertIn("run-id: ${{ github.event.workflow_run.id }}", workflow)
-        self.assertIn("needs: [inspect, publish-source]", workflow)
-        self.assertIn("needs: [inspect, prepare]", workflow)
-        self.assertIn("homebrew_preview publish", workflow)
-        self.assertNotIn("pull_request_target:", workflow)
+    def test_preview_and_controller_workflows_are_retired(self):
+        for name in ('branches.yml', 'homebrew-preview.yml'):
+            self.assertFalse((ROOT / '.github/workflows' / name).exists())
+        self.assertNotIn('pr-dev-preview:', (ROOT / '.github/workflows/ci.yml').read_text())
 
 
 if __name__ == "__main__":
