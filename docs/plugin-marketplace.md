@@ -62,8 +62,13 @@ existing installation with `pipx upgrade gh-address-cr`.
 
 ## Release boundary
 
-A stable source tag `vX.Y.Z` is the immutable source identity. The build fails
-unless HEAD equals that tag's commit. The release helper prepares:
+A stable source tag `vX.Y.Z` is the immutable publication identity. Read-only
+`prepare --candidate <sha>` runs before that tag exists: HEAD must equal the
+verified candidate, and tracked changes are allowed only in `pyproject.toml`
+and `src/gh_address_cr/__init__.py` for final embedded version metadata.
+Without `--candidate`, preparation requires HEAD to equal the existing tag.
+Publication and recovery always verify the tag against the sealed source SHA;
+they never execute a source generator or rebuild payloads. The helper prepares:
 
 - `gh-address-cr-X.Y.Z.zip`, including hidden plugin metadata
 - `gh-address-cr-X.Y.Z.zip.sha256`
@@ -72,8 +77,7 @@ unless HEAD equals that tag's commit. The release helper prepares:
 
 Actions transports the ZIP and receipts, rather than an unpacked payload that
 could lose hidden files. After PyPI succeeds, the plugin publisher and Homebrew
-publisher run as independent jobs. Dry-run, TestPyPI, and no-release runs do not
-publish the Marketplace. Plugin failure never repeats PyPI publication.
+publisher run as independent jobs. No-release runs do not publish the Marketplace. Plugin failure never repeats PyPI publication.
 
 The writer uses the same repository's `GITHUB_TOKEN` with only `contents: write`;
 no new PAT or cross-repository credential is needed. Normal publication checks

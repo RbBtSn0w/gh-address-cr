@@ -91,3 +91,15 @@ class ScheduledReleaseContract(unittest.TestCase):
         receipt, = [step for step in steps if step.get('uses') == 'actions/upload-artifact@v4']
         self.assertIn('github.run_attempt', receipt['with']['name'])
         self.assertEqual(receipt['if'], 'always()')
+
+    def test_homebrew_executes_only_the_immutable_trusted_workflow_snapshot(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/homebrew.yml').read_text())
+        self.assertEqual(workflow['env']['EXPECTED_SOURCE_SHA'], '${{ inputs.source_sha }}')
+        for name, job in workflow['jobs'].items():
+            for step in job['steps']:
+                if step.get('uses') == 'actions/checkout@v4' and not step['with'].get('repository'):
+                    self.assertEqual(step['with']['ref'], '${{ github.workflow_sha }}', name)
+        helper = (ROOT / '.github/actions/setup-homebrew-helper/action.yml').read_text()
+        self.assertNotIn('pip install .', helper)
+        self.assertIn('--only-binary=:all:', helper)

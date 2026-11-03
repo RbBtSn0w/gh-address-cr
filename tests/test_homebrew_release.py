@@ -394,6 +394,22 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual((restored / filename).read_bytes(), b"immutable bottle")
             self.assertEqual((restored / record.name).read_bytes(), record.read_bytes())
 
+    def test_stable_source_binds_the_tag_sha_and_pypi_without_version_commits(self):
+        metadata = {'info': {'version': '1.2.3'}}
+        def command(argv, **kwargs):
+            if argv[:2] == ['git', 'show']:
+                raise AssertionError('source metadata is not the published version authority')
+            return subprocess.CompletedProcess(argv, 0, COMMIT if 'rev-parse' in argv else '', '')
+        with mock.patch.dict(os.environ, {'EXPECTED_SOURCE_SHA': COMMIT}), \
+             mock.patch.object(support, 'command', side_effect=command), \
+             mock.patch.object(release, 'fetch_pypi_json', return_value=metadata), \
+             mock.patch.object(release, 'select_sdist_from_pypi', return_value=(SOURCE_URL, SOURCE_HASH)):
+            self.assertEqual(release.stable_source('1.2.3'), (COMMIT, SOURCE_URL, SOURCE_HASH))
+        with mock.patch.dict(os.environ, {'EXPECTED_SOURCE_SHA': 'f' * 40}), \
+             mock.patch.object(support, 'command', side_effect=command), \
+             self.assertRaisesRegex(ValueError, 'source SHA'):
+            release.stable_source('1.2.3')
+
     def test_retry_restores_snapshot_without_resolving_again(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)

@@ -9,5 +9,6 @@ runs:
     - shell: bash
       run: |
         python -m venv .release-venv
-        .release-venv/bin/python -m pip install .
+        [[ "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        .release-venv/bin/python -m pip install --only-binary=:all: "gh-address-cr==$PACKAGE_VERSION"
         echo "$PWD/.release-venv/bin" >> "$GITHUB_PATH"

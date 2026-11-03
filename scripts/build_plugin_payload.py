@@ -42,7 +42,7 @@ SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 TEXT_SUFFIXES = {".md", ".json", ".yaml", ".yml"}
 UNSAFE_CONTENT = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
     r"(?<![A-Za-z0-9:/])/(?:Users|home|private|tmp|var|opt|etc)/|(?<![A-Za-z0-9])[A-Za-z]:[\\/])"
 )
 SECRET_KEYS = {"api_key", "apikey", "token", "access_token", "password", "secret", "credentials"}

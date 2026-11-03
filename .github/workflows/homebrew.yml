@@ -39,6 +39,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
   PACKAGE_VERSION: ${{ inputs.version }}
   BOTTLE_REBUILD: ${{ inputs.rebuild }}
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
@@ -51,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify released source identity
@@ -60,8 +61,8 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git rev-parse "v${PACKAGE_VERSION}^{commit}")" = "$SOURCE_SHA"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
       - uses: ./.github/actions/setup-homebrew-helper
       - name: Restore or prepare the immutable resource snapshot
         env:
@@ -80,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
@@ -103,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4
@@ -128,7 +129,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4
@@ -156,7 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4
@@ -178,7 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4
@@ -211,7 +212,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4

@@ -138,6 +138,16 @@ class PluginPackagingTest(unittest.TestCase):
                 with patch.object(builder, "SKILL_ROOT", source), self.assertRaises(ValueError):
                     builder.build_payload(root / "output")
 
+    def test_credential_prefix_requires_a_left_token_boundary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'guidance.md'
+            path.write_text('Use task-completion-verification and risk-based-triage-of-findings.')
+            builder.validate_text(path)
+            for prefix in ('', ' ', '"', '='):
+                path.write_text(prefix + 'sk-' + 'a' * 24)
+                with self.subTest(prefix=prefix), self.assertRaises(ValueError):
+                    builder.validate_text(path)
+
     def test_builder_rejects_symlinks_even_under_excluded_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
