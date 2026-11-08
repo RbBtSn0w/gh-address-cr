@@ -55,11 +55,11 @@ class ScheduledReleaseContract(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
         expression = workflow['jobs']['verify']['if']
         for enabled, ref, event in itertools.product(('true', '', 'false'), ('refs/heads/main', 'refs/heads/develop'), ('schedule', 'workflow_dispatch', 'push', 'pull_request', 'workflow_run')):
-            value = expression.replace('vars.RELEASE_ENABLED', repr(enabled)).replace('github.ref', repr(ref)).replace('github.event_name', repr(event)).replace('&&', ' and ').replace('||', ' or ')
-            self.assertEqual(eval(value, {'__builtins__': {}}), enabled == 'true' and ref == 'refs/heads/main' and event in ('schedule', 'workflow_dispatch'))
-        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+            value = expression.replace('vars.RELEASE_ENABLED', repr(enabled)).replace('github.ref', repr(ref)).replace('github.event_name', repr(event)).replace('inputs.operation', repr('release')).replace('&&', ' and ').replace('||', ' or ')
+            self.assertEqual(eval(value, {'__builtins__': {}}), ref == 'refs/heads/main' and event in ('schedule', 'workflow_dispatch'))
+        self.assertEqual(workflow['permissions'], {'actions': 'read', 'contents': 'read'})
         self.assertEqual(workflow['concurrency'], {'group': 'release-main', 'cancel-in-progress': False})
-        self.assertEqual(workflow['jobs']['publish']['needs'], 'verify')
+        self.assertEqual(workflow['jobs']['publish']['needs'], ['verify', 'recovery-input'])
         for name in ('publish', 'publish-pypi', 'publish-plugin-marketplace'):
             text = str(workflow['jobs'][name])
             self.assertNotIn('python -m build', text)

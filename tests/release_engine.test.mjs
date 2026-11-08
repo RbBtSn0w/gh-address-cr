@@ -37,6 +37,8 @@ test('real API analyzes patch/refactor/minor/breaking/no-op, rejects invalid his
       assert.equal(result.status, 0, result.stderr);
       const plan = JSON.parse(result.stdout.trim().split('\n').at(-1));
       assert.equal(plan.version, version);
+      assert.equal(typeof plan.notes, version === null ? "object" : "string");
+      if (version !== null) assert.ok(plan.notes.length > 0);
       assert.equal(plan.completed, true);
       assert.equal(plan.candidate, git(cwd, 'rev-parse', 'HEAD'));
       assert.equal(plan.baseline.gitHead, git(cwd, 'rev-parse', 'v3.22.0'));

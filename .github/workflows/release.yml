@@ -3,7 +3,19 @@ on:
   schedule:
     - cron: '0 7 * * 5'
   workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [release, recover]
+        default: release
+      source_run_id:
+        type: string
+        description: Original main release run ID (recover only)
+      artifact_id:
+        type: string
+        description: Immutable verified artifact ID (recover only)
 permissions:
+  actions: read
   contents: read
 env:
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: https://telemetry-gateway-development.hamiltonsnow.workers.dev/v1/traces
@@ -12,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    if: vars.RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (inputs.operation != 'recover')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -35,24 +47,27 @@ jobs:
       - name: Install verification tools
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          python -m pip install -e '.[dev]' build twine
       - name: Check candidate source
         env:
           CANDIDATE: ${{ github.sha }}
         run: bash scripts/release/check-main.sh "$CANDIDATE"
+      - name: Analyze exact candidate
+        id: plan
+        run: |
+          mkdir -p dist
+          node scripts/release/engine.mjs plan dist/plan.json
+      - name: Install exact candidate verification dependencies
+        if: steps.plan.outputs.released == 'true'
+        run: python -m pip install -e '.[dev]' build twine
       - name: Verify product
+        if: steps.plan.outputs.released == 'true'
         run: |
           ruff check src tests scripts/build_plugin_payload.py scripts/release
           python scripts/check_mypy_ratchet.py
           python -m unittest discover -s tests
           python -m gh_address_cr --help
           python -m gh_address_cr agent manifest
-          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs
-      - name: Analyze exact candidate
-        id: plan
-        run: |
-          mkdir -p dist
-          node scripts/release/engine.mjs plan dist/plan.json
+          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs tests/release_observation.test.mjs
       - name: Build final release bytes without publisher authority
         if: steps.plan.outputs.released == 'true'
         env:
@@ -76,19 +91,24 @@ jobs:
           name: release-main-verified-${{ github.run_attempt }}
           path: dist/
           if-no-files-found: error
-  publish:
-    needs: verify
-    if: needs.verify.outputs.released == 'true' && vars.RELEASE_ENABLED == 'true'
+      - name: Retain read-only analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-analysis-${{ github.run_attempt }}
+          path: dist/plan.json
+          if-no-files-found: warn
+  recovery-input:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.operation == 'recover'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+    outputs:
+      source_sha: ${{ steps.source.outputs.candidate_sha }}
+      version: ${{ steps.plan.outputs.version }}
+      artifact_id: ${{ inputs.artifact_id }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.source_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -97,48 +117,118 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: ./.github/actions/setup-homebrew-helper
+      - name: Bind original run and immutable artifact
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/source-artifact.json"
+          node scripts/release/recovery-source.mjs --run "$RUNNER_TEMP/source-run.json" --artifact "$RUNNER_TEMP/source-artifact.json" --repository "$GITHUB_REPOSITORY" --source-run-id "$SOURCE_RUN_ID" --artifact-id "$ARTIFACT_ID" > "$RUNNER_TEMP/recovery-source.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/source-artifact.zip"
+          node --input-type=module -e 'import {readFileSync} from "node:fs";import {createHash} from "node:crypto";const p=process.env.RUNNER_TEMP,m=JSON.parse(readFileSync(p+"/source-artifact.json"));if(!m.name.startsWith("release-main-verified-")||m.digest!=="sha256:"+createHash("sha256").update(readFileSync(p+"/source-artifact.zip")).digest("hex"))throw Error("Original verified artifact name/digest mismatch")'
+          python3 scripts/release/check_artifact_zip.py "$RUNNER_TEMP/source-artifact.zip"
+          node -e 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/recovery-source.json"));fs.appendFileSync(process.env.GITHUB_OUTPUT,"candidate_sha="+s.candidate_sha+"\n")'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: verified
+      - name: Validate original sealed plan and existing tag
+        id: plan
+        env:
+          CANDIDATE: ${{ steps.source.outputs.candidate_sha }}
+          PYTHONPATH: src
+        run: |
+          python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; from scripts.release.recovery import verify_tag; p=verify(Path("verified"),os.environ["CANDIDATE"]); verify_tag("RbBtSn0w/gh-address-cr","v"+p["version"],p["candidate"]); Path(os.environ["GITHUB_OUTPUT"]).write_text("version="+p["version"]+"\n")'
+  publish:
+    needs: [verify, recovery-input]
+    if: always() && vars.RELEASE_ENABLED == 'true' && ((needs.verify.result == 'success' && needs.verify.outputs.released == 'true') || needs.recovery-input.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: ./.github/actions/setup-homebrew-helper
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          artifact-ids: ${{ needs.recovery-input.outputs.artifact_id || needs.verify.outputs.artifact_id }}
+          run-id: ${{ inputs.operation == 'recover' && inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
           merge-multiple: true
           path: dist
       - name: Verify handoff and live main then publish prebuilt bytes
+        if: inputs.operation != 'recover'
         env:
-          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+          CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python -m scripts.release.handoff verify --candidate "$CANDIDATE"
           bash scripts/release/check-main.sh "$CANDIDATE"
           node scripts/release/engine.mjs publish dist/plan.json
+      - name: Recover only missing GitHub assets under original tag
+        if: inputs.operation == 'recover'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m scripts.release.recovery --directory dist
   publish-pypi:
-    needs: [verify, publish]
-    if: vars.RELEASE_ENABLED == 'true'
+    needs: [verify, recovery-input, publish]
+    if: always() && needs.publish.result == 'success' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.source_sha }}
+          ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: ./.github/actions/setup-homebrew-helper
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          artifact-ids: ${{ needs.recovery-input.outputs.artifact_id || needs.verify.outputs.artifact_id }}
+          run-id: ${{ inputs.operation == 'recover' && inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
           merge-multiple: true
           path: verified
       - name: Verify handoff and stage only missing PyPI files
         id: stage
         env:
-          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+          OPERATION: ${{ inputs.operation }}
+          CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
         run: |
           python -m scripts.release.pypi_reconcile stage --directory verified --candidate "$CANDIDATE" --output dist --receipt "$RUNNER_TEMP/pypi-receipt.json"
-          bash scripts/release/check-main.sh "$CANDIDATE"
+          if [ "$OPERATION" = recover ]; then
+            python -c 'import os; from scripts.release.recovery import verify_tag; from scripts.release.handoff import verify; from pathlib import Path; p=verify(Path("verified"),os.environ["CANDIDATE"]); verify_tag("RbBtSn0w/gh-address-cr","v"+p["version"],p["candidate"])'
+          else
+            bash scripts/release/check-main.sh "$CANDIDATE"
+          fi
       - uses: pypa/gh-action-pypi-publish@release/v1
         if: steps.stage.outputs.missing == 'true'
         with:
@@ -146,7 +236,7 @@ jobs:
       - name: Read back exact per-file publication results
         if: always() && steps.stage.outcome == 'success'
         env:
-          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
+          CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
         run: python -m scripts.release.pypi_reconcile confirm --directory verified --candidate "$CANDIDATE" --receipt "$RUNNER_TEMP/pypi-receipt.json"
       - name: Preserve per-file PyPI receipt
         if: always()
@@ -156,22 +246,25 @@ jobs:
           path: ${{ runner.temp }}/pypi-receipt.json
           if-no-files-found: warn
   publish-homebrew:
-    needs: [verify, publish-pypi]
-    if: vars.RELEASE_ENABLED == 'true'
+    needs: [verify, recovery-input, publish-pypi]
+    if: always() && needs.publish-pypi.result == 'success' && vars.RELEASE_ENABLED == 'true'
     uses: ./.github/workflows/homebrew.yml
     permissions:
+      actions: read
       contents: write
     with:
-      version: ${{ needs.verify.outputs.version }}
-      source_sha: ${{ needs.verify.outputs.source_sha }}
+      version: ${{ needs.recovery-input.outputs.version || needs.verify.outputs.version }}
+      source_sha: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
       rebuild: '0'
+      operation: ${{ inputs.operation || 'release' }}
     secrets: inherit
   publish-plugin-marketplace:
-    needs: [verify, publish-pypi]
-    if: vars.RELEASE_ENABLED == 'true'
+    needs: [verify, recovery-input, publish-pypi]
+    if: always() && needs.publish-pypi.result == 'success' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: write
     concurrency:
       group: plugin-marketplace-publication
@@ -179,27 +272,73 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.source_sha }}
+          ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: ./.github/actions/setup-homebrew-helper
       - name: Install verified runtime without running source build hooks
         run: |
           python -m pip install --only-binary=:all: 'PyYAML>=6' packaging
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          artifact-ids: ${{ needs.recovery-input.outputs.artifact_id || needs.verify.outputs.artifact_id }}
+          run-id: ${{ inputs.operation == 'recover' && inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
           merge-multiple: true
           path: dist
       - name: Verify and publish immutable plugin bundle
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE: ${{ needs.verify.outputs.source_sha }}
-          PACKAGE_VERSION: ${{ needs.verify.outputs.version }}
+          CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
+          PACKAGE_VERSION: ${{ needs.recovery-input.outputs.version || needs.verify.outputs.version }}
+          OPERATION: ${{ inputs.operation }}
         run: |
-          python -m scripts.release.handoff verify --candidate "$CANDIDATE"
-          python -m pip install --only-binary=:all: dist/*.whl
-          bash scripts/release/check-main.sh "$CANDIDATE"
+          python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; verify(Path("dist"),os.environ["CANDIDATE"])'
+          if [ "$OPERATION" != recover ]; then bash scripts/release/check-main.sh "$CANDIDATE"; fi
           python -m scripts.release.plugin_release publish --directory dist/plugin-release --version "$PACKAGE_VERSION"
+
+  result:
+    needs: ['verify', 'recovery-input', 'publish', 'publish-pypi', 'publish-homebrew', 'publish-plugin-marketplace']
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - name: Restore plan for result context
+        if: needs.verify.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-analysis-${{ github.run_attempt }}
+          path: result-input
+      - name: Restore original recovery plan
+        if: needs.recovery-input.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: result-input
+      - name: Record independent verification and publication results
+        if: always()
+        env:
+          RELEASE_NEEDS: ${{ toJSON(needs) }}
+          RELEASE_TARGETS: '{"github": "publish", "pypi": "publish-pypi", "homebrew": "publish-homebrew", "marketplace": "publish-plugin-marketplace"}'
+          RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: node scripts/release/observe.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-result-${{ github.run_attempt }}
+          path: release-result.json
+          if-no-files-found: error

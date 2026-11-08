@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 export function configDigest() {
   const hash = createHash('sha256');
-  for (const name of ['release.config.cjs', 'scripts/commit-semantics.mjs', 'scripts/release/consistency.mjs', 'scripts/release/engine.mjs', 'package-lock.json']) {
+  for (const name of ['release.config.cjs', 'scripts/commit-semantics.mjs', 'scripts/release-commit-analyzer.mjs', 'scripts/release-notes-generator.mjs', 'scripts/release/consistency.mjs', 'scripts/release/engine.mjs', 'package-lock.json']) {
     hash.update(name).update(readFileSync(root + name));
   }
   return hash.digest('hex');

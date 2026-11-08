@@ -484,8 +484,14 @@ class RuntimePackagingTest(PythonScriptTestCase):
         self.assertNotIn("@semantic-release/exec", text)
         self.assertIn("scripts/release/consistency.mjs", text)
         self.assertNotIn('"@semantic-release/git"', text)
-        self.assertIn("@semantic-release/commit-analyzer", text)
-        self.assertIn("@semantic-release/release-notes-generator", text)
+        for adapter, engine in (
+            ("release-commit-analyzer.mjs", "@semantic-release/commit-analyzer"),
+            ("release-notes-generator.mjs", "@semantic-release/release-notes-generator"),
+        ):
+            self.assertIn(f"./scripts/{adapter}", text)
+            source = (ROOT / "scripts" / adapter).read_text(encoding="utf-8")
+            self.assertIn(f"loadReleaseTool('{engine}', context)", source)
+            self.assertIn("await normalizeReleaseCommits(context)", source)
         self.assertIn('repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git"', text)
         self.assertIn("parserOpts: releaseParserOpts", text)
         self.assertIn(r"(\\S.*)", text)
@@ -633,10 +639,10 @@ class RuntimePackagingTest(PythonScriptTestCase):
         text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("publish-homebrew:", text)
-        self.assertIn("needs: [verify, publish-pypi]", text)
+        self.assertIn("needs: [verify, recovery-input, publish-pypi]", text)
         self.assertIn("vars.RELEASE_ENABLED == 'true'", text)
         self.assertIn("uses: ./.github/workflows/homebrew.yml", text)
-        self.assertIn("version: ${{ needs.verify.outputs.version }}", text)
+        self.assertIn("version: ${{ needs.recovery-input.outputs.version || needs.verify.outputs.version }}", text)
         homebrew = (ROOT / ".github/workflows/homebrew.yml").read_text()
         self.assertIn("workflow_dispatch:", homebrew)
         self.assertIn("workflow_call:", homebrew)

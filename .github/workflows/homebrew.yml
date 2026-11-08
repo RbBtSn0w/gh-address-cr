@@ -5,6 +5,9 @@ run-name: >-
 on:
   workflow_call:
     inputs:
+      operation:
+        type: string
+        default: release
       source_sha:
         type: string
         required: true
@@ -19,6 +22,9 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      operation:
+        type: string
+        default: release
       source_sha:
         type: string
         required: true
@@ -32,6 +38,7 @@ on:
         default: "0"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -39,6 +46,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  RELEASE_OPERATION: ${{ inputs.operation || 'release' }}
   EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
   PACKAGE_VERSION: ${{ inputs.version }}
   BOTTLE_REBUILD: ${{ inputs.rebuild }}
@@ -77,6 +85,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -153,6 +162,7 @@ jobs:
     needs: merge-bottles
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4

@@ -14,7 +14,7 @@ module.exports = {
   plugins: [
     "./scripts/commit-semantics.mjs",
     [
-      "@semantic-release/commit-analyzer",
+      "./scripts/release-commit-analyzer.mjs",
       {
         preset: "conventionalcommits",
         parserOpts: releaseParserOpts,
@@ -24,7 +24,7 @@ module.exports = {
       },
     ],
     [
-      "@semantic-release/release-notes-generator",
+      "./scripts/release-notes-generator.mjs",
       {
         preset: "conventionalcommits",
         parserOpts: releaseParserOpts,

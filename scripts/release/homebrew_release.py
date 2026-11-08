@@ -96,6 +96,8 @@ def prepare(directory: Path, version: str) -> None:
         shared.validate_snapshot(payload, formula.read_text(), version=version, commit=commit,
                                  source_url=url, source_sha256=sha)
     else:
+        if os.environ.get("RELEASE_OPERATION") == "recover":
+            raise ValueError("original resource snapshot required for recovery")
         if metadata_name in names:
             raise ValueError("snapshot metadata exists without its immutable formula")
         payload, text = resolve_formula(version=version, commit=commit, url=url, sha=sha, name="gh-address-cr")
@@ -187,6 +189,8 @@ def build(directory: Path, snapshot_dir: Path, target: str, rebuild: int) -> Non
         return
     if record_name in names:
         raise ValueError("published build record is missing its atomic recovery bundle")
+    if os.environ.get("RELEASE_OPERATION") == "recover":
+        raise ValueError("recovery never builds missing bottles; original bundle required")
     block = f'  bottle do\n    root_url "{bottle_root(version)}"\n    rebuild {rebuild}\n  end' if rebuild else ""
     stage_formula(shared.formula_text(payload, bottle_block=block))
     started = time.monotonic()
