@@ -98,8 +98,7 @@ test('official prepare rejects complete notes drift before service hooks or tag 
       git(cwd,'commit','--quiet','--allow-empty','-m','fix: release candidate');
       git(cwd,'clone','--quiet','--bare',cwd,remote);
       writeFileSync(filename,JSON.stringify({completed:true,candidate:git(cwd,'rev-parse','HEAD'),baseline,config:configDigest(),version:'3.22.1',notes:sealedNotes}));
-      const code=`import semanticRelease from ${JSON.stringify(pathToFileURL(resolve('node_modules/semantic-release/index.js')).href)};import {writeFileSync} from 'node:fs';await semanticRelease({branches:['main'],repositoryUrl:${JSON.stringify(pathToFileURL(remote).href)},ci:false,plugins:[{analyzeCommits:()=> 'patch',generateNotes:()=>${JSON.stringify(generatedNotes)}},${JSON.stringify(resolve('scripts/release/consistency.mjs'))},{prepare:()=>writeFileSync(${JSON.stringify(marker)},'prepared'),publish:()=>writeFileSync(${JSON.stringify(marker)},'published')}]},{cwd:${JSON.stringify(cwd)},env:{PATH:process.env.PATH,RELEASE_PLAN:${JSON.stringify(filename)},GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},stdout:{write(){}},stderr:{write(){}}});`;
-      const result=spawnSync(process.execPath,['--input-type=module','-e',code],{encoding:'utf8',timeout:30000});
+      const result=spawnSync(process.execPath,[resolve('tests/fixtures/run_release_publication.mjs'),cwd,remote,filename,generatedNotes,marker],{encoding:'utf8',timeout:30000});
       assert.equal(result.status===0,accepted,result.stderr);
       const tags=git(cwd,'tag','--list');
       if(accepted){assert.match(tags,/v3.22.1/);assert.equal(readFileSync(marker,'utf8'),'published');}
