@@ -58,6 +58,8 @@ def verify_release_record(release: dict, tag: str, notes: str, release_id: int) 
 def reconcile_assets(repository: str, release: dict, directory: Path, names: list[str], notes: str) -> None:
     verify_release_record(release, release['tag_name'], notes, release['id'])
     assets = release.get('assets', [])
+    missing = []
+    # Read every existing asset before the first external write.
     for name in names:
         path = directory / name
         if Path(name).name != name or not path.is_file() or path.is_symlink():
@@ -69,13 +71,15 @@ def reconcile_assets(repository: str, release: dict, directory: Path, names: lis
             if hashlib.sha256(download(repository, matching[0]['id'])).digest() != hashlib.sha256(path.read_bytes()).digest():
                 raise ValueError('existing release asset differs from sealed bytes')
         else:
-            command(['gh', 'release', 'upload', release['tag_name'], str(path), '--repo', repository])
-            fresh = json.loads(command(['gh', 'api', f'repos/{repository}/releases/{release["id"]}']))
-            verify_release_record(fresh, release['tag_name'], notes, release['id'])
-            match = [asset for asset in fresh['assets'] if asset['name'] == name]
-            if len(match) != 1 or download(repository, match[0]['id']) != path.read_bytes():
-                raise ValueError('uploaded release asset not confirmed')
-
+            missing.append(name)
+    for name in missing:
+        path = directory / name
+        command(['gh', 'release', 'upload', release['tag_name'], str(path), '--repo', repository])
+        fresh = json.loads(command(['gh', 'api', f'repos/{repository}/releases/{release["id"]}']))
+        verify_release_record(fresh, release['tag_name'], notes, release['id'])
+        match = [asset for asset in fresh['assets'] if asset['name'] == name]
+        if len(match) != 1 or download(repository, match[0]['id']) != path.read_bytes():
+            raise ValueError('uploaded release asset not confirmed')
 
 def recover(repository: str, directory: Path, plan: dict, names: list[str]) -> None:
     original_notes = plan.get('notes')

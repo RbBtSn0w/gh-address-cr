@@ -41,6 +41,12 @@ report its own finishing run's producer metadata, while actual recovery still
 requires the source run to be complete. Original notes and bytes are preserved;
 publishers do not rebuild wheel/sdist or move tags.
 
+Recovery availability also requires the shared publication preflight: existing
+notes, release identity and all original asset bytes must be readable and match.
+A tag alone is insufficient. Matching drafts and missing assets remain repairable;
+conflicts or unreadable evidence suppress the command. Recovery validates every
+existing asset before uploading any missing file.
+
 `.github/release-train/` is generated common runtime with a source revision and
 per-file hashes. Do not hand-edit it. `.github/release-train.json`, the fixed-command
 `scripts/release/train-adapter.mjs`, product handoffs/channel adapters and native
