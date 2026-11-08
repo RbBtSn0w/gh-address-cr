@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -37,6 +37,8 @@ test('real API analyzes patch/refactor/minor/breaking/no-op, rejects invalid his
       assert.equal(result.status, 0, result.stderr);
       const plan = JSON.parse(result.stdout.trim().split('\n').at(-1));
       assert.equal(plan.version, version);
+      assert.equal(typeof plan.notes, version === null ? "object" : "string");
+      if (version !== null) assert.ok(plan.notes.length > 0);
       assert.equal(plan.completed, true);
       assert.equal(plan.candidate, git(cwd, 'rev-parse', 'HEAD'));
       assert.equal(plan.baseline.gitHead, git(cwd, 'rev-parse', 'v3.22.0'));
@@ -86,5 +88,21 @@ test('actual metadata-only workflow rejects malformed messages and preserves bre
   ]) {
     const result = spawnSync('bash', ['-c', script], {env: {...process.env, RELEASE_TOOLS: process.cwd(), PR_TITLE: title, PR_BODY: description}, encoding: 'utf8'});
     assert.equal(result.status === 0, accepted, result.stderr);
+  }
+});
+test('official prepare rejects complete notes drift before service hooks or tag creation',()=>{
+  for(const [sealedNotes,generatedNotes,accepted]of [['Original notes (2026-11-08)','Original notes (2026-11-09)',false],[undefined,'Original notes',false],['Original notes','Original notes',true]]){
+    const cwd=fixture(),remote=cwd+'-remote.git',filename=cwd+'-plan.json',marker=cwd+'-published';
+    try{
+      const baseline={version:'3.22.0',gitHead:git(cwd,'rev-parse','v3.22.0'),gitTag:'v3.22.0'};
+      git(cwd,'commit','--quiet','--allow-empty','-m','fix: release candidate');
+      git(cwd,'clone','--quiet','--bare',cwd,remote);
+      writeFileSync(filename,JSON.stringify({completed:true,candidate:git(cwd,'rev-parse','HEAD'),baseline,config:configDigest(),version:'3.22.1',notes:sealedNotes}));
+      const result=spawnSync(process.execPath,[resolve('tests/fixtures/run_release_publication.mjs'),cwd,remote,filename,generatedNotes,marker],{encoding:'utf8',timeout:30000});
+      assert.equal(result.status===0,accepted,result.stderr);
+      const tags=git(cwd,'tag','--list');
+      if(accepted){assert.match(tags,/v3.22.1/);assert.equal(readFileSync(marker,'utf8'),'published');}
+      else{assert.match(result.stderr,/notes.*(?:drift|unavailable)/i);assert.equal(tags,'v3.22.0');assert.equal(existsSync(marker),false);}
+    }finally{for(const path of [cwd,remote,filename,marker])rmSync(path,{recursive:true,force:true});}
   }
 });

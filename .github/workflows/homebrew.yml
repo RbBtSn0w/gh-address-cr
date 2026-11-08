@@ -4,7 +4,14 @@ run-name: >-
 
 on:
   workflow_call:
+    outputs:
+      receipt_artifact_id:
+        description: Immutable remote tap readback receipt
+        value: ${{ jobs.publish-tap.outputs.receipt_artifact_id }}
     inputs:
+      operation:
+        type: string
+        default: release
       source_sha:
         type: string
         required: true
@@ -19,6 +26,9 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      operation:
+        type: string
+        default: release
       source_sha:
         type: string
         required: true
@@ -32,6 +42,7 @@ on:
         default: "0"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -39,6 +50,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  RELEASE_OPERATION: ${{ inputs.operation || 'release' }}
   EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
   PACKAGE_VERSION: ${{ inputs.version }}
   BOTTLE_REBUILD: ${{ inputs.rebuild }}
@@ -77,6 +89,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -153,6 +166,7 @@ jobs:
     needs: merge-bottles
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -207,6 +221,8 @@ jobs:
           fi
 
   publish-tap:
+    outputs:
+      receipt_artifact_id: ${{ steps.receipt.outputs.artifact-id }}
     needs: [publish-bottles, verify-bottles]
     runs-on: ubuntu-latest
     steps:
@@ -243,3 +259,13 @@ jobs:
         run: >-
           python -m scripts.release.homebrew_release publish-tap
           --directory publication --evidence verification --checkout homebrew-tap
+          --receipt "$RUNNER_TEMP/homebrew-receipt.json"
+
+      - name: Retain exact remote tap receipt
+        id: receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-publication-receipt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/homebrew-receipt.json
+          if-no-files-found: warn

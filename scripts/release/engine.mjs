@@ -1,6 +1,7 @@
 /** Release-aware API adapter. Only semantic-release computes release versions. */
 import semanticRelease from 'semantic-release';
-import { analyzeCommits } from '@semantic-release/commit-analyzer';
+import { analyzeCommits } from '../../.github/release-train/release-commit-analyzer.mjs';
+import { generateNotes } from '../../.github/release-train/release-notes-generator.mjs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -37,7 +38,7 @@ export async function planRelease(source = process.cwd()) {
     const env = localEnvironment();
     let completed = false;
     let acceptedBaseline;
-    const analyzer = config.plugins.find((item) => Array.isArray(item) && item[0] === '@semantic-release/commit-analyzer');
+    const analyzer = config.plugins.find((item) => Array.isArray(item) && item[0] === './.github/release-train/release-commit-analyzer.mjs');
     const record = async (_options, context) => {
       const type = await analyzeCommits(analyzer[1], context);
       acceptedBaseline = baseline(context.lastRelease);
@@ -45,9 +46,10 @@ export async function planRelease(source = process.cwd()) {
       return type;
     };
     const result = await semanticRelease({...config, extends: [], repositoryUrl: pathToFileURL(mirror).href, dryRun: true, ci: false,
-      plugins: [], analyzeCommits: [absolutePlugin(config.plugins[0]), record]}, {cwd: checkout, env, stdout: quiet, stderr: quiet});
+      plugins: [], analyzeCommits: [absolutePlugin(config.plugins[0]), record],
+      generateNotes: (_options, context) => generateNotes(config.plugins.find(item => Array.isArray(item) && item[0] === './.github/release-train/release-notes-generator.mjs')[1], {...context, options: {...context.options, repositoryUrl: config.repositoryUrl}})}, {cwd: checkout, env, stdout: quiet, stderr: quiet});
     if (!completed || !acceptedBaseline?.gitHead) throw new Error('Analysis incomplete or published baseline missing');
-    return {completed, candidate, baseline: acceptedBaseline, config: configDigest(), version: result ? result.nextRelease.version : null};
+    return {completed, candidate, baseline: acceptedBaseline, config: configDigest(), version: result ? result.nextRelease.version : null, notes: result?.nextRelease?.notes ?? null};
   } finally { rmSync(temporary, {recursive: true, force: true}); }
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

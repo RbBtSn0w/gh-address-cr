@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import shutil
 import sys
 import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -96,6 +98,8 @@ def prepare(directory: Path, version: str) -> None:
         shared.validate_snapshot(payload, formula.read_text(), version=version, commit=commit,
                                  source_url=url, source_sha256=sha)
     else:
+        if os.environ.get("RELEASE_OPERATION") == "recover":
+            raise ValueError("original resource snapshot required for recovery")
         if metadata_name in names:
             raise ValueError("snapshot metadata exists without its immutable formula")
         payload, text = resolve_formula(version=version, commit=commit, url=url, sha=sha, name="gh-address-cr")
@@ -187,6 +191,8 @@ def build(directory: Path, snapshot_dir: Path, target: str, rebuild: int) -> Non
         return
     if record_name in names:
         raise ValueError("published build record is missing its atomic recovery bundle")
+    if os.environ.get("RELEASE_OPERATION") == "recover":
+        raise ValueError("recovery never builds missing bottles; original bundle required")
     block = f'  bottle do\n    root_url "{bottle_root(version)}"\n    rebuild {rebuild}\n  end' if rebuild else ""
     stage_formula(shared.formula_text(payload, bottle_block=block))
     started = time.monotonic()
@@ -418,12 +424,30 @@ def publish_tap(directory: Path, evidence: Path, checkout: Path) -> None:
     shared.update_tap(checkout, formula, name="gh-address-cr", version=payload["version"])
 
 
+def publication_receipt(directory: Path, checkout: Path) -> dict:
+    """Read the remote tap after publication, matching the exact four-target formula."""
+    payload, _ = load_snapshot(directory)
+    publication = json.loads((directory / "publication.json").read_text())
+    if set(publication["targets"]) != set(shared.TARGETS):
+        raise ValueError("Homebrew receipt requires all four bottle targets")
+    shared.command(["git", "-C", str(checkout), "fetch", "--quiet", "origin", "main"])
+    commit = shared.command(["git", "-C", str(checkout), "rev-parse", "FETCH_HEAD"]).stdout.strip()
+    remote = shared.command(["git", "-C", str(checkout), "show", "FETCH_HEAD:Formula/gh-address-cr.rb"]).stdout.encode()
+    if not re.fullmatch(r"[a-f0-9]{40}", commit) or remote != (directory / "gh-address-cr.rb").read_bytes():
+        raise ValueError("Remote Homebrew formula differs from the verified publication")
+    return {"status": "completed", "candidate_sha": payload["commit"], "version": payload["version"],
+            "observed_at": datetime.now(timezone.utc).isoformat(), "remote_id": commit,
+            "url": f"https://github.com/{shared.TAP_REPOSITORY}/blob/{commit}/Formula/gh-address-cr.rb",
+            "checksum": hashlib.sha256(remote).hexdigest(), "bottle_targets": list(shared.TARGETS)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=["prepare", "preserve-snapshot", "build", "merge",
                                              "publish-bottles", "verify", "publish-tap"])
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--version")
+    parser.add_argument("--receipt", type=Path)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--builds", type=Path)
     parser.add_argument("--evidence", type=Path)
@@ -452,6 +476,8 @@ def main() -> int:
         "publish-tap": lambda: publish_tap(args.directory, args.evidence, args.checkout),
     }
     operations[args.operation]()
+    if args.receipt and args.operation == "publish-tap":
+        shared.write_json(args.receipt, publication_receipt(args.directory, args.checkout))
     shared.add_current_span_event("release.phase.completed", {"release.phase": args.operation})
     print(json.dumps({"status": "PASSED", "operation": args.operation}))
     return 0

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeRelease } from "../scripts/release/analyze_branch_release.mjs";
+import { analyzeRelease, trustedAnalyzerOptions } from "../scripts/release/analyze_branch_release.mjs";
 
 const input = (messages) => ({
   commits: messages.map((message, index) => ({
@@ -56,5 +56,15 @@ test("malformed facts and candidate policy overrides fail closed", async () => {
     { ...valid, commits: [{ ...valid.commits[0], config: "candidate.js" }] },
   ]) {
     await assert.rejects(analyzeRelease(invalid), /Invalid release analysis input/);
+  }
+});
+
+test('trusted wrappers preserve official rules while unknown or duplicate analyzers fail', () => {
+  const options = {preset: 'conventionalcommits', releaseRules: [{type: 'refactor', release: 'patch'}]};
+  for (const name of ['@semantic-release/commit-analyzer', './.github/release-train/release-commit-analyzer.mjs', './.github/release-train/release-commit-analyzer.mjs']) {
+    assert.deepEqual(trustedAnalyzerOptions({plugins: [[name, options]]}), options);
+  }
+  for (const plugins of [[], [['./untrusted.mjs', options]], [['@semantic-release/commit-analyzer', {preset: 'angular'}]], [['@semantic-release/commit-analyzer', options], ['./.github/release-train/release-commit-analyzer.mjs', options]]]) {
+    assert.throws(() => trustedAnalyzerOptions({plugins}), /Unsupported trusted/);
   }
 });

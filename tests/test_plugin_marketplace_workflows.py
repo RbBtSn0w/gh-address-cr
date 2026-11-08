@@ -17,10 +17,10 @@ class PluginMarketplaceWorkflowTests(unittest.TestCase):
     def test_stable_publication_waits_for_pypi_and_uses_exact_source(self):
         release = (WORKFLOWS / 'release.yml').read_text()
         publish = job(release, 'publish-plugin-marketplace')
-        for expected in ('needs: [verify, publish-pypi]', "vars.RELEASE_ENABLED == 'true'",
-                         'ref: ${{ needs.verify.outputs.source_sha }}', 'fetch-depth: 0',
+        for expected in ('needs: [verify, recovery-input, publish-pypi]', "vars.RELEASE_ENABLED == 'true'",
+                         "ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}", 'fetch-depth: 0',
                          'persist-credentials: false', 'contents: write', 'artifact-ids:',
-                         'python -m scripts.release.plugin_release publish', 'handoff verify'):
+                         'python -m scripts.release.plugin_release publish', 'from scripts.release.handoff import verify'):
             self.assertIn(expected, publish)
         self.assertNotIn('id-token:', publish)
         self.assertNotIn('python -m build', publish)

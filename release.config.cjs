@@ -12,9 +12,9 @@ module.exports = {
   repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git",
   tagFormat: "v${version}",
   plugins: [
-    "./scripts/commit-semantics.mjs",
+    "./.github/release-train/commit-semantics.mjs",
     [
-      "@semantic-release/commit-analyzer",
+      "./.github/release-train/release-commit-analyzer.mjs",
       {
         preset: "conventionalcommits",
         parserOpts: releaseParserOpts,
@@ -24,7 +24,7 @@ module.exports = {
       },
     ],
     [
-      "@semantic-release/release-notes-generator",
+      "./.github/release-train/release-notes-generator.mjs",
       {
         preset: "conventionalcommits",
         parserOpts: releaseParserOpts,

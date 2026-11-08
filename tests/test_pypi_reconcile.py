@@ -45,6 +45,10 @@ class PyPIReconcileTests(unittest.TestCase):
             self.assertFalse(pypi.reconcile(self.verified, self.candidate, self.root / 'repeat', self.receipt))
             pypi.reconcile(self.verified, self.candidate, None, self.receipt)
         self.assertEqual(json.loads(self.receipt.read_text())['files'][self.sdist]['status'], 'verified')
+        confirmed = json.loads(self.receipt.read_text())
+        self.assertIn('observed_at', confirmed)
+        self.assertEqual(confirmed['expected_files'], {
+            name: entry['sha256'] for name, entry in confirmed['files'].items()})
 
     def test_wrong_existing_bytes_and_missing_confirmation_fail(self):
         remote = self.remote([self.wheel])

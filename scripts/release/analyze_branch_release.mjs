@@ -15,6 +15,20 @@ function exactKeys(value, keys) {
     && keys.every((key) => Object.hasOwn(value, key));
 }
 
+export function trustedAnalyzerOptions(config) {
+  const supported = new Set([
+    '@semantic-release/commit-analyzer',
+    './scripts/release-commit-analyzer.mjs',
+    './.github/release-train/release-commit-analyzer.mjs',
+  ]);
+  const plugins = config.plugins.filter((plugin) => Array.isArray(plugin)
+    && supported.has(plugin[0]));
+  if (plugins.length !== 1 || plugins[0][1]?.preset !== 'conventionalcommits') {
+    throw new Error('Unsupported trusted release analyzer policy');
+  }
+  return plugins[0][1];
+}
+
 /** Analyze only supplied immutable commit facts using this trusted checkout's policy. */
 export async function analyzeRelease(input) {
   if (!exactKeys(input, ["commits", "current_version", "baseline_tag"])
@@ -26,13 +40,9 @@ export async function analyzeRelease(input) {
         && typeof commit.message === "string")) {
     throw new Error("Invalid release analysis input");
   }
-  const plugins = trustedConfig.plugins.filter((plugin) => Array.isArray(plugin)
-    && plugin[0] === "@semantic-release/commit-analyzer");
-  if (plugins.length !== 1 || plugins[0][1]?.preset !== "conventionalcommits") {
-    throw new Error("Unsupported trusted release analyzer policy");
-  }
+  const options = trustedAnalyzerOptions(trustedConfig);
   // Commit text is analysis input, never telemetry or console output.
-  const release_type = await analyzeCommits(plugins[0][1], {
+  const release_type = await analyzeCommits(options, {
     cwd,
     commits: input.commits,
     logger: { log() {} },

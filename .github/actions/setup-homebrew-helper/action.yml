@@ -1,5 +1,5 @@
-name: Setup Homebrew release helper
-description: Install trusted release tooling in its own Python environment.
+name: Setup trusted release helper
+description: Use current trusted source helpers with third-party binary dependencies only.
 runs:
   using: composite
   steps:
@@ -9,6 +9,7 @@ runs:
     - shell: bash
       run: |
         python -m venv .release-venv
-        [[ "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-        .release-venv/bin/python -m pip install --only-binary=:all: "gh-address-cr==$PACKAGE_VERSION"
+        python -c 'import tomllib; from pathlib import Path; print("\n".join(tomllib.loads(Path("pyproject.toml").read_text())["project"]["dependencies"]))' > "$RUNNER_TEMP/release-helper-requirements.txt"
+        .release-venv/bin/python -m pip install --only-binary=:all: -r "$RUNNER_TEMP/release-helper-requirements.txt" 'PyYAML>=6'
         echo "$PWD/.release-venv/bin" >> "$GITHUB_PATH"
+        echo "PYTHONPATH=$PWD/src" >> "$GITHUB_ENV"
