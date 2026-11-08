@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "profile": "custom",
+  "adapter": "scripts/release/train-adapter.mjs",
+  "intended_targets": [
+    "stable_tag",
+    "github",
+    "pypi",
+    "homebrew",
+    "marketplace"
+  ]
+}

@@ -1,4 +1,5 @@
 name: Release
+run-name: ${{ inputs.operation == 'recover' && format('Recover release · run {0}', inputs.source_run_id) || format('Release main · {0}', github.event_name == 'schedule' && 'scheduled' || 'manual') }}
 on:
   schedule:
     - cron: '0 7 * * 5'
@@ -8,12 +9,13 @@ on:
         type: choice
         options: [release, recover]
         default: release
+        description: Release current main, or complete an original release
       source_run_id:
         type: string
-        description: Original main release run ID (recover only)
+        description: Original release run ID — required only for recover
       artifact_id:
         type: string
-        description: Immutable verified artifact ID (recover only)
+        description: Original recovery artifact ID — copy from Release outcome
 permissions:
   actions: read
   contents: read
@@ -24,6 +26,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
+    name: Analyze and validate candidate
     if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (inputs.operation != 'recover')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -32,6 +35,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
       artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+      analysis_artifact_id: ${{ steps.analysis_artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +48,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Reject full release reruns before analysis or builds
+        run: |
+          if [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            echo '::error::Open the original Release outcome and recover its sealed identity, or dispatch a new release for current main. Full reruns cannot reanalyze after possible publication.'
+            echo "Original outcome: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            exit 1
+          fi
       - name: Install verification tools
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
@@ -55,7 +66,7 @@ jobs:
         id: plan
         run: |
           mkdir -p dist
-          node scripts/release/engine.mjs plan dist/plan.json
+          node .github/release-train/cli.mjs analyze --output dist/plan.json
       - name: Install exact candidate verification dependencies
         if: steps.plan.outputs.released == 'true'
         run: python -m pip install -e '.[dev]' build twine
@@ -67,7 +78,8 @@ jobs:
           python -m unittest discover -s tests
           python -m gh_address_cr --help
           python -m gh_address_cr agent manifest
-          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs tests/release_observation.test.mjs
+          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs tests/release_observation.test.mjs tests/release_outcome_v2.test.mjs tests/release_platform_observation.test.mjs tests/release_train_cli.test.mjs
+          node .github/release-train/sync.mjs check --consumer .
       - name: Build final release bytes without publisher authority
         if: steps.plan.outputs.released == 'true'
         env:
@@ -83,7 +95,7 @@ jobs:
           python -m venv "$RUNNER_TEMP/installed-release"
           "$RUNNER_TEMP/installed-release/bin/pip" install dist/*.whl
           GH_ADDRESS_CR_TEST_RUNTIME=installed "$RUNNER_TEMP/installed-release/bin/python" -m unittest tests.contract.test_installed_runtime_smoke_contract tests.contract.test_agent_journey_contract
-          python -m scripts.release.handoff record --candidate "$CANDIDATE"
+          node .github/release-train/cli.mjs seal
       - uses: actions/upload-artifact@v4
         id: artifact
         if: steps.plan.outputs.released == 'true'
@@ -92,6 +104,7 @@ jobs:
           path: dist/
           if-no-files-found: error
       - name: Retain read-only analysis
+        id: analysis_artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -99,6 +112,7 @@ jobs:
           path: dist/plan.json
           if-no-files-found: warn
   recovery-input:
+    name: Validate original recovery
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.operation == 'recover'
     runs-on: ubuntu-latest
     outputs:
@@ -118,6 +132,15 @@ jobs:
         with:
           python-version: '3.13'
       - uses: ./.github/actions/setup-homebrew-helper
+      - name: Validate recovery IDs
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ || ! "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::Copy original run and recovery artifact IDs from Release outcome.'
+            exit 1
+          fi
       - name: Bind original run and immutable artifact
         id: source
         env:
@@ -127,7 +150,7 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/source-artifact.json"
-          node scripts/release/recovery-source.mjs --run "$RUNNER_TEMP/source-run.json" --artifact "$RUNNER_TEMP/source-artifact.json" --repository "$GITHUB_REPOSITORY" --source-run-id "$SOURCE_RUN_ID" --artifact-id "$ARTIFACT_ID" > "$RUNNER_TEMP/recovery-source.json"
+          node .github/release-train/recovery-source.mjs --run "$RUNNER_TEMP/source-run.json" --artifact "$RUNNER_TEMP/source-artifact.json" --repository "$GITHUB_REPOSITORY" --source-run-id "$SOURCE_RUN_ID" --artifact-id "$ARTIFACT_ID" > "$RUNNER_TEMP/recovery-source.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/source-artifact.zip"
           node --input-type=module -e 'import {readFileSync} from "node:fs";import {createHash} from "node:crypto";const p=process.env.RUNNER_TEMP,m=JSON.parse(readFileSync(p+"/source-artifact.json"));if(!m.name.startsWith("release-main-verified-")||m.digest!=="sha256:"+createHash("sha256").update(readFileSync(p+"/source-artifact.zip")).digest("hex"))throw Error("Original verified artifact name/digest mismatch")'
           python3 scripts/release/check_artifact_zip.py "$RUNNER_TEMP/source-artifact.zip"
@@ -147,6 +170,7 @@ jobs:
         run: |
           python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; from scripts.release.recovery import verify_tag; p=verify(Path("verified"),os.environ["CANDIDATE"]); verify_tag("RbBtSn0w/gh-address-cr","v"+p["version"],p["candidate"]); Path(os.environ["GITHUB_OUTPUT"]).write_text("version="+p["version"]+"\n")'
   publish:
+    name: Publish GitHub release
     needs: [verify, recovery-input]
     if: always() && vars.RELEASE_ENABLED == 'true' && ((needs.verify.result == 'success' && needs.verify.outputs.released == 'true') || needs.recovery-input.result == 'success')
     runs-on: ubuntu-latest
@@ -185,14 +209,17 @@ jobs:
         run: |
           python -m scripts.release.handoff verify --candidate "$CANDIDATE"
           bash scripts/release/check-main.sh "$CANDIDATE"
-          node scripts/release/engine.mjs publish dist/plan.json
+          node .github/release-train/cli.mjs publish
       - name: Recover only missing GitHub assets under original tag
         if: inputs.operation == 'recover'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python -m scripts.release.recovery --directory dist
+          node .github/release-train/cli.mjs recover
   publish-pypi:
+    name: Publish PyPI
+    outputs:
+      receipt_artifact_id: ${{ steps.receipt.outputs.artifact-id }}
     needs: [verify, recovery-input, publish]
     if: always() && needs.publish.result == 'success' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
@@ -239,6 +266,7 @@ jobs:
           CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
         run: python -m scripts.release.pypi_reconcile confirm --directory verified --candidate "$CANDIDATE" --receipt "$RUNNER_TEMP/pypi-receipt.json"
       - name: Preserve per-file PyPI receipt
+        id: receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -246,6 +274,7 @@ jobs:
           path: ${{ runner.temp }}/pypi-receipt.json
           if-no-files-found: warn
   publish-homebrew:
+    name: Publish Homebrew
     needs: [verify, recovery-input, publish-pypi]
     if: always() && needs.publish-pypi.result == 'success' && vars.RELEASE_ENABLED == 'true'
     uses: ./.github/workflows/homebrew.yml
@@ -259,6 +288,9 @@ jobs:
       operation: ${{ inputs.operation || 'release' }}
     secrets: inherit
   publish-plugin-marketplace:
+    name: Publish Marketplace
+    outputs:
+      receipt_artifact_id: ${{ steps.receipt.outputs.artifact-id }}
     needs: [verify, recovery-input, publish-pypi]
     if: always() && needs.publish-pypi.result == 'success' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
@@ -298,9 +330,22 @@ jobs:
         run: |
           python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; verify(Path("dist"),os.environ["CANDIDATE"])'
           if [ "$OPERATION" != recover ]; then bash scripts/release/check-main.sh "$CANDIDATE"; fi
-          python -m scripts.release.plugin_release publish --directory dist/plugin-release --version "$PACKAGE_VERSION"
+          python -m scripts.release.plugin_release publish --directory dist/plugin-release --version "$PACKAGE_VERSION" --receipt "$RUNNER_TEMP/marketplace-receipt.json"
+
+      - name: Retain Marketplace remote receipt
+        id: receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-receipt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/marketplace-receipt.json
+          if-no-files-found: warn
 
   result:
+    name: Release outcome
+    permissions:
+      contents: read
+      actions: read
     needs: ['verify', 'recovery-input', 'publish', 'publish-pypi', 'publish-homebrew', 'publish-plugin-marketplace']
     if: always()
     runs-on: ubuntu-latest
@@ -312,21 +357,61 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.22.2'
-      - name: Restore plan for result context
-        if: needs.verify.result == 'success'
+      - name: Restore original analysis by producer ID
+        id: analysis
+        if: needs.verify.outputs.analysis_artifact_id != ''
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: release-analysis-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.verify.outputs.analysis_artifact_id }}
+          merge-multiple: true
           path: result-input
-      - name: Restore original recovery plan
-        if: needs.recovery-input.result == 'success'
+      - name: Restore original verified payload and handoff
+        id: verified
+        if: needs.recovery-input.outputs.artifact_id != '' || needs.verify.outputs.artifact_id != ''
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ inputs.artifact_id }}
-          run-id: ${{ inputs.source_run_id }}
+          artifact-ids: ${{ needs.recovery-input.outputs.artifact_id || needs.verify.outputs.artifact_id }}
+          run-id: ${{ inputs.operation == 'recover' && inputs.source_run_id || github.run_id }}
           github-token: ${{ github.token }}
           merge-multiple: true
           path: result-input
+      - name: Restore PyPI per-file remote receipt
+        id: pypi_receipt
+        if: needs.publish-pypi.outputs.receipt_artifact_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.publish-pypi.outputs.receipt_artifact_id }}
+          merge-multiple: true
+          path: publication-input
+      - name: Restore Homebrew remote receipt
+        id: homebrew_receipt
+        if: needs.publish-homebrew.outputs.receipt_artifact_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.publish-homebrew.outputs.receipt_artifact_id }}
+          merge-multiple: true
+          path: publication-input
+      - name: Restore Marketplace remote receipt
+        id: marketplace_receipt
+        if: needs.publish-plugin-marketplace.outputs.receipt_artifact_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.publish-plugin-marketplace.outputs.receipt_artifact_id }}
+          merge-multiple: true
+          path: publication-input
+      - name: Read back GitHub identity and original payload bytes
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+          ORIGINAL_RUN_ID: ${{ inputs.operation == 'recover' && inputs.source_run_id || github.run_id }}
+          RECOVERY_ARTIFACT_ID: ${{ needs.recovery-input.outputs.artifact_id || needs.verify.outputs.artifact_id }}
+        run: node scripts/release/observe-platforms.mjs
       - name: Record independent verification and publication results
         if: always()
         env:
@@ -335,10 +420,13 @@ jobs:
           RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
           RELEASE_OPERATION: ${{ inputs.operation }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: node scripts/release/observe.mjs
+          REPORT_DOWNLOADS: ${{ toJSON(steps) }}
+        run: node .github/release-train/cli.mjs report
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-result-${{ github.run_attempt }}
-          path: release-result.json
+          path: |
+            release-result.json
+            publication-input/*.json
           if-no-files-found: error

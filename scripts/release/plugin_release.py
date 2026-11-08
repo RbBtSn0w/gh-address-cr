@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from packaging.version import Version
@@ -238,11 +239,27 @@ def recover(directory: Path, version: str, *, source: Path = ROOT) -> dict:
     return publish(directory, version, source=source)
 
 
+def publication_receipt(directory: Path, version: str, result: dict) -> dict:
+    """Verify the current marketplace snapshot again before recording completion."""
+    bundle = load_bundle(directory, version)
+    if result.get('status') not in {'published', 'unchanged'}:
+        return {'status': 'unknown', 'candidate_sha': bundle.receipt['source_commit'], 'version': version,
+                'observed_at': datetime.now(timezone.utc).isoformat(), 'remote_id': result.get('commit'),
+                'url': f"https://github.com/{shared.REPOSITORY}/tree/{result.get('commit')}",
+                'preserved_newer': True, 'reason': 'A newer marketplace snapshot was preserved.'}
+    commit = result['commit']
+    verify_remote(bundle, REMOTE, commit)
+    return {'status': 'completed', 'candidate_sha': bundle.receipt['source_commit'], 'version': version,
+            'observed_at': datetime.now(timezone.utc).isoformat(), 'remote_id': commit,
+            'url': f'https://github.com/{shared.REPOSITORY}/tree/{commit}'}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=['prepare', 'publish', 'recover'])
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--version', required=True)
+    parser.add_argument('--receipt', type=Path)
     parser.add_argument('--candidate', help='Exact verified SHA for pre-tag read-only preparation only')
     args = parser.parse_args()
     if args.candidate and args.operation != 'prepare':
@@ -255,6 +272,8 @@ def main() -> int:
             result = recover(args.directory, args.version)
         else:
             result = publish(args.directory, args.version)
+        if args.receipt and args.operation != 'prepare':
+            shared.write_json(args.receipt, publication_receipt(args.directory, args.version, result))
         print(json.dumps(result, sort_keys=True))
         summary = os.environ.get('GITHUB_STEP_SUMMARY')
         if summary:

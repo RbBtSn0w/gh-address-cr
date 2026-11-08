@@ -488,8 +488,8 @@ class RuntimePackagingTest(PythonScriptTestCase):
             ("release-commit-analyzer.mjs", "@semantic-release/commit-analyzer"),
             ("release-notes-generator.mjs", "@semantic-release/release-notes-generator"),
         ):
-            self.assertIn(f"./scripts/{adapter}", text)
-            source = (ROOT / "scripts" / adapter).read_text(encoding="utf-8")
+            self.assertIn(f"./.github/release-train/{adapter}", text)
+            source = (ROOT / ".github" / "release-train" / adapter).read_text(encoding="utf-8")
             self.assertIn(f"loadReleaseTool('{engine}', context)", source)
             self.assertIn("await normalizeReleaseCommits(context)", source)
         self.assertIn('repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git"', text)

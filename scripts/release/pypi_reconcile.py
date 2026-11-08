@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
@@ -65,6 +66,8 @@ def reconcile(directory: Path, candidate: str, output: Path | None, receipt_path
     receipt = {'candidate': candidate, 'version': plan['version'], 'files': {}}
     for path in [*wheels, *sdists]:
         receipt['files'][path.name] = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'status': 'unverified'}
+    receipt['expected_files'] = {name: entry['sha256'] for name, entry in receipt['files'].items()}
+    receipt['observed_at'] = datetime.now(timezone.utc).isoformat()
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     try:
         remote = published_files(read_version(plan['version']), plan['version'])

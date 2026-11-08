@@ -103,3 +103,39 @@ class ScheduledReleaseContract(unittest.TestCase):
         helper = (ROOT / '.github/actions/setup-homebrew-helper/action.yml').read_text()
         self.assertNotIn('pip install .', helper)
         self.assertIn('--only-binary=:all:', helper)
+
+
+class ReleaseOutcomeV2Tests(unittest.TestCase):
+    def test_full_rerun_stops_before_analysis_and_product_builds(self):
+        import os
+
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        steps = workflow['jobs']['verify']['steps']
+        guard, = [step for step in steps if step.get('name') == 'Reject full release reruns before analysis or builds']
+        self.assertLess(steps.index(guard), next(i for i, step in enumerate(steps) if step.get('id') == 'plan'))
+        result = subprocess.run(['bash', '-e', '-c', guard['run']], env={**os.environ,
+            'GITHUB_RUN_ATTEMPT': '2', 'GITHUB_SERVER_URL': 'https://github.com',
+            'GITHUB_REPOSITORY': 'example/fixture', 'GITHUB_RUN_ID': '123'}, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('original', result.stdout.lower())
+        self.assertIn('recover', result.stdout.lower())
+
+    def test_final_summary_uses_every_retained_producer_id_and_read_only_authority(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        self.assertEqual(workflow['name'], 'Release')
+        self.assertIn('Recover release', workflow['run-name'])
+        result = workflow['jobs']['result']
+        self.assertEqual(result['permissions'], {'contents': 'read', 'actions': 'read'})
+        downloads = [step['with'] for step in result['steps'] if step.get('uses') == 'actions/download-artifact@v4']
+        self.assertEqual(len(downloads), 5)
+        for download in downloads:
+            self.assertIn('artifact-ids', download)
+            self.assertTrue(download['merge-multiple'])
+            self.assertNotIn('name', download)
+        text = str(downloads)
+        for producer in ['verify.outputs.analysis_artifact_id', 'verify.outputs.artifact_id',
+                         'publish-pypi.outputs.receipt_artifact_id', 'publish-homebrew.outputs.receipt_artifact_id',
+                         'publish-plugin-marketplace.outputs.receipt_artifact_id']:
+            self.assertIn(producer, text)
