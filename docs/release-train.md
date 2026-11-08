@@ -41,6 +41,11 @@ report its own finishing run's producer metadata, while actual recovery still
 requires the source run to be complete. Original notes and bytes are preserved;
 publishers do not rebuild wheel/sdist or move tags.
 
+The configured consistency plugin checks the complete analyzed notes in the
+official `prepare` phase, after generation and before tag creation or service
+prepare hooks. Missing notes or UTC-date drift stop publication before side
+effects; semantic-release remains the version engine.
+
 Recovery availability also requires the shared publication preflight: existing
 notes, release identity and all original asset bytes must be readable and match.
 A tag alone is insufficient. Matching drafts and missing assets remain repairable;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -88,5 +88,22 @@ test('actual metadata-only workflow rejects malformed messages and preserves bre
   ]) {
     const result = spawnSync('bash', ['-c', script], {env: {...process.env, RELEASE_TOOLS: process.cwd(), PR_TITLE: title, PR_BODY: description}, encoding: 'utf8'});
     assert.equal(result.status === 0, accepted, result.stderr);
+  }
+});
+test('official prepare rejects complete notes drift before service hooks or tag creation',()=>{
+  for(const [sealedNotes,generatedNotes,accepted]of [['Original notes (2026-11-08)','Original notes (2026-11-09)',false],[undefined,'Original notes',false],['Original notes','Original notes',true]]){
+    const cwd=fixture(),remote=cwd+'-remote.git',filename=cwd+'-plan.json',marker=cwd+'-published';
+    try{
+      const baseline={version:'3.22.0',gitHead:git(cwd,'rev-parse','v3.22.0'),gitTag:'v3.22.0'};
+      git(cwd,'commit','--quiet','--allow-empty','-m','fix: release candidate');
+      git(cwd,'clone','--quiet','--bare',cwd,remote);
+      writeFileSync(filename,JSON.stringify({completed:true,candidate:git(cwd,'rev-parse','HEAD'),baseline,config:configDigest(),version:'3.22.1',notes:sealedNotes}));
+      const code=`import semanticRelease from ${JSON.stringify(pathToFileURL(resolve('node_modules/semantic-release/index.js')).href)};import {writeFileSync} from 'node:fs';await semanticRelease({branches:['main'],repositoryUrl:${JSON.stringify(pathToFileURL(remote).href)},ci:false,plugins:[{analyzeCommits:()=> 'patch',generateNotes:()=>${JSON.stringify(generatedNotes)}},${JSON.stringify(resolve('scripts/release/consistency.mjs'))},{prepare:()=>writeFileSync(${JSON.stringify(marker)},'prepared'),publish:()=>writeFileSync(${JSON.stringify(marker)},'published')}]},{cwd:${JSON.stringify(cwd)},env:{PATH:process.env.PATH,RELEASE_PLAN:${JSON.stringify(filename)},GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},stdout:{write(){}},stderr:{write(){}}});`;
+      const result=spawnSync(process.execPath,['--input-type=module','-e',code],{encoding:'utf8',timeout:30000});
+      assert.equal(result.status===0,accepted,result.stderr);
+      const tags=git(cwd,'tag','--list');
+      if(accepted){assert.match(tags,/v3.22.1/);assert.equal(readFileSync(marker,'utf8'),'published');}
+      else{assert.match(result.stderr,/notes.*(?:drift|unavailable)/i);assert.equal(tags,'v3.22.0');assert.equal(existsSync(marker),false);}
+    }finally{for(const path of [cwd,remote,filename,marker])rmSync(path,{recursive:true,force:true});}
   }
 });
