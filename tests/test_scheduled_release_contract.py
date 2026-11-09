@@ -35,9 +35,17 @@ class ScheduledReleaseContract(unittest.TestCase):
             candidate = 'a' * 40
             (root / 'product.whl').write_bytes(b'wheel')
             (root / 'product.tar.gz').write_bytes(b'sdist')
+            plugin = root / 'plugin/package/.codex-plugin/plugin.json'
+            plugin.parent.mkdir(parents=True)
+            plugin.write_text('{"name":"fixture"}')
             (root / 'plan.json').write_text(json.dumps({'completed': True, 'candidate': candidate, 'version': '1.2.3'}))
             (root / 'handoff.json').write_text(json.dumps({'candidate': candidate, 'files': inventory(root)}))
             self.assertEqual(verify(root, candidate)['version'], '1.2.3')
+            content = plugin.read_bytes()
+            plugin.unlink()
+            with self.assertRaises(ValueError):
+                verify(root, candidate)
+            plugin.write_bytes(content)
             with self.assertRaises(ValueError):
                 verify(root, 'b' * 40)
             (root / 'extra').write_bytes(b'unexpected')
@@ -47,6 +55,15 @@ class ScheduledReleaseContract(unittest.TestCase):
             (root / 'product.whl').write_bytes(hashlib.sha256(b'changed').digest())
             with self.assertRaises(ValueError):
                 verify(root, candidate)
+
+    def test_verified_artifact_upload_preserves_hidden_plugin_manifests(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        producer, = [step for step in workflow['jobs']['verify']['steps']
+                     if step.get('id') == 'artifact']
+        self.assertEqual(producer['uses'], 'actions/upload-artifact@v4')
+        self.assertEqual(producer['with']['path'], 'dist/')
+        self.assertIs(producer['with'].get('include-hidden-files'), True)
 
     def test_event_matrix_permissions_and_publisher_never_builds(self):
         import itertools

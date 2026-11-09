@@ -107,6 +107,7 @@ jobs:
         with:
           name: release-main-verified-${{ github.run_attempt }}
           path: dist/
+          include-hidden-files: true
           if-no-files-found: error
       - name: Retain read-only analysis
         id: analysis_artifact
