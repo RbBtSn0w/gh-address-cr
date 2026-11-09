@@ -3,6 +3,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,16 @@ from scripts.release.handoff import inventory
 
 
 class PyPIReconcileTests(unittest.TestCase):
+    @contextmanager
+    def confirmation_clock(self, timeout=10):
+        elapsed = [0.0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+        with patch.object(pypi.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(pypi.time, 'sleep', side_effect=sleep), \
+             patch.object(pypi, 'CONFIRM_TIMEOUT_SECONDS', timeout):
+            yield elapsed
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -56,9 +67,38 @@ class PyPIReconcileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different bytes'):
             self.stage(remote)
         self.assertFalse((self.root / 'missing').exists())
-        with patch.object(pypi, 'read_version', return_value=self.remote([self.wheel])):
+        with patch.object(pypi, 'CONFIRM_TIMEOUT_SECONDS', 0), patch.object(pypi, 'read_version', return_value=self.remote([self.wheel])):
             with self.assertRaisesRegex(ValueError, 'missing'):
                 pypi.reconcile(self.verified, self.candidate, None, self.receipt)
+
+    def test_confirmation_waits_read_only_for_both_original_files(self):
+        original = {p.name: p.read_bytes() for p in self.verified.iterdir()}
+        with self.confirmation_clock(timeout=20), patch.object(pypi, 'read_version', side_effect=[
+                None, self.remote([self.wheel]), self.remote([self.wheel, self.sdist])]):
+            self.assertFalse(pypi.reconcile(self.verified, self.candidate, None, self.receipt))
+        receipt = json.loads(self.receipt.read_text())
+        self.assertEqual({entry['status'] for entry in receipt['files'].values()}, {'verified'})
+        self.assertEqual({p.name: p.read_bytes() for p in self.verified.iterdir()}, original)
+        self.assertFalse((self.root/'missing').exists())
+
+    def test_confirmation_timeout_retains_missing_receipt_without_staging(self):
+        with self.confirmation_clock(timeout=2) as elapsed, patch.object(pypi, 'read_version', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                pypi.reconcile(self.verified, self.candidate, None, self.receipt)
+        self.assertLessEqual(elapsed[0], 2)
+        self.assertEqual({entry['status'] for entry in json.loads(self.receipt.read_text())['files'].values()}, {'missing'})
+        self.assertFalse((self.root/'missing').exists())
+
+    def test_confirmation_conflicts_and_read_errors_never_retry(self):
+        from urllib.error import URLError
+        conflict = self.remote([self.wheel])
+        conflict['urls'][0]['digests']['sha256'] = 'b'*64
+        for response in (conflict, {}, URLError('offline')):
+            with self.subTest(response=response), self.confirmation_clock(), \
+                    patch.object(pypi, 'read_version', side_effect=[response]) as read:
+                with self.assertRaises((ValueError, URLError)):
+                    pypi.reconcile(self.verified, self.candidate, None, self.receipt)
+                self.assertEqual(read.call_count, 1)
 
     def test_handoff_is_fully_verified_before_network_or_staging(self):
         (self.verified / self.sdist).write_bytes(b'changed')

@@ -7,12 +7,16 @@ import json
 import os
 import re
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 from scripts.release.handoff import verify
+
+CONFIRM_TIMEOUT_SECONDS = 180
+CONFIRM_POLL_SECONDS = 5
 
 
 def read_version(version: str) -> dict | None:
@@ -69,31 +73,41 @@ def reconcile(directory: Path, candidate: str, output: Path | None, receipt_path
     receipt['expected_files'] = {name: entry['sha256'] for name, entry in receipt['files'].items()}
     receipt['observed_at'] = datetime.now(timezone.utc).isoformat()
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
-    try:
-        remote = published_files(read_version(plan['version']), plan['version'])
-    except (HTTPError, URLError, OSError, ValueError) as error:
-        receipt['read_error'] = type(error).__name__
+    deadline = time.monotonic() + CONFIRM_TIMEOUT_SECONDS
+    while True:
+        try:
+            remote = published_files(read_version(plan['version']), plan['version'])
+        except (HTTPError, URLError, OSError, ValueError) as error:
+            receipt['read_error'] = type(error).__name__
+            receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+            raise
+        missing = []
+        conflicts = False
+        for path in [*wheels, *sdists]:
+            observed = remote.get(path.name)
+            entry = receipt['files'][path.name]
+            if observed is not None and observed != entry['sha256']:
+                entry['status'] = 'conflict'
+                conflicts = True
+            else:
+                entry['status'] = ('verified' if output is None else 'already-present') if observed else 'missing'
+            if observed is None:
+                missing.append(path)
+        receipt['observed_at'] = datetime.now(timezone.utc).isoformat()
         receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
-        raise
-    missing = []
-    conflicts = False
-    for path in [*wheels, *sdists]:
-        observed = remote.get(path.name)
-        entry = receipt['files'][path.name]
-        if observed is not None and observed != entry['sha256']:
-            entry['status'] = 'conflict'
-            conflicts = True
-        else:
-            entry['status'] = ('verified' if output is None else 'already-present') if observed else 'missing'
-        if observed is None:
-            missing.append(path)
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
-    if conflicts:
-        raise ValueError('existing PyPI file has different bytes')
-    if output is None:
-        if missing:
+        if conflicts:
+            raise ValueError('existing PyPI file has different bytes')
+        if output is not None or not missing:
+            break
+        # A successful upload may precede JSON-index visibility. Only repeat reads;
+        # stage and publisher authority never run inside this confirmation window.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise ValueError('PyPI publication remains missing files; inspect the per-file receipt')
-    else:
+        time.sleep(min(CONFIRM_POLL_SECONDS, remaining))
+        if time.monotonic() >= deadline:
+            raise ValueError('PyPI publication remains missing files; inspect the per-file receipt')
+    if output is not None:
         # A stale directory must never introduce a previously staged archive.
         output.mkdir(parents=True, exist_ok=False)
         for path in missing:
