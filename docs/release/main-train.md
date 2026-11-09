@@ -68,8 +68,17 @@ only sealed original generated notes. Conflicts or unverifiable reads stop. PyPI
 the original tag and sealed archives, not live-main equality. Four-platform
 Homebrew recovery restores original atomic bottle bundles and fails closed when
 one is missing; recovery does not build replacement bottles. Marketplace uses the
-existing sealed bundle and source tag. Original normal release remains responsible
-for all first-time builds.
+existing sealed bundle and source tag.
+
+If the original run proves Homebrew never started, complete its first delivery
+through the existing independent **Homebrew** workflow with `operation=release`,
+the original version/source SHA and `rebuild=0`. First verify the original artifact,
+tag, PyPI sdist hash and absence of a newer tap or competing publication; missing
+assets alone do not prove first delivery. This creates the first resource snapshot
+and bottles without rebuilding the original wheel/sdist. Preserve the earlier
+partial/failed runs and record this separate operation as first delivery. Once
+Homebrew artifacts exist, recovery must reuse their sealed snapshot/bundles; it
+must never fall back to a new build because evidence is missing.
 
 `release-result.json` and the Actions summary separate verification from publication
 and record GitHub, PyPI, Homebrew and marketplace independently. Disabled publication
@@ -95,10 +104,11 @@ footers; genuine multi-parent merge metadata is recorded without style rejection
 A malformed ordinary commit, including one hidden behind a skip marker, still
 fails closed. Existing product baseline remains mandatory.
 
-External readiness is separate: PyPI OIDC is retained; first marketplace bootstrap
-has not been observed. The release App metadata names ID `2758804` and
-`RELEASE_BOT_PRIVATE_KEY`, but its tap installation is unverified. No credential,
-repository setting, schedule execution, tag or publication was changed locally.
+External readiness is separate: verify PyPI OIDC, Marketplace snapshot identity and
+the existing release App's tap installation/access using actual channel receipts.
+The configured App metadata names ID `2758804` and `RELEASE_BOT_PRIVATE_KEY`;
+credential names alone never prove delivery or authorization. Retain dated staging
+observations as history rather than treating them as the current service state.
 
 ## Historical squash compatibility (2026-11-07)
 
