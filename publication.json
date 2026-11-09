@@ -1,0 +1,53 @@
+{
+  "archive": {
+    "name": "gh-address-cr-3.23.0.zip",
+    "sha256": "744bf88cbf3eb84a6133890ae11aa9127027fb94ba487cf0939a4986f237c7f7"
+  },
+  "build_run_url": "https://github.com/RbBtSn0w/gh-address-cr/actions/runs/42627816773",
+  "files": {
+    ".codex-plugin/plugin.json": "99f6d5c09ee55668edde8f2acde60c44d18951c4eb06ee22a0bd3e81151418eb",
+    "assets/icon.png": "2d6eefb67296daaaf20fdd48006cdc300a7103f5acb1ab55fd5bf08e06af3caa",
+    "assets/logo.png": "8b80f6a87f80c38f8900d63e5c3a193ba52225920abfba14d55ddadbf3472e55",
+    "assets/screenshot-1.png": "cb4dd0be3d389ed6ec20d5b1f2b3ac8dab7deb0b9b47c06855e834c5fbe1224f",
+    "plugin.json": "f724e1b1bbc0996cbca5c9548fd8e211aa3eb10724c7c6c26a63e3f445772d36",
+    "skills/gh-address-cr/SKILL.md": "6ea463ccc608c8f2a87b2afb0c81df824d3539cfa8064453ad08fc6cd1b8928a",
+    "skills/gh-address-cr/agents/openai.yaml": "0b4891ebc4420054c538342cb08784e514af1fafeeb0dead1abb9b242e4ce657",
+    "skills/gh-address-cr/references/agent-protocol.md": "5720f8c5a0174487690ab480ba1aa0fb95d0e98cd25015c755f58a6ae6f9f40b",
+    "skills/gh-address-cr/references/completion-contract.md": "76091b45f6680579036700aa7a1014660998944b58c7d53273fd68329d7e7391",
+    "skills/gh-address-cr/references/cr-triage-checklist.md": "f53de9068552215326aa03020f4e1469b64ec8ca2f0cd5c82ce1b5c738052cbb",
+    "skills/gh-address-cr/references/evidence-ledger.md": "54b370c45001152844eb509a7e5b55cf089812b2936d4521cc24f33ed36b8acb",
+    "skills/gh-address-cr/references/feedback.md": "3e3f22ed2a5052408091efb5931a3bc687057d51fd52a7a80239060aabba6984",
+    "skills/gh-address-cr/references/mode-producer-matrix.md": "d50860011c9250ef0f32505f4f2b42b159e2bc8f227be9dae71c3e0b04ae26cb",
+    "skills/gh-address-cr/references/stacked-pr-workflow.md": "8d682f65581965dd19ad1bb405f366bfacb7477943ce2fa581b6f4369c721f70",
+    "skills/gh-address-cr/references/status-action-map.md": "a277979495faf013cfeaa7f0a016937ccc5faa4420f14b3ebf1a9fb9fd5cc21c",
+    "skills/gh-address-cr/runtime-requirements.json": "ac77f05b6ae6c6152a59959bcfa191d154c93c15e7d9b7cfd346306aaa811b28"
+  },
+  "schema_version": "plugin-publication.v1",
+  "snapshot": {
+    "catalog": {
+      "interface": {
+        "displayName": "GH Address CR Community"
+      },
+      "name": "gh-address-cr-community",
+      "plugins": [
+        {
+          "category": "Developer Tools",
+          "name": "gh-address-cr",
+          "policy": {
+            "authentication": "ON_INSTALL",
+            "installation": "AVAILABLE"
+          },
+          "source": {
+            "path": "./dist/plugin/gh-address-cr",
+            "source": "local"
+          }
+        }
+      ]
+    },
+    "license": "MIT License\n\nCopyright (c) 2026 RbBtSn0w\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+    "readme": "# GH Address CR Marketplace\n\nStable plugin version: 3.23.0.\n\nInstall the gh-address-cr runtime separately using pipx or Homebrew.\nRegister this Git source with an explicit marketplace ref:\n\n```bash\ncodex plugin marketplace add RbBtSn0w/gh-address-cr --ref marketplace\ncodex plugin add gh-address-cr@gh-address-cr-community\n```\n\nSee the source repository documentation for update and recovery instructions.\n"
+  },
+  "source_commit": "73f8632769ca57aeb7436d40fc381598294eddc6",
+  "source_tag": "v3.23.0",
+  "version": "3.23.0"
+}

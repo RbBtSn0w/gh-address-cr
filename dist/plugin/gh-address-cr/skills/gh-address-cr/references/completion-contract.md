@@ -1,0 +1,76 @@
+# Completion Contract
+
+`gh-address-cr final-gate` pass is mandatory before any completion statement. Add `--require-checks` or `--require-required-checks` when the PR workflow must also prove GitHub checks are green. With either flag, a PR that has no check runs (or whose base branch requires none) blocks with `FINAL_GATE_REQUIRED_CHECKS_MISSING` and `pr_checks_missing_count=1`: zero checks cannot prove the checks are green.
+
+`completion_scope: "pull_request"` proves only the selected layer. Use
+`gh-address-cr final-gate <owner/repo> <pr_number> --stack` for a bottom-up
+`completion_scope: "stack_segment"` proof. Only its reported
+`covered_pr_numbers` are covered; a closing topology change returns
+`STACK_CONTEXT_STALE` and suppresses the completion claim.
+
+Never output "done", "all resolved", "completed", or equivalent unless:
+
+- `gh-address-cr final-gate <owner/repo> <pr_number>` has just passed
+- output includes `Verified: 0 Unresolved Threads found`
+- output includes `Verified: 0 Pending Reviews found`
+- unresolved GitHub threads = 0
+- session blocking items = 0
+- final-gate output includes a telemetry coverage label
+- final response includes the rendered `completion_summary.markdown` from `final-gate --machine` or the readable Markdown block from `PR Completion Summary Guidance`
+
+Only `gate_scope: "final"` output (from `gh-address-cr final-gate`) is completion proof. The `gate_scope: "inline"` summary emitted by `review`/`address`/`threads` is a pre-gate that does not evaluate pending reviews or PR checks; a `PASSED`/`PRELIM_PASSED` inline result is never sufficient to claim completion.
+
+Final output must include:
+
+1. the explicit `gh-address-cr final-gate <owner/repo> <pr_number>` command invocation used
+2. `Verified: 0 Unresolved Threads found`
+3. `Verified: 0 Pending Reviews found`
+4. unresolved GitHub threads = 0
+5. session blocking items = 0
+6. the rendered completion summary: verdict first, review counts in a small table, then telemetry, sources, duration, slowest operation, lifecycle metrics (when available), and issues as separate bullets. Keep report artifacts outside code fences. Explain abnormal metrics briefly; do not hide diagnostics or flags.
+7. telemetry coverage label and efficiency report path
+8. audit summary path + sha256
+
+Use `completion_summary_line`, the structured `completion_summary` object, `PR Completion Summary Guidance`, `audit_summary.md`, or the machine-readable count lines printed by `final-gate` when run-scoped diagnostics are needed. The compact line carries telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary. In the issue summary each error-prone operation appears once, as `<operation> failures=<n> timeouts=<n> retries=<n>`; other inefficiency flags (such as duration thresholds) follow `flags:`, each slow operation once, with a run count when it exceeded the threshold more than once.
+
+`final-gate` also writes the advisory `cr-metrics.json` report using the
+`cr-lifecycle.v1` schema. It projects item lifecycle timing and rework from the
+evidence ledger; inferred observation times are excluded from exact lead-time
+aggregates. Report generation is fail-open: diagnostics remain visible, but
+the lifecycle report cannot change the final-gate verdict or exit code. The
+artifact is decision evidence for maintainers, never workflow authority.
+
+Telemetry coverage labels are `complete`, `partial`, `runtime-only`, or `unavailable`. `runtime-only` is valid when host telemetry was not imported. `unavailable` must be reported explicitly instead of silently omitting metrics.
+
+For local development loops, `runtime-only` is advisory rather than abnormal by itself. Report the label and its implication, but do not expand it into a blocker or mandatory exception narrative unless additional telemetry diagnostics, inefficiency flags, or gate blockers are also present.
+
+If final-gate reports abnormal coverage, diagnostics, success-rate drops, or inefficiency flags, briefly explain the user impact in the final response. Status checks that block because the PR still needs work (`address`, `threads`, or `final-gate` returning a documented needs-action reason code) are reported in `needs_action_count` and do not lower `success_rate`; only crashes, errors, and rejected commands do. Likewise a `gh pr checks` probe that finds pending checks or no check runs at all is a successful probe, not a GitHub failure. These telemetry conditions are observed workflow evidence and do not become review-resolution blockers by themselves.
+
+Final-gate machine output may include `logic_validation_signals`. Each generated
+signal identifies its `item_kind` so runtime recovery can distinguish local
+findings from GitHub threads. Signals with `gate_effect=blocking` are completion
+blockers and must be fixed or explained through runtime evidence before claiming
+completion. Signals with `gate_effect=advisory` are non-blocking diagnostics;
+mention their implication when relevant, but do not treat them as a second
+review producer or as permission to bypass evidence, publish, or final-gate.
+
+For run-scoped diagnostics that must keep artifacts available after the gate, use:
+
+```text
+gh-address-cr final-gate --no-auto-clean <owner/repo> <pr_number>
+```
+
+Successful `gh-address-cr final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`.
+The archive includes `cr-metrics.json` when projection succeeds.
+
+If gate fails, continue iteration; completion summary is forbidden.
+
+## Why Review Comments Appear Later
+
+- GitHub review bots run asynchronously.
+- New commits trigger re-analysis and can generate new comments.
+- Old threads can become outdated; new ones may appear on different lines.
+
+## Presentation compatibility
+
+`completion_summary.markdown` is an additive display field. Render it directly, without a code fence. The exact `completion_summary_line` and the first bracketed line remain available for machine compatibility and diagnostics (for example `[gh-address-cr: PASSED | threads: ...]`); they are not the preferred user-facing layout. Both presentations carry telemetry coverage, confidence, source scope, observed duration, slowest operation, and issue summary.

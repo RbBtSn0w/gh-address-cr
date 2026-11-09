@@ -1,0 +1,4 @@
+interface:
+  display_name: "GH Address CR"
+  short_description: "Resolve GitHub PR review feedback safely"
+  default_prompt: "Use $gh-address-cr to handle this pull request through the runtime CLI and verify completion with final-gate."
