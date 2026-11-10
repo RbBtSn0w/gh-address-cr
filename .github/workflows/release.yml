@@ -68,6 +68,8 @@ jobs:
         env:
           CANDIDATE: ${{ github.sha }}
         run: bash scripts/release/check-main.sh "$CANDIDATE"
+      - name: Check synchronized release implementation
+        run: node .github/release-train/sync.mjs check --consumer .
       - name: Check release pipeline and configured schedule
         env:
           RELEASE_TOOLS: ${{ runner.temp }}/release-cadence
@@ -86,14 +88,15 @@ jobs:
         run: python -m pip install -e '.[dev]' build twine
       - name: Verify product
         if: steps.plan.outputs.released == 'true'
+        env:
+          RELEASE_TOOLS: ${{ runner.temp }}/release-cadence
         run: |
           ruff check src tests scripts/build_plugin_payload.py scripts/release
           python scripts/check_mypy_ratchet.py
           python -m unittest discover -s tests
           python -m gh_address_cr --help
           python -m gh_address_cr agent manifest
-          node --test tests/branch_release_analysis.test.mjs tests/release_engine.test.mjs tests/release_observation.test.mjs tests/release_outcome_v2.test.mjs tests/release_platform_observation.test.mjs tests/release_train_cli.test.mjs
-          node .github/release-train/sync.mjs check --consumer .
+          npm run test:release
       - name: Build final release bytes without publisher authority
         if: steps.plan.outputs.released == 'true'
         env:
@@ -156,6 +159,8 @@ jobs:
             echo '::error::Copy original run and recovery artifact IDs from Release outcome.'
             exit 1
           fi
+      - name: Check synchronized recovery implementation
+        run: node .github/release-train/sync.mjs check --consumer .
       - name: Bind original run and immutable artifact
         id: source
         env:
