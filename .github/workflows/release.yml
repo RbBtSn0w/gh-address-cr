@@ -2,7 +2,8 @@ name: Release
 run-name: ${{ inputs.operation == 'recover' && format('Recover release · run {0}', inputs.source_run_id) || format('Release main · {0}', github.event_name == 'schedule' && 'scheduled' || 'manual') }}
 on:
   schedule:
-    - cron: '0 7 * * 5'
+    - cron: "0 15 * * 5"
+      timezone: "Asia/Singapore"
   workflow_dispatch:
     inputs:
       operation:
@@ -67,6 +68,14 @@ jobs:
         env:
           CANDIDATE: ${{ github.sha }}
         run: bash scripts/release/check-main.sh "$CANDIDATE"
+      - name: Check release pipeline and configured schedule
+        env:
+          RELEASE_TOOLS: ${{ runner.temp }}/release-cadence
+        run: |
+          npm install --prefix "$RELEASE_TOOLS" --ignore-scripts --no-audit --no-fund --save-exact yaml@2.9.1
+          node .github/release-train/pipeline-contract.mjs check
+          node .github/release-train/cadence.mjs check
+
       - name: Analyze exact candidate
         id: plan
         run: |
@@ -174,6 +183,7 @@ jobs:
           CANDIDATE: ${{ steps.source.outputs.candidate_sha }}
           PYTHONPATH: src
         run: |
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import {validateOriginalPlan} from "./.github/release-train/release-entrypoint.mjs"; validateOriginalPlan(JSON.parse(readFileSync("verified/plan.json")));'
           python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; from scripts.release.recovery import verify_tag; p=verify(Path("verified"),os.environ["CANDIDATE"]); verify_tag("RbBtSn0w/gh-address-cr","v"+p["version"],p["candidate"]); Path(os.environ["GITHUB_OUTPUT"]).write_text("version="+p["version"]+"\n")'
   publish:
     name: Publish GitHub release
@@ -218,6 +228,7 @@ jobs:
           CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import {validateOriginalPlan} from "./.github/release-train/release-entrypoint.mjs"; validateOriginalPlan(JSON.parse(readFileSync("dist/plan.json")));'
           python -m scripts.release.handoff verify --candidate "$CANDIDATE"
           bash scripts/release/check-main.sh "$CANDIDATE"
           node .github/release-train/cli.mjs publish
@@ -244,6 +255,9 @@ jobs:
         with:
           ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -261,6 +275,7 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
         run: |
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import {validateOriginalPlan} from "./.github/release-train/release-entrypoint.mjs"; validateOriginalPlan(JSON.parse(readFileSync("verified/plan.json")));'
           python -m scripts.release.pypi_reconcile stage --directory verified --candidate "$CANDIDATE" --output dist --receipt "$RUNNER_TEMP/pypi-receipt.json"
           if [ "$OPERATION" = recover ]; then
             python -c 'import os; from scripts.release.recovery import verify_tag; from scripts.release.handoff import verify; from pathlib import Path; p=verify(Path("verified"),os.environ["CANDIDATE"]); verify_tag("RbBtSn0w/gh-address-cr","v"+p["version"],p["candidate"])'
@@ -318,6 +333,9 @@ jobs:
           ref: ${{ inputs.operation == 'recover' && github.sha || needs.verify.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -339,6 +357,7 @@ jobs:
           PACKAGE_VERSION: ${{ needs.recovery-input.outputs.version || needs.verify.outputs.version }}
           OPERATION: ${{ inputs.operation }}
         run: |
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import {validateOriginalPlan} from "./.github/release-train/release-entrypoint.mjs"; validateOriginalPlan(JSON.parse(readFileSync("dist/plan.json")));'
           python -c 'import os; from pathlib import Path; from scripts.release.handoff import verify; verify(Path("dist"),os.environ["CANDIDATE"])'
           if [ "$OPERATION" != recover ]; then bash scripts/release/check-main.sh "$CANDIDATE"; fi
           python -m scripts.release.plugin_release publish --directory dist/plugin-release --version "$PACKAGE_VERSION" --receipt "$RUNNER_TEMP/marketplace-receipt.json"

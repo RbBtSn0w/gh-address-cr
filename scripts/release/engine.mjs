@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { baseline, configDigest } from './consistency.mjs';
+import {validateOriginalPlan} from '../../.github/release-train/release-entrypoint.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const config = createRequire(import.meta.url)('../../release.config.cjs');
 const quiet = {write() {}};
@@ -49,7 +50,7 @@ export async function planRelease(source = process.cwd()) {
       plugins: [], analyzeCommits: [absolutePlugin(config.plugins[0]), record],
       generateNotes: (_options, context) => generateNotes(config.plugins.find(item => Array.isArray(item) && item[0] === './.github/release-train/release-notes-generator.mjs')[1], {...context, options: {...context.options, repositoryUrl: config.repositoryUrl}})}, {cwd: checkout, env, stdout: quiet, stderr: quiet});
     if (!completed || !acceptedBaseline?.gitHead) throw new Error('Analysis incomplete or published baseline missing');
-    return {completed, candidate, baseline: acceptedBaseline, config: configDigest(), version: result ? result.nextRelease.version : null, notes: result?.nextRelease?.notes ?? null};
+    return {completed, candidate, baseline: acceptedBaseline, config: configDigest(), version: result ? result.nextRelease.version : null, tag: result?.nextRelease?.gitTag ?? null, notes: result?.nextRelease?.notes ?? null};
   } finally { rmSync(temporary, {recursive: true, force: true}); }
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -62,6 +63,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `released=${!!plan.version}\nversion=${plan.version || ''}\nsource_sha=${plan.candidate}\n`, {flag: 'a'});
   } else {
     const plan = JSON.parse(readFileSync(filename, 'utf8'));
+    validateOriginalPlan(plan);
     if (!plan.version || !plan.completed) throw new Error('Release plan has no completed release');
     const result = await semanticRelease({...config, plugins: config.plugins.map(absolutePlugin)},
       {env: {...process.env, RELEASE_PLAN: resolve(filename)}});

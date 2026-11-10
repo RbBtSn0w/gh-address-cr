@@ -60,3 +60,30 @@ workflows remain consumer-owned. Upgrade from the authorized source skill's
 `node .github/release-train/sync.mjs check --consumer .` verifies consumer integrity
 without upstream access. Local tests use synthetic receipts and never publish a
 package, tap commit, Marketplace snapshot or GitHub Release.
+
+## Versioned custom implementation
+
+The existing release adapter exposes protocol 1 and its engine-selected identity to shared coordination. Analysis retains the real semantic-release tag; the original immutable pipeline envelope is captured in the existing plan. Present invalid envelopes fail before Node-owned publication/handoff/recovery boundaries. Reporting uses original goals and returns its parsed result to the shared exit policy, so successful report generation does not hide incomplete channel evidence. See [the release-only architecture preflight](rfcs/release-pipeline-integration-20261110.md) for authority, artifact and recovery boundaries. The Python review/session runtime, final-gate semantics, telemetry and existing PyPI file-level restore contract are unchanged.
+
+## Pipeline capability configuration
+
+`.github/release-train.json` owns configuration schema v2 / pipeline protocol v1,
+required goals, existing execution bindings and cadence. The current explicit
+schedule preserves Friday 15:00 Asia/Singapore (07:00 UTC). A new explicit empty
+cadence uses Friday 15:00 Asia/Shanghai; changing cadence is a normal configuration
+change, not a release approval. Runtime dispatch inputs do not change the schedule.
+
+With isolated `yaml@2.9.1` provisioned in `RELEASE_TOOLS`, run the read-only checks:
+
+```bash
+node .github/release-train/pipeline-contract.mjs check
+node .github/release-train/cadence.mjs check
+```
+
+An explicit maintenance `cadence.mjs update` changes only the native schedule
+projection; review that diff. Original plans retain exact identity, notes and goals.
+Reports/recovery use those original goals after configuration or main advances; old
+plans remain compatible and never acquire invented receipts. Public capability
+coordination stays separate from product/platform implementations and existing CI
+job permissions. Activation, credentials and existing delivery destinations are
+unchanged by configuration migration.
