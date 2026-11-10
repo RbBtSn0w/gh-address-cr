@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import * as adapter from '../scripts/release/train-adapter.mjs';
 import {captureAnalysis} from '../.github/release-train/release-entrypoint.mjs';
 import {createPipelinePlan} from '../.github/release-train/pipeline-contract.mjs';
-import {reportExitCode} from '../.github/release-train/release-result.mjs';
+import {reportExitCode,writeResult} from '../.github/release-train/release-result.mjs';
 const candidate='a'.repeat(40);
 const identity={candidate_sha:candidate,version:'1.2.3',tag:'v1.2.3',notes:'Original notes',baseline_tag:'v1.2.2'};
 const plan=()=>({completed:true,candidate,version:identity.version,tag:identity.tag,notes:identity.notes,baseline:{gitTag:identity.baseline_tag}});
@@ -55,4 +55,15 @@ for(const corruption of ['notes','digest'])test(`report retains diagnostics for 
   assert.equal(result.recovery.available,false);assert.equal(result.recovery.command,undefined);assert.equal(result.pipeline,undefined);
   assert.equal(reportExitCode(result),1);assert.match(readFileSync(summary,'utf8'),/Original.*pipeline|report-inputs/i);
   assert.equal(JSON.parse(readFileSync(join(cwd,'release-result.json'))).failure_stage,'report-inputs');
+}));
+
+test('an explicitly required channel outside the original plan cannot disappear from report validation',()=>fixture(cwd=>{
+  const current=config(),pipeline=createPipelinePlan({config:current,identity:{...identity,repository:'example/ghcr'}});
+  const receipt={status:'completed',candidate_sha:candidate,version:identity.version,remote_id:'fixture/channel',observed_at:'2026-11-10T00:00:00Z'};
+  const summary=join(cwd,'summary.md');
+  const result=writeResult(join(cwd,'release-result.json'),{schema_version:2,candidate_sha:candidate,version:identity.version,enabled:true,verification:'passed',concluded:true,intended_targets:[...current.intended_targets,'additional-required'],targets:{...Object.fromEntries(current.intended_targets.map(id=>[id,receipt])),'additional-required':{status:'failed'}}},{config:current,plan:{...plan(),pipeline},summaryPath:summary});
+  assert.equal(reportExitCode(result),1);assert.equal(result.failure_stage,'report-inputs');assert.equal(result.verification,'failed');
+  assert.deepEqual(result.intended_targets,current.intended_targets);assert.deepEqual(result.pipeline.goals,pipeline.pipeline.goals);assert.equal(result.pipeline.plan_digest,pipeline.digest);
+  assert.equal(result.targets['additional-required'].status,'failed');assert.equal(result.recovery.available,false);assert.equal(result.recovery.command,undefined);
+  assert.match(readFileSync(summary,'utf8'),/additional-required/);assert.equal(JSON.parse(readFileSync(join(cwd,'release-result.json'))).failure_stage,'report-inputs');
 }));
