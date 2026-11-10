@@ -2,16 +2,19 @@
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {writeResult} from '../../.github/release-train/release-result.mjs';
+import {inspectReportPlan} from '../../.github/release-train/release-entrypoint.mjs';
 const read = name => {try {return JSON.parse(readFileSync(name));} catch {return null;}};
 const needs = JSON.parse(process.env.RELEASE_NEEDS);
 const config=JSON.parse(readFileSync(fileURLToPath(new URL('../../.github/release-train.json',import.meta.url))));
 const jobs=JSON.parse(process.env.RELEASE_TARGETS||'{}');
 const defaults={stable_tag:'publish',github:'publish',pypi:'publish-pypi',homebrew:'publish-homebrew',marketplace:'publish-plugin-marketplace'};
-const mapping=Object.fromEntries(config.intended_targets.map(name=>[name,jobs[name]||defaults[name]]));
 const original = process.env.RELEASE_OPERATION === 'recover';
 const source = original ? needs['recovery-input'] : needs.verify;
 const outputs = source?.outputs ?? {};
 const plan = read('result-input/plan.json');
+const {original:originalPlan}=inspectReportPlan(plan);
+const intended=originalPlan?.pipeline.goals.map(goal=>goal.id)??config.intended_targets;
+const mapping=Object.fromEntries(intended.map(name=>[name,jobs[name]||defaults[name]]));
 const candidate = outputs.source_sha || plan?.candidate || process.env.GITHUB_SHA;
 const version = outputs.version || plan?.version || null;
 const active = process.env.RELEASE_ENABLED === 'true';
@@ -45,7 +48,7 @@ const result=writeResult('release-result.json', {
   failure_stage: downloadFailure?'report-input':failed?.[0]??null,
   recovery: read('publication-input/recovery-availability.json'),
   errors: [...(downloadFailure?['Report artifact download failed; channel receipts remain unconfirmed.']:[]),...(github?.errors||[]),...(failed?[`${failed[0]} ${failed[1].result}; inspect its named step and channel evidence.`]:[])],
-});
+}, {config,plan});
 
 if(downloadFailure||result.verification==='failed'||result.failure_stage||(active&&['failed','partial'].includes(result.publication)&&!result.asynchronous)) {
   console.error('::error::Release verification or publication is incomplete. Inspect Release outcome and the original channel receipts.');

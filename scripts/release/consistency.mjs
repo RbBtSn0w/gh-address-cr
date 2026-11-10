@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {validateOriginalPlan} from '../../.github/release-train/release-entrypoint.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 export function configDigest() {
   const hash = createHash('sha256');
@@ -18,6 +19,7 @@ function verifiedPlan(context) {
   const path = context.env.RELEASE_PLAN;
   if (!path) throw new Error('Verified release plan required');
   const plan = JSON.parse(readFileSync(path, 'utf8'));
+  validateOriginalPlan(plan);
   const candidate = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: context.cwd, encoding: 'utf8'}).trim();
   if (!plan.completed || !plan.version || plan.candidate !== candidate || plan.config !== configDigest()
       || JSON.stringify(plan.baseline) !== JSON.stringify(baseline(context.lastRelease))

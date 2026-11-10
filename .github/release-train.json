@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profile": "custom",
   "adapter": "scripts/release/train-adapter.mjs",
   "intended_targets": [
@@ -8,5 +8,176 @@
     "pypi",
     "homebrew",
     "marketplace"
-  ]
+  ],
+  "protocol_version": 1,
+  "cadence": {
+    "schedule": {
+      "enabled": true,
+      "cron": "0 15 * * 5",
+      "timezone": "Asia/Singapore"
+    },
+    "manual": {
+      "enabled": true
+    }
+  },
+  "pipeline": {
+    "stages": [
+      {
+        "id": "validate",
+        "implementation": "product",
+        "operation": "execute",
+        "effect": "local",
+        "depends_on": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "role": "python-files",
+            "kind": "files"
+          },
+          {
+            "role": "plugin",
+            "kind": "files"
+          },
+          {
+            "role": "native-archives",
+            "kind": "files"
+          }
+        ],
+        "execution": {
+          "provider": "github-actions",
+          "job": "verify"
+        },
+        "when": "release-needed"
+      },
+      {
+        "id": "github",
+        "implementation": "semantic-release",
+        "operation": "execute",
+        "effect": "write",
+        "depends_on": [
+          "validate"
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "role": "release-source",
+            "kind": "source"
+          }
+        ],
+        "execution": {
+          "provider": "github-actions",
+          "job": "publish"
+        },
+        "when": "release-needed"
+      },
+      {
+        "id": "pypi",
+        "implementation": "pypi",
+        "operation": "execute",
+        "effect": "write",
+        "depends_on": [
+          "github"
+        ],
+        "inputs": [
+          {
+            "from_stage": "validate",
+            "role": "python-files",
+            "kind": "files"
+          }
+        ],
+        "outputs": [],
+        "execution": {
+          "provider": "github-actions",
+          "job": "publish-pypi"
+        },
+        "when": "release-needed"
+      },
+      {
+        "id": "homebrew",
+        "implementation": "homebrew",
+        "operation": "execute",
+        "effect": "write",
+        "depends_on": [
+          "pypi"
+        ],
+        "inputs": [
+          {
+            "from_stage": "validate",
+            "role": "native-archives",
+            "kind": "files"
+          }
+        ],
+        "outputs": [],
+        "execution": {
+          "provider": "github-actions",
+          "job": "publish-homebrew"
+        },
+        "when": "release-needed"
+      },
+      {
+        "id": "marketplace",
+        "implementation": "marketplace",
+        "operation": "execute",
+        "effect": "write",
+        "depends_on": [
+          "pypi"
+        ],
+        "inputs": [
+          {
+            "from_stage": "validate",
+            "role": "plugin",
+            "kind": "files"
+          }
+        ],
+        "outputs": [],
+        "execution": {
+          "provider": "github-actions",
+          "job": "publish-plugin-marketplace"
+        },
+        "when": "release-needed"
+      }
+    ],
+    "goals": [
+      {
+        "id": "stable_tag",
+        "stages": [
+          "github"
+        ],
+        "asynchronous": false,
+        "recovery": "supported"
+      },
+      {
+        "id": "github",
+        "stages": [
+          "github"
+        ],
+        "asynchronous": false,
+        "recovery": "supported"
+      },
+      {
+        "id": "pypi",
+        "stages": [
+          "pypi"
+        ],
+        "asynchronous": false,
+        "recovery": "supported"
+      },
+      {
+        "id": "homebrew",
+        "stages": [
+          "homebrew"
+        ],
+        "asynchronous": false,
+        "recovery": "supported"
+      },
+      {
+        "id": "marketplace",
+        "stages": [
+          "marketplace"
+        ],
+        "asynchronous": false,
+        "recovery": "supported"
+      }
+    ]
+  }
 }
