@@ -85,14 +85,11 @@ jobs:
       - name: Install locked release tools
         if: matrix.python-version == '3.14'
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Install the cadence parser
-        if: matrix.python-version == '3.14'
-        run: npm install --prefix "$RUNNER_TEMP/release-cadence" --ignore-scripts --no-audit --no-fund --save-exact yaml@2.9.1
       - name: Check the actual release contract
         id: release_contracts
         if: matrix.python-version == '3.14'
         env:
-          RELEASE_TOOLS: ${{ runner.temp }}/release-cadence
+          RELEASE_TOOLS: ${{ github.workspace }}
         run: |
           node --version
           npm --version
@@ -102,7 +99,7 @@ jobs:
       - name: Run release regressions
         if: matrix.python-version == '3.14'
         env:
-          RELEASE_TOOLS: ${{ runner.temp }}/release-cadence
+          RELEASE_TOOLS: ${{ github.workspace }}
         run: npm run test:release
 
       - name: Ruff

@@ -33,6 +33,7 @@ test('candidate release tests inherit the parser provisioned for configuration c
   const parser = steps.find(step => step.run?.includes('cadence.mjs check'));
   const regression = steps.find(step => step.run?.includes('npm run test:release'));
   assert.ok(parser.env.RELEASE_TOOLS);
+  assert.equal(JSON.parse(readFileSync(join(root, 'package.json'))).devDependencies.yaml, '2.9.1');
   assert.equal(regression.env?.RELEASE_TOOLS, parser.env.RELEASE_TOOLS);
 });
 
