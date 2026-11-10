@@ -41,10 +41,18 @@ test('custom report returns parsed original goals and shared exit policy after c
   assert.ok(result.intended_targets.includes('original-only'));
   assert.equal(result.pipeline.source,'original-plan');assert.equal(reportExitCode(result),1);
 }));
-test('report rejects engine notes that differ from the immutable original envelope',()=>fixture(cwd=>{
+for(const corruption of ['notes','digest'])test(`report retains diagnostics for original ${corruption} conflicts`,()=>fixture(cwd=>{
   mkdirSync(join(cwd,'result-input'));
-  const original=createPipelinePlan({config:config(),identity:{...identity,repository:'example/ghcr'}});
-  writeFileSync(join(cwd,'result-input/plan.json'),JSON.stringify({...plan(),notes:'Changed notes',pipeline:original}));
-  const env={...process.env,RELEASE_ENABLED:'true',GITHUB_SHA:candidate,RELEASE_TARGETS:'{}',RELEASE_NEEDS:JSON.stringify({verify:{result:'success',outputs:{source_sha:candidate,version:identity.version}}})};
-  assert.throws(()=>adapter.report({cwd,env}));
+  const original=createPipelinePlan({config:config(),identity:{...identity,repository:'example/fixture'}});
+  const changed={...plan(),pipeline:original};
+  if(corruption==='notes')changed.notes='Changed notes';
+  else changed.pipeline={...original,digest:'sha256:'+'f'.repeat(64)};
+  writeFileSync(join(cwd,'result-input/plan.json'),JSON.stringify(changed));
+  const summary=join(cwd,'summary.md');
+  const env={...process.env,RELEASE_ENABLED:'true',GITHUB_SHA:candidate,GITHUB_STEP_SUMMARY:summary,RELEASE_TARGETS:'{}',RELEASE_NEEDS:JSON.stringify({verify:{result:'success',outputs:{source_sha:candidate,version:identity.version}}})};
+  const result=adapter.report({cwd,env});
+  assert.equal(result.failure_stage,'report-inputs');assert.equal(result.verification,'failed');
+  assert.equal(result.recovery.available,false);assert.equal(result.recovery.command,undefined);assert.equal(result.pipeline,undefined);
+  assert.equal(reportExitCode(result),1);assert.match(readFileSync(summary,'utf8'),/Original.*pipeline|report-inputs/i);
+  assert.equal(JSON.parse(readFileSync(join(cwd,'release-result.json'))).failure_stage,'report-inputs');
 }));
