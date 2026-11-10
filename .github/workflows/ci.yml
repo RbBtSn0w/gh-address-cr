@@ -77,11 +77,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Test official release analysis adapter
+      - name: Select npm 12 for release contract checks
         if: matrix.python-version == '3.14'
         run: |
-          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund @semantic-release/commit-analyzer@13.0.1 conventional-changelog-conventionalcommits@9.0.0
-          node --test tests/branch_release_analysis.test.mjs
+          npm install --prefix "$RUNNER_TEMP/release-npm" --ignore-scripts --no-audit --no-fund npm@12.2.2
+          echo "$RUNNER_TEMP/release-npm/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install locked release tools
+        if: matrix.python-version == '3.14'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check the actual release contract
+        id: release_contracts
+        if: matrix.python-version == '3.14'
+        env:
+          RELEASE_TOOLS: ${{ github.workspace }}
+        run: |
+          node --version
+          npm --version
+          node .github/release-train/sync.mjs check --consumer .
+          node .github/release-train/pipeline-contract.mjs check
+          node .github/release-train/cadence.mjs check
+      - name: Run release regressions
+        if: matrix.python-version == '3.14'
+        env:
+          RELEASE_TOOLS: ${{ github.workspace }}
+        run: npm run test:release
 
       - name: Ruff
         run: ruff check src tests scripts/build_plugin_payload.py scripts/release
