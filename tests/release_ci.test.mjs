@@ -37,6 +37,21 @@ test('candidate release tests inherit the parser provisioned for configuration c
   assert.equal(regression.env?.RELEASE_TOOLS, parser.env.RELEASE_TOOLS);
 });
 
+test('publication and recovery entrypoints receive the guarded repository release authority', () => {
+  const release = yaml.parse(readFileSync(join(root, '.github/workflows/release.yml'), 'utf8'));
+  let entrypoints = 0;
+  for (const [name, job] of Object.entries(release.jobs)) {
+    for (const step of job.steps || []) {
+      if (!/node \.github\/release-train\/cli\.mjs (publish|recover)\b/.test(step.run || '')) continue;
+      const env = {...release.env, ...job.env, ...step.env};
+      assert.equal(env.RELEASE_ENABLED, '${{ vars.RELEASE_ENABLED }}', `${name}: ${step.name}`);
+      assert.match(job.if, /vars\.RELEASE_ENABLED == 'true'/);
+      entrypoints++;
+    }
+  }
+  assert.equal(entrypoints, 2);
+});
+
 test('the same release test entrypoint discovers a newly added failing test', () => {
   const script = JSON.parse(readFileSync(join(root, 'package.json'))).scripts?.['test:release'];
   assert.equal(typeof script, 'string', 'CI and candidate verification need one complete release test entrypoint');
