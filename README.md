@@ -1,6 +1,6 @@
 # GH Address CR Marketplace
 
-Stable plugin version: 3.23.0.
+Stable plugin version: 3.24.0.
 
 Install the gh-address-cr runtime separately using pipx or Homebrew.
 Register this Git source with an explicit marketplace ref:

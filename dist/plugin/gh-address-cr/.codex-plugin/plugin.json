@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "gh-address-cr",
-  "version": "3.23.0",
+  "version": "3.24.0",
   "description": "Deterministic PR review-resolution control plane for AI coding agents.",
   "author": {
     "name": "rbbtsn0w",

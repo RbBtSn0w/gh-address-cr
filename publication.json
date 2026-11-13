@@ -1,15 +1,15 @@
 {
   "archive": {
-    "name": "gh-address-cr-3.23.0.zip",
-    "sha256": "744bf88cbf3eb84a6133890ae11aa9127027fb94ba487cf0939a4986f237c7f7"
+    "name": "gh-address-cr-3.24.0.zip",
+    "sha256": "1b1640a58bf47ad6df1ce3c1c94af2e3ba7b9a133f28500d9a4bbba3cd5b7702"
   },
-  "build_run_url": "https://github.com/RbBtSn0w/gh-address-cr/actions/runs/42627816773",
+  "build_run_url": "https://github.com/RbBtSn0w/gh-address-cr/actions/runs/43398864104",
   "files": {
-    ".codex-plugin/plugin.json": "99f6d5c09ee55668edde8f2acde60c44d18951c4eb06ee22a0bd3e81151418eb",
+    ".codex-plugin/plugin.json": "aee2edf11e498f2cd893c1563126063aa939c24fcce238dbd83cc280c783ae9f",
     "assets/icon.png": "2d6eefb67296daaaf20fdd48006cdc300a7103f5acb1ab55fd5bf08e06af3caa",
     "assets/logo.png": "8b80f6a87f80c38f8900d63e5c3a193ba52225920abfba14d55ddadbf3472e55",
     "assets/screenshot-1.png": "cb4dd0be3d389ed6ec20d5b1f2b3ac8dab7deb0b9b47c06855e834c5fbe1224f",
-    "plugin.json": "f724e1b1bbc0996cbca5c9548fd8e211aa3eb10724c7c6c26a63e3f445772d36",
+    "plugin.json": "0d08af93dca52d74c841fb965061d54d340a6b319e61d4b25d7d8645701d40e7",
     "skills/gh-address-cr/SKILL.md": "6ea463ccc608c8f2a87b2afb0c81df824d3539cfa8064453ad08fc6cd1b8928a",
     "skills/gh-address-cr/agents/openai.yaml": "0b4891ebc4420054c538342cb08784e514af1fafeeb0dead1abb9b242e4ce657",
     "skills/gh-address-cr/references/agent-protocol.md": "5720f8c5a0174487690ab480ba1aa0fb95d0e98cd25015c755f58a6ae6f9f40b",
@@ -45,9 +45,9 @@
       ]
     },
     "license": "MIT License\n\nCopyright (c) 2026 RbBtSn0w\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
-    "readme": "# GH Address CR Marketplace\n\nStable plugin version: 3.23.0.\n\nInstall the gh-address-cr runtime separately using pipx or Homebrew.\nRegister this Git source with an explicit marketplace ref:\n\n```bash\ncodex plugin marketplace add RbBtSn0w/gh-address-cr --ref marketplace\ncodex plugin add gh-address-cr@gh-address-cr-community\n```\n\nSee the source repository documentation for update and recovery instructions.\n"
+    "readme": "# GH Address CR Marketplace\n\nStable plugin version: 3.24.0.\n\nInstall the gh-address-cr runtime separately using pipx or Homebrew.\nRegister this Git source with an explicit marketplace ref:\n\n```bash\ncodex plugin marketplace add RbBtSn0w/gh-address-cr --ref marketplace\ncodex plugin add gh-address-cr@gh-address-cr-community\n```\n\nSee the source repository documentation for update and recovery instructions.\n"
   },
-  "source_commit": "73f8632769ca57aeb7436d40fc381598294eddc6",
-  "source_tag": "v3.23.0",
-  "version": "3.23.0"
+  "source_commit": "aff2cd130f0c35ba54e16a4568cfe8cea902698c",
+  "source_tag": "v3.24.0",
+  "version": "3.24.0"
 }
