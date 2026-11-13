@@ -229,6 +229,7 @@ jobs:
       - name: Verify handoff and live main then publish prebuilt bytes
         if: inputs.operation != 'recover'
         env:
+          RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
           CANDIDATE: ${{ needs.recovery-input.outputs.source_sha || needs.verify.outputs.source_sha }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -239,6 +240,7 @@ jobs:
       - name: Recover only missing GitHub assets under original tag
         if: inputs.operation == 'recover'
         env:
+          RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
           GH_TOKEN: ${{ github.token }}
         run: |
           node .github/release-train/cli.mjs recover
