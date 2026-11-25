@@ -15,6 +15,8 @@ from zipfile import ZipFile
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import Version
 
+from scripts.release import homebrew_support as shared
+
 PACKAGE = "gh-address-cr"
 
 
@@ -104,20 +106,22 @@ gh api repos/{repository}/actions/artifacts/{artifact}/zip > "$preview_dir/previ
 Run the install after the checksum matches.
 
 ```bash
-python3 -m venv "$preview_dir/venv"
-"$preview_dir/venv/bin/python" -m pip install "$preview_dir/{wheel}"
-"$preview_dir/venv/bin/gh-address-cr" --version
-"$preview_dir/venv/bin/gh-address-cr" --help
+printf '%s  %s\\n' '{digest}' "$preview_dir/{wheel}" | shasum -a 256 -c - &&
+  python3 -m venv "$preview_dir/venv" &&
+  "$preview_dir/venv/bin/python" -m pip install "$preview_dir/{wheel}" &&
+  "$preview_dir/venv/bin/gh-address-cr" --version &&
+  "$preview_dir/venv/bin/gh-address-cr" --help
 ```
 """
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("version", "seal", "verify", "card"))
     parser.add_argument("directory", type=Path)
     parser.add_argument("--version")
     args = parser.parse_args()
+    shared.add_current_span_event("release.phase.started", {"release.phase": args.command})
     identity = {
         "pr": os.environ["PR_NUMBER"],
         "head": os.environ["PR_HEAD"],
@@ -137,7 +141,9 @@ def main() -> None:
         receipt = verify(args.directory, identity)
         if args.command == "card":
             print(card(receipt, os.environ["GITHUB_REPOSITORY"], os.environ["ARTIFACT_ID"]), end="")
+    shared.add_current_span_event("release.phase.completed", {"release.phase": args.command})
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(shared.traced_main(main))

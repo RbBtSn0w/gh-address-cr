@@ -1,14 +1,21 @@
 """PR wheel identity and reviewer delivery contracts."""
 
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from shutil import which
+from unittest.mock import patch
 from zipfile import ZipFile
 
 import yaml
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind, StatusCode
 
+from scripts.release import pr_preview
 from scripts.release.pr_preview import card, check_wheel, seal, verify, version_for
 
 HEAD = "0123456" + "a" * 33
@@ -57,10 +64,41 @@ class PreviewWheelTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "SHA-256"):
                 verify(directory, IDENTITY)
 
+    def test_preview_helper_uses_release_span_lifecycle(self):
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        with (
+            patch.object(pr_preview.shared, "initialize_telemetry", return_value=provider.get_tracer("test")),
+            patch.object(pr_preview.shared, "shutdown_telemetry"),
+            patch("builtins.print"),
+            patch("sys.argv", ["pr_preview.py", "version", "/private/preview-fixture"]),
+            patch.dict(os.environ, {
+                "PR_NUMBER": "421", "PR_HEAD": HEAD, "GITHUB_RUN_ID": "7", "GITHUB_RUN_ATTEMPT": "1",
+            }),
+        ):
+            self.assertEqual(pr_preview.shared.traced_main(pr_preview.main), 0)
+            with patch.dict(os.environ, {"PR_HEAD": "invalid"}), self.assertRaises(ValueError):
+                pr_preview.shared.traced_main(pr_preview.main)
+        success, failure = exporter.get_finished_spans()
+        self.assertEqual(success.kind, SpanKind.INTERNAL)
+        self.assertEqual(success.attributes["process.exit.code"], 0)
+        self.assertEqual(success.attributes["process.pid"], os.getpid())
+        self.assertTrue(success.attributes["process.executable.name"])
+        self.assertEqual(success.events[0].attributes["release.phase"], "version")
+        self.assertEqual(failure.status.status_code, StatusCode.ERROR)
+        self.assertIn("error.type", failure.attributes)
+        self.assertNotIn("/private/preview-fixture", str([success.attributes, failure.attributes]))
+        provider.shutdown()
+
     @unittest.skipUnless(which("node"), "Node is required to exercise the actual Actions script")
     def test_wheel_workflow_requires_matching_successful_python_ci(self):
         workflow = yaml.safe_load(Path(".github/workflows/pr-preview.yml").read_text())
-        self.assertEqual(workflow["jobs"]["pr-preview"]["needs"], "verify-ci")
+        job = workflow["jobs"]["pr-preview"]
+        self.assertEqual(job["needs"], "verify-ci")
+        self.assertEqual(job["steps"][0]["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
+        self.assertEqual(job["steps"][1]["with"]["ref"], "${{ github.workflow_sha }}")
+        self.assertIn('helper="$tools/scripts/release/pr_preview.py"', job["steps"][4]["run"])
         source = workflow["jobs"]["verify-ci"]["steps"][0]["with"]["script"]
         harness = r"""
 const assert = require('node:assert/strict');
@@ -120,7 +158,7 @@ const runScript = new Function('github', 'context', 'core', 'process',
   'return (async () => {' + source + '\n})();');
 const head = 'a'.repeat(40);
 const run = {
-  id: 7, path: '.github/workflows/pr-preview.yml', event: 'pull_request', run_attempt: 2,
+  id: 7, path: '.github/workflows/pr-preview.yml@refs/pull/421/merge', event: 'pull_request', run_attempt: 2,
   repository: { id: 2 }, head_repository: { id: 2 }, head_sha: head,
 };
 const pr = {

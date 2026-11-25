@@ -59,6 +59,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: preview-source
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -67,25 +70,41 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: preview-source
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: preview-tools
+          sparse-checkout: |
+            scripts/release
+            scripts/set_package_version.py
+            src/gh_address_cr
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install build 'packaging>=24'
+      - run: >-
+          python -m pip install build 'packaging>=24' 'requests>=2.31'
+          'opentelemetry-sdk>=1.40' 'opentelemetry-exporter-otlp-proto-http>=1.40'
       - name: Pack and verify the exact PR head
         run: |
           test "$(git rev-parse HEAD)" = "$PR_HEAD"
           preview="$RUNNER_TEMP/pr-preview"
           mkdir "$preview"
-          version="$(python scripts/release/pr_preview.py version "$preview")"
-          python scripts/set_package_version.py --version "$version"
+          tools="$GITHUB_WORKSPACE/preview-tools"
+          export PYTHONPATH="$tools:$tools/src"
+          helper="$tools/scripts/release/pr_preview.py"
+          version="$(python "$helper" version "$preview")"
+          python "$tools/scripts/set_package_version.py" --version "$version" \
+            --pyproject pyproject.toml --init-file src/gh_address_cr/__init__.py
           python -m build --wheel --outdir "$preview"
-          python scripts/release/pr_preview.py seal "$preview" --version "$version"
+          python "$helper" seal "$preview" --version "$version"
           wheel="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["file"])' "$preview/receipt.json")"
           consumer="$(mktemp -d "$RUNNER_TEMP/preview-consumer.XXXXXX")"
           cp -R tests "$consumer/tests"
           # The existing negative test explicitly adds this path in its poisoned subprocess.
-          ln -s "$GITHUB_WORKSPACE/src" "$consumer/src"
+          ln -s "$PWD/src" "$consumer/src"
           (
             cd "$consumer"
             unset PYTHONPATH PYTHONHOME
@@ -96,8 +115,8 @@ jobs:
             GH_ADDRESS_CR_TEST_RUNTIME=installed venv/bin/python -m unittest \
               tests.contract.test_installed_runtime_smoke_contract tests.contract.test_agent_journey_contract
           )
-          python scripts/release/pr_preview.py verify "$preview"
-          ARTIFACT_ID=99999999999999 python scripts/release/pr_preview.py card "$preview" > "$preview/card.md"
+          python "$helper" verify "$preview"
+          ARTIFACT_ID=99999999999999 python "$helper" card "$preview" > "$preview/card.md"
       - name: Upload verified preview
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -136,7 +155,7 @@ jobs:
               throw new Error('Invalid source run ID');
             }
             const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id });
-            if (run.path !== '.github/workflows/pr-preview.yml' || run.event !== 'pull_request' ||
+            if (run.path?.split('@', 1)[0] !== '.github/workflows/pr-preview.yml' || run.event !== 'pull_request' ||
                 !Number.isSafeInteger(run.repository?.id) || run.repository.id !== run.head_repository?.id ||
                 !/^[0-9a-f]{40}$/.test(run.head_sha)) {
               throw new Error('Expected a same-repository PR CI run');
