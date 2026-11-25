@@ -53,4 +53,9 @@ class ActionsConsolidationTests(unittest.TestCase):
         for job in ("lint-and-test", "otel-minimum-versions"):
             block = ci.split(f"  {job}:\n", 1)[1].split("    steps:", 1)[0]
             self.assertIn("if: github.event_name != 'pull_request_target'", block)
-        self.assertNotIn('pr-dev-preview:', ci)
+        for job in ("pr-preview", "pr-preview-comment"):
+            block = ci.split(f"  {job}:\n", 1)[1].split("    steps:\n", 1)[0]
+            self.assertIn("if: github.event_name == 'pull_request'", block)
+        comment = ci.split("  pr-preview-comment:\n", 1)[1]
+        self.assertIn("head.repo.full_name == github.repository", comment)
+        self.assertNotIn("actions/checkout", comment)

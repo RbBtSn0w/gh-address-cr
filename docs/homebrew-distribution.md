@@ -105,12 +105,16 @@ filenames. It does not republish the Python package. Changed dependency resource
 require a subsequent normal package release. Do not delete assets to bypass
 identity checks.
 
-## Retired development previews
+## PR wheel previews
 
-PR preview publication is retired. The migration removes the producer and its
-consumer workflow, and ordinary CI emits no legacy preview artifact. Existing
-published preview assets are historical evidence; this change does not delete
-them. Stable publication and explicit same-version recovery remain supported.
+CI provides a versioned wheel for the exact head of an eligible PR to `main`.
+Download the Actions artifact from the run summary or the same-repository PR
+Conversation card, verify SHA-256, and use the displayed commands to install the
+named wheel in a fresh virtual environment. Fork reviewers use the Actions summary.
+
+Homebrew preview publication remains retired. Existing published preview assets
+are historical evidence. Stable Homebrew publication and explicit same-version
+recovery remain supported.
 
 ## Acceptance and diagnostics
 
