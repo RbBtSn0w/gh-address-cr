@@ -58,8 +58,58 @@ class PreviewWheelTests(unittest.TestCase):
                 verify(directory, IDENTITY)
 
     @unittest.skipUnless(which("node"), "Node is required to exercise the actual Actions script")
+    def test_wheel_workflow_requires_matching_successful_python_ci(self):
+        workflow = yaml.safe_load(Path(".github/workflows/pr-preview.yml").read_text())
+        self.assertEqual(workflow["jobs"]["pr-preview"]["needs"], "verify-ci")
+        source = workflow["jobs"]["verify-ci"]["steps"][0]["with"]["script"]
+        harness = r"""
+const assert = require('node:assert/strict');
+const source = require('node:fs').readFileSync(0, 'utf8');
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const runScript = new AsyncFunction('github', 'context', 'core', 'setTimeout', source);
+const head = { sha: 'a'.repeat(40), ref: 'feature/wheel', repo: { id: 2 } };
+const created_at = '2026-11-25T05:00:00Z';
+const matching = {
+  id: 10, head_sha: head.sha, head_branch: head.ref, head_repository: { id: 2 },
+  created_at, pull_requests: [], status: 'completed', conclusion: 'success',
+};
+let result = matching;
+let polls = 0;
+const outputs = {};
+const execute = () => runScript({
+  rest: { actions: {
+    getWorkflowRun: async () => ({ data: { created_at } }),
+    listWorkflowRuns: async options => {
+      assert.equal(options.workflow_id, 'ci.yml');
+      assert.equal(options.event, 'pull_request');
+      assert.equal(options.head_sha, head.sha);
+      return { data: { workflow_runs: [
+        { ...matching, id: 9, head_repository: { id: 3 } },
+        { ...matching, id: 8, created_at: '2026-11-22T05:00:00Z' },
+        ++polls === 1 ? { ...result, status: 'in_progress' } : result,
+      ] } };
+    },
+  } },
+}, { repo: { owner: 'RbBtSn0w', repo: 'gh-address-cr' }, payload: {
+  pull_request: { head, number: 421 },
+}, runId: 11 }, { setOutput: (key, value) => { outputs[key] = value; } }, callback => callback());
+
+(async () => {
+  await execute();
+  assert.deepEqual(outputs, { 'run-id': 10 });
+  assert.equal(polls, 2);
+  result = { ...matching, conclusion: 'failure' };
+  await assert.rejects(execute(), /Python CI failed/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+        result = subprocess.run(
+            ["node", "-e", harness], input=source, capture_output=True, text=True, timeout=15, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(which("node"), "Node is required to exercise the actual Actions script")
     def test_resolver_uses_successful_upload_after_comment_only_rerun(self):
-        workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
+        workflow = yaml.safe_load(Path(".github/workflows/pr-preview.yml").read_text())
         comment = workflow["jobs"]["pr-preview-comment"]
         source = comment["steps"][0]["with"]["script"]
         self.assertTrue(comment["steps"][1]["with"]["merge-multiple"])
@@ -70,7 +120,7 @@ const runScript = new Function('github', 'context', 'core', 'process',
   'return (async () => {' + source + '\n})();');
 const head = 'a'.repeat(40);
 const run = {
-  id: 7, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 2,
+  id: 7, path: '.github/workflows/pr-preview.yml', event: 'pull_request', run_attempt: 2,
   repository: { id: 2 }, head_repository: { id: 2 }, head_sha: head,
 };
 const pr = {
@@ -83,14 +133,11 @@ const github = {
   rest: {
     actions: {
       getWorkflowRun: async () => ({ data: run }),
-      listJobsForWorkflowRun: async () => [{
-        name: 'PR preview package', run_id: 7, run_attempt: 1, conclusion: 'success',
+      listJobsForWorkflowRun: async () => [1, 2].map(run_attempt => ({
+        name: 'PR preview package', run_id: 7, run_attempt, conclusion: 'success',
         steps: [{ name: 'Upload verified preview', conclusion: 'success' }],
-      }],
-      listWorkflowRunArtifacts: async ({ name }) => {
-        assert.equal(name, artifact.name);
-        return listed;
-      },
+      })),
+      listWorkflowRunArtifacts: async () => listed,
     },
     pulls: { get: async () => ({ data: pr }) },
   },

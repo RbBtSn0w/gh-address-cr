@@ -1,4 +1,4 @@
-"""Contracts for the five operator-facing Actions entry points."""
+"""Contracts for the operator-facing Actions entry points."""
 
 import os
 import subprocess
@@ -10,9 +10,9 @@ WORKFLOWS = ROOT / ".github/workflows"
 
 
 class ActionsConsolidationTests(unittest.TestCase):
-    def test_five_operational_workflows(self):
+    def test_operational_workflows(self):
         self.assertEqual({p.name for p in WORKFLOWS.glob("*.yml")}, {
-            "ci.yml", "homebrew.yml", "release.yml", "plugin-marketplace.yml", "pr-commit-semantics.yml",
+            "ci.yml", "homebrew.yml", "release.yml", "plugin-marketplace.yml", "pr-commit-semantics.yml", "pr-preview.yml",
         })
 
     def test_target_guard_runs_for_base_edits_and_rejects_other_main_sources(self):
@@ -53,9 +53,14 @@ class ActionsConsolidationTests(unittest.TestCase):
         for job in ("lint-and-test", "otel-minimum-versions"):
             block = ci.split(f"  {job}:\n", 1)[1].split("    steps:", 1)[0]
             self.assertIn("if: github.event_name != 'pull_request_target'", block)
+        self.assertNotIn("  pr-preview:", ci)
+        preview = (WORKFLOWS / "pr-preview.yml").read_text()
+        self.assertIn("  pull_request:", preview)
+        for denied in ("  pull_request_target:", "  push:", "  schedule:", "  workflow_run:"):
+            self.assertNotIn(denied, preview)
         for job in ("pr-preview", "pr-preview-comment"):
-            block = ci.split(f"  {job}:\n", 1)[1].split("    steps:\n", 1)[0]
+            block = preview.split(f"  {job}:\n", 1)[1].split("    steps:\n", 1)[0]
             self.assertIn("if: github.event_name == 'pull_request'", block)
-        comment = ci.split("  pr-preview-comment:\n", 1)[1]
+        comment = preview.split("  pr-preview-comment:\n", 1)[1]
         self.assertIn("head.repo.full_name == github.repository", comment)
         self.assertNotIn("actions/checkout", comment)

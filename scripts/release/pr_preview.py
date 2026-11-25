@@ -81,9 +81,11 @@ def card(receipt: dict[str, str], repository: str, artifact: str) -> str:
         receipt[key] for key in ("head", "version", "runId", "attempt", "file", "sha256")
     )
     source = f"https://github.com/{repository}"
+    checks = receipt.get("ciRunId")
+    check_link = f" · [Python CI]({source}/actions/runs/{checks})" if checks else ""
     return f"""## PR wheel · `{PACKAGE} {version}`
 
-Commit [`{sha}`]({source}/commit/{sha}) · [CI run {run}]({source}/actions/runs/{run})
+Commit [`{sha}`]({source}/commit/{sha}) · [Preview run {run}]({source}/actions/runs/{run}){check_link}
 · packaging attempt `{attempt}` · artifact `{artifact}`
 
 ### Try this exact wheel
@@ -122,6 +124,10 @@ def main() -> None:
         "runId": os.environ["GITHUB_RUN_ID"],
         "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
     }
+    if checks_run_id := os.environ.get("CHECKS_RUN_ID"):
+        if not re.fullmatch(r"[1-9][0-9]*", checks_run_id):
+            raise ValueError("Invalid Python CI run ID")
+        identity["ciRunId"] = checks_run_id
     if args.command == "version":
         manifest = tomllib.loads(Path("pyproject.toml").read_text())
         print(version_for(manifest["project"]["version"], identity["pr"], identity["head"]))
