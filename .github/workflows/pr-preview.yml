@@ -66,6 +66,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_HEAD: ${{ github.event.pull_request.head.sha }}
       CHECKS_RUN_ID: ${{ needs.verify-ci.outputs.run-id }}
+      DISABLE_TELEMETRY: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

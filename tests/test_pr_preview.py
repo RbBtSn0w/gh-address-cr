@@ -96,6 +96,7 @@ class PreviewWheelTests(unittest.TestCase):
         workflow = yaml.safe_load(Path(".github/workflows/pr-preview.yml").read_text())
         job = workflow["jobs"]["pr-preview"]
         self.assertEqual(job["needs"], "verify-ci")
+        self.assertEqual(job["env"]["DISABLE_TELEMETRY"], "1")
         self.assertEqual(job["steps"][0]["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
         self.assertEqual(job["steps"][1]["with"]["ref"], "${{ github.workflow_sha }}")
         self.assertIn('helper="$tools/scripts/release/pr_preview.py"', job["steps"][4]["run"])
